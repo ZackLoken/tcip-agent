@@ -152,7 +152,8 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     persist_run_partition("e1", data_cfg, partition=partition)
     split = read_run_partition("e1")
     assert split["group_by"] == "explicit_map"
-    assert split["group_key_map"] == group_key_map  # the map itself, not just the policy name
+    # The map itself, not just the policy name.
+    assert split["members"][str(labels_dir)]["group_key_map"] == group_key_map
 
     # A calibration reference drawn from val's own stems must not be permanently blocked.
     val_stems = {Path(s).stem for s in val_ds.stems}
@@ -458,8 +459,9 @@ def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, mon
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_spatial"), {
-        "train": ["mosaic::strip_x_1"],
-        "val": ["mosaic::strip_x_0"], "group_by": "spatial_strip",
+        "spatial": {"train_identities": ["mosaic::strip_x_1"],
+                    "val_identities": ["mosaic::strip_x_0"]},
+        "group_by": "spatial_strip",
     })
 
     # A reference drawn from the same source is a real leak: region-scoping aside, the trained
@@ -482,8 +484,9 @@ def test_train_disjointness_rects_kwargs_default_none_is_byte_identical(tmp_path
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_noop"),
-                       {"train": ["mosaic::strip_x_1"], "group_by": "spatial_strip"})
+    tcip_store.replace(split_key("exp_noop"), {
+        "spatial": {"train_identities": ["mosaic::strip_x_1"], "val_identities": []},
+        "group_by": "spatial_strip"})
 
     omitted = _train_disjointness("exp_noop", {"mosaic"}, set())
     explicit_none = _train_disjointness(
@@ -641,8 +644,9 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
     persist_run_partition("exp_spatial_e2e", data_cfg)
     split = read_run_partition("exp_spatial_e2e")
     assert split["group_by"] == "spatial_strip"
-    assert stem not in split["train"]  # the bare stem itself is never a member
-    assert all("::strip_" in s for s in split["train"])
+    trained = split["spatial"]["train_identities"]
+    assert stem not in trained  # the bare stem itself is never a member
+    assert all("::strip_" in s for s in trained)
 
     clean = _train_disjointness("exp_spatial_e2e", {"a_different_mosaic"}, set())
     assert clean["leaked_groups"] == []

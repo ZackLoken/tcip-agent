@@ -1,6 +1,6 @@
 """An audited tool's entry lands in the one log its scope names.
 
-A tool that mutates a record travelling with the dataset records in that dataset's own audit
+A tool that mutates a record traveling with the dataset records in that dataset's own audit
 log, so the provenance moves with the data; every other call stays a platform event. Exactly
 one log receives each entry, and a platform entry keeps the shape it always had.
 """

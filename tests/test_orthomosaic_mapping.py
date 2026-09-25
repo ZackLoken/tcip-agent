@@ -592,7 +592,10 @@ _PLANT_PIXELS = [(10.0, 10.0), (10.0, 50.0), (50.0, 10.0), (50.0, 50.0)]
 
 def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import assign_detections_to_plants
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        read_plant_csvs,
+        resolve_nn_tolerance_m,
+    )
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
@@ -608,12 +611,13 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
         "scores": [0.9, 0.8],
         "labels": [1, 1],
     }
-    assignments = assign_detections_to_plants(detections, georef, plants)
+    assignments = assign_detections_to_plants(
+        detections, georef, plants, nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"])
     assert len(assignments) == 2
 
     near, far = assignments
     assert near.detection_index == 0
-    assert near.source == "nearest_neighbour"
+    assert near.source == "nearest_neighbor"
     assert near.plot_name == "plot0"
     assert near.accession_name == "acc0"
     assert near.distance_m is not None and near.distance_m < 1.0
@@ -625,43 +629,28 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
     assert far.distance_m is not None  # honest distance even when unmapped, never fabricated
 
 
-def test_assign_detections_to_plants_default_tolerance_is_pitch_derived(tmp_path: Path) -> None:
-    """The default ``nn_tolerance_m`` must be this plot's own ``grid_pitch_m(plants) / 6``, the
-    same derivation ``plant_mapping.build_mapping`` uses, not the hardcoded ``NN_TOLERANCE_METERS``
-    fallback: a detection placed between the two values is mapped only when the tolerance passed
-    is the looser fallback, never with the derived (tighter) default.
-    """
+def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import assign_detections_to_plants
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        NN_TOLERANCE_METERS, grid_pitch_m, haversine_m, read_plant_csvs,
-    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import haversine_m, read_plant_csvs
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     georef = OrthomosaicGeoreference.from_file(path)
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
 
-    pitch = grid_pitch_m(plants)
-    derived_tol = pitch / 6
-    assert 0 < derived_tol < NN_TOLERANCE_METERS  # the scenario must actually tell them apart
-
-    # ~5 m from plant 0 (10 px at 0.5 m/px): farther than the derived tolerance but closer than
-    # the NN_TOLERANCE_METERS fallback.
     det_px = (20.0, 10.0)
     lat, lon = georef.pixel_to_wgs84(*det_px)
     plant0_lat, plant0_lon = georef.pixel_to_wgs84(*_PLANT_PIXELS[0])
     dist = haversine_m(lat, lon, plant0_lat, plant0_lon)
-    assert derived_tol < dist < NN_TOLERANCE_METERS
-
     detections = {"boxes": [[det_px[0] - 1, det_px[1] - 1, det_px[0] + 1, det_px[1] + 1]]}
 
-    default_result = assign_detections_to_plants(detections, georef, plants)
-    assert default_result[0].source == "unmapped"
-
-    explicit_result = assign_detections_to_plants(
-        detections, georef, plants, nn_tolerance_m=NN_TOLERANCE_METERS)
-    assert explicit_result[0].source == "nearest_neighbour"
-    assert explicit_result[0].plot_name == "plot0"
+    tight = assign_detections_to_plants(detections, georef, plants, nn_tolerance_m=dist / 2)
+    assert tight[0].source == "unmapped"
+    loose = assign_detections_to_plants(detections, georef, plants, nn_tolerance_m=dist * 2)
+    assert loose[0].source == "nearest_neighbor"
+    assert loose[0].plot_name == "plot0"
 
 
 def test_assign_detections_to_plants_no_boxes_returns_empty(tmp_path: Path) -> None:
@@ -673,4 +662,4 @@ def test_assign_detections_to_plants_no_boxes_returns_empty(tmp_path: Path) -> N
     georef = OrthomosaicGeoreference.from_file(path)
     plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
 
-    assert assign_detections_to_plants({"boxes": []}, georef, plants) == []
+    assert assign_detections_to_plants({"boxes": []}, georef, plants, nn_tolerance_m=1.0) == []

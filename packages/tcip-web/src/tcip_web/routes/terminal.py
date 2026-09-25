@@ -1,21 +1,17 @@
 """Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`.
 
-One live terminal session (the co-pilot rail) is the norm; the API is session-plural so
-multiples need no redesign. The WebSocket carries raw PTY output as text frames
-(server → browser) and JSON control messages (browser → server), validated as
+The API is session-plural. The WebSocket carries raw PTY output as text frames (server → browser)
+and JSON control messages (browser → server), validated as
 ``TerminalInputFrame``/``TerminalResizeFrame``:
 
     {"type": "input",  "data": "<keystrokes>"}
     {"type": "resize", "rows": 34, "cols": 96}
 
-Delivery model: the PTY reader thread appends output to a capped scrollback and pushes
-it to one queue per connected WebSocket via ``loop.call_soon_threadsafe`` (FIFO), and a
-single pump task per socket drains that queue: byte order is load-bearing for a
-terminal stream, so exactly one writer task per socket. On (re)connect the scrollback
-snapshot and queue registration happen under the writer's lock, so the replay is
-gap-free and duplicate-free. All endpoints sit behind the loopback + Origin trust
-boundary; the terminal must never be network-exposed without adding auth (it is
-keyboard access to Claude Code).
+Delivery model: the PTY reader thread appends output to a capped scrollback and pushes it to one
+queue per connected WebSocket via ``loop.call_soon_threadsafe`` (FIFO), and a single pump task per
+socket drains that queue, so exactly one writer task per socket. On (re)connect the scrollback
+snapshot and queue registration happen under the writer's lock, so the replay is gap-free and
+duplicate-free. All endpoints sit behind the loopback + Origin trust boundary.
 """
 
 from __future__ import annotations
@@ -54,9 +50,8 @@ _EXIT_NOTE = "\r\n\x1b[2m[Claude Code exited, use Restart in the rail header]\x1
 def _offer(queue: asyncio.Queue, data: str) -> None:
     """Enqueue output for one subscriber (runs on that subscriber's loop).
 
-    On overflow, drop the backlog and leave a ``None`` sentinel: the pump closes the
-    socket, and the reconnect replay is a coherent repaint (unlike dropping chunks
-    mid-stream, which would tear ANSI sequences).
+    On overflow, drop the backlog and leave a ``None`` sentinel: the pump closes the socket, and
+    the reconnect replay repaints.
     """
     try:
         queue.put_nowait(data)
@@ -70,13 +65,8 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 def _record_start(session_id: str, launched: dict) -> None:
-    """One platform audit line per launch, naming the session id and the program it launched.
-
-    The MCP server the agent starts reads this id from its environment and stamps it on its own
-    lines as a declared correlation (any launcher can set that variable, so those lines say what
-    the process claimed); this line says what the backend itself launched under the id. A failed
-    append raises ``AuditEntryNotWritten``: the process is already spawned by the time this runs,
-    so the caller (``TerminalSession.start``) answers the gap.
+    """One platform audit line per launch, naming the session id and the program it launched. A
+    failed append raises ``AuditEntryNotWritten``.
     """
     from tcip_web.routes.audit_gap import record_committed
 
@@ -160,8 +150,8 @@ class TerminalSession:
 
     def terminate(self) -> bool:
         """Kill the PTY. Returns True when no process remains afterward, False when it survives:
-        ``self._pty`` is then restored so ``alive()``/I/O still see it, since an untracked
-        survivor would otherwise let a retry spawn a second process beside it."""
+        ``self._pty`` is then restored so ``alive()``/I/O still see it.
+        """
         with self._lock:
             pty, self._pty = self._pty, None
         if pty is None:
@@ -271,7 +261,7 @@ _SESSIONS_LOCK = threading.Lock()
 
 
 def shutdown_all() -> None:
-    """Kill every live agent terminal (called from the app lifespan on shutdown)."""
+    """Kill every live agent terminal and forget the sessions."""
     for s in list(_SESSIONS.values()):
         if not s.terminate():
             logger.warning("terminal session %s survived shutdown termination", s.id)

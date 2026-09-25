@@ -1,15 +1,5 @@
-"""Mask -> polygon rings: the one contour extractor behind every mask-derived shape.
-
-Both paths that turn a mask into a stored shape call this: SAM-assisted labeling
-(:mod:`tcip_annotation.sam_wrapper`, which produces ground truth a breeder confirms) and model
-prediction export (tcip-mcp's ``mask_geometry.mask_to_polygon_points``, a thin delegate). A single
-implementation is the point: an occlusion-split object (routine in this imagery, a leaf crossed by a
-stem, a fruit behind a branch) is genuinely more than one region, and GT and prediction must not
-disagree about what a mask means.
-
-Every external contour becomes its own ring, largest-area first; nothing is reduced to the largest
-component. Lives here (not in tcip-mcp) because tcip-annotation depends on neither sibling package,
-and ``state.Polygon``, whose ``rings`` this feeds, is defined alongside it.
+"""Mask -> polygon rings: the contour extractor behind every mask-derived shape. Every external
+contour becomes its own ring, largest-area first; nothing is reduced to the largest component.
 """
 
 from __future__ import annotations
@@ -31,13 +21,11 @@ def mask_to_polygon_rings(
 
     ``threshold=None`` treats the mask as already binary (any nonzero pixel is foreground): what a
     SAM boolean mask is. A soft/probability mask passes the binarization threshold its caller
-    resolved; this function never picks one for it.
+    resolved.
 
-    Rings are ordered largest-contour-area first, so a consumer that can only render or edit one ring
-    gets the dominant region rather than a raster-order accident. Each ring is simplified with
-    ``cv2.approxPolyDP`` at ``epsilon_frac`` of its own perimeter, and a ring left that is no
-    ring (:func:`~tcip_annotation.state.is_ring`, the rule a :class:`Polygon` is built under) is
-    dropped: it is no longer an area. Returns ``[]`` when nothing is foreground.
+    Rings are ordered largest-contour-area first. Each ring is simplified with ``cv2.approxPolyDP``
+    at ``epsilon_frac`` of its own perimeter, and a ring left that is no ring
+    (:func:`~tcip_annotation.state.is_ring`) is dropped. Returns ``[]`` when nothing is foreground.
     """
     import cv2
     import numpy as np

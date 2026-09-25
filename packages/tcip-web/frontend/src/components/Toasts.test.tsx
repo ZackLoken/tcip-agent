@@ -84,7 +84,7 @@ describe("Toasts channel replacement", () => {
     expect(screen.getByText(/\(×3\)/)).toBeInTheDocument();
   });
 
-  it("leaves an unchannelled push behaving as today: identical text collapses, otherwise appends", () => {
+  it("leaves an unchanneled push behaving as today: identical text collapses, otherwise appends", () => {
     render(<Toasts />);
     act(() => useStore.getState().pushToast("Cancel failed: network error"));
     act(() => useStore.getState().pushToast("Cancel failed: network error"));

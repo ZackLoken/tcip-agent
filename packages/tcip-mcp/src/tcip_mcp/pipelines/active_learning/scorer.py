@@ -1,9 +1,8 @@
 """Active learning scorers: rank unlabeled images by informativeness.
 
-An acquisition function is a capability, not a fixed menu: scorers resolve through a small dict
-registry (``resolve_scorer``) the agent can extend with ``register_scorer``, composing a new
-acquisition function (e.g. margin, least-confidence) and register it rather than pick from a welded
-if/elif. The built-in reference scorers:
+Scorers resolve through a small dict registry (``resolve_scorer``) the agent can extend with
+``register_scorer``, composing a new acquisition function (e.g. margin, least-confidence). The
+built-in reference scorers:
   - UncertaintyScorer: prediction entropy / confidence spread
   - DiversityScorer: embedding distance from labeled set
   - CombinedScorer: weighted combination of uncertainty + diversity
@@ -47,21 +46,17 @@ class UncertaintyScorer(BaseScorer):
     For classification/ordinal: uses entropy of class probabilities.
     """
 
-    def __init__(self, task: str = "classification") -> None:
+    def __init__(self, task: str) -> None:
         self.task = task
 
     @torch.no_grad()
     def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-
         model = predictor.model
         model.eval()
         scored: list[tuple[str, float]] = []
 
         for path in image_paths:
-            # EXIF-oriented: score in the same frame and at the width the model trained on.
-            img = load_image(path, predictor.in_chans)
-            tensor = pil_to_tensor(img).unsqueeze(0).to(predictor.device)
+            tensor = predictor.model_input(path)[0].unsqueeze(0)
 
             if self.task in ("detection", "instance_seg"):
                 outputs = model([tensor[0]])
@@ -112,8 +107,6 @@ class DiversityScorer(BaseScorer):
 
     @torch.no_grad()
     def score(self, image_paths: list[str], predictor: Any) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-
         model = predictor.model
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
@@ -127,9 +120,7 @@ class DiversityScorer(BaseScorer):
         # Extract backbone features
         embeddings = []
         for path in image_paths:
-            # EXIF-oriented: embed in the same frame and at the width the model trained on.
-            img = load_image(path, predictor.in_chans)
-            tensor = pil_to_tensor(img).unsqueeze(0).to(predictor.device)
+            tensor = predictor.model_input(path)[0].unsqueeze(0)
             # A bespoke model's own opt-in attribute, not part of nn.Module's stub (checked above).
             feats = cast(Any, model).backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
@@ -166,7 +157,7 @@ class CombinedScorer(BaseScorer):
 
     def __init__(
         self,
-        task: str = "classification",
+        task: str,
         uncertainty_weight: float = 0.6,
         diversity_weight: float = 0.4,
         labeled_embeddings: np.ndarray | None = None,
@@ -217,10 +208,7 @@ def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
 def resolve_scorer(method: str, task: str) -> BaseScorer:
     """Resolve a scorer: a registered built-in name, else a dotted ``module:factory`` you wrote.
 
-    Mirrors ``resolve_proposer``. An unresolvable name raises ``ValueError`` rather than falling
-    back to the combined scorer: a silent substitution means the queue is ordered by an acquisition
-    function the caller did not choose, while the result still reports the name that was asked for.
-    A dotted name that fails to import raises ``ValueError`` too, so one ``except`` covers both.
+    An unresolvable or unimportable name raises ``ValueError``.
     """
     factory = SCORER_REGISTRY.get(method)
     if factory is not None:

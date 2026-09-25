@@ -179,7 +179,7 @@ def test_plant_id_source_passes_through_when_uniform():
 def test_plant_id_source_reports_mixed_when_not_uniform():
     results = [
         {"image": "a", "plant_id": "P1", "count": 1, "plant_id_source": "sequence"},
-        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "nearest_neighbour"},
+        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "nearest_neighbor"},
     ]
     out = aggregate_per_plant(results, strategy="count", value_key="count")
     assert out[0]["plant_id_source"] == "mixed"
@@ -424,9 +424,9 @@ def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
     """Only a trailing token that is one of crops.yml's own declared units (or a
     mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/'open' are none
     of those, regardless of what precedes them."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
-    assert _unit_from_value_key(value_key) is None
+    assert unit_from_value_key(value_key) is None
 
 
 def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
@@ -435,19 +435,19 @@ def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
     distance, anything outside mask_geometry) is still recognized when its value_key is a sensible
     '{name}_{unit}'. Any key ending in one of crops.yml's declared units (or its squared form) is
     recognized, regardless of what module produced it."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
-    assert _unit_from_value_key("area_mm2") == ("mm2", "mm")
-    assert _unit_from_value_key("principal_axis_extent_cm") == ("cm", "cm")
-    assert _unit_from_value_key("secondary_axis_extent_m") == ("m", "m")
-    assert _unit_from_value_key("perimeter_mm") == ("mm", "mm")
-    assert _unit_from_value_key("principal_axis_extent_px") is None
+    assert unit_from_value_key("area_mm2") == ("mm2", "mm")
+    assert unit_from_value_key("principal_axis_extent_cm") == ("cm", "cm")
+    assert unit_from_value_key("secondary_axis_extent_m") == ("m", "m")
+    assert unit_from_value_key("perimeter_mm") == ("mm", "mm")
+    assert unit_from_value_key("principal_axis_extent_px") is None
     # bespoke, non-mask_geometry keys: now recognized on the same basis as mask_geometry's own
-    assert _unit_from_value_key("length_cm") == ("cm", "cm")
-    assert _unit_from_value_key("width_m") == ("m", "m")
-    assert _unit_from_value_key("nut_diameter_mm") == ("mm", "mm")
-    assert _unit_from_value_key("arc_length_cm") == ("cm", "cm")
-    assert _unit_from_value_key("leaf_area_mm2") == ("mm2", "mm")
+    assert unit_from_value_key("length_cm") == ("cm", "cm")
+    assert unit_from_value_key("width_m") == ("m", "m")
+    assert unit_from_value_key("nut_diameter_mm") == ("mm", "mm")
+    assert unit_from_value_key("arc_length_cm") == ("cm", "cm")
+    assert unit_from_value_key("leaf_area_mm2") == ("mm2", "mm")
 
 
 def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
@@ -455,12 +455,12 @@ def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
     area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess through.
     An area is length^2, and silently labeling it with a bare linear unit is exactly the kind of wrong
     number this function exists to prevent from shipping quietly."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
     with pytest.raises(ValueError, match="area.*squared|squared.*area"):
-        _unit_from_value_key("area_mm")
+        unit_from_value_key("area_mm")
     with pytest.raises(ValueError):
-        _unit_from_value_key("leaf_area_cm")  # 'area' buried mid-key still catches it
+        unit_from_value_key("leaf_area_cm")  # 'area' buried mid-key still catches it
 
 
 def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():

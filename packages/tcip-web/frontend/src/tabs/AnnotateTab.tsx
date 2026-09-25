@@ -70,7 +70,7 @@ export function AnnotateTab() {
   const setView = useStore((s) => s.setView);
   const mode = useStore((s) => s.gui.mode);
   const activeSubject = useStore((s) => s.gui.active_subject);
-  // The subject registry (subject -> {description?, attributes?}); drives colours (name-derived,
+  // The subject registry (subject -> {description?, attributes?}); drives colors (name-derived,
   // GUI-local) and the per-instance attribute editor.
   const registry = useStore((s) => s.registry.subjects);
 
@@ -329,7 +329,7 @@ export function AnnotateTab() {
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
-  const colorTick = useSubjectColors(); // bumps on a recolour, so swatches recompute below
+  const colorTick = useSubjectColors(); // bumps on a recolor, so swatches recompute below
   const subjectSwatches = useMemo(() => {
     void colorTick; // read only to force recompute; subjectColor() itself needs no argument for it
     return Object.keys(registry).map((name) => ({ name, color: subjectColor(name) }));
@@ -637,11 +637,11 @@ export function AnnotateTab() {
     // belongs to), then load the new one.
     flushLeaving();
 
-    let cancelled = false;
+    let canceled = false;
     void (async () => {
       try {
         const labels = await api.annotate.load(imgPath, label);
-        if (cancelled) return;
+        if (canceled) return;
         loadLabels(labels);
         loadedKeyRef.current = key;
         loadedPathsRef.current = { image: imgPath, label, mtime: labels.base_mtime };
@@ -650,7 +650,7 @@ export function AnnotateTab() {
         setConflict(false);
         startImageSessionTracking(currentImageName);
       } catch {
-        if (cancelled) return;
+        if (canceled) return;
         // Show a blank canvas but block saving so a transient load failure can't let an
         // empty canvas overwrite the labels still on disk. image_path stays empty so the
         // Complete checkbox won't derive a status from this blank canvas either.
@@ -674,7 +674,7 @@ export function AnnotateTab() {
       }
     })();
     return () => {
-      cancelled = true;
+      canceled = true;
     };
     // Keyed on image identity + label dir only (see loadedKeyRef guard); save /
     // loadLabels / tracking actions are stable or ref-based.
@@ -757,7 +757,7 @@ export function AnnotateTab() {
     return false;
   }
 
-  // Channelled "cut", so a repeat replaces the standing toast with a count.
+  // Channeled "cut", so a repeat replaces the standing toast with a count.
   function requireCutSelection(): void {
     useStore
       .getState()
@@ -1290,7 +1290,7 @@ export function AnnotateTab() {
         useStore
           .getState()
           .pushToast(
-            "The polygon changed since the first click; the cut was cancelled. Select it and " +
+            "The polygon changed since the first click; the cut was canceled. Select it and " +
               "place both points again.",
             "error",
             "cut",

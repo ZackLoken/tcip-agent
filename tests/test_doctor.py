@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import json
 import os
 import subprocess
@@ -19,7 +21,6 @@ from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_path,
     image_dir,
-    image_status_key,
     replace_image_status_store,
     status_bucket,
     status_records,
@@ -88,13 +89,19 @@ def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
     assert "usage: tcip doctor " in capsys.readouterr().out
 
 
+def _register_absent_checkpoint(root: Path, name: str, checkpoint_path: str) -> None:
+    """A registry entry, written by the registry's own producer, naming a checkpoint file that
+    does not exist on this machine."""
+    from tcip_mcp.model_registry import _register_entry
+
+    _register_entry(str(root), name=name, checkpoint_path=checkpoint_path, config={},
+                    metrics=None, tags=None, kind=None, metrics_source=None, experiment_id=None,
+                    sha256="0" * 64)
+
+
 def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
     root = _project(tmp_path)
-    # registry entry pointing at a pytest temp checkpoint
-    reg = root / ".tcip" / "models"
-    reg.mkdir(parents=True)
-    (reg / "registry.json").write_text(json.dumps({"entries": [
-        {"name": "junk", "checkpoint_path": r"C:\Temp\pytest-of-x\model.pt"}]}))
+    _register_absent_checkpoint(root, "junk", r"C:\Temp\pytest-of-x\model.pt")
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
@@ -167,8 +174,8 @@ def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     # to land as the same loose file the file backend reads, not the process-default backend.
     ts.bind(FileBackend())
     ts.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-              {"name": "unicorn", "delivers": ["unicorn_horn_length"],
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+              complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"],
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
               expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
@@ -219,26 +226,6 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     assert "bud" in res.stdout and "A1" in res.stdout
 
 
-def test_doctor_flags_an_unrecognized_region_completeness_entry(tmp_path):
-    """A region-completeness store entry with no {grid, cells_complete} shape would be dropped
-    by any merge, the exact state that blocks every attestation write; the doctor mirrors the
-    status-store sibling and reports it by count rather than reading the store as clean."""
-    from tcip_mcp.dataset_layout import region_completeness_key, status_bucket
-
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    ts.bind(FileBackend())
-    ts.replace(region_completeness_key(root),
-              {status_bucket("bud", date): {"cells_complete": ["A1"]}},  # no "grid": unrecognized
-              expect=ts.Version.ABSENT)
-
-    res = _run(root, file_layout=True)
-    assert "1 region-completeness entry is in a shape this reader does not recognize" in res.stdout
-
-
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
     self-describing (``missing``/``snapshot_errors``); ``tcip doctor`` surfaces it rather than
@@ -259,6 +246,9 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     (manifest_dir / "manifest.json").write_text(json.dumps({
         "files": [], "missing": ["agent_helper.py"], "snapshot_errors": [],
     }))
+    from tcip_mcp.project_record import record_site
+
+    record_site(str(root), "north orchard")
 
     res = _run(root)
     assert res.returncode == 1  # warning only, no error
@@ -379,26 +369,6 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     assert "'bud'" in contradictions[0]
 
 
-def test_doctor_flags_a_bare_status_token(tmp_path):
-    """A status store entry with no {status, recorded_by, recorded_at} shape is unreadable and
-    would be dropped by any merge; the doctor reports it by count rather than staying silent."""
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
-    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    # A bare token is a shape replace_image_status_store's own writer refuses, so this fixture
-    # writes it through the store primitive directly, bound to the file backend the subprocess reads.
-    ts.bind(FileBackend())
-    ts.replace(image_status_key(root), {status_bucket("bud", date): {"IMG_S.JPG": "unannotated"}},
-              expect=ts.Version.ABSENT)
-
-    res = _run(root, file_layout=True)
-    assert "1 status entry is in a shape this reader does not recognize" in res.stdout
-
-
 def test_doctor_flags_a_stale_complete_token(tmp_path):
     """A stored 'complete' whose label file holds no annotation of the confirmed subject is a
     token a human should re-confirm; the doctor reports it and does not rewrite it."""
@@ -452,16 +422,12 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     throwaway test checkpoint is not reported as merely missing, and an entry whose checkpoint
     was never written is not reported as pollution."""
     root = _layout_project(tmp_path, "2026-03-04")
-    models = root / ".tcip" / "models"
-    models.mkdir(parents=True)
     ghost = str(Path(root.anchor) / "tcip_absent_models" / "orchard.pt")
     scratch = str(Path(root.anchor) / "scratch" / "pytest-of-someone" / "run" / "last.pt")
-    (models / "registry.json").write_text(json.dumps({"entries": [
-        {"name": "orchard_detector_v2", "checkpoint_path": ghost},
-        {"name": "scratch_detector", "checkpoint_path": scratch},
-    ]}))
+    _register_absent_checkpoint(root, "orchard_detector_v2", ghost)
+    _register_absent_checkpoint(root, "scratch_detector", scratch)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
     assert res.returncode == 2, res.stdout
     entry_lines = _lines(res.stdout, "registry entry")
     assert len(entry_lines) == 2, res.stdout
@@ -479,41 +445,13 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     ckpt_dir = root / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True)
     (ckpt_dir / "m.pt").write_bytes(b"weights")
-    (ckpt_dir / "registry.json").write_text(json.dumps({"entries": [
-        {"name": "m", "checkpoint_path": ".tcip/models/m.pt"}]}))
+    ModelRegistry(str(root)).register_model(
+        name="m", checkpoint_path=str(ckpt_dir / "m.pt"), config={}, metrics_source=None)
 
-    res = _run(root, file_layout=True)
+    res = _run(root)
 
     assert "test/temp" not in res.stdout
     assert "checkpoint missing" not in res.stdout
-
-
-def _dir_outside_any_temp_tree() -> Path:
-    """A writable directory whose path carries none of the doctor's temp-tree markers.
-
-    The doctor reads a checkpoint under pytest's tree or the OS temp directory as test pollution,
-    so a test wanting the other findings needs a real file elsewhere. The interpreter's temp
-    directory qualifies on Linux and not on Windows, where it sits under a Temp segment, so the
-    filesystem root is tried after it; the first candidate that is creatable and unmarked wins.
-    The leaf is named for this process, so two suites running at once (one per store backend)
-    never write and unlink one shared file.
-    """
-    import os
-    import tempfile
-
-    from tcip_mcp.cli.doctor import TEMP_TREE_MARKERS
-
-    candidates = [Path(tempfile.gettempdir()), Path(Path.cwd().anchor)]
-    for base in candidates:
-        target = base / "tcip_no_metrics_source_fixture" / str(os.getpid())
-        if any(marker in str(target) for marker in TEMP_TREE_MARKERS):
-            continue
-        try:
-            target.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            continue
-        return target
-    raise RuntimeError(f"no writable directory outside a temp tree among {candidates}")
 
 
 def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
@@ -529,39 +467,6 @@ def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
     assert _image_stems(tmp_path) == {"plotA_0_0": "plotA_0_0.npz", "plotA_0_1": "plotA_0_1.jpg"}
 
 
-def test_the_checkpoint_fixture_directory_is_this_processs_own():
-    import os
-
-    target = _dir_outside_any_temp_tree()
-    try:
-        assert target.name == str(os.getpid())
-        assert target.parent.name == "tcip_no_metrics_source_fixture"
-    finally:
-        target.rmdir()
-
-
-def test_registry_entry_with_no_metrics_source_is_flagged(tmp_path):
-    """A registry entry that predates the metrics_source field is reported, not read as though
-    the platform had verified its numbers."""
-    root = _layout_project(tmp_path, "2026-03-04")
-    ckpt_dir = _dir_outside_any_temp_tree()
-    ckpt = ckpt_dir / "model.pt"
-    ckpt.write_bytes(b"weights")
-    models = root / ".tcip" / "models"
-    models.mkdir(parents=True)
-    (models / "registry.json").write_text(json.dumps({"entries": [
-        {"name": "legacy", "checkpoint_path": str(ckpt), "metrics": {"val_map50": 0.5}}]}))
-
-    try:
-        res = _run(root, file_layout=True)
-        assert res.returncode == 1, res.stdout
-        matches = _lines(res.stdout, "metrics_source")
-        assert len(matches) == 1 and "legacy" in matches[0], res.stdout
-    finally:
-        ckpt.unlink()
-        ckpt_dir.rmdir()
-
-
 def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     """The specs the doctor loads are the ones the trait registry resolves, and only the
     unloadable spec is reported: a valid spec sitting beside it stays silent."""
@@ -569,16 +474,16 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
 
     root = _layout_project(tmp_path, "2026-03-04")
     specs_dir = root / traits._TRAIT_SPECS_RELPATH
-    ts.replace(traits.trait_spec_key(specs_dir, "bloom_length"),
-              {"name": "bloom_length", "delivers": ["bloom_length"],
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}, expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_spec_key(specs_dir, "leaf_length"),
+              complete_spec_record({"name": "leaf_length", "delivers": ["leaf_length"],
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}), expect=ts.Version.ABSENT)
     ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
-              {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers",
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+              complete_spec_record({"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers",
+               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
               expect=ts.Version.ABSENT)
     # A confirmed, current statement isolates the loadable spec's own finding, named off the
     # spec that actually loads rather than spelled here.
-    (loadable,) = traits.load_trait_specs(project_root=root)
+    (loadable,), _errors = traits.load_trait_specs_with_errors(project_root=root)
     confirm_spec_statement(root, loadable.name)
 
     res = _run(root)
@@ -587,17 +492,20 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     assert len(spec_lines) == 1, res.stdout
     assert "burr_size.json" in spec_lines[0]
     assert "measured_with" in spec_lines[0]
-    assert "bloom_length.json" not in res.stdout
+    assert "leaf_length.json" not in res.stdout
 
 
 def _leaf_spec_project(tmp_path: Path) -> Path:
     import tcip_store as ts
 
+    from tcip_mcp.project_record import record_site
+
     root = _layout_project(tmp_path, "2026-03-04")
+    record_site(str(root), "north orchard")
     directory = root / traits._TRAIT_SPECS_RELPATH
     ts.replace(traits.trait_spec_key(directory, "leaf"),
-               {"name": "leaf", "delivers": ["leaf_length"],
-                "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}, expect=ts.Version.ABSENT)
+               complete_spec_record({"name": "leaf", "delivers": ["leaf_length"],
+                "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}), expect=ts.Version.ABSENT)
     return root
 
 
@@ -621,7 +529,7 @@ def test_doctor_reports_a_stale_trait_spec_statement(tmp_path: Path):
     directory = root / traits._TRAIT_SPECS_RELPATH
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "notes": "a note added after confirmation"},
+    ts.replace(key, complete_spec_record({**stored.value, "notes": "a note added after confirmation"}),
                expect=stored.version)
 
     res = _run(root)
@@ -684,16 +592,6 @@ def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(
     assert res.returncode == 1, res.stdout
     lines = _lines(res.stdout, "trait spec")
     assert len(lines) == 1 and "schema_version 99, above the" in lines[0]
-
-
-def test_doctor_warns_on_a_project_with_no_record(tmp_path):
-    """A recordless project is accepted: a warning, not an error, and the exit code says so."""
-    root = _layout_project(tmp_path, "2026-03-04")
-
-    res = _run(root)
-
-    assert res.returncode == 1, res.stdout
-    assert "initialize_project" in res.stdout
 
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
@@ -808,11 +706,11 @@ def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_q
     })
 
     findings: list[tuple[str, str]] = []
-    doctor.check_negatives(root, findings)
+    doctor.check_negatives(root, findings, census=doctor._census(root, findings, set()))
     assert not any("not a confirmed negative" in msg for _, msg in findings)
 
     quality_findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, quality_findings)
+    doctor.check_data_quality(root, quality_findings, census=doctor._census(root, quality_findings, set()))
     assert quality_findings == []
 
 
@@ -834,10 +732,66 @@ def test_an_unreadable_status_store_is_its_own_error_not_a_false_negative_sweep(
     monkeypatch.setattr("tcip_mcp.dataset_layout.read_image_status_store", _raise)
 
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, findings)
+    doctor.check_data_quality(root, findings, census=doctor._census(root, findings, set()))
 
     assert len(findings) == 1, findings
     level, message = findings[0]
     assert level == "warn"
     assert "will not read" in message and "boom" in message
     assert not any("not a confirmed negative" in msg for _, msg in findings)
+
+
+def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
+    tmp_path, monkeypatch,
+):
+    """The census reads each label once and only the data-quality check reports one that will not
+    read: the status, negatives, provenance and region-completeness checks read the census's
+    result, never the file, for an unreadable label the status store names ``complete`` and a
+    readable one a completeness attestation covers."""
+    import tcip_store as ts
+
+    from tcip_mcp.cli import doctor
+    from tcip_mcp.dataset_layout import (
+        record_image_statuses, region_completeness_digest_key, region_completeness_key,
+    )
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_U.JPG")
+    annotation_path(root, date, "IMG_U").write_bytes(b"{not json")
+    record_image_statuses(root, status_bucket("bud", date), {"IMG_U.JPG": "complete"},
+                          recorded_by="user:breeder")
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_A.JPG")
+    readable = annotation_path(root, date, "IMG_A")
+    json_io.write_annotations(readable, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
+                              32, 32)
+    cell = next(c for c in reference_cells(32, 32, 16, clamp=True) if c.name == "A1")
+    bucket = status_bucket("bud", "IMG_A")
+    ts.replace(region_completeness_key(root), {bucket: {
+        "grid": {"width": 32, "height": 32, "tile_size": 16, "overlap": 0.0, "cols": 2, "rows": 2},
+        "cells_complete": ["A1"], "attested_by": "user:breeder", "attested_at": "t",
+        "stem": "IMG_A", "date": date, "subject": "bud"}}, expect=ts.Version.ABSENT)
+    ts.replace(region_completeness_digest_key(root), {bucket: {"A1": cell_annotation_digest(
+        json_io.read_annotations(str(readable)), "bud", cell)}}, expect=ts.Version.ABSENT)
+
+    reads: list[str] = []
+    real_read = json_io.read_annotations
+
+    def _counting_read(path, *args, **kwargs):
+        reads.append(Path(path).name)
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(json_io, "read_annotations", _counting_read)
+    findings: list[tuple[str, str]] = []
+    census = doctor._census(root, findings, set())
+    for check in (doctor.check_negatives, doctor.check_data_quality, doctor.check_status_tokens,
+                  doctor.check_provenance, doctor.check_region_completeness):
+        check(root, findings, census=census)
+
+    assert sorted(reads) == ["IMG_A.json", "IMG_U.json"]
+    unreadable = [msg for _, msg in findings if "label file will not read" in msg]
+    assert len(unreadable) == 1, findings
+    assert "IMG_U.json" in unreadable[0]
+    assert not any("region completeness" in msg for _, msg in findings), findings

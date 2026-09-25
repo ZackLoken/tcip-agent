@@ -1,18 +1,14 @@
-"""Calibrate + held-out validate a detection operating point over a labeled split.
+r"""Calibrate + held-out validate a detection operating point over a labeled split.
 
-The confidence operating point is the phenotype for a count trait, so it must be derived per
-dataset and validated against held-out ground truth, never pinned. This script runs
-:func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point`, the resolution the MCP
-tool ``calibrate_count_operating_point`` also runs, and prints the full provenance and gate
-evidence for inspection. It writes nothing: a validated claim is minted only by the audited door,
-and a script writing into the experiment record would route that mutation around the audit log.
+Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point` and prints the full
+provenance and gate evidence for inspection. It writes nothing.
 
 Usage:
     tcip calibrate-operating-point \
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> --project-root <project_root> \
-        [--experiment-id <id>] [--val-ratio 0.5] [--device cpu] [--subject <subject>] \
+        [--experiment-id <id>] [--holdout-ratio 0.5] [--device cpu] [--subject <subject>] \
         [--attribute <attribute>] [--selection-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project-root (register it with
@@ -27,6 +23,8 @@ import sys
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO
+
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("--checkpoint", required=True, help="Path to the model .pt checkpoint.")
     parser.add_argument("--trait", required=True, help="Trait name (defines the count objective).")
@@ -43,15 +41,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "the working directory, which would search an empty index.")
     parser.add_argument("--experiment-id", default=None,
                         help="Producing experiment id recorded in the printed provenance.")
-    parser.add_argument("--val-ratio", type=float, default=0.5,
+    parser.add_argument("--holdout-ratio", type=float, default=DEFAULT_HOLDOUT_RATIO,
                         help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
                              "effect on the first calibration call for this labels_dir's GT identity"
                              ": a cal/holdout split locks on its first draw, and a later run with a "
-                             "different --val-ratio/--seed over unchanged labels reuses the locked "
+                             "different --holdout-ratio/--seed over unchanged labels reuses the locked "
                              "split unchanged (a divergence is printed, not silently ignored).")
-    parser.add_argument("--seed", type=int, default=0,
+    parser.add_argument("--seed", type=int, default=DEFAULT_CAL_SEED,
                         help="Split seed for the locked cal/holdout split. Same first-call-only "
-                             "semantics as --val-ratio.")
+                             "semantics as --holdout-ratio.")
     parser.add_argument("--device", default=None, help="cuda / cpu (auto if omitted).")
     parser.add_argument("--group-by", default=None,
                         help="Grouping policy for the cal/holdout split: 'tile_prefix' (strips a "
@@ -96,7 +94,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             images_dir=args.images_dir, dataset_root=args.dataset_root,
             project_root=args.project_root, subject=args.subject, attribute=args.attribute,
             experiment_id=args.experiment_id, group_by=args.group_by, group_key_map=group_key_map,
-            selection_dir=args.selection_dir, val_ratio=args.val_ratio, seed=args.seed,
+            selection_dir=args.selection_dir, holdout_ratio=args.holdout_ratio, seed=args.seed,
             device=args.device,
         )
     except (UnregisteredCheckpoint, CalibrationUsageError) as exc:

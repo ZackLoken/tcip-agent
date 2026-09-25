@@ -101,7 +101,7 @@ function RefusedLaunchEntry({
 
 function statusBadgeClass(status: InferenceStatus): string {
   if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
-  if (status === "failed" || status === "cancelled") return "bg-tcip-fp/20 text-tcip-fp";
+  if (status === "failed" || status === "canceled") return "bg-tcip-fp/20 text-tcip-fp";
   if (status === "interrupted") return "bg-tcip-border text-tcip-muted";
   return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
 }
@@ -383,7 +383,7 @@ export function InferenceTab() {
   async function onCancel(jobId: string) {
     // Optimistically flip the row so the button disappears immediately; the poll +
     // the worker's next-image-boundary stop will confirm the terminal state.
-    setJobs((prev) => prev.map((j) => (j.job_id === jobId ? { ...j, status: "cancelled" } : j)));
+    setJobs((prev) => prev.map((j) => (j.job_id === jobId ? { ...j, status: "canceled" } : j)));
     try {
       await inferenceApi.cancel(jobId);
     } catch (e) {

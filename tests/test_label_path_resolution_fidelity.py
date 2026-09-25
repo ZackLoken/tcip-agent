@@ -71,7 +71,7 @@ def test_annotation_date_refuses_a_tree_deeper_than_one_date_bucket() -> None:
 def test_caller_supplied_date_wins_over_the_image_paths_own_date() -> None:
     """An explicit ``date`` decides the bucket a label is written to.
 
-    The image's own path supplies the date only when the caller passes none: a caller labelling a
+    The image's own path supplies the date only when the caller passes none: a caller labeling a
     capture under a different session's date must land there, not back in the image's bucket.
     """
     img = "/ds/images/2026-02-11/IMG_1.JPG"

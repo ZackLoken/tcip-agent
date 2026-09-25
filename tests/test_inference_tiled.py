@@ -117,15 +117,14 @@ def test_run_inference_tile_flag(tmp_path, monkeypatch):
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
-    r = run_inference_verified(ckpt, image_paths=[img], tile=True, tile_size=TILE, conf_threshold=0.0)
-    assert r["tiled"] is True
-    assert r["total_detections"] == sum(x["count"] for x in r["results"])
+    r = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=True, tile_size=TILE, conf_threshold=0.0)
+    assert r["operating_point"]["tiled"]["value"] is True
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
     assert r["operating_point"]["conf"]["validated_against"] == "false"
 
-    r2 = run_inference_verified(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
-    assert r2["tiled"] is False
+    r2 = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=False, conf_threshold=0.0)
+    assert r2["operating_point"]["tiled"]["value"] is False
     assert len(r2["results"]) == 1  # non-tiled path still works
 
 
@@ -207,5 +206,5 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     assert "error" not in result, result
     img = _image(tmp_path)
 
-    r = run_inference_verified(str(ckpt_path), image_paths=[img], conf_threshold=0.0)
+    r = run_inference_verified(str(ckpt_path), images_dir=str(Path(img).parent), conf_threshold=0.0)
     assert r["id_map"] == recorded_id_map  # the recorded map, not a fresh registry re-derivation

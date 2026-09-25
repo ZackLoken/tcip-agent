@@ -193,7 +193,7 @@ Grid cell system:
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence). On a classified bucket (predictions carrying
    the object class in `subject`) this scores the object's localization, never the classifier's
-   own call; a bucket whose stamp predates the recorded scope refuses by name
+   own call
 4. Review in panel: accept correct predictions, correct errors, add missed objects. The recorded
    verdict action is one of `tcip_annotation.verdicts.VerdictAction`: accepted, rejected, edited,
    or swept (an explicit "checked this image, found nothing missed" attestation that mutates no

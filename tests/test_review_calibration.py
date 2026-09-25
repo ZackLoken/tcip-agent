@@ -39,9 +39,9 @@ _IDENTITY_A = {"checkpoint_sha256": "sha-model-a", "experiment_id": None}
 _IDENTITY_B = {"checkpoint_sha256": "sha-model-b", "experiment_id": None}
 
 
-def _entry(mt, action, cid, gt, pred, conf, *, producer_identity=_IDENTITY_A, conf_threshold=None,
+def _entry(action, cid, gt, pred, conf, *, producer_identity=_IDENTITY_A, conf_threshold=None,
            missed_object_attested=False):
-    return {"match_type": mt, "action": action, "class_id": cid,
+    return {"action": action, "class_id": cid,
             "iscrowd": False, "reviewed_by": "", "class_name": "", "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": producer_identity, "conf_threshold": conf_threshold,
             "missed_object_attested": missed_object_attested}
@@ -52,11 +52,11 @@ def _floored_state():
     ``gt_preexisting=True`` marks these as a GT-backed review session, not the
     previously-unlabeled scenario exercised separately below."""
     a = {"img_status": "completed", "gt_preexisting": True, "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9),
-        _entry("FP", "rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05)]}
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9),
+        _entry("rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05)]}
     b = {"img_status": "completed", "gt_preexisting": True, "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9),
-        _entry("TP", "accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]}
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9),
+        _entry("accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]}
     return {"image": {"A.jpg": a, "B.jpg": b}}
 
 
@@ -91,13 +91,13 @@ def _dense_review_state(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, 
             row, col = divmod(k, cols)
             box = [0.05 + col * 0.02 + jitter, 0.05 + row * 0.02, 0.01, 0.01]
             if k < miss_pattern[i]:
-                dets.append(_entry("FN", "edited", 0, box, None, None, producer_identity=identity,
+                dets.append(_entry("edited", 0, box, None, None, producer_identity=identity,
                                    missed_object_attested=True))
             else:
-                dets.append(_entry("TP", "accepted", 0, box, box, conf, producer_identity=identity))
+                dets.append(_entry("accepted", 0, box, box, conf, producer_identity=identity))
         for j in range(fp_pattern[i]):
             fp_box = [0.05 + j * 0.02, 0.05 + (far_row + i) * 0.02, 0.01, 0.01]
-            dets.append(_entry("FP", "rejected", 0, None, fp_box, fp_conf, producer_identity=identity))
+            dets.append(_entry("rejected", 0, None, fp_box, fp_conf, producer_identity=identity))
         images[f"{id_prefix}{i}.jpg"] = {"img_status": "completed", "detections": dets,
                                          "gt_preexisting": gt_preexisting}
     return {"image": images}
@@ -135,7 +135,7 @@ def test_a_verdict_entry_missing_a_stated_key_is_refused_by_name(key):
     naming the key, never read through a default."""
     from tcip_annotation.verdicts import decode_verdict
 
-    entry = _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9)
+    entry = _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9)
     assert decode_verdict(entry).iscrowd is False
     del entry[key]
     with pytest.raises(ValueError, match=f"'{key}'"):
@@ -221,7 +221,7 @@ def test_a_verdict_on_a_crowd_region_carries_its_flag_into_the_reference(tmp_pat
 def test_review_only_completed_images():
     state = _floored_state()
     state["image"]["C.jpg"] = {"img_status": "started", "detections": [
-        _entry("TP", "accepted", 0, [0.1, 0.1, 0.05, 0.05], [0.1, 0.1, 0.05, 0.05], 0.9)]}
+        _entry("accepted", 0, [0.1, 0.1, 0.05, 0.05], [0.1, 0.1, 0.05, 0.05], 0.9)]}
     ids = {r["image_id"] for r in review_to_records(state, image_dims=_DIMS,
                                                     bucket_identities=[_IDENTITY_A])}
     assert ids == {"A", "B"}  # a partially-reviewed image is not a confirmed reference
@@ -313,7 +313,7 @@ def test_producer_identity_matches_by_checkpoint_sha_regardless_of_bucket_dir():
 def test_missing_producer_identity_fails_closed_not_grandfathered():
     # Verdicts whose recorded producer identity is null are excluded, never grandfathered in.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_id": 0,
+        {"action": "accepted", "class_id": 0,
          "iscrowd": False, "reviewed_by": "", "class_name": "", "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9}
     ]}}}
@@ -328,7 +328,7 @@ def test_unresolvable_class_id_refuses_the_whole_reference_not_a_silent_drop():
     # confirmed miss (FN) while keeping an in-vocabulary accepted-FP entry, making gt/dt agree by
     # construction and pass the count-bias gate on a reference missing real evidence.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
+        {"action": "accepted", "class_id": None, "class_name": "bud",
          "iscrowd": False, "reviewed_by": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -341,7 +341,7 @@ def test_missing_class_id_key_also_refuses_not_defaulted_to_class_one():
     # must not silently default to category_id 1 for every entry; it must refuse instead of
     # guessing.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_name": "bud",
+        {"action": "accepted", "class_name": "bud",
          "iscrowd": False, "reviewed_by": "", "class_id": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -354,7 +354,7 @@ def test_class_id_unresolvable_message_is_drawn_from_the_shared_failure_vocabula
     # describe_review_validation's own _FAILURE_MESSAGES entries use, not an independently
     # authored string, so a breeder sees one consistent voice regardless of which check refused.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
+        {"action": "accepted", "class_id": None, "class_name": "bud",
          "iscrowd": False, "reviewed_by": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -370,7 +370,7 @@ def test_a_coverage_only_attestation_needs_no_resolvable_class_id():
     # not refuse the reference (the entry carries no class-scoped evidence to admit either way),
     # and its missed_object_attested stamp must still count toward adjudication coverage.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
-        {"match_type": "sweep", "action": "swept", "class_id": None, "class_name": "",
+        {"action": "swept", "class_id": None, "class_name": "",
          "iscrowd": False, "reviewed_by": "", "gt_bbox_norm": None, "pred_bbox_norm": None, "conf": None,
          "producer_identity": _IDENTITY_A, "conf_threshold": None, "missed_object_attested": True}
     ]}}}
@@ -525,7 +525,7 @@ def test_rejected_fn_geometry_is_not_mistaken_for_a_missed_object_attestation():
     # missed_object_attested (the explicit, call-site-derived fact record_detection_action
     # stamps, never bbox geometry) is what adjudication_covered must key off of.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
-        _entry("FN", "rejected", 0, [0.25, 0.25, 0.05, 0.05], None, None,
+        _entry("rejected", 0, [0.25, 0.25, 0.05, 0.05], None, None,
               missed_object_attested=False),
     ]}}}
     recs = review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
@@ -538,11 +538,11 @@ def test_rejected_fn_geometry_is_not_mistaken_for_a_missed_object_attestation():
 
 def test_review_conf_threshold_is_the_max_across_scoped_verdicts():
     state = {"image": {"A.jpg": {"img_status": "completed", "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
               conf_threshold=0.1),
-        _entry("FP", "rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05, conf_threshold=0.3)]},
+        _entry("rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05, conf_threshold=0.3)]},
         "B.jpg": {"img_status": "completed", "detections": [
-        _entry("TP", "accepted", 0, [0.1, 0.1, 0.05, 0.05], [0.1, 0.1, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.1, 0.1, 0.05, 0.05], [0.1, 0.1, 0.05, 0.05], 0.9,
               conf_threshold=0.2)]}}}
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_A]) == pytest.approx(0.3)
 
@@ -551,9 +551,9 @@ def test_review_conf_threshold_none_when_any_scoped_verdict_lacks_it():
     # A verdict with no conf_threshold at all leaves the review-side term unknown (never inferred
     # as 0 or skipped), so the caller's max(...) combination fails closed.
     state = {"image": {"A.jpg": {"img_status": "completed", "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
               conf_threshold=0.1),
-        _entry("FP", "rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05, conf_threshold=None)]}}}
+        _entry("rejected", 0, None, [0.75, 0.75, 0.05, 0.05], 0.05, conf_threshold=None)]}}}
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_A]) is None
 
 
@@ -562,9 +562,9 @@ def test_review_conf_threshold_scoped_to_the_matching_bucket_only():
     # floor: the same _matches_any_bucket predicate review_to_records uses, not a second
     # implementation.
     state = {"image": {"A.jpg": {"img_status": "completed", "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
               conf_threshold=0.1, producer_identity=_IDENTITY_A),
-        _entry("TP", "accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.9,
               conf_threshold=0.9, producer_identity=_IDENTITY_B)]}}}
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_A]) == pytest.approx(0.1)
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_B]) == pytest.approx(0.9)
@@ -572,14 +572,14 @@ def test_review_conf_threshold_scoped_to_the_matching_bucket_only():
 
 def test_review_conf_threshold_none_when_nothing_scoped_to_this_bucket():
     state = {"image": {"A.jpg": {"img_status": "completed", "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
               conf_threshold=0.1, producer_identity=_IDENTITY_A)]}}}
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_B]) is None
 
 
 def test_review_conf_threshold_respects_only_completed():
     state = {"image": {"A.jpg": {"img_status": "started", "detections": [
-        _entry("TP", "accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
+        _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
               conf_threshold=0.7)]}}}
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_A], only_completed=True) is None
     assert review_conf_threshold(state, bucket_identities=[_IDENTITY_A],

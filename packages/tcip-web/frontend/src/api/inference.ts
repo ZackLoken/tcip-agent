@@ -2,7 +2,18 @@
 
 import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import type { JobStatus } from "@/api/types.generated";
+import type {
+  CanopySegmentDisclosure,
+  DeliveryEventRecord as StoredDeliveryEventRecord,
+  DeliverySupersessionRecord,
+  ExportCountCsvPayload,
+  ExportCsvPayload,
+  JobStatus,
+  MatchTolerance,
+  PhenologyPayload,
+  PlantMappingDisclosure,
+  PlantRegistryDisclosure,
+} from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
 /**
@@ -99,13 +110,6 @@ export interface PlantMappingSummary {
   totals: { n_dates: number; n_images: number; n_mapped: number; n_unattributed: number };
 }
 
-// The persisted mapping record's own resolved match radius: never recomputed by a caller, and
-// `source` names which of build_mapping's four branches produced `value`.
-export interface PlantMappingTolerance {
-  value: number;
-  source: string;
-}
-
 export interface PerPlantRow {
   plant_id: string;
   accession: string | null;
@@ -137,72 +141,6 @@ export interface OnsetRow {
   [milestoneColumn: string]: string | number | null;
 }
 
-// The inputs a phenology measurement is computed from. Every Results door takes this same shape; none
-// accepts rows, so no caller-composed table can be mistaken for (or declared to be) a delivery.
-export interface PhenologyRequest {
-  project_root: string;
-  mapping_name: string;
-  predictions_by_date: Record<string, string>;
-  trait: string;
-  // The population: the plant ids this measurement is for, one row each. Never every mapped
-  // plot, which is whatever the plant CSVs listed.
-  plants: string[];
-  // Show unvalidated numbers on screen instead of refusing. A display choice, never an
-  // acknowledgement: it never applies to a CSV, which has its own export request shape.
-  show_unvalidated?: boolean;
-}
-
-/** The breeder's own act of shipping a phenology export unvalidated: the reason only, since
- *  acknowledged_by is resolved server-side from the request's own user. */
-export interface AcknowledgementRequest {
-  reason: string;
-}
-
-/** The export door's own request shape: it shares the five fields PhenologyRequest also carries
- *  but does not inherit it (no show_unvalidated, a display-only choice this door never honors). */
-export interface ExportCsvRequest {
-  project_root: string;
-  mapping_name: string;
-  predictions_by_date: Record<string, string>;
-  trait: string;
-  plants: string[];
-  payload: "curves" | "milestones";
-  filename?: string;
-  user?: string;
-  acknowledgement?: AcknowledgementRequest | null;
-}
-
-/** The bucket regime of a per-image count delivery: an existing, reviewed prediction bucket. */
-export interface PerImageCountDeliveryRequest {
-  kind: "per_image_count";
-  predictions_dir: string;
-  trait: string;
-}
-
-/** A per-plant count delivery from a persisted whole-raster prediction bucket plus a
- *  registered plant registry. `nn_tolerance_m` is not exposed here: this door serves the
- *  derived tolerance, or the `canopy_subject` regime. */
-export interface OrthomosaicPlantCountsDeliveryRequest {
-  kind: "orthomosaic_plant_counts";
-  predictions_dir: string;
-  raster_path: string;
-  plant_registry: string;
-  delivered_phenotype: string;
-  crop?: string;
-  pipeline_version?: string;
-  canopy_subject?: string;
-}
-
-/** The count-export door's own request shape: a discriminated `delivery` naming which of the
- *  two stranded count kinds this posts, the same acknowledgement shape `ExportCsvRequest` uses. */
-export interface ExportCountCsvRequest {
-  project_root: string;
-  delivery: PerImageCountDeliveryRequest | OrthomosaicPlantCountsDeliveryRequest;
-  filename: string;
-  user?: string;
-  acknowledgement?: AcknowledgementRequest | null;
-}
-
 /** The count-export door's own response headers: present on every response, an empty string
  *  (never a rendering of null/undefined) when nothing was unvalidated or acknowledged. */
 export interface ExportCountCsvHeaders {
@@ -223,7 +161,7 @@ export interface PhenologyMeasurementResponse {
   // Each dimension's own unfloored state, e.g. { operating_point: "validated_held_out" }: for a
   // reader wanting one dimension's real outcome regardless of an unrelated dimension's failure.
   validated_raw: Record<string, string>;
-  // True when any dimension lacked on-disk evidence, including one an acknowledgement cleared,
+  // True when any dimension lacked on-disk evidence, including one an acknowledgment cleared,
   // which is exactly when these numbers must not be rendered as validated.
   has_unvalidated_dimensions: boolean;
   validity_detail: Record<string, unknown>;
@@ -495,80 +433,6 @@ export function traitSpecAuthoringRefusalOf(e: unknown): TraitSpecAuthoringRefus
   };
 }
 
-// The mapping a phenology delivery attributed detections through, plus this delivery's own
-// unattributed-capture disclosure (MappingBuild.delivery_disclosure).
-export interface PlantMappingDisclosure {
-  name: string;
-  project_root: string;
-  dataset_id: string;
-  dataset_root: string;
-  built_at: string;
-  record_sha256: string;
-  nn_tolerance_m: PlantMappingTolerance;
-  capture_identity: Record<string, string>;
-  captures_unverified: string[];
-  plant_csvs_unverified: string[];
-  dates_delivered: string[];
-  images_unattributed: number;
-  images_unattributed_scope: string;
-  plant_attribution: string;
-}
-
-// The whole-raster counterpart of PlantMappingDisclosure: a nearest-neighbour orthomosaic
-// delivery's own registry disclosure (deliver_orthomosaic_plant_counts's own).
-export interface PlantRegistryDisclosure {
-  plant_registry: { name: string; digest: string };
-  project_root: string;
-  raster_identity: Record<string, unknown>;
-  nn_tolerance_m: PlantMappingTolerance;
-  detections_unattributed: number;
-  detections_unattributed_scope: string;
-  plant_attribution: string;
-  plants_outside_raster: string[];
-}
-
-// One resolved segment-to-plant tie: the derived clearance a displaced registry position
-// would have to exceed to leave this segment.
-export interface SegmentTieDisclosure {
-  segment_index: number;
-  plot_name: string;
-  clearance_m: number;
-}
-
-// The label document a canopy-segment delivery read its boundaries from.
-export interface CanopySegmentsDocument {
-  path: string;
-  sha256: string;
-  subject: string;
-  n_segments: number;
-}
-
-// A canopy-segment delivery's unattributed-detection count, broken out by source; the sum of
-// these three is CanopySegmentDisclosure.detections_unattributed, stated there as derived.
-export interface UnattributedDetectionsBySource {
-  outside_segments: number;
-  overlapping_segments: number;
-  segment_without_plant: number;
-}
-
-// The third disclosure shape: a canopy-segment orthomosaic delivery's own disclosure
-// (deliver_orthomosaic_plant_counts's canopy_subject argument).
-export interface CanopySegmentDisclosure {
-  plant_registry: { name: string; digest: string };
-  project_root: string;
-  raster_identity: Record<string, unknown>;
-  canopy_segments: CanopySegmentsDocument;
-  segment_ties: SegmentTieDisclosure[];
-  segments_without_plant: number;
-  plants_outside_raster: string[];
-  plants_without_segment: string[];
-  plants_with_ambiguous_detections: string[];
-  detections_unattributed: number;
-  detections_unattributed_by_source: UnattributedDetectionsBySource;
-  detections_unattributed_scope: string;
-  plant_attribution: string;
-}
-
 export type PlantMappingUnion =
   PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure;
 
@@ -587,87 +451,12 @@ export function isPlantMappingDisclosure(pm: PlantMappingUnion): pm is PlantMapp
   return "name" in pm && "record_sha256" in pm;
 }
 
-/** The `delivery_supersessions` record `supersede_delivery` filed against one event's id, joined
- *  onto that event by the backend (`delivery_events_schema.with_supersessions`). */
-export interface DeliverySupersession {
-  superseded_event_id: string;
-  output_sha256: string | null;
-  replacement_event_id: string | null;
-  reason: string;
-  superseded_by: string;
-  superseded_at: string;
-}
-
-/** One bucket's binding evidence, as `record_delivery_binding_event` (resolution.py) renders a
- *  StampBinding into `documents` and into each ReconciledDocument's own `bindings`. */
-export interface DocumentBinding {
-  ok: boolean;
-  claimed: boolean;
-  experiment_id: string | null;
-  producing_experiment_id: string | null;
-  checkpoint_sha256: string | null;
-  record_digest: string | null;
-  note: string;
-}
-
-/** One sidecar document's reconciled validity, as `_reconcile_validity` (resolution.py) returns
- *  it and `record_delivery_binding_event` stores it keyed by the document name. `bound_validated`
- *  and `delivery_note` are set only on the classifier entry: the delivery-level state
- *  `bind_classifier_validity` returned (the one the gate used), beside the reconciler's own
- *  `validated`, which the two differ from when the binding floors a validated stamp. */
-export interface ReconciledDocument {
-  validated: string;
-  on_disk_validated: boolean;
-  missing_sidecars: string[];
-  unvalidated_buckets: string[];
-  binding_notes: Record<string, string>;
-  bindings: Record<string, DocumentBinding>;
-  conf: number | null;
-  confs: Record<string, number | null>;
-  per_bucket: Record<string, string>;
-  bound_validated?: string | null;
-  delivery_note?: string | null;
-}
-
-/** One geometry or scope dimension's reconciled validity (claim_scope, tile_size, scale), as the
- *  matching `reconcile_*_validity` function (resolution.py) returns it. `validated` is null when
- *  `operative` is false: never operative for this delivery, not a failed reference. */
-export interface ReconciledDimension {
-  operative: boolean;
-  validated: string | null;
-  per_bucket: Record<string, string>;
-  unvalidated_buckets: string[];
-  binding_notes: Record<string, string>;
-}
-
-/** One completed delivery: what shipped, under which trait and kind, and the real per-bucket
- *  verification evidence the delivering door reconciled at the time. Read-only; a delivery event
- *  is a fact recorded after an artifact already shipped, not a statement to confirm. */
-export interface DeliveryEventRecord {
-  event_id: string;
-  trait: string | null;
-  delivery_kind: string | null;
-  door: string;
-  output_path: string | null;
-  output_sha256: string | null;
-  documents: Record<string, DocumentBinding>;
-  // Every reconciliation the delivering door's gate ran, keyed by the document or dimension it
-  // reconciled; undefined/null on a record written before these fields existed.
-  document_reconciliations?: Record<string, ReconciledDocument> | null;
-  dimension_reconciliations?: Record<string, ReconciledDimension> | null;
-  produced_at: string;
-  // Who acknowledged this delivery unvalidated, and why; null on both when nothing was.
-  acknowledged_by: string | null;
-  acknowledgement_reason: string | null;
-  // The plant mapping this delivery attributed detections through, door-conditional (phenology
-  // a mapping, deliver_orthomosaic_plant_counts a registry or canopy disclosure, others null).
-  plant_mapping: PlantMappingUnion | null;
-  // Set only alongside plant_mapping: the name to load to see exactly the cited record (its own
-  // name while unmoved, an archived key once superseded, or null when neither resolves).
+/** One completed delivery as the backend serves it: the stored record, the key its cited mapping
+ *  loads under (set only alongside `plant_mapping`), and the supersession filed against it. */
+export type DeliveryEventRecord = StoredDeliveryEventRecord & {
   plant_mapping_resolved_key?: string | null;
-  // The supersession filed against this event, if any (see DeliverySupersession above).
-  superseded: DeliverySupersession | null;
-}
+  superseded: DeliverySupersessionRecord | null;
+};
 
 export const resultsApi = {
   registeredModels: (project_path: string) =>
@@ -697,7 +486,7 @@ export const resultsApi = {
       summary: PlantMappingSummary;
       mapping: unknown;
       unreadable: Record<string, string[]>;
-      nn_tolerance_m: PlantMappingTolerance;
+      nn_tolerance_m: MatchTolerance;
       max_match_distance_m: number;
     }>(ROUTES.postResultsPlantMappingBuild, body),
 
@@ -705,14 +494,14 @@ export const resultsApi = {
     postJson<{
       mapping: unknown;
       summary: PlantMappingSummary | Record<string, never>;
-      nn_tolerance_m: PlantMappingTolerance | null;
+      nn_tolerance_m: MatchTolerance | null;
       max_match_distance_m: number | null;
     }>(ROUTES.postResultsPlantMappingLoad, { name }),
 
   // Every mapping name persisted under the open project, for the Results tab's name picker.
   listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),
 
-  phenologyMeasurement: (body: PhenologyRequest) =>
+  phenologyMeasurement: (body: PhenologyPayload) =>
     postJson<PhenologyMeasurementResponse>(ROUTES.postResultsPhenologyMeasurement, body),
 
   /** Enumerates what exists, keyed by trait plus delivery kind; the served `statement_fields`
@@ -759,7 +548,7 @@ export const resultsApi = {
 
   // The server computes what it exports, never a caller-composed table of rows. Its own request
   // shape is distinct from the measurement request's shape, never a spread of it.
-  downloadCsv: async (body: ExportCsvRequest): Promise<Blob> => {
+  downloadCsv: async (body: ExportCsvPayload): Promise<Blob> => {
     const resp = await fetch(ROUTES.postResultsExportCsv, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -775,7 +564,7 @@ export const resultsApi = {
   // Unlike downloadCsv, this reports from the response headers: there is no prior screen
   // measurement for a count, so the headers travel back beside the blob rather than discarded.
   downloadCountCsv: async (
-    body: ExportCountCsvRequest,
+    body: ExportCountCsvPayload,
   ): Promise<{ blob: Blob; headers: ExportCountCsvHeaders }> => {
     const resp = await fetch(ROUTES.postResultsExportCountCsv, {
       method: "POST",

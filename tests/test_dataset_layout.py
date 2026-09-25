@@ -82,7 +82,7 @@ def _touch(path: Path, text: str = "") -> None:
 def test_subjects_with_labels_is_per_date(tmp_path: Path) -> None:
     root = tmp_path
     # Subjects are read from the per-image label records (the path no longer encodes them).
-    # bud labelled on 2026-02-11 only; bush labelled on 2026-03-02 only.
+    # bud labeled on 2026-02-11 only; bush labeled on 2026-03-02 only.
     json_io.write_annotations(
         str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
@@ -134,6 +134,37 @@ def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
     assert models_with_predictions(root, "2026-02-11") == ["baseline"]
     assert models_with_predictions(root, "2026-03-24") == []
     assert models_with_predictions(root, "2026-03-02") == []
+
+
+def test_a_bucket_holding_only_its_stamp_offers_no_predictions(tmp_path: Path) -> None:
+    """A bucket whose one file is its own ``operating_point.json`` stamp, on disk the way the file
+    backend writes it, has nothing to overlay, so it is not offered beside a bucket holding a
+    prediction document."""
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, sidecar_key
+
+    date = "2026-02-11"
+    key = sidecar_key(prediction_dir(tmp_path, "stamped", date))
+    stamp_file = FileBackend().path_for(key)
+    stamp_file.parent.mkdir(parents=True)
+    stamp_file.write_bytes(ts.get_descriptor(key.store).codec.encode(operating_point_stamp(
+        None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        id_map=None, subject="bud", attribute=None, trait=None, dataset_hash=None,
+        checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
+        raster_path=None, produced_at=None)))
+    assert [f.name for f in stamp_file.parent.iterdir()] == ["operating_point.json"]
+    published = prediction_dir(tmp_path, "published", date)
+    published.mkdir(parents=True)
+    write_predictions_json(
+        published / "IMG_1.json", {"image": "IMG_1.jpg", "width": 64, "height": 64,
+                                   "boxes": [[4.0, 4.0, 20.0, 20.0]], "scores": [0.9],
+                                   "labels": [1], "count": 1},
+        created_by="test-producer", subject="bud", attribute=None, id_map={"bud": 0})
+
+    assert models_with_predictions(tmp_path, date) == ["published"]
 
 
 def test_subjects_path_is_the_single_dataset_registry():
@@ -208,7 +239,7 @@ def test_the_tree_roots_are_the_dated_dirs_without_their_date() -> None:
 def test_prediction_bucket_dirs_finds_a_dated_and_a_model_directory_bucket(tmp_path: Path) -> None:
     """Every model directory under predictions/ counts as a bucket in its own right, alongside
     each of its date subdirectories: the one walk the doctor command's registry check and
-    tcip_mcp.store_catalogue.project_roots both read through, so a directory one calls a
+    tcip_mcp.store_catalog.project_roots both read through, so a directory one calls a
     bucket is a directory the other calls one too."""
     from tcip_mcp.dataset_layout import prediction_bucket_dirs
 

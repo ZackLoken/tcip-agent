@@ -87,9 +87,9 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
     assert [r["tool"] for r in rows] == ["stamp_written", "prediction_bucket_published"]
     assert rows[0]["arguments"]["pred_dir"] == str(out) and rows[0]["stamp"]["checkpoint_sha256"]
     # The publication names what the stamp does not, never a stamp fact over again.
-    assert set(rows[1]["arguments"]) == {"predictions_dir", "written", "lineage_linked"}
-    assert (rows[1]["arguments"]["predictions_dir"], rows[1]["arguments"]["written"]) == (
-        str(out), [str(out / "img.json")])
+    assert set(rows[1]["arguments"]) == {"predictions_dir", "lineage_linked"}
+    assert rows[1]["arguments"]["predictions_dir"] == str(out)
+    assert rows[0]["stamp"]["image_filenames"] == {"img": "img.png"}
 
 
 def test_resolve_writable_bucket_for_pins_both_canonical_shapes_suggestion_strings(tmp_path):
@@ -221,7 +221,7 @@ def test_a_second_image_regime_export_against_a_completed_experiment_refuses_bef
     _fake_predictor(monkeypatch)
 
     from tcip_mcp.experiments import create_experiment, update_status
-    create_experiment("expImg", {"model_source": {"builder": "x:y"}})
+    create_experiment("expImg", {"model_source": {"builder": "x:y", "task": "detection"}})
     update_status("expImg", "running")
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -253,7 +253,7 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_refuses_
     _fake_predictor(monkeypatch)
 
     from tcip_mcp.experiments import create_experiment, update_status
-    create_experiment("expImgSame", {"model_source": {"builder": "x:y"}})
+    create_experiment("expImgSame", {"model_source": {"builder": "x:y", "task": "detection"}})
     update_status("expImgSame", "running")
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -292,7 +292,7 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_v
     _fake_predictor(monkeypatch)
 
     from tcip_mcp.experiments import create_experiment, get_experiment_lineage, update_status
-    create_experiment("expImgEmptyFirst", {"model_source": {"builder": "x:y"}})
+    create_experiment("expImgEmptyFirst", {"model_source": {"builder": "x:y", "task": "detection"}})
     update_status("expImgEmptyFirst", "running")
 
     from tcip_mcp.tools.inference_tools import run_inference

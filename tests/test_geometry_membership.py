@@ -111,7 +111,7 @@ def _membership(ds) -> set[str]:
     assert keys <= set(ds.sample_sources) == set(ds.sample_ground_truth)
     for key in keys:
         assert Path(ds.sample_sources[key]).is_file()
-    return {ds.member_stem_of(key) for key in keys}
+    return {ds.member_of(key) for key in keys}
 
 
 def _persisted(experiment_id: str, data_cfg: dict, _train_ds, _val_ds, partition) -> dict:

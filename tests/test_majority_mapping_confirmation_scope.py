@@ -1,6 +1,6 @@
 """What the delivered majority-crossing marker is about, and what it is never about.
 
-A trait's ``majority_provisional`` says one thing: whether the breeders have confirmed that this
+A trait's ``crossing_unconfirmed`` says one thing: whether the breeders have confirmed that this
 trait's "most objects in state" phrase maps to the crossing key the spec names. It travels into the
 phenology CSV as its own column, per trait, and it is not the delivery gate's verdict on whether the
 numbers beside it were validated. Two different questions, two columns, two independent answers: a
@@ -10,6 +10,8 @@ cases.
 """
 
 from __future__ import annotations
+
+from tests._trait_fixtures import complete_spec_record
 
 import csv
 from pathlib import Path
@@ -26,7 +28,7 @@ BUD_SPEC = {
     "milestone_fractions": [0.05, 0.5, 0.95],
     "milestone_on": "positive_fraction",
     "majority_milestone": "95per",
-    "majority_provisional": True,
+    "crossing_unconfirmed": True,
     "phenology_prefix": "bud",
     "majority_label": "opening",
 }
@@ -38,7 +40,7 @@ PISTILLATE_SPEC = {
     "milestone_fractions": [0.5],
     "milestone_on": "positive_fraction",
     "majority_milestone": "50per",
-    "majority_provisional": False,
+    "crossing_unconfirmed": False,
     "phenology_prefix": "pistillate",
     "majority_label": "flowering",
 }
@@ -60,7 +62,7 @@ def _write_specs(project_root: Path) -> None:
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
     for spec in (BUD_SPEC, PISTILLATE_SPEC):
         stamped = {**spec, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}
-        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), stamped, expect=ts.Version.ABSENT)
+        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), complete_spec_record(stamped), expect=ts.Version.ABSENT)
     for spec in (BUD_SPEC, PISTILLATE_SPEC):
         seed_confirmed_crossing(project_root, spec["name"])
 
@@ -82,7 +84,7 @@ def _predictions(
 
     dirs = {}
     for date in ("2026-02-11", "2026-03-09"):
-        # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
+        # A covered-bucket key is relative to a dataset root, recognized by its annotations/predictions segment.
         d = root / "predictions" / "live" / date
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(
@@ -126,7 +128,7 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     """Run one trait's phenology delivery.
 
     Returns the delivered row when every dimension clears the gate, or the door's own refusal
-    dict when the classifier is left unvalidated: this door takes no acknowledgement at all, so
+    dict when the classifier is left unvalidated: this door takes no acknowledgment at all, so
     an unvalidated dimension always refuses now.
     """
     root = tmp_path / spec["name"]
@@ -177,7 +179,7 @@ def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
 def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
     """The marker answers whether the breeders confirmed the majority reading, a different
     question from the delivery gate's own verdict. With one measurement dimension cleared and the
-    classifier left unvalidated, this door takes no acknowledgement at all, so the delivery
+    classifier left unvalidated, this door takes no acknowledgment at all, so the delivery
     refuses, and the refusal still names each dimension's own reconciled state."""
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=False)
 

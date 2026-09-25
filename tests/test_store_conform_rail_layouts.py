@@ -28,7 +28,7 @@ import tcip_store as ts
 from tcip_store.file_backend import FileBackend
 from tcip_store.sqlite_backend import SqliteBackend, database_path
 
-import tcip_mcp.store_catalogue  # noqa: F401
+import tcip_mcp.store_catalog  # noqa: F401
 
 
 @contextmanager

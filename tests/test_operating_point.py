@@ -346,7 +346,8 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_rects_noop"), {
-        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+        "spatial": {"train_identities": ["mosaic::strip_x_1"], "val_identities": []},
+        "group_by": "spatial_strip",
     })
     cal, hold = good_cal_holdout()
 
@@ -417,14 +418,13 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
 
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {})
-    split_cfg: dict = {}
-    if group_by is not None:
-        split_cfg["resolved_group_by"] = group_by
+    split_cfg: dict = {"resolved_seed": 0, "resolved_group_by": group_by or "stem"}
     if group_by == "spatial_strip":
         split_cfg["spatial_manifest"] = {"train_identities": list(train),
                                          "val_identities": list(val)}
     if selection_dir is not None:
-        split_cfg["selection_binding"] = {"selection_dir": selection_dir}
+        split_cfg["selection_binding"] = {
+            "selection_dir": selection_dir, "selection_sha256": None, "redraw": False}
     here = Path(labels_dir) if labels_dir is not None else tmp_path / "annotations" / date
     data_cfg = {"labels_dir": str(here), "split": split_cfg}
     group_of = (recorded_group_key_fn(group_by, date=date)
@@ -434,7 +434,7 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
     images = tmp_path / "images" / date if date is not None else tmp_path / "images"
 
     def _sample(stem: str, side: str) -> Sample:
-        return Sample(source=str(images / f"{stem}.png"),
+        return Sample(member=stem, source=str(images / f"{stem}.png"),
                       ground_truth=str(here / f"{stem}.json"), group=group_of(stem),
                       side=side, confirmation_bucket=status_bucket("bud", date))
 
@@ -448,7 +448,7 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
 def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(
     tmp_path, monkeypatch,
 ):
-    """A checkpoint bound to a manifest, calibrated over the whole labelled directory on its own
+    """A checkpoint bound to a manifest, calibrated over the whole labeled directory on its own
     date (no selection_dir stated for this particular calibration), still sweeps its own
     selection members and floors with the token: the check runs whenever the record carries a
     selection_binding, whether or not this calibration itself names one."""

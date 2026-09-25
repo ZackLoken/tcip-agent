@@ -28,7 +28,7 @@ SUBJECT = "bud"
 
 
 def _make_dataset(root: Path) -> tuple[Path, Path]:
-    """One labelled image under one capture date; answers ``(images_dir, labels_dir)``."""
+    """One labeled image under one capture date; answers ``(images_dir, labels_dir)``."""
     from PIL import Image
 
     from tcip_annotation import json_io
@@ -80,9 +80,9 @@ def test_update_lineage_names_a_refused_identity_field_and_applies_the_legitimat
 def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
     create_experiment("a", {}, dataset_id="1", dataset_fingerprint="v1:ff")
     create_experiment("b", {}, dataset_id="1", dataset_fingerprint="v1:ff")
-    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is True
+    assert compare_experiments(["a", "b"], stale_seconds=600.0)["same_dataset_fingerprint"] is True
     create_experiment("c", {}, dataset_id="2", dataset_fingerprint="v1:ee")
-    assert compare_experiments(["a", "c"])["same_dataset_fingerprint"] is False
+    assert compare_experiments(["a", "c"], stale_seconds=600.0)["same_dataset_fingerprint"] is False
 
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(exp_dir):
@@ -91,7 +91,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(exp_dir)
     train on the same (known) data."""
     create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
     create_experiment("b", {})  # bespoke/imageless -> no recorded fingerprint
-    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is None
+    assert compare_experiments(["a", "b"], stale_seconds=600.0)["same_dataset_fingerprint"] is None
 
 
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):

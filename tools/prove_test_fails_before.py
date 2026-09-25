@@ -10,7 +10,7 @@ baseline's own source is what gets imported, runs pytest there, and reads pytest
 rather than its exit code.
 
     python tools/prove_test_fails_before.py tests/test_foo.py
-    python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behaviour"
+    python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behavior"
     python tools/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
     python tools/prove_test_fails_before.py tests/test_foo.py --json out.json
     python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8

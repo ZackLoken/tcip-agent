@@ -53,12 +53,14 @@ def hpo_root(tmp_path, monkeypatch) -> Path:
 _RELAUNCH_FIELD_DEFAULTS = {
     "search_alg": "random", "scheduler": "asha", "grace_period": 5, "reduction_factor": 3,
     "max_concurrent": 1, "warm_start": False, "baseline_params": None, "resources_per_trial": None,
-    "param_space": {}, "trial_budget": None,
+    "param_space": {}, "trial_budget": None, "base_config": {}, "relaunched_from": None,
+    "split_draws": 1, "split_draw_seeds": None, "search_seed": 0, "cancel_requested": False,
+    "heartbeat": None,
 }
-"""Every ``run_hyperparameter_search`` argument beside ``n_trials``/``base_config`` a manifest carries, at the
-values ``run_hyperparameter_search`` itself defaults to; :func:`_write_sweep` folds these in so a hand-written
-test manifest is complete (as a real one always is) unless a test overrides a field, or omits
-``base_config`` itself, to exercise a genuinely incomplete one."""
+"""Every key ``run_hyperparameter_search``'s manifest writer writes beside ``study_name``,
+``status`` and ``n_trials``, at the values it defaults to (``search_seed`` and ``heartbeat`` have
+none; 0 and None here); :func:`_write_sweep` folds these in so a test manifest is complete, as a
+real one always is."""
 
 
 def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
@@ -68,9 +70,9 @@ def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
 
     sweep = root / study
     sweep.mkdir(parents=True, exist_ok=True)
-    manifest = {"study_name": study, "status": "running",
+    manifest = {**_RELAUNCH_FIELD_DEFAULTS, "study_name": study, "status": "running",
                 "heartbeat": datetime.now(timezone.utc).isoformat(), "n_trials": 2,
-                **_RELAUNCH_FIELD_DEFAULTS, **manifest_fields}
+                **manifest_fields}
     tcip_store.replace(sweep_manifest_key(study), manifest)
     return sweep
 
@@ -138,7 +140,7 @@ def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient, hpo_root) ->
 
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
     assert not any(t.is_alive() for t in tuning._workers.values())
-    assert any(s["sweep_id"] == sweep_id for s in jobstore.load(tuning.HPO_REGISTRY))
+    assert any(s["sweep_id"] == sweep_id for s in jobstore.load(tuning.HPO_SWEEPS))
 
 
 def test_list_sweeps_finds_a_sweep_that_only_exists_on_disk(client, hpo_root) -> None:
@@ -692,7 +694,8 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
         (tb_dir / "marker.txt").write_text("x", encoding="utf-8")
         tcip_store.replace(
             sweep_manifest_key(study_name),
-            {"study_name": study_name, "status": "completed", "n_trials": 1},
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS},
         )
         return {"study_name": study_name}
 
@@ -778,37 +781,6 @@ def test_the_launch_route_is_not_registered(client: TestClient, hpo_root) -> Non
 def test_relaunch_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) -> None:
     resp = client.post("/api/tuning/sweeps", json={"study_name": "nope"})
     assert resp.status_code == 404
-
-
-def test_relaunch_route_409s_when_the_manifest_holds_no_base_config(client: TestClient, hpo_root) -> None:
-    _write_sweep(hpo_root, "hpo_nobase01")  # a manifest without base_config
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_nobase01"})
-    assert resp.status_code == 409
-
-
-def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_than_defaulting_it(
-    client: TestClient, hpo_root
-) -> None:
-    """A manifest carrying base_config but missing another run_hyperparameter_search argument (an old manifest
-    from before this field existed) refuses by name, rather than silently substituting a
-    default that was never the sweep's own choice."""
-    import tcip_store
-    from tcip_mcp.tools.training_tools import sweep_manifest_key
-
-    manifest = {
-        "study_name": "hpo_partial001", "status": "running", "n_trials": 2,
-        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
-        "param_space": {}, "search_alg": "random", "grace_period": 5, "reduction_factor": 3,
-        "max_concurrent": 1, "warm_start": False, "baseline_params": None,
-        "resources_per_trial": None,
-        # scheduler deliberately omitted: an old manifest from before run_hyperparameter_search recorded it.
-    }
-    (hpo_root / "hpo_partial001").mkdir(parents=True)
-    tcip_store.replace(sweep_manifest_key("hpo_partial001"), manifest)
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_partial001"})
-    assert resp.status_code == 409
-    assert "scheduler" in resp.json()["detail"]
 
 
 def test_relaunch_route_409s_for_a_manifest_naming_a_caller_split_seed_axis_at_one_draw(
@@ -967,12 +939,14 @@ def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_giv
                  n_trials=7, search_alg="bayesopt", scheduler="median",
                  grace_period=3, reduction_factor=4, max_concurrent=2,
                  warm_start=True, baseline_params={"lr": 0.05},
-                 resources_per_trial={"cpu": 2.0, "gpu": 0.5}, trial_budget=9)
+                 resources_per_trial={"cpu": 2.0, "gpu": 0.5}, trial_budget=9,
+                 search_seed=713)
 
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_fields001"})
     assert resp.status_code == 200
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
+    assert captured["search_seed"] == 713
     assert captured["base_config"] == base_config
     assert captured["param_space"] == {"lr": {"type": "loguniform", "low": 1e-6, "high": 1e-1}}
     assert captured["n_trials"] == 7
@@ -987,39 +961,6 @@ def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_giv
     assert captured["auto_tensorboard"] is False
     assert captured["relaunched_from"] == "hpo_fields001"
     assert captured["trial_budget"] == 9
-
-
-def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
-    client: TestClient, hpo_root, monkeypatch
-) -> None:
-    """A manifest without the field carries neither split_draws nor split_draw_seeds; the
-    relaunch route reads them, and trial_budget, as run_hyperparameter_search's own defaults
-    (1, None, None) rather than refusing."""
-    from tcip_web.routes import tuning
-
-    captured: dict = {}
-
-    def fake_run_hyperparameter_search(**kwargs):
-        captured.update(kwargs)
-        return {"study_name": kwargs["study_name"]}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
-    _write_sweep(hpo_root, "hpo_predraws01", base_config=base_config)
-
-    import tcip_store
-    from tcip_mcp.tools.training_tools import sweep_manifest_key
-
-    manifest = tcip_store.read(sweep_manifest_key("hpo_predraws01", str(hpo_root)))
-    assert "split_draws" not in manifest and "split_draw_seeds" not in manifest
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_predraws01"})
-    assert resp.status_code == 200
-    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
-
-    assert captured["split_draws"] == 1
-    assert captured["split_draw_seeds"] is None
-    assert captured["trial_budget"] is None
 
 
 def test_relaunch_passes_through_a_manifests_own_split_draws(
@@ -1044,83 +985,6 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
 
     assert captured["split_draws"] == 3
     assert captured["split_draw_seeds"] == [1, 2, 3]
-
-
-def test_relaunch_passes_a_manifests_unreadable_trial_budget_through_to_the_tool(
-    client: TestClient, hpo_root, monkeypatch
-) -> None:
-    """coverage. A manifest recording trial_budget as a non-numeric string relaunches with the
-    string passed through unread by this route: _relaunch_spec reads trial_budget raw, and the
-    tool's own door refuses it as not a count of trials."""
-    from tcip_web.routes import tuning
-
-    captured: dict = {}
-
-    def fake_run_hyperparameter_search(**kwargs):
-        captured.update(kwargs)
-        return {"study_name": kwargs["study_name"]}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
-    _write_sweep(hpo_root, "hpo_budget001", base_config=base_config, trial_budget="nine")
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_budget001"})
-    assert resp.status_code == 200
-    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
-
-    assert captured["trial_budget"] == "nine"
-
-
-def test_relaunch_coerces_a_manifests_numeric_string_split_draws(
-    client: TestClient, hpo_root, monkeypatch
-) -> None:
-    """A manifest recording split_draws as a numeric string (an older or hand-written one) is
-    read through the same int() coercion caller_split_seed_refusal applies, so the relaunch runs
-    at the draw count it names rather than comparing the string itself to an int."""
-    from tcip_web.routes import tuning
-
-    captured: dict = {}
-
-    def fake_run_hyperparameter_search(**kwargs):
-        captured.update(kwargs)
-        return {"study_name": kwargs["study_name"]}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
-    _write_sweep(hpo_root, "hpo_drawsstr01", base_config=base_config, split_draws="2")
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_drawsstr01"})
-    assert resp.status_code == 200
-    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
-
-    assert captured["split_draws"] == 2
-
-
-@pytest.mark.parametrize("value, study", [
-    pytest.param("not-a-number", "hpo_drawsbad01", id="not-a-number"),
-    pytest.param(2.5, "hpo_drawsbad02", id="a-fractional-float"),
-])
-def test_relaunch_route_409s_for_a_manifest_whose_split_draws_is_not_a_draw_count(
-    client: TestClient, hpo_root, monkeypatch, value, study,
-) -> None:
-    """A manifest whose split_draws value coerce_split_draws cannot read as an int is not a
-    draw count; the relaunch route refuses it by name before the worker starts, rather than
-    replaying a numeric string into a TypeError or letting a bare int() truncate a fractional
-    float."""
-    captured: dict = {}
-
-    def fake_run_hyperparameter_search(**kwargs):
-        captured.update(kwargs)
-        return {"study_name": kwargs["study_name"]}
-
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
-    base_config = {"model_source": {"builder": "x:y"}, "data": {}, }
-    _write_sweep(hpo_root, study, base_config=base_config, split_draws=value)
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": study})
-    assert resp.status_code == 409
-    assert "split_draws" in resp.json()["detail"]
-    assert not captured
 
 
 def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifest(
@@ -1182,59 +1046,19 @@ def test_relaunch_records_the_source_manifests_own_study_name_not_the_requests(
     assert captured["relaunched_from"] == "hpo_source_actual1"
 
 
-def test_manifest_fields_projects_relaunched_from_none_when_the_manifest_lacks_the_key() -> None:
-    """An older manifest, from before this field existed, projects relaunched_from as None the
-    same as a manifest that genuinely was not a relaunch, rather than being treated as missing
-    something a caller must supply."""
-    from tcip_web.routes.tuning import _manifest_fields
-
-    manifest = {"study_name": "hpo_old1", "status": "completed", "base_config": {}}
-    assert "relaunched_from" not in manifest
-    assert _manifest_fields(manifest)["relaunched_from"] is None
-
-
 def test_manifest_fields_projects_redraws_within_manifest_from_the_base_config() -> None:
     """The recorded base_config's own data.split.redraw_within_selection is the source of truth
-    for the sweep listing's redraws_within_selection field: false for a manifest predating the
-    flag or one that never set it, true only when the base config actually carries it."""
+    for the sweep listing's redraw_within_selection field: false for a config that never set
+    it, true only when the base config actually carries it."""
     from tcip_web.routes.tuning import _manifest_fields
 
-    without_flag = {"study_name": "hpo_old2", "base_config": {
-        "data": {"split": {"selection_dir": "m"}},
-    }}
-    assert _manifest_fields(without_flag)["redraws_within_selection"] is False
+    def _manifest(split: dict) -> dict:
+        return {"study_name": "hpo_redraw2", "status": "completed", "n_trials": 1,
+                **_RELAUNCH_FIELD_DEFAULTS, "base_config": {"data": {"split": split}}}
 
-    with_flag = {"study_name": "hpo_redraw2", "base_config": {
-        "data": {"split": {"selection_dir": "m", "redraw_within_selection": True, "seed": 5}},
-    }}
-    assert _manifest_fields(with_flag)["redraws_within_selection"] is True
-
-
-def test_relaunch_of_an_older_manifest_missing_relaunched_from_still_succeeds(
-    client: TestClient, hpo_root
-) -> None:
-    """_missing_relaunch_fields does not require relaunched_from: a manifest carrying no
-    ``relaunched_from`` key at all (_write_sweep's own default) relaunches exactly as any other
-    manifest does."""
-    from tcip_web.routes.tuning import _RELAUNCH_FIELDS, _missing_relaunch_fields
-
-    assert "relaunched_from" not in _RELAUNCH_FIELDS
-    _write_sweep(hpo_root, "hpo_old_relaunch1",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, })
-
-    import tcip_store
-    from tcip_mcp.tools.training_tools import sweep_manifest_key
-
-    manifest = tcip_store.read(sweep_manifest_key("hpo_old_relaunch1"))
-    assert "relaunched_from" not in manifest
-    assert _missing_relaunch_fields(manifest) == []
-
-    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_old_relaunch1"})
-    assert resp.status_code == 200
-
-    from tcip_web.routes import tuning
-
-    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert _manifest_fields(_manifest({"selection_dir": "m"}))["redraw_within_selection"] is False
+    with_flag = _manifest({"selection_dir": "m", "redraw_within_selection": True, "seed": 5})
+    assert _manifest_fields(with_flag)["redraw_within_selection"] is True
 
 
 def test_cancel_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) -> None:
@@ -1277,7 +1101,7 @@ def test_cancel_reaches_a_relaunch_before_run_hyperparameter_search_writes_its_o
 
     def fake_run_hyperparameter_search(*, study_name, **kwargs):
         release.wait(timeout=5)
-        return {"status": "cancelled", "study_name": study_name, "error": "stood down for the test"}
+        return {"status": "canceled", "study_name": study_name, "error": "stood down for the test"}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_precancel1",
@@ -1307,29 +1131,31 @@ def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) 
     job = HPOJob(sweep_id="hpo-worker-err")
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
                          scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
-                         warm_start=False, baseline_params=None, resources_per_trial=None)
+                         warm_start=False, baseline_params=None, resources_per_trial=None,
+                         split_draws=1, split_draw_seeds=None, trial_budget=None, search_seed=0)
     _worker(job, spec, str(hpo_root), "hpo-source-1")
     assert job.status == "failed"
     assert job.error == "the sweep's base config fails preflight"
 
 
-def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, monkeypatch) -> None:
-    """A cancelled sweep's row must carry a reason a breeder can read, the same way a failed
+def test_worker_marks_a_canceled_result_canceled_with_its_reason(hpo_root, monkeypatch) -> None:
+    """A canceled sweep's row must carry a reason a breeder can read, the same way a failed
     sweep's row does, not job.error left unset while the disk manifest alone holds it."""
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
 
     monkeypatch.setattr(
         "tcip_mcp.tools.training_tools.run_hyperparameter_search",
-        lambda **kwargs: {"status": "cancelled", "study_name": kwargs.get("study_name"),
-                          "error": "the sweep was cancelled by request before it could finish"},
+        lambda **kwargs: {"status": "canceled", "study_name": kwargs.get("study_name"),
+                          "error": "the sweep was canceled by request before it could finish"},
     )
     job = HPOJob(sweep_id="hpo-worker-cxl")
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
                          scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
-                         warm_start=False, baseline_params=None, resources_per_trial=None)
+                         warm_start=False, baseline_params=None, resources_per_trial=None,
+                         split_draws=1, split_draw_seeds=None, trial_budget=None, search_seed=0)
     _worker(job, spec, str(hpo_root), "hpo-source-2")
-    assert job.status == "cancelled"
-    assert job.error == "the sweep was cancelled by request before it could finish"
+    assert job.status == "canceled"
+    assert job.error == "the sweep was canceled by request before it could finish"
 
 
 def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hyperparameter_search(
@@ -1356,7 +1182,8 @@ def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hyper
     mark_sweep_launching(job.sweep_id, str(hpo_root))
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
                          scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
-                         warm_start=False, baseline_params=None, resources_per_trial=None)
+                         warm_start=False, baseline_params=None, resources_per_trial=None,
+                         split_draws=1, split_draw_seeds=None, trial_budget=None, search_seed=0)
 
     _worker(job, spec, str(hpo_root), "hpo-source-markleak")
 
@@ -1442,128 +1269,6 @@ def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reaso
     assert fields["cancel_requested"] is False
 
 
-def test_manifest_fields_reports_not_relaunchable_for_an_unreadable_split_draws_value() -> None:
-    """A split_draws value int() cannot read is not a draw count, and the relaunch route would
-    409 on it (_invalid_split_draws_field); the listing marker agrees rather than reporting
-    relaunchable for a manifest the route refuses, with the route's own reason. Every other
-    relaunch field is filled in so the marker reaches this check rather than the missing-fields
-    one that runs ahead of it."""
-    from tcip_web.routes.tuning import _manifest_fields
-
-    manifest = {
-        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {}, "split_draws": "not-a-number",
-        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-    }
-    fields = _manifest_fields(manifest)
-    assert fields["relaunchable"] is False
-    assert fields["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
-    assert fields["split_draws"] is None
-
-
-def test_manifest_fields_reports_relaunchable_for_a_manifest_recording_split_draws_zero() -> None:
-    """The marker checks nothing the tool's own door checks: split_draws=0 reads as one draw
-    through coerce_split_draws, so a manifest recording it, with every other relaunch field
-    present and no caller-supplied seed axis, lists relaunchable here; its actual relaunch
-    reaches the door, which refuses it by name (the below-one argument leg), and the job records
-    that reason as its own error."""
-    from tcip_web.routes.tuning import _manifest_fields
-
-    manifest = {
-        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, },
-        "split_draws": 0,
-    }
-    fields = _manifest_fields(manifest)
-    assert fields["relaunchable"] is True
-    assert fields["reason"] is None
-    assert fields["split_draws"] == 0
-
-
-def test_manifest_fields_reports_not_relaunchable_for_an_infinite_split_draws_value() -> None:
-    """A JSON Infinity literal decodes to float("inf") through the store's plain json.loads
-    even though its own encode refuses to write one, so a manifest of unknown provenance under
-    hpo_root() can carry it; int() cannot read it as a draw count either, and the marker reports
-    not relaunchable with the same reason the route's 409 would give, rather than raising or
-    reporting relaunchable for a manifest that would fail the worker. Every other relaunch field
-    is filled in so the marker reaches this check rather than the missing-fields one that runs
-    ahead of it."""
-    from tcip_web.routes.tuning import _manifest_fields
-
-    manifest = {
-        "n_trials": 1, **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {}, "split_draws": float("inf"),
-        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-    }
-    fields = _manifest_fields(manifest)
-    assert fields["relaunchable"] is False
-    assert fields["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
-    assert fields["split_draws"] is None
-
-
-def test_invalid_split_draws_reason_matches_what_the_marker_tests_assert_literally() -> None:
-    """Coverage: the two tests above assert the marker's reason as a literal string, not the
-    imported constant; this pins that literal to the module's own constant composed with the
-    missing-fields text's own ": cannot relaunch" suffix, so a reword of either half is caught
-    here."""
-    from tcip_web.routes.tuning import _INVALID_SPLIT_DRAWS_REASON
-
-    assert f"{_INVALID_SPLIT_DRAWS_REASON}: cannot relaunch" == (
-        "this sweep's record's split_draws is not a draw count: cannot relaunch"
-    )
-
-
-def test_list_sweeps_serves_a_manifest_with_an_infinite_split_draws_value_beside_a_healthy_one(
-    client: TestClient, hpo_root,
-) -> None:
-    """A manifest whose split_draws is a JSON Infinity literal cannot come from _write_sweep
-    (tcip_store.replace goes through the same encode that refuses a non-finite number on write),
-    so it is hand-written directly to the file this key resolves to, bound to the file backend
-    explicitly rather than through whichever backend the ambient test run is on: the store's own
-    write-side refusal makes the file backend the only producer of this manifest. The route still
-    answers 200 (FastAPI's own response_model handling for this route's -> dict annotation
-    already renders a non-finite float as JSON null rather than raising, so the raw value never
-    crashes the listing the way a bare Starlette JSONResponse would); relaunchable and
-    split_draws must both be computed from that coerced null rather than from the raw in-memory
-    inf, or relaunchable would stay True and split_draws would read null by accident rather than
-    by a deliberate coercion."""
-    import tcip_store
-    from datetime import datetime, timezone
-    from tcip_store.file_backend import FileBackend
-    from tcip_mcp.tools.training_tools import sweep_manifest_key
-
-    tcip_store.bind(FileBackend())
-    _write_sweep(hpo_root, "hpo_healthy_beside_inf",
-                base_config={"model_source": {"builder": "x:y"}, "data": {}, },
-                split_draws=2)
-
-    key = sweep_manifest_key("hpo_infinite_draws")
-    path = FileBackend().path_for(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "study_name": "hpo_infinite_draws", "status": "completed",
-        "heartbeat": datetime.now(timezone.utc).isoformat(), "n_trials": 2,
-        **_RELAUNCH_FIELD_DEFAULTS,
-        "base_config": {},
-        "param_space": {"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-        "split_draws": float("inf"),
-    }
-    path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    resp = client.get("/api/tuning/sweeps")
-    assert resp.status_code == 200
-    by_id = {s["sweep_id"]: s for s in resp.json()["sweeps"]}
-    assert "hpo_healthy_beside_inf" in by_id
-    assert "hpo_infinite_draws" in by_id
-    healthy_row = by_id["hpo_healthy_beside_inf"]
-    assert healthy_row["relaunchable"] is True
-    assert healthy_row["split_draws"] == 2
-    infinite_row = by_id["hpo_infinite_draws"]
-    assert infinite_row["relaunchable"] is False
-    assert infinite_row["split_draws"] is None
-    assert infinite_row["reason"] == "this sweep's record's split_draws is not a draw count: cannot relaunch"
-
-
 def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_the_database(
     client: TestClient, hpo_root,
 ) -> None:
@@ -1602,22 +1307,6 @@ def test_list_sweeps_on_the_sqlite_backend_never_sees_a_loose_manifest_beside_th
     assert "hpo_loose_manifest" not in ids
 
 
-def test_manifest_fields_narrows_a_truthy_non_mapping_param_space_rather_than_crashing() -> None:
-    """_manifest_fields narrows a truthy non-mapping param_space (a hand-edited or otherwise
-    malformed manifest) to an empty mapping before the key projection, so param_space_keys
-    renders empty rather than raising. This manifest also carries none of the other relaunch
-    fields, so the marker agrees with what a relaunch of it would 409 on: the missing-fields
-    reason, not a false relaunchable."""
-    from tcip_web.routes.tuning import _manifest_fields, _missing_relaunch_fields
-
-    manifest = {"base_config": {}, "param_space": "not-a-mapping"}
-    fields = _manifest_fields(manifest)
-    assert fields["param_space_keys"] == []
-    assert fields["relaunchable"] is False
-    missing = _missing_relaunch_fields(manifest)
-    assert fields["reason"] == f"this sweep's record is missing {missing}: cannot relaunch"
-
-
 def test_persisted_summary_carries_no_manifest_field(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
@@ -1648,9 +1337,9 @@ def test_persisted_summary_carries_no_manifest_field(
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
-    persisted = jobstore.load(tuning.HPO_REGISTRY)
+    persisted = jobstore.load(tuning.HPO_SWEEPS)
     entry = next(s for s in persisted if s["sweep_id"] == sweep_id)
-    assert set(entry) == {"sweep_id", "status", "error", "has_result", "platform_root"}
+    assert set(entry) == {"sweep_id", "status", "error", "platform_root"}
 
 
 def test_get_sweep_live_branch_carries_no_manifest_field(

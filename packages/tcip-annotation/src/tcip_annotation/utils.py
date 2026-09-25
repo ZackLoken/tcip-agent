@@ -12,11 +12,7 @@ logger = logging.getLogger(__name__)
 
 def _read_orientation_tag(img: Image.Image) -> int | None:
     """The image's EXIF Orientation tag value, or ``None`` if it carries no EXIF data or no
-    Orientation tag. The one orientation read `auto_orient_image` and `get_image_dimensions`
-    both use, so the frame one rotates and the frame the other measures can't disagree.
-
-    Reads the tag through ``_getexif``, a JPEG-family (JPEG, MPO) accessor PIL's TIFF plugin
-    does not implement; the photographic path this serves admits only those containers.
+    Orientation tag, read through ``_getexif``, a JPEG-family (JPEG, MPO) accessor.
     """
     try:
         # _getexif is a JpegImageFile/MpoImageFile accessor, absent from the Image.Image stub.
@@ -56,13 +52,7 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
 
 
 def get_image_dimensions(path: str) -> tuple[int, int]:
-    """Return (width, height) of an image, applying EXIF orientation.
-
-    Header-only: reads size + orientation without decoding pixels. The transpose-based
-    path costs a full decode of a 24MP frame (~0.5 s) just to learn its dimensions.
-    Its one production caller is `image_utils.image_dimensions`, which routes every
-    photographic container here.
-    """
+    """Return (width, height) of an image, applying EXIF orientation; header-only, no pixel decode."""
     with Image.open(path) as img:
         w, h = img.size
         orientation = _read_orientation_tag(img) or 1

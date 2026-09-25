@@ -57,7 +57,7 @@ def _hermetic_platform_root(tmp_path):
 
 
 def _entry(action, cid, gt, pred, conf):
-    return {"match_type": "TP" if pred and gt else ("FP" if pred else "FN"), "action": action,
+    return {"action": action,
             "class_id": cid, "iscrowd": False, "reviewed_by": "", "class_name": "", "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": _IDENTITY, "conf_threshold": 0.01}
 

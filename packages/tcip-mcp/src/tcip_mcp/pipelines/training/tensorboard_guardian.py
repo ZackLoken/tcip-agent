@@ -1,29 +1,18 @@
-"""Keep one child tied to the life of the process that launched it, on platforms with no
-job-object equivalent (Linux, macOS).
+"""Keep one child tied to the life of the process that launched it, on platforms with no job-object
+equivalent (Linux, macOS).
 
-Run as its own process: ``python -m tcip_mcp.pipelines.training.tensorboard_guardian --parent
-<pid> --term-grace <seconds> -- <argv...>``, under the launcher's own interpreter
-(``sys.executable``), which is why ``tcip_mcp`` must be importable there for ``-m`` to find this
-module at all. Both options are required; a missing one is a usage error, since this module
-carries no grace of its own, only the value its caller (``tensorboard_manager``) hands it. Starts
-``<argv...>`` as its own child: while the launching process (identified by ``pid``, recognized
-only as long as ``os.getppid()`` still returns it) and the child are both alive, it waits,
-checking the child every tenth of a second (so a child that exits immediately is reflected in the
-guardian's own exit well inside the manager's half-second startup grace) and the parent's
-liveness once a second (its death needs no faster detection than that). Once the parent is gone,
-it terminates the child (``SIGTERM``, then ``SIGKILL`` if it has not exited within
-``--term-grace`` seconds) and exits with the child's return code, 128 plus the signal number when
-a signal ended it (the shell convention; a raw negative code does not survive ``sys.exit``); if
-the child exits on its own first, the guardian exits with that same code; a ``SIGTERM`` delivered
-to the guardian itself is forwarded to the child the same way. The caller is expected to keep
-``--term-grace`` well under its own wait for this process to end, so this process's own kill of a
-stubborn child lands, and this process exits, before that wait gives up and reports stopped with
-TensorBoard still alive underneath it; on the parent-death path a stubborn child is gone within
-about a second plus the grace after the parent dies (one second to detect it). The limits: a
-parent's death is detected within a second of it happening, never instantly; a guardian the
-kernel kills outright, rather than exiting through this code, leaves its child running with
-nothing left watching it; and this mechanism covers macOS by the same code path as Linux,
-exercised by no CI leg.
+Run as ``python -m tcip_mcp.pipelines.training.tensorboard_guardian --parent <pid> --term-grace
+<seconds> -- <argv...>``; both options are required. Starts ``<argv...>`` as its own child and,
+while the launching process (recognized only as long as ``os.getppid()`` still returns it) and the
+child are both alive, waits, checking the child every tenth of a second and the parent's liveness
+once a second. Once the parent is gone, it terminates the child (``SIGTERM``, then ``SIGKILL`` if
+it has not exited within ``--term-grace`` seconds) and exits with the child's return code, 128 plus
+the signal number when a signal ended it; if the child exits on its own first, the guardian exits
+with that same code; a ``SIGTERM`` delivered to the guardian itself is forwarded to the child the
+same way.
+
+Limits: a parent's death is detected within a second, never instantly; a guardian the kernel kills
+    outright leaves its child running unwatched.
 """
 
 from __future__ import annotations

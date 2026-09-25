@@ -22,7 +22,7 @@ def test_a_created_experiment_is_listed_whichever_backend_holds_its_record(
     try:
         from tcip_mcp.experiments import create_experiment, experiment_exists, list_experiments
 
-        create_experiment("e1", {"model_source": {"builder": "my_models:fcos_det"}})
+        create_experiment("e1", {"model_source": {"builder": "my_models:fcos_det", "task": "detection"}})
 
         assert experiment_exists("e1")
         listed = list_experiments()
@@ -44,14 +44,14 @@ def test_experiment_list_compare_lineage(tmp_path, monkeypatch):
         update_lineage,
     )
 
-    create_experiment("e1", {"model_source": {"builder": "my_models:tv_resnet50_det"}}, data_source="imgs")
+    create_experiment("e1", {"model_source": {"builder": "my_models:tv_resnet50_det", "task": "detection"}}, data_source="imgs")
     log_metrics("e1", 1, {"map50": 0.6})
     update_lineage("e1", predictions="w.pt")
-    create_experiment("e2", {"model_source": {"builder": "my_models:fcos_det"}})
+    create_experiment("e2", {"model_source": {"builder": "my_models:fcos_det", "task": "detection"}})
 
     assert {e["experiment_id"] for e in list_experiments()} == {"e1", "e2"}
 
-    cmp = compare_experiments(["e1", "e2", "missing"])
+    cmp = compare_experiments(["e1", "e2", "missing"], stale_seconds=600.0)
     assert cmp["count"] == 3
     e1 = next(c for c in cmp["experiments"] if c["experiment_id"] == "e1")
     assert e1["model"] == "my_models:tv_resnet50_det" and e1["last_logged_metrics"]["map50"] == 0.6
@@ -72,7 +72,7 @@ def test_get_experiment_tool_pages_metrics_and_exposes_n_rows(tmp_path, monkeypa
     from tcip_mcp.experiments import create_experiment, log_metrics
     from tcip_mcp.tools.experiment_tools import get_experiment
 
-    create_experiment("exp-paged", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-paged", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     for e in range(5):
         log_metrics("exp-paged", e, {"loss": float(e)})
 
@@ -91,7 +91,7 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.experiment_tools import get_experiment
 
-    create_experiment("exp-lineage", {"model_source": {"builder": "my_models:currant_cluster_det"}},
+    create_experiment("exp-lineage", {"model_source": {"builder": "my_models:fruit_detector", "task": "detection"}},
                       data_source="imgs")
 
     ok = get_experiment("exp-lineage", view="lineage")
@@ -111,7 +111,7 @@ def test_list_experiments_tool_carries_has_model_source(tmp_path, monkeypatch):
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    create_experiment("exp-run", {"model_source": {"builder": "my_models:fcos_det"}})
+    create_experiment("exp-run", {"model_source": {"builder": "my_models:fcos_det", "task": "detection"}})
     stamp_run_identity("exp-run", "out_dir", launched_by={"launcher": "process"})
     create_experiment("exp-precreated", {"a": 1})
 
@@ -130,7 +130,7 @@ def test_list_experiments_launched_only_serves_the_absorbed_runs_view(tmp_path, 
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_mcp.tools.training_tools import _all_training_runs
 
-    create_experiment("exp-launched-view", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-launched-view", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-launched-view", "running")
     create_experiment("exp-not-a-run", {"a": 1})
 
@@ -154,12 +154,12 @@ def test_compare_experiments_reports_lock_last_row_and_post_end_rows(tmp_path, m
         compare_experiments, create_experiment, log_metrics, metrics_key, update_status,
     )
 
-    create_experiment("exp-locked", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-locked", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-locked", "running")
     log_metrics("exp-locked", 0, {"loss": 0.5})
     update_status("exp-locked", "completed")
 
-    result = compare_experiments(["exp-locked"])
+    result = compare_experiments(["exp-locked"], stale_seconds=600.0)
     c = result["experiments"][0]
     assert c["recorded_state"] == "completed"
     assert c["state"] == "completed"
@@ -172,21 +172,21 @@ def test_compare_experiments_reports_lock_last_row_and_post_end_rows(tmp_path, m
     # own residual, not the mutation lock's job to catch (log_metrics itself would refuse).
     ts.append(metrics_key("exp-locked"),
              {"epoch": 1, "timestamp": "2099-01-01T00:00:00+00:00", "loss": 0.1})
-    result2 = compare_experiments(["exp-locked"])
+    result2 = compare_experiments(["exp-locked"], stale_seconds=600.0)
     assert result2["experiments"][0]["rows_after_end"] == 1
 
 
-def test_compare_experiments_cancelled_run_is_not_log_locked(tmp_path, monkeypatch):
-    """A rail must admit valid work: the lock admits rows on a cancelled record, so log_locked
+def test_compare_experiments_canceled_run_is_not_log_locked(tmp_path, monkeypatch):
+    """A rail must admit valid work: the lock admits rows on a canceled record, so log_locked
     reads False there even though no production flow appends to one."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment, update_status
 
-    create_experiment("exp-cancelled-cmp", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    update_status("exp-cancelled-cmp", "running")
-    update_status("exp-cancelled-cmp", "cancelled")
+    create_experiment("exp-canceled-cmp", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
+    update_status("exp-canceled-cmp", "running")
+    update_status("exp-canceled-cmp", "canceled")
 
-    result = compare_experiments(["exp-cancelled-cmp"])
+    result = compare_experiments(["exp-canceled-cmp"], stale_seconds=600.0)
     assert result["experiments"][0]["log_locked"] is False
 
 
@@ -199,7 +199,7 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monk
     import tcip_store as ts
     from tcip_mcp.experiments import compare_experiments, create_experiment, status_key, update_status
 
-    create_experiment("exp-stale", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-stale", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-stale", "running")
     key = status_key("exp-stale")
     with ts.transaction(key) as txn:
@@ -207,7 +207,7 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monk
         s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         txn.write(key, s)
 
-    result = compare_experiments(["exp-stale"])
+    result = compare_experiments(["exp-stale"], stale_seconds=600.0)
     c = result["experiments"][0]
     assert c["recorded_state"] == "running"
     assert c["state"] == "interrupted"
@@ -219,12 +219,12 @@ def test_compare_experiments_reads_no_refusal_history(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment, log_metrics, update_status
 
-    create_experiment("exp-refused", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-refused", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-refused", "running")
     update_status("exp-refused", "completed")
     assert "error" in log_metrics("exp-refused", 1, {"loss": 0.9})
 
-    assert "refused_mutations" not in compare_experiments(["exp-refused"])["experiments"][0]
+    assert "refused_mutations" not in compare_experiments(["exp-refused"], stale_seconds=600.0)["experiments"][0]
 
 
 def test_compare_experiments_running_with_fresh_heartbeat(tmp_path, monkeypatch):
@@ -233,10 +233,10 @@ def test_compare_experiments_running_with_fresh_heartbeat(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment, update_status
 
-    create_experiment("exp-fresh-running", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-fresh-running", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-fresh-running", "running")
 
-    result = compare_experiments(["exp-fresh-running"])
+    result = compare_experiments(["exp-fresh-running"], stale_seconds=600.0)
     c = result["experiments"][0]
     assert c["state"] == "running"
     assert c["log_locked"] is False
@@ -250,9 +250,9 @@ def test_compare_experiments_never_launched_reports_recorded_state(tmp_path, mon
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import compare_experiments, create_experiment
 
-    create_experiment("exp-never-launched", {"a": 1})
+    create_experiment("exp-never-launched", {"model_source": {"builder": "my_models:det", "task": "detection"}})
 
-    result = compare_experiments(["exp-never-launched"])
+    result = compare_experiments(["exp-never-launched"], stale_seconds=600.0)
     c = result["experiments"][0]
     assert c["recorded_state"] == "created"
     assert c["state"] == "created"
@@ -269,7 +269,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp
         compare_experiments, create_experiment, metrics_key, status_key, update_status,
     )
 
-    create_experiment("exp-instants", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-instants", {"model_source": {"builder": "my_models:tree_detector", "task": "detection"}})
     update_status("exp-instants", "running")
     update_status("exp-instants", "completed")
 
@@ -292,5 +292,5 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp
     for row in rows:
         ts.append(mkey, row)
 
-    result = compare_experiments(["exp-instants"])
+    result = compare_experiments(["exp-instants"], stale_seconds=600.0)
     assert result["experiments"][0]["rows_after_end"] == 2

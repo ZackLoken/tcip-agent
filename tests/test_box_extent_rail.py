@@ -460,3 +460,21 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(tmp_path, shape):
     result = stage_proposals(str(image), model_name="sam", **unscored)
 
     assert "conf" in result.get("error", ""), result
+
+
+@pytest.mark.parametrize("shape", ["box", "polygon"])
+def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(tmp_path, shape):
+    """Every staged shape states its own subject; one stating none is refused naming the shape's
+    index and the missing field, never staged under an empty subject."""
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
+    image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
+    _write_image(image)
+    unstated = ({"boxes": [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}
+                if shape == "box" else
+                {"polygons": [{"conf": 0.9, "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})
+
+    result = stage_proposals(str(image), model_name="sam", **unstated)
+
+    assert result.get("error", "").startswith(f"{shape} 0: "), result
+    assert "subject" in result["error"] and "Field required" in result["error"]

@@ -121,7 +121,7 @@ def test_variant_search_walks_past_every_reviewed_variant(tmp_path: Path) -> Non
     assert resolution.verdict_count == 3
 
 
-def test_verdicts_on_a_neighbouring_bucket_do_not_freeze_this_one(tmp_path: Path) -> None:
+def test_verdicts_on_a_neighboring_bucket_do_not_freeze_this_one(tmp_path: Path) -> None:
     """Review state is shared by every bucket of a dataset, and a bucket is frozen only by
     verdicts against its own images. A populated bucket whose images nobody reviewed is written
     as named, even while another bucket's images carry verdicts."""

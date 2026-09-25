@@ -1,8 +1,6 @@
 """Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline.
 
-Three tools over the canonical ``pipelines.postprocessing`` modules, so the agent composes tools
-instead of scripting into the web backend (and a milestone date means exactly what it means in
-the web Results tab):
+Three tools over the canonical ``pipelines.postprocessing`` modules:
 
     build_plant_mapping                   geolocated images + plant CSVs → a named mapping
                                            under the project
@@ -12,8 +10,8 @@ the web Results tab):
     deliver_phenology_milestones           that mapping + classified predictions →
                                            <phenology_prefix>_phenology.csv
 
-See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
-per-plant fraction → crossings).
+See the ``phenology`` skill for the whole pattern (isolate → detect → classify state → per-plant
+fraction → crossings).
 """
 
 from __future__ import annotations
@@ -29,22 +27,18 @@ from tcip_mcp.server import mcp
 @mcp.tool()
 @audited
 def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site: str) -> dict:
-    """Register a plant-locations CSV set under a name, so ``build_plant_mapping`` and
-    ``deliver_orthomosaic_plant_counts`` name which version of a plant list they read rather than
-    re-asserting file paths on every call.
+    """Register a plant-locations CSV set under a name that later doors cite instead of file paths.
 
-    Reads every path in ``csv_paths`` through the same parser those two doors already use
-    (``read_plant_csvs``), one file at a time, and refuses naming any file that parses to no
-    georeferenced, named plant. The stored, frozen, project-scoped record holds each file's
-    ``{path, sha256, n_plants}``, ``crop``, ``site``, ``registered_by`` (always this door's own
-    identity: no HTTP request reaches this tool, so there is no breeder identity to stamp
-    instead), ``registered_at``, and a content digest over every parsed row.
+    Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
+    naming any file that parses to no georeferenced, named plant. The stored, frozen,
+    project-scoped record holds each file's ``{path, sha256, n_plants}``, ``crop``, ``site``,
+    ``registered_by`` (always this door's own identity), ``registered_at``, and a content digest
+    over every parsed row.
 
     A second registration under a taken ``name`` is read before it writes (this store's own
     ``concurrency="cas"``): it returns the existing record unchanged when the digest matches (the
-    same plants again, from a different path or row order), and refuses naming both digests when
-    it does not, since silently moving what a taken name means would strand every mapping already
-    citing it.
+    same plants again, from a different path or row order), and refuses naming both digests when it
+    does not.
 
     Args:
         name: The registry's name within this project (``tcip_store.layout_claims.NAME_SEGMENT``:
@@ -55,13 +49,10 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
         site: The site or block these plants are of. The expert's fact, never inferred.
 
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
-    (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with ``tcip shp-to-plant-csv``, since
-    this registry's one-file-one-snapshot verification has no multi-file form), naming any file
-    that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name conflict's
-    two digests. A name outside ``NAME_SEGMENT`` refuses at the door. Unlike
-    ``build_plant_mapping``, this does not require a project record:
-    ``deliver_orthomosaic_plant_counts`` reads a registry without one, and a registry has to be
-    registrable before either door can name it.
+    (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with ``tcip shp-to-plant-csv``), naming
+    any file that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name
+    conflict's two digests. A name outside ``NAME_SEGMENT`` refuses at the door. This does not
+    require a project record.
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -120,53 +111,48 @@ def build_plant_mapping(
 ) -> dict:
     """Assign each geolocated image to a plant, then persist the mapping under this project.
 
-    Image GPS (handheld EXIF) carries ~5 m error while the plant grid is ~2.8 m between
-    adjacent plots, so nearest-neighbour GPS alone is ambiguous. This orders each date's
-    images by EXIF capture time (the walker's sequence), splits into row runs on large GPS
-    jumps, and assigns along the row, falling back to nearest-neighbour when the sequence
-    signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no
-    fabricated "confidence"). The mapping is project state, persisted under the resolved
-    platform state root by ``name``; ``deliver_phenology_milestones`` reads it back the same way. See the
-    ``phenology`` skill.
+    Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
+    large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
+    signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no fabricated
+    "confidence"). The mapping is project state, persisted under the resolved platform state root
+    by ``name``.
 
     Args:
-        name: The mapping's name within this project (``plant_mapping_key``'s own naming
-            rule). A rebuild under the same name replaces this project's own mapping of that
-            name.
-        images_root: Directory whose immediate subfolders are ``<YYYY-MM-DD>/`` image buckets
-            (the ingest layout).
+        name: The mapping's name within this project (``plant_mapping_key``'s own naming rule). A
+            rebuild under the same name replaces this project's own mapping of that name.
+        images_root: Directory whose immediate subfolders are ``<YYYY-MM-DD>/`` image buckets (the
+            ingest layout).
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
         dates: Optional subset of date folders to map (default: all under ``images_root``).
-        nn_tolerance_m: Nearest-neighbour tolerance (m). ``None`` (default) derives it from the
+        nn_tolerance_m: Nearest-neighbor tolerance (m). ``None`` (default) derives it from the
             plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
             explicit value is honored but still capped at that pitch-derived ceiling.
-        supersede: A rebuild under ``name`` whose current record is still cited by a delivery
-            event under this project refuses by name, listing the citing events, unless this is
-            ``True``: the current record is then archived first (never overwritten), the new
-            record's own ``supersedes`` names the archived digest, and the archived record stays
-            readable by that digest. An uncited rebuild replaces as it always has, ignoring this.
+        supersede: A rebuild under ``name`` whose current record is still cited by a delivery event
+            under this project refuses by name, listing the citing events, unless this is ``True``:
+            the current record is then archived first (never overwritten), the new record's own
+            ``supersedes`` names the archived digest, and the archived record stays readable by
+            that digest. An uncited rebuild replaces as it always has, ignoring this.
 
-    Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not
-    a registered dataset's own ``images/`` directory, naming ``initialize_project``/
-    ``activate_project`` when the resolved platform state root carries no project record, and
-    naming ``register_plant_registry`` when ``plant_registry`` names no stored registry. A name
-    outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
-    refuses at the door. No capture at all under the requested dates, or captures that carry no
-    position this door reads (no GPS EXIF, or a raster/band-group capture), also refuses, naming
-    the plant-tag mechanism the platform does not yet have. A receipt that cannot be written fails
-    the call naming the receipt: the record it would have named is left on disk but
-    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it until
-    a rebuild replaces it. A rebuild a delivery event still cites, with ``supersede`` left
+    Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not a
+    registered dataset's own ``images/`` directory, naming
+    ``initialize_project``/``activate_project`` when the resolved platform state root carries no
+    project record, and naming ``register_plant_registry`` when ``plant_registry`` names no stored
+    registry. A name outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits,
+    single hyphens) refuses at the door. No capture at all under the requested dates, or captures
+    that carry no position this door reads (no GPS EXIF, or a raster/band-group capture), also
+    refuses, naming the plant-tag mechanism the platform does not yet have. A receipt that cannot
+    be written fails the call naming the receipt: the record it would have named is left on disk
+    but :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it
+    until a rebuild replaces it. A rebuild a delivery event still cites, with ``supersede`` left
     ``False``, refuses naming those events.
 
-    Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS
-    distance) plus totals, the mapping's ``name``, the resolved ``project_root`` and
-    ``dataset_root``, ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source":
-    ...}``, never recomputed here), ``max_match_distance_m`` (the tolerance's own loosest accepted
-    distance, derived from it through ``plant_mapping.match_gates``), and ``unreadable`` (per date,
-    the captures PIL could not open), not the full per-image mapping (that lives in the persisted
-    record).
+    Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS distance)
+    plus totals, the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``,
+    ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``),
+    ``max_match_distance_m`` (the tolerance's own loosest accepted distance, derived from it
+    through ``plant_mapping.match_gates``), and ``unreadable`` (per date, the captures PIL could
+    not open), not the full per-image mapping (that lives in the persisted record).
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -176,7 +162,6 @@ def build_plant_mapping(
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.project_paths import platform_state_root
-    from tcip_mcp.project_record import ProjectRecordMissing, read_record
 
     if not NAME_SEGMENT.fullmatch(name):
         return {"error": (
@@ -184,11 +169,6 @@ def build_plant_mapping(
             f"({NAME_SEGMENT.pattern})")}
 
     platform_root = platform_state_root()
-    try:
-        read_record(platform_root)
-    except ProjectRecordMissing as exc:
-        return {"error": str(exc)}
-
     resolved_images_root = Path(images_root).resolve()
     if not resolved_images_root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
@@ -218,7 +198,8 @@ def build_plant_mapping(
             project_root=platform_root, built_by="build_plant_mapping",
             plant_registry=registry_ref, dates=dates, nn_tolerance_m=nn_tolerance_m,
         )
-    except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal) as exc:
+    except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal,
+            plant_mapping.NoMatchTolerance) as exc:
         return {"error": str(exc)}
 
     try:
@@ -246,65 +227,16 @@ def build_plant_mapping(
 
 
 def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
-    """Thin wrapper over ``phenology.resolve_positive_class_id`` (the one resolution both delivery
-    doors' positive-class-id surfaces call), for this tool's trait-name-based callers."""
+    """Thin wrapper over ``phenology.resolve_positive_class_id``."""
     from tcip_mcp.traits import get_trait
 
     return phenology.resolve_positive_class_id(get_trait(trait_name), predictions_by_date)
 
 
-class ProducerDiffersAcrossDates(ValueError):
-    """The dates of one phenology series were produced by more than one checkpoint or run.
-
-    A curve spliced from two models is not one measurement, so the delivery refuses rather
-    than naming one producer for all of it or collapsing the set to a placeholder string.
-    """
-
-
-def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
-    """Collect producing-model identity from each date's ``operating_point.json`` sidecar.
-
-    The one producer every delivered date shares carries through; dates whose sidecars name
-    different checkpoints or runs raise :class:`ProducerDiffersAcrossDates` naming each date's
-    own producer. A missing sidecar contributes nothing rather than failing the delivery.
-    """
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    shas: dict[str, str] = {}
-    exps: dict[str, str] = {}
-    for date, pred_dir in predictions_by_date.items():
-        data = read_operating_point_sidecar(pred_dir)
-        if not data:
-            continue
-        if data.get("checkpoint_sha256"):
-            shas[date] = str(data["checkpoint_sha256"])
-        if data.get("experiment_id"):
-            exps[date] = str(data["experiment_id"])
-
-    def _one(label: str, by_date: dict[str, str]) -> str | None:
-        values = set(by_date.values())
-        if len(values) > 1:
-            raise ProducerDiffersAcrossDates(
-                f"the delivered dates were produced by more than one {label}: "
-                f"{dict(sorted(by_date.items()))}. A phenology series is one measurement by one "
-                "producer; deliver the dates one producer covers, or re-run inference so every "
-                "date's bucket names the same one."
-            )
-        return next(iter(values)) if values else None
-
-    return {"sha256": _one("checkpoint", shas), "experiment_id": _one("run", exps)}
-
-
 def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
                   score: Callable[[Any, Any], float], tolerance: float) -> list[tuple]:
-    """Greedy 1:1 IoU assignment over every (gt, pred) pair, highest IoU claimed first.
-
-    The classifier calibration's ``iou_match`` branch only: ``center_match`` calls
-    ``evaluation.center_match_pairs`` directly instead (see ``_match_gt_to_predictions``), so this
-    keeps a single accept direction (``score >= tolerance``) rather than the two directions a
-    shared higher/lower-is-better loop would need. Equal IoUs are claimed by (gt index,
-    pred index) descending here, where ``tcip_annotation.matching.compute_matches`` keeps them
-    ascending: the two agree on the IoU primitive, not on the tie order.
+    """Greedy 1:1 IoU assignment over every (gt, pred) pair, highest IoU claimed first; equal IoUs
+    are claimed by (gt index, pred index) descending.
     """
     pairs = sorted(
         ((score(g, p), gi, pi) for gi, g in gt_boxes for pi, p in pred_boxes),
@@ -330,34 +262,14 @@ def _center(a) -> tuple[float, float]:
 def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
                              center_match_tolerance: float | None = None,
                              iou_threshold: float = 0.5) -> list[tuple]:
-    """Match GT to predictions using the criterion resolved by the caller, never a pinned IoU
-    threshold (a pinned IoU=0.3 silently paired objects by a criterion different from the trait's
-    own choice, dropping real classification calibration pairs from the reference with no
-    disclosure).
+    """Match GT to predictions on box geometry alone, never ``subject``, under the criterion the
+    caller resolved.
 
-    Unlike ``tcip_annotation.matching.compute_matches`` (which only matches within the same
-    ``subject`` name), a classification calibration matches on box geometry alone, not
-    ``subject``: a GT box carries the trait's object type in ``subject`` and its confirmed value
-    under ``attributes[attribute]``, and a prediction box under a classified scope carries the
-    same shape, so matching by ``subject`` name would already agree by construction rather than
-    testing anything (both sides read as the same object class). ``gt`` arrives box ground truth
-    only and ``preds`` objects only, a crowd region excluded, both selected once by the caller;
-    the predictions are narrowed to boxes here.
-
-    ``kind``/``center_match_tolerance``/``iou_threshold`` come from
-    ``evaluation.resolve_match_criterion``, the same resolver every other localization consumer
-    goes through, computed once across the whole reference split by the caller
-    (``_classification_items``), never re-derived per image (a per-image average lets one atypical
-    annotation both drop real pairs, on a smaller-than-typical image, and fabricate a false match,
-    on a larger-than-typical one). For ``center_match``, calls ``evaluation.center_match_pairs``
-    directly under its ``distance_first`` policy: acceptance drops a prediction's score once it is
-    confirmed (``review.py``), so a partly reviewed bucket holds records with no place in a score
-    order, and geometry alone is the evidence for which ground truth a prediction identifies
-    (``_center_match_image`` returns aggregate TP/FP/FN counts only, under the count's own
-    score-first policy, so this pairing goes through the shared primitive under its own policy
-    instead). For ``iou_match``, reuses
-    ``tcip_annotation.matching.box_iou`` (the same primitive ``compute_matches`` itself calls)
-    rather than a second IoU implementation.
+    ``gt`` arrives box ground truth only and ``preds`` objects only, a crowd region excluded; the
+    predictions are narrowed to boxes here. ``kind``/``center_match_tolerance``/``iou_threshold``
+    come from ``evaluation.resolve_match_criterion``. For ``center_match``, calls
+    ``evaluation.center_match_pairs`` under its ``distance_first`` policy; for ``iou_match``, uses
+    ``tcip_annotation.matching.box_iou``.
     """
     from tcip_annotation.matching import box_iou
     from tcip_annotation.state import BBox
@@ -383,51 +295,34 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
 
 def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str,
                           positive_value: str, attribute: str) -> list[dict]:
-    """Build classification calibration/holdout items for one split from paired GT + prediction dirs.
+    """Build classification calibration/holdout items for one split from paired GT + prediction
+    dirs.
 
     For every ``<stem>.json`` present in both dirs, matches GT annotations against predictions by
     the trait's own localization criterion (``_match_gt_to_predictions``) and yields one item per
-    matched pair: ``{"image_id": stem, "is_true_positive": <GT subject/attribute == positive_value>,
-    "is_pred_positive": <prediction subject == positive_value>, "bbox": <the GT box, x1,y1,x2,y2>}``.
-    ``subject`` scopes the GT side to the run's own object class: a labels dir isn't guaranteed to
-    hold only one kind of annotation, a dataset that also isolates an enabling subject (e.g.
-    ``bush``, per the root CLAUDE.md's "a subject is not a trait" rule) would otherwise let an
-    unrelated object's box enter the match pool and pair against the classifier's prediction
-    purely on proximity. Predictions are held to the object class the same way ground truth is
+    matched pair: ``{"image_id": stem, "is_true_positive": <GT subject/attribute ==
+    positive_value>, "is_pred_positive": <prediction subject == positive_value>, "bbox": <the GT
+    box, x1,y1,x2,y2>}``. ``subject`` scopes the GT side to the run's own object class. Predictions
+    are held to the object class the same way ground truth is
     (:func:`~tcip_annotation.json_io.require_classified_record`), never subject-filtered out of
-    that check. ``attribute`` is the per-run fact naming which
-    GT attribute carries the trait's positive-class axis,
-    threaded by the caller, never hardcoded here (a hardcoded attribute name would pin this
-    producer to one trait). ``bbox`` is the matched instance's own GT geometry, carried through
-    so ``resolve_classifier_operating_point``'s content-overlap check has real per-instance
-    content to hash (a placeholder box would collapse every item of the same class to one
-    identical hash, defeating that check entirely; see its own docstring). An unmatched GT or
-    prediction (the detector itself missed or hallucinated an object) is not a classification-call
-    disagreement and is excluded, this calibrates the classifier's call, not the detector's, the
-    same separation the platform's own detect-then-classify decomposition makes elsewhere. A crowd
-    region is never one object, so it is never paired (:func:`~tcip_annotation.state.instances`).
+    that check. ``attribute`` names which GT attribute carries the trait's positive-class axis.
+    ``bbox`` is the matched instance's own GT geometry. An unmatched GT or prediction (the detector
+    itself missed or hallucinated an object) is excluded. A crowd region is never paired
+    (:func:`~tcip_annotation.state.instances`).
 
     ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
     calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
     classified stamp must agree with it, else this refuses naming both; a detector stamp refuses
-    outright, a detector bucket carries no value to calibrate. The vocabulary a bare ``pred_dir``,
-    or a classified stamp recording no usable ``id_map``, is held to is the registry ``gt_dir``'s
-    own dataset root carries; with none, this refuses naming ``pred_dir``, ``gt_dir`` and the
-    remedy (place the split under its dataset root), since the vocabulary a classifier is
-    calibrated against is the registry the reference belongs to, never the values the reference
-    happens to carry, and a registry borrowed from elsewhere would be a claim the data does not
-    carry.
+    outright. The vocabulary a bare ``pred_dir``, or a classified stamp recording no usable
+    ``id_map``, is held to is the registry ``gt_dir``'s own dataset root carries; with none, this
+    refuses naming ``pred_dir``, ``gt_dir`` and the remedy (place the split under its dataset
+    root).
 
-    ``gt_dir`` is read as a measurement reference, so it goes through
-    ``json_io.require_reference_ground_truth`` first: a GT dir pointed at a prediction bucket would
-    match the classifier's calls against the classifier's own calls and agree with itself
-    perfectly, which no numeric gate below can catch.
+    ``gt_dir`` goes through ``json_io.require_reference_ground_truth`` first.
 
     The match criterion (kind + tolerance/iou_threshold) is resolved once across the whole split
-    via ``evaluation.resolve_match_criterion``, the same resolver every other localization
-    consumer goes through, never a second independent computation, built from the same
-    subject-scoped GT the matching itself uses, so an unrelated subject's typical size can't skew
-    it either, and never re-derived per image.
+    via ``evaluation.resolve_match_criterion``, from the same subject-scoped GT the matching itself
+    uses.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import prediction_documents
@@ -535,45 +430,21 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
 
 
 def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> str | None:
-    """The refusal for a stated dataset root a caller-supplied directory's own root contradicts.
-
-    Only a positive disagreement refuses: a directory the dataset layout cannot place answers
-    nothing, and a bespoke calibration over loose directories with a stated root is legitimate work
-    for the other two calibration doors this check serves (``calibrate_scalar_operating_point``,
-    ``calibrate_physical_scale``). The classifier door additionally requires, past this check, that
-    a bare or map-less prediction bucket's ground truth resolve the registry its own dataset root
-    carries (``_classification_items``): a loose ground-truth directory with no relation to the
-    stated root refuses there even when this check alone does not.
-
-    Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
-    caller here. ``calibrate_operating_point`` and ``gate_evidence_summary`` live in
-    ``pipelines/calibration.py``.
+    """The refusal for a stated dataset root a caller-supplied directory's own root contradicts; a
+    directory the dataset layout cannot place refuses nothing.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.pipelines.data.splits import same_directory
 
     stated = Path(dataset_root).resolve()
     for role, path in candidates.items():
         derived = dataset_root_of(path)
-        if derived is not None and derived.resolve() != stated:
+        if derived is not None and not same_directory(derived, stated):
             return (f"{role} {str(path)!r} sits under dataset root {str(derived.resolve())!r}, "
                     f"while dataset_root states {str(stated)!r}. The claim, its covered locations "
                     "and its reference are all recorded against one root, so state the root the "
                     "calibration's own directories live under.")
     return None
-
-
-def _agreed_checkpoint_identity(pred_dirs: list[str]) -> str | None:
-    """The checkpoint identity the calibration evidence itself carried, or ``None``.
-
-    Copied from the prediction buckets' own stamps, never re-resolved from a checkpoint file:
-    re-hashing a file proves a file with that content exists somewhere, not that these predictions
-    came from it. Buckets carrying none, or disagreeing, record the identity absent, which the
-    reader compares as absence equal to absence rather than skipping the comparison.
-    """
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    carried = {(read_operating_point_sidecar(d) or {}).get("checkpoint_sha256") for d in pred_dirs}
-    return carried.pop() if len(carried) == 1 else None
 
 
 @mcp.tool()
@@ -593,52 +464,43 @@ def calibrate_classifier_operating_point(
 
     Builds classification calibration/holdout items by matching each split's GT against its
     predictions via the trait's own localization criterion (``_classification_items``), runs the
-    same-rigor classification-mode gate (``operating_point.resolve_classifier_operating_point``,
-    disjointness, train-disjointness, content-duplication, count-bias, and a derived
-    compensating-error floor, mirroring the detector calibration path), and stamps the result into
-    ``<output_dir>/classifier_operating_point.json``, a file distinct from the count operating
-    point's own sidecar, never conflatable with it. Without this producer, a classifier-validated
-    stamp can never be earned on disk, and the gate floors every caller to unvalidated forever.
+    classification-mode gate (``operating_point.resolve_classifier_operating_point``: disjointness,
+    train-disjointness, content-duplication, count-bias, and a derived compensating-error floor),
+    and stamps the result into ``<output_dir>/classifier_operating_point.json``, a file distinct
+    from the count operating point's own sidecar.
 
     A stamp that claims validation names the record it was earned from: the gate runs once through
     ``resolution.open_validation`` over the evidence, ``seal_validation`` files the row and returns
-    the stamp with its pointer merged in, and the stamp is written last. A calibration that does not
-    clear its gate stamps unvalidated, with its failures, and earns nothing.
+    the stamp with its pointer merged in, and the stamp is written last. A calibration that does
+    not clear its gate stamps unvalidated, with its failures, and earns nothing.
 
     Refuses (a plain ``{"error": ...}``) when either GT dir holds the model's own predictions
     rather than a measurement; the pred dirs are predictions by definition and are not held to it,
     and when a GT dir's own dataset root contradicts the stated ``dataset_root``.
 
-    This door takes no selection: it draws no universe at all, the caller already hands it
-    four already-split directories.
+    This door takes no selection: the caller hands it four already-split directories.
 
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
         subject: The GT annotation subject naming this trait's object type, a per-run fact the
-            caller supplies: the (subject, attribute) axis threads from the run's own config, never
-            from ``TraitSpec`` (pinning it here would reintroduce a trait-vocabulary leak at the
-            public surface). Scopes the GT side of
-            matching so an unrelated subject sharing the same labels dir (e.g. an enabling subject
-            like ``bush``, root CLAUDE.md's "a subject is not a trait") can't enter the match pool.
-        attribute: The GT annotation attribute carrying this trait's positive-class axis, a
-            per-run fact the caller supplies, same rationale as ``subject`` above.
+            caller supplies. Scopes the GT side of matching so an unrelated subject sharing the
+            same labels dir cannot enter the match pool.
+        attribute: The GT annotation attribute carrying this trait's positive-class axis, a per-run
+            fact the caller supplies.
         calibration_gt_dir / calibration_pred_dir: Paired per-image JSON dirs for the calibration
-            split (same stems).
-        holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out split.
+        split (same stems).
+        holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out
+        split.
         output_dir: Where to write ``classifier_operating_point.json``.
         dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
             record's reference locations are written against it, and it is the root a reader
             resolves them from. Refuses when either GT dir's own layout places it under a different
-            root; loose directories the layout cannot place refuse nothing here. Past this check, a
-            GT dir whose prediction bucket carries no usable vocabulary of its own (a bare bucket,
-            or a classified stamp with no id_map) must itself resolve the registry its own dataset
-            root carries (``_classification_items``'s own refusal, naming both directories and the
-            remedy), so the two ground-truth directories cannot be loose unless their buckets
-            already carry a vocabulary.
+            root; loose directories the layout cannot place refuse nothing here. A GT dir whose
+            prediction bucket carries no usable vocabulary of its own must itself resolve the
+            registry its own dataset root carries (``_classification_items``).
         experiment_id: The classifier checkpoint's training run's record id (one run's immutable
-            record, ``tcip_mcp.experiments``), if known, gates train-disjointness the same way the
-            detector calibration path does. ``None`` (a foreign/unregistered checkpoint) skips
-            that check rather than failing closed.
+            record, ``tcip_mcp.experiments``), if known, gates train-disjointness. ``None`` (a
+            foreign/unregistered checkpoint) skips that check.
     """
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
     from tcip_mcp.traits import TraitUnknownError, get_trait
@@ -666,18 +528,25 @@ def calibrate_classifier_operating_point(
                                            attribute=attribute)
     except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
+    # One spelling of the resolver's inputs, for the report and the validation record's replay.
+    resolver_inputs: dict[str, Any] = {
+        "calibration_items": cal_items, "holdout_items": hold_items,
+        "calibration_labels_dir": calibration_gt_dir}
     result = resolve_classifier_operating_point(
-        trait_name, calibration_items=cal_items, holdout_items=hold_items,
-        experiment_id=experiment_id,
-        calibration_labels_dir=calibration_gt_dir,
-    )
+        trait_name, experiment_id=experiment_id, **resolver_inputs)
 
     from tcip_mcp.project_paths import resolve_output_path
 
-    from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        ProducerDiffers, open_validation, seal_validation, stamped_producer, write_sidecar,
+    )
 
+    try:
+        checkpoint_sha256 = stamped_producer({"calibration_pred_dir": calibration_pred_dir,
+                                              "holdout_pred_dir": holdout_pred_dir})["sha256"]
+    except ProducerDiffers as exc:
+        return {"error": str(exc)}
     out = resolve_output_path(output_dir)
-    checkpoint_sha256 = _agreed_checkpoint_identity([calibration_pred_dir, holdout_pred_dir])
     stamp = {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_value}},
@@ -694,7 +563,7 @@ def calibrate_classifier_operating_point(
             document="classifier_operating_point",
             # Named off the function this door reported from, so record and report share one gate.
             evidence={"resolver": resolve_classifier_operating_point.__name__,
-                      "inputs": {"calibration_items": cal_items, "holdout_items": hold_items}},
+                      "inputs": resolver_inputs},
             trait=trait_name, checkpoint_sha256=checkpoint_sha256,
             producing_experiment_id=experiment_id,
             reference_inputs={
@@ -704,7 +573,7 @@ def calibrate_classifier_operating_point(
                                       "holdout": holdout_pred_dir},
             },
         )
-        _, stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
+        stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
                                    stamp_body=stamp)
     write_sidecar(out, stamp, "classifier_operating_point")
     return {
@@ -729,67 +598,56 @@ def deliver_phenology_milestones(
 ) -> dict:
     """Per-plant phenology milestones from classified predictions + a plant mapping.
 
-    A phenology milestone is a crossing of the **fraction of a plant's detected objects that are in
-    the trait's positive/measured state**, an expert-defined morphological stage emitted by a
-    *validated* classifier (the trait's positive class), never a geometric proxy such as bounding-box
-    height. For a registered trait whose positive state is, say, ``<majority_label>`` this reports:
+    A phenology milestone is a crossing of the fraction of a plant's detected objects that are in
+    the trait's positive/measured state, an expert-defined morphological stage emitted by a
+    validated classifier (the trait's positive class). For a registered trait whose positive state
+    is, say, ``<majority_label>`` this reports:
 
         <phenology_prefix>_<majority_label>_date   date most objects reached that state
                                  (crops.yml) = the 95% crossing (crossing-unconfirmed reading,
                                  pending breeder confirmation)
         <phenology_prefix>_05/50/95per_date  dates the positive-state fraction crosses 5/50/95%
 
-    Column names and crossing fractions come from ``trait``'s ``TraitSpec``, a different registered
-    trait yields its own prefixed columns without a code change.
+    Column names and crossing fractions come from ``trait``'s ``TraitSpec``.
 
     Args:
         trait: A registered trait name (``registered_traits()``), required, no default. The
             positive class id is resolved from the prediction buckets' own recorded ``id_map`` by
-            this trait's ``positive_value`` (a mapping fact read from the labels the run
-            actually decoded through, never a pinned default or a separate registry re-derivation
-            that could disagree with it).
-        mapping_name: Name of a plant mapping persisted under this project (``{date:
-            [assignment, ...]}`` with ``stem`` / ``plot_name`` / ``accession_name`` per
-            assignment), produced by the web plant-mapping step or ``build_plant_mapping``.
-        predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image JSON
-            prediction files (``<stem>.json``) from the state classifier.
+            this trait's ``positive_value``.
+        mapping_name: Name of a plant mapping persisted under this project (``{date: [assignment,
+            ...]}`` with ``stem`` / ``plot_name`` / ``accession_name`` per assignment).
+        predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image JSON prediction
+            files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
-            ``<phenology_prefix>_phenology.csv``). A relative path resolves against the
-            platform state root, never the server process's cwd.
-        plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values)
-            this delivery is for: the CSV carries exactly one row per id, in this order, and a
-            plant the mapping never covers ships as a row with no observed dates. Required and
-            never defaulted: a mapping names every plot in its plant CSVs, which is not the
-            population, so an empty list refuses.
+            ``<phenology_prefix>_phenology.csv``). A relative path resolves against the platform
+            state root.
+        plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) this
+            delivery is for: the CSV carries exactly one row per id, in this order, and a plant the
+            mapping never covers ships as a row with no observed dates. Required; an empty list
+            refuses.
         classifier_pred_dirs: Bucket(s) carrying the trait's classifier-validity stamp
-            (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
-, reconciled from disk, never trusted from a caller-asserted string. ``None``
-            or a bucket with no such stamp floors the classifier dimension to unvalidated.
+            (``classifier_operating_point.json``, written by
+            ``calibrate_classifier_operating_point``), reconciled from disk. ``None`` or a bucket
+            with no such stamp floors the classifier dimension to unvalidated.
 
-    The count operating point's confidence and validity are both read from each prediction
-    bucket's own ``operating_point.json``, never from a caller: this tool takes no
-    acknowledgement, so an unvalidated dimension always refuses here. Only the Results tab's
-    ``export_csv`` route can deliver this trait's ``state_crossing_dates`` unvalidated, through a
-    breeder's own acknowledged act.
+    The count operating point's confidence and validity are both read from each prediction bucket's
+    own ``operating_point.json``; this tool takes no acknowledgment, so an unvalidated dimension
+    always refuses here.
 
-    A bucket produced by a tiled run also gates on its ``tile_size``: the tile edge scales the
-    per-image counts the positive fraction is built from, so a run with no persisted training
-    geometry and no explicit caller override refuses here, the same way an uncalibrated conf does.
-    Buckets from untiled runs are never gated on it.
+    A bucket produced by a tiled run also gates on its ``tile_size``, so a run with no persisted
+    training geometry and no explicit caller override refuses here. Buckets from untiled runs are
+    never gated on it.
 
     The delivered CSV's producer tail (``producer_model_sha256``, ``producing_experiment_id``,
     ``produced_at``, ``validation_record``) is built from the bindings the reconciliation verified,
-    so a bucket whose validation claim no record answers for delivers those cells empty rather than
-    carrying the names it asserted for itself, and a delivery every bucket of which is bound names
-    the records.
+    so a bucket whose validation claim no record answers for delivers those cells empty.
 
-    Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
-    classified along the trait's positive-class axis, the positive fraction is not a valid measurement
-    anywhere, the tool refuses to write the CSV and returns ``error`` with
-    ``positive_class_assessed: false``. Rows for a plant with a partially-unclassified or partially-
-    missing date still ship (with the gap disclosed via ``n_dates_unclassified``/
-    ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
-    CLAUDE.md's measurement-integrity invariant).
+    Returns a summary. If no bucket, anywhere in the delivery, ever classified along the trait's
+    positive-class axis, the tool refuses to write the CSV and returns ``error`` with
+    ``positive_class_assessed: false``. Rows for a plant with a partially-unclassified or
+    partially-missing date still ship (with the gap disclosed via
+    ``n_dates_unclassified``/``n_dates_missing_images``) but carry no milestone dates for that
+    plant.
     """
     from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
     from tcip_mcp.operationalization import (
@@ -837,16 +695,11 @@ def deliver_phenology_milestones(
                           f"own recorded id_map ({msg})."),
                 "n_plants": 0}
 
-    from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated
-    from tcip_store import StoreError
-
     try:
         result = phenology.per_plant_phenology(
             mapping, predictions_by_date, positive_value=pos, spec=spec, plants=plants,
         )
-    except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
-            StoreError, phenology.EmptyPopulation) as exc:
+    except phenology.measurement_refusals() as exc:
         return {"error": str(exc), "n_plants": 0}
     rows = result["rows"]
 
@@ -865,7 +718,7 @@ def deliver_phenology_milestones(
         }
 
     # Measurement-integrity gate: a delivery requires a classifier validated against held-out GT.
-    # This tool builds no acknowledgement, so an unvalidated dimension always refuses here.
+    # This tool builds no acknowledgment, so an unvalidated dimension always refuses here.
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
         binding_notes_text,
@@ -901,7 +754,7 @@ def deliver_phenology_milestones(
         classifier_state, classifier_pred_dirs, list(predictions_by_date.values()), trait=trait,
     )
 
-    # A delivered phenotype needs both dimensions validated; this tool passes no acknowledgement.
+    # A delivered phenotype needs both dimensions validated; this tool passes no acknowledgment.
     flags = phenology.phenology_delivery_flags(classifier_state, op_state, tile_recon)
     gate = check_delivery_gate(flags)
     if not gate.ok:
@@ -932,7 +785,7 @@ def deliver_phenology_milestones(
                 f"validated count operating point (reconciled from operating_point.json = "
                 f"{op_state!r})." + floor_note
                 + " Validate both (calibrate_classifier_operating_point for the classifier; a "
-                "calibrated run_inference for the count). This tool takes no acknowledgement; "
+                "calibrated run_inference for the count). This tool takes no acknowledgment; "
                 "acknowledge and deliver a clearly-flagged provisional CSV from the Results tab "
                 "instead."
             ),
@@ -945,9 +798,11 @@ def deliver_phenology_milestones(
 
     # What the sidecars assert about the producer, corroborated by the writer against the verified
     # bindings; dates produced by different checkpoints refuse here, before anything is written.
+    from tcip_mcp.pipelines.resolution import ProducerDiffers, stamped_producer
+
     try:
-        producer = _resolve_producer_identity(predictions_by_date)
-    except ProducerDiffersAcrossDates as exc:
+        producer = stamped_producer(predictions_by_date)
+    except ProducerDiffers as exc:
         return {"error": str(exc), "n_plants": len(rows)}
 
     # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
@@ -968,7 +823,7 @@ def deliver_phenology_milestones(
     # (including the majority crossing-unconfirmed marker) and records the delivery.
     cells = phenology.write_phenology_csv(
         "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
-        flags=flags, acknowledgement=None, basis=still_stated.basis,
+        flags=flags, acknowledgment=None, basis=still_stated.basis,
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {
@@ -998,5 +853,4 @@ def deliver_phenology_milestones(
         "columns": phenology.phenology_csv_columns(spec),
         "captures_unverified": verified["captures_unverified"],
         "plant_csvs_unverified": verified["plant_csvs_unverified"],
-        "plants": [r["plant_id"] for r in rows],
     }

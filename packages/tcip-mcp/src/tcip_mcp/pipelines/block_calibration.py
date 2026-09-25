@@ -1,15 +1,8 @@
 """Block-aware calibration/holdout: validate a detection operating point directly against a
-mosaic's own reserved calibration/test bands (see ``split_construction.spatial_single_source_split``'s
-four-way split, ``reserve_calibration_fraction``), for a raster training source too large or too
-singular to hold whole images out from.
-
-Ties together the region-completeness gate (:mod:`region_completeness`), the halo mechanism
-(:func:`~tcip_mcp.pipelines.data.tiling.region_halo`), a recursive
-:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split` sub-banding of each reserved region,
-and per-band record building (shaped like ``pipelines.calibration.calibrate_operating_point``'s own
-per-image records) into :func:`~tcip_mcp.pipelines.operating_point.resolve_operating_point`, the
-same gate every other calibration path resolves through, never a second, parallel validation
-mechanism.
+mosaic's own reserved calibration/test bands (see
+``split_construction.spatial_single_source_split``'s four-way split,
+``reserve_calibration_fraction``), for a raster training source too large or too singular to hold
+whole images out from.
 """
 
 from __future__ import annotations
@@ -20,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
+from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +25,16 @@ DEFAULT_K_TEST = 3
 
 class BlockCalibrationRefused(ValueError):
     """A named block-calibration refusal: completeness, feasibility, or a resolution precondition
-    (no experiment_id, no spatial-strip split, no reserved calibration region). Each message
-    states exactly what's missing, never a generic gate failure."""
+    (no experiment_id, no spatial-strip split, no reserved calibration region). Each message states
+    exactly what's missing.
+    """
 
 
 def _reserved_spatial_regions(split: dict) -> dict | None:
     """The reserved calibration/test regions of a spatial-strip split, or ``None``.
 
     ``None`` when the manifest is not a spatial-strip split at all, or when it reserved no
-    calibration or no test region: the one predicate behind both the cheap precheck and the
-    resolver's own refusals, so the two cannot disagree about whether a run qualifies.
+    calibration or no test region.
     """
     if split.get("group_by") != "spatial_strip":
         return None
@@ -52,10 +45,8 @@ def _reserved_spatial_regions(split: dict) -> dict | None:
 
 
 def reserved_calibration_region_available(experiment_id: str) -> bool:
-    """Whether ``experiment_id``'s own persisted split is a spatial-strip split with a non-empty
-    reserved ``calibration`` region: the cheap, dataset-free precondition check
-    ``run_inference`` runs before deciding whether a ``trait`` + ``raster_path`` export may
-    proceed into block calibration at all.
+    """Whether ``experiment_id``'s split is a spatial-strip split with a non-empty reserved
+    calibration region.
     """
     from tcip_mcp.experiments import read_run_partition
 
@@ -98,34 +89,29 @@ def _select_gt_for_band(
 ) -> dict[str, np.ndarray]:
     """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
     ``iscrowd``) whose box center lands in ``band_rect``, each box kept at its full extent (never
-    clipped) and translated to the band's own local (inner-rect-relative) pixel space.
-
-    Mirrors the DT side's own inclusion rule exactly (:func:`_band_records`'s center-in-inner-rect
-    keep test) rather than clipping GT to the rect: a straddling object must be included or
-    excluded consistently on both sides of the curve derivation, or the reference is biased at every band
-    boundary (a clipped-but-kept GT box paired against a dropped, off-center detection reads as a
-    false negative that a real delivered pass would never report).
+    clipped) and translated to the band's own local (inner-rect-relative) pixel space: the same
+    inclusion rule as :func:`_band_records`.
     """
     boxes = gt["boxes"]
     x0, y0, x1, y1 = band_rect
     cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
     cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
     keep = (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
-    kept = boxes[keep].astype(np.float64, copy=True)
-    kept[:, [0, 2]] -= x0
-    kept[:, [1, 3]] -= y0
-    return {"boxes": kept, "labels": gt["labels"][keep], "iscrowd": gt["iscrowd"][keep]}
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
+
+    band = {k: gt[k][keep] for k in PER_BOX_KEYS if k in gt}
+    band["boxes"] = band["boxes"].astype(np.float64, copy=True)
+    band["boxes"][:, [0, 2]] -= x0
+    band["boxes"][:, [1, 3]] -= y0
+    return band
 
 
 def _check_completeness(
     dataset_root: str, subject: str, stem: str, rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
     """Refuse by name (the incomplete/stale cells and the subject) unless every rect in ``rects``
-    is fully covered by an attested-complete, non-stale region-completeness record. Called against
-    the whole reserved calibration/test regions, before any sub-banding: every band is a sub-rect
-    of its own region, so a region-level pass covers every band by construction, and checking here
-    (rather than per band, after sub-banding might itself fail) keeps this the first thing that
-    can refuse, never masked by a later geometry/density error."""
+    is fully covered by an attested-complete, non-stale region-completeness record.
+    """
     from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
 
     problems: list[str] = []
@@ -145,11 +131,7 @@ def _check_completeness(
 
 
 def _check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int = 2) -> None:
-    """Refuse by name when fewer than ``min_present`` bands on this side carry any GT at all:
-    :func:`~tcip_mcp.pipelines.operating_point.resolve_operating_point`'s own equivalence gate
-    already refuses a side with under 2 present images, checked here first (before paying for any
-    tiled inference) so a doomed layout fails cheaply and with a block-scoped explanation, not a
-    generic downstream holdout-gate message."""
+    """Refuse by name when fewer than ``min_present`` bands on this side carry any GT at all."""
     n_present = sum(1 for c in gt_counts.values() if c > 0)
     if n_present < min_present:
         raise BlockCalibrationRefused(
@@ -181,38 +163,30 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 def resolve_block_calibration_records(
     predictor: Any, *, trait_name: str, experiment_id: str | None,
-    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, postprocess: str = "nms",
+    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, postprocess: str = DEFAULT_POSTPROCESS,
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
-    calibration/test regions. Returns ``(bundle, provenance, evidence)``: ``bundle`` is the same
-    :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle` shape every calibration path returns;
-    ``provenance`` carries the resolved ``dataset_root``/``stem``/``training_raster_path``/
-    ``spatial_manifest`` (for the caller's own claim-scope check against the actual export target)
-    plus ``density_uniformity_flags``; ``evidence`` is the resolver this ran, the arguments it ran
-    over and the reserved regions they came from, which is what an export door earning a validation
-    record for a validated block-calibrated count reopens the gate with. The arguments are the same
-    dict passed to ``resolve_operating_point`` here, never a second assembly of them; the trait and
-    the producing run are left out because they are ``open_validation``'s own arguments.
+    calibration/test regions.
 
-    ``experiment_id`` unresolved (``None``, or given but not found) refuses outright, unlike the
-    ordinary image-set calibration path's legitimate "foreign checkpoint, skip the disjointness
-    check" allowance (:func:`~tcip_mcp.pipelines.operating_point._train_disjointness`): this path's
-    whole premise is one specific checkpoint validated against one specific mosaic's own reserved
-    regions, so an unresolvable experiment_id means there is no mosaic to validate against at all,
-    not a foreign-but-harmless case to skip past.
+    Returns ``(bundle, provenance, evidence)``: ``bundle`` is a
+    :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle`; ``provenance`` carries the resolved
+    ``dataset_root``/``stem``/``training_raster_path``/``spatial_manifest`` plus
+    ``density_uniformity_flags``; ``evidence`` is the resolver this ran, the arguments it ran over
+    (the dict passed to ``resolve_operating_point``, without the trait and the producing run) and
+    the reserved regions they came from.
 
-    The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a
-    real planting-grid pitch over the GT-object-spacing fallback when the training experiment's
-    own ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves
-    at least two georeferenced plants and the training raster's own pixel size is resolvable
-    (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source (no
-    single file to read tags from) always falls back to GT-spacing.
+    ``experiment_id`` unresolved (``None``, or given but not found) refuses outright.
 
-    ``export_tile_size`` (required, no default) is the edge the caller's own whole-mosaic export
-    pass resolved to run at; refused when it differs from the run partition's own ``tile_size``,
-    naming both, so the reserved-region claim this resolves and the bucket the export pass writes
-    are tiled at one regime by construction, never two values nothing holds equal.
+    The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a real
+    planting-grid pitch over the GT-object-spacing fallback when the training experiment's own
+    ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves at
+    least two georeferenced plants and the training raster's own pixel size is resolvable
+    (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source always
+    falls back to GT-spacing.
+
+    ``export_tile_size`` (required) is the edge the caller's whole-mosaic export pass runs at;
+    refused, naming both, when it differs from the run partition's own ``tile_size``.
     """
     from tcip_store import store
 
@@ -393,17 +367,13 @@ def resolve_block_calibration_records(
                        density_flags)
 
     from tcip_mcp.pipelines.operating_point import (
-        derive_max_dets_from_counts, set_detector_operating_point,
+        STAGED_CONF_FLOOR, apply_operating_point, derive_max_dets_from_counts,
     )
 
     density_cap = derive_max_dets_from_counts(
         list(cal_gt_counts.values()) + list(test_gt_counts.values()))
-
-    applied, applied_attribute_path = set_detector_operating_point(
-        predictor.model, score_thresh=0.01, detections_per_img=density_cap)
-    predictor.score_threshold = applied.get("score_thresh", 0.01)
-    # predict_tiled's separate post-merge full-band cap is never reset by construction alone.
-    predictor.max_dets = density_cap
+    applied, applied_attribute_path = apply_operating_point(
+        predictor, STAGED_CONF_FLOOR, density_cap)
 
     from tcip_mcp.pipelines.raster_source import open_raster
 
@@ -475,16 +445,15 @@ def _band_records(
     tile_size: int, overlap: float, predictor: Any, *, tile_batch_size: int, global_nms_iou: float,
     postprocess: str, gt: dict[str, np.ndarray], stem: str,
 ) -> tuple[list[dict], dict[str, tuple[int, int, int, int]]]:
-    """Per-band COCO-shaped records (:func:`~tcip_mcp.pipelines.training.evaluation.
-    build_coco_image_record`, the exact model ``calibrate_operating_point._records`` builds) plus
-    the band rects keyed by a globally-unique image_id, for ``resolve_operating_point``'s
+    """Per-band COCO-shaped records
+    (:func:`~tcip_mcp.pipelines.training.evaluation.build_coco_image_record`) plus the band rects
+    keyed by a globally-unique image_id, for ``resolve_operating_point``'s
     ``cal_rects``/``hold_rects`` geometric disjointness check.
 
-    Runs the unmodified :meth:`~tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor.
-    predict_tiled` over a haloed :class:`~tcip_mcp.pipelines.raster_source._RegionView` of
-    ``reader``, keeps only detections whose center lands in the un-haloed inner rect (kept at full
-    extent, never clipped), and selects GT the same way (:func:`_select_gt_for_band`) so both
-    sides of the curve derivation apply one inclusion rule at every band boundary.
+    Runs :meth:`~tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor.predict_tiled`
+    over a haloed :class:`~tcip_mcp.pipelines.raster_source._RegionView` of ``reader``, keeps only
+    detections whose center lands in the un-haloed inner rect (kept at full extent, never clipped),
+    and selects GT the same way (:func:`_select_gt_for_band`).
     """
     from tcip_mcp.pipelines.data.tiling import region_halo
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView

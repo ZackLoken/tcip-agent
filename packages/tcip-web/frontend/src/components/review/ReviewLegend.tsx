@@ -4,7 +4,7 @@ import { LegendRow } from "@/components/review/LegendRow";
 import type { ReviewColors } from "@/lib/reviewColors";
 
 /** Legend anchored lower-left of the canvas (same pattern as Annotate). Opens on hover for a
- *  quick view and pins open on click so a swatch can be recoloured without the popover slipping
+ *  quick view and pins open on click so a swatch can be recolored without the popover slipping
  *  away; clicking outside unpins. Solid = outcome, dashed blue = the detection under review. */
 export function ReviewLegend({
   colors,
@@ -18,7 +18,7 @@ export function ReviewLegend({
    *  that constant is tab-specific. */
   items: { key: keyof ReviewColors; label: string; dashed?: boolean }[];
   onEdit: (key: keyof ReviewColors) => void;
-  /** One static row under the colour rows, shown only while the confirm-admitted button is
+  /** One static row under the color rows, shown only while the confirm-admitted button is
    *  offered: never advertises a channel the canvas is not currently drawing. */
   note?: { text: string } | null;
 }) {
@@ -68,7 +68,7 @@ export function ReviewLegend({
           </div>
         )}
         <p className="mt-2 border-t border-tcip-border pt-1.5 text-[10px] text-tcip-muted">
-          Click a swatch to recolour
+          Click a swatch to recolor
         </p>
       </div>
       <button

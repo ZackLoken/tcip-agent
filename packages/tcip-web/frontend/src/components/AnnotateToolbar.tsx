@@ -151,7 +151,7 @@ export function AnnotateToolbar({
   const redo = useStore((s) => s.redo);
 
   const subjectNames = useMemo(() => Object.keys(registry), [registry]);
-  useSubjectColors(); // re-render on a recolour: the swatches below call subjectColor() fresh
+  useSubjectColors(); // re-render on a recolor: the swatches below call subjectColor() fresh
 
   // Editor shelf: collapsed by default, remembered across sessions.
   const { open: editorOpen, toggle: toggleEditor } = useDisclosure("tcip.annotate.editorOpen");

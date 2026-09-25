@@ -27,6 +27,16 @@ def _run(root: Path):
         capture_output=True, text=True, env=env)
 
 
+def _project(root: Path) -> None:
+    """The project record every creating door writes, written through its producer under the file
+    backend the doctor subprocess reads."""
+    from tcip_mcp.project_record import record_site
+
+    ts.bind(FileBackend())
+    root.mkdir(parents=True, exist_ok=True)
+    record_site(str(root), "north orchard")
+
+
 def _plant(key: ts.Key, doc: dict) -> None:
     """Place an above-ceiling document directly on disk: the seam's own writer refuses it."""
     path = FileBackend().path_for(key)
@@ -38,10 +48,11 @@ def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completenes
     tmp_path,
 ):
     root = tmp_path / "proj"
+    _project(root)
     (root / "images").mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
 
-    _plant(region_completeness_key(root), {"schema_version": 2, "leaf/2024-01-01": {}})
+    _plant(region_completeness_key(root), {"schema_version": 2})
 
     res = _run(root)
 
@@ -49,16 +60,16 @@ def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completenes
     assert res.returncode != 2  # a raw-parse version finding is a warning, never a blocking error
 
 
-def test_doctor_reports_the_digest_version_even_when_the_main_store_has_no_recognized_bucket(
+def test_doctor_reports_the_digest_version_even_when_the_main_store_has_no_bucket(
     tmp_path,
 ):
     root = tmp_path / "proj"
+    _project(root)
     (root / "images").mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
 
-    # No recognized bucket at all: normalize_region_completeness_store(raw) reads as empty,
-    # so the digest file's own version finding must still be reachable, not short-circuited.
-    _plant(region_completeness_key(root), {"leaf/2024-01-01": {}})
+    # No bucket at all: the digest file's own version finding must still be reachable.
+    _plant(region_completeness_key(root), {})
     _plant(region_completeness_digest_key(root), {"schema_version": 2})
 
     res = _run(root)
@@ -70,6 +81,7 @@ def test_doctor_reports_the_digest_version_even_when_the_main_store_has_no_recog
 
 def test_doctor_reports_a_version_refused_trait_spec_as_a_warning_not_a_crash(tmp_path):
     root = tmp_path / "proj"
+    _project(root)
     (root / "images").mkdir(parents=True)
 
     _plant(trait_spec_key(trait_specs_dir(root), "sometrait"),
@@ -87,6 +99,7 @@ def test_doctor_unifies_check_negatives_with_check_status_tokens_on_a_version_re
     tmp_path,
 ):
     root = tmp_path / "proj"
+    _project(root)
     (root / "images").mkdir(parents=True)
 
     _plant(image_status_key(root), {"schema_version": 2})
@@ -107,6 +120,7 @@ def test_doctor_reports_a_newer_written_bandgroup_manifest_instead_of_crashing(t
     from tcip_mcp.pipelines.data.band_groups import band_group_manifest_key
 
     root = tmp_path / "proj"
+    _project(root)
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
 

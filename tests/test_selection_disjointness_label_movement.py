@@ -5,6 +5,8 @@ label_digests block a bound run's own split.json carries, never a refusal.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import hashlib
 from pathlib import Path
 
@@ -37,14 +39,14 @@ def _seed_trait_spec(project_root: Path) -> None:
         "name": TRAIT, "count_objective": "count_unbiased", "localization": "center_match",
         "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
         "holdout_match_quality_floor": 0.5, "positive_value": "", "milestone_fractions": [],
-        "milestone_on": "", "majority_milestone": "", "majority_provisional": False,
+        "milestone_on": "", "majority_milestone": "", "crossing_unconfirmed": False,
         "phenology_prefix": "leaf_out", "majority_label": "", "sliver_policy": "class_avg_size",
         "sliver_frac": 0.5, "count_bias_tolerance_frac": 0.01,
         "delivers": ["leaf_out_05per_date", "leaf_out_50per_date"],
         "notes": "Test-only, not a domain-expert-confirmed measurement.",
         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
     }
-    ts.replace(traits.trait_spec_key(specs_dir, TRAIT), spec, expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_spec_key(specs_dir, TRAIT), complete_spec_record(spec), expect=ts.Version.ABSENT)
 
 
 def _save_png(path: Path) -> None:
@@ -332,7 +334,7 @@ _REVIEW_IDENTITY = {"checkpoint_sha256": "sha-review", "experiment_id": None}
 
 
 def _review_entry(gt, pred, conf):
-    return {"match_type": "TP", "action": "accepted", "class_id": 0,
+    return {"action": "accepted", "class_id": 0,
             "iscrowd": False, "reviewed_by": "", "class_name": "", "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": _REVIEW_IDENTITY, "conf_threshold": None,
             "missed_object_attested": False}
@@ -644,12 +646,12 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     value: ``data_cfg["split"]`` (the block copied whole into the durable experiment config and
     embedded in every checkpoint) never gains them, so neither does anything downstream that
     merges it. The durable config's own read back below reads the one place
-    ``subprocess_worker.run`` patches it into, without a real training subprocess; a checkpoint's
+    ``subprocess_worker.run`` mirrors it into, without a real training subprocess; a checkpoint's
     embedded config and a trial's resolved config are not independently read back here."""
     import tcip_store as ts
 
     from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_split
+    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -666,7 +668,7 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
         assert "members" not in block
 
     create_experiment("exp_split_config_readback", {})
-    _patch_experiment_config_split("exp_split_config_readback", data_cfg["split"])
+    _mirror_data_section("exp_split_config_readback", data_cfg)
     durable = ts.read(config_key("exp_split_config_readback"))
     for block in (durable["data"]["split"], durable["data"]["split"]["selection_binding"]):
         assert "label_digests" not in block

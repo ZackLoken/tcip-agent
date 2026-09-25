@@ -205,7 +205,7 @@ class TestRenderSegmentations:
         assert Path(result).is_file()
 
     def test_renders_every_ring_of_an_occlusion_split_instance(self, viz_dataset: Path):
-        """An instance's rings all get drawn, and it is labelled once, not once per contour."""
+        """An instance's rings all get drawn, and it is labeled once, not once per contour."""
         from tcip_annotation.viz import render_segmentations
 
         pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
@@ -375,16 +375,6 @@ class TestVisualizePredictions:
         assert "error" in result
         assert str(pred) in result["error"]
 
-    def test_a_neither_key_stamp_refuses_by_name(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import visualize
-
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"bud": 0, "nut": 1}})
-
-        result = visualize("predictions", img)
-        assert "error" in result
-        assert "repair-classified-predictions" in result["error"]
-
     def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
@@ -431,16 +421,6 @@ class TestVisualizeComparison:
         result = visualize("comparison", img)
         assert "error" in result
         assert str(pred) in result["error"]
-
-    def test_a_neither_key_stamp_refuses_by_name(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import visualize
-
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"bud": 0, "nut": 1}})
-
-        result = visualize("comparison", img)
-        assert "error" in result
-        assert "repair-classified-predictions" in result["error"]
 
     def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize

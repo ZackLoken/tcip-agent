@@ -24,15 +24,14 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
         tmp_path / "splits",
         selection.Selection(
             samples=(
-                selection.Sample(source="images/2026-03-04/a_1.jpg",
+                selection.Sample(member="a_1", source="images/2026-03-04/a_1.jpg",
                                  ground_truth="annotations/2026-03-04/a_1.json",
                                  group="a", side="train",
                                  confirmation_bucket="bud/2026-03-04",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
             subject="bud", attribute=None, id_map={"bud": 0}, seed=42, group_by="stem",
-            dataset_fingerprint="7ac1", admission_counts={"annotated": 1},
-            realized_ratios={"train": 1.0, "val": 0.0, "calibration": 0.0},
+            dataset_fingerprint="7ac1",
         ),
     ))
     golden = REGISTERED["selection"].golden
@@ -40,7 +39,7 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
 
     assert "members" not in golden and "splits" not in golden and "date" not in golden
     assert set(golden["samples"][0]) >= {
-        "source", "ground_truth", "group", "side", "confirmation_bucket"}
+        "member", "source", "ground_truth", "group", "side", "confirmation_bucket"}
     assert set(golden) == set(fresh)
 
 
@@ -132,7 +131,7 @@ def test_the_experiment_split_golden_carries_every_key_persist_run_partition_wri
     experiment_id = "exp-fixture-shape-check"
     create_experiment(experiment_id, {"model_source": {"builder": "my_module:build"}})
     persist_run_partition(
-        experiment_id, {"split": {"resolved_group_by": "stem_prefix"}},
+        experiment_id, {"split": {"resolved_group_by": "stem_prefix", "resolved_seed": 42}},
         dataset_id="a1", dataset_fingerprint="7ac1", partition=partition,
     )
     fresh = read_run_partition(experiment_id)

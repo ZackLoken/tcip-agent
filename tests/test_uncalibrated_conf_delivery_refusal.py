@@ -1,7 +1,7 @@
 """A count CSV is a phenotype, so the conf behind it is either validated or declared as not.
 
 A run with no per-dataset calibration ships whatever confidence its caller happened to pass. The
-count door's only defence is the validity of the operating point the run recorded, so these drive
+count door's only defense is the validity of the operating point the run recorded, so these drive
 the whole path (a real raw run, the real CSV writer) and pin what reaches disk in each case.
 """
 
@@ -110,7 +110,7 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
 
 
 def test_deliver_per_image_counts_takes_no_acknowledge_unvalidated_keyword(tmp_path, monkeypatch):
-    """This door takes no acknowledgement for its own CSV, so ``acknowledge_unvalidated`` is a
+    """This door takes no acknowledgment for its own CSV, so ``acknowledge_unvalidated`` is a
     caller error rather than a route to a flagged write. The refusal this door makes on an
     uncalibrated conf is covered above."""
     import tcip_mcp.tools.inference_tools as itools
@@ -127,7 +127,7 @@ def test_deliver_per_image_counts_takes_no_acknowledge_unvalidated_keyword(tmp_p
 
 def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatch):
     """The refusal is about the missing validation, never about the door: a conf resolved against a
-    held-out reference writes the CSV with no acknowledgement and stamps its real reference.
+    held-out reference writes the CSV with no acknowledgment and stamps its real reference.
 
     The predictions it counted are persisted and stamped, and the CSV's own validity is read back
     off that stamp, so the number in the file rests on an artifact anyone can re-read.
@@ -153,7 +153,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
                                predictions_dir=str(bucket))
 
     assert "error" not in r, r
-    assert r["predictions_dir"] == str(bucket)
+    assert r["output_dir"] == str(bucket)
     assert r["operating_point_validated"] == VALIDATED_HELD_OUT
     assert r["total_detections"] == sum(_CountStub._COUNTS.values())
     assert VALIDATED_HELD_OUT in out_csv.read_text(encoding="utf-8")
@@ -170,7 +170,7 @@ def test_deliver_per_image_counts_stamps_default_conf_source_when_omitted(tmp_pa
     """The rail must admit the ordinary, unstated call: an omitted conf still runs the pass at the
     platform default, and its provenance says so in the persisted bucket, never laundered into
     'explicit'. The bucket publish is ungated on an uncalibrated conf, so the stamp lands even
-    though the CSV itself, taking no acknowledgement of its own, refuses right after."""
+    though the CSV itself, taking no acknowledgment of its own, refuses right after."""
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import (
         DEFAULT_CONF, VALIDATED_FALSE, read_operating_point_sidecar,

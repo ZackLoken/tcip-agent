@@ -27,7 +27,7 @@ export interface LoadedImage extends ImageServeFacts {
   /** The decoded bitmap, or null when the load failed. */
   image: HTMLImageElement | null;
   ok: boolean;
-  /** True when the caller's signal cancelled the load; no other field is meaningful then. */
+  /** True when the caller's signal canceled the load; no other field is meaningful then. */
   aborted: boolean;
   /** Which header failed to parse as JSON, when that is why `ok` is false; null otherwise. */
   headerParseError: string | null;

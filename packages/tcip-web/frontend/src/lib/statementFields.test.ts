@@ -4,7 +4,7 @@ import { STATEMENT_FIELD_LABELS } from "./statementFields";
 
 describe("STATEMENT_FIELD_LABELS", () => {
   it("labels the majority crossing marker without the reserved word provisional", () => {
-    expect(STATEMENT_FIELD_LABELS.majority_provisional).toBe(
+    expect(STATEMENT_FIELD_LABELS.crossing_unconfirmed).toBe(
       "Majority milestone crossing pending breeder confirmation",
     );
   });

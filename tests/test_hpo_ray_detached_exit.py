@@ -1,6 +1,6 @@
 """A real Ray cluster's exit from a console-free process, the scenario the fake-Ray lifecycle
 tests in ``test_hpo_ray_lifecycle.py`` cannot reach: on Windows, ``ray.shutdown()`` ends each
-daemon by signalling ``CTRL_BREAK_EVENT`` through its console, which raises ``OSError: [WinError
+daemon by signaling ``CTRL_BREAK_EVENT`` through its console, which raises ``OSError: [WinError
 6] The handle is invalid`` on a daemon started without one (a server launched under
 ``DETACHED_PROCESS``, as the GUI capture harness does). This drives ``tune_search`` inside a
 subprocess created with ``DETACHED_PROCESS`` and checks both that the call returns normally and
@@ -91,7 +91,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
             search_alg="random",
             scheduler=None,
             resources_per_trial={"cpu": 1},
-            storage_path=storage_path,
+            storage_path=storage_path, seed=0
         )
 
         if not ready.wait(timeout=60):

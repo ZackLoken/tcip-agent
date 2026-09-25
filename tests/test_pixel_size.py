@@ -1,4 +1,4 @@
-"""The raster-georeferencing-to-metres-per-pixel resolver: what it accepts, what it refuses, and
+"""The raster-georeferencing-to-meters-per-pixel resolver: what it accepts, what it refuses, and
 the short clause it names a refusal by (never a filesystem path)."""
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class TestRasterPixelSize:
         _write_geotiff(path, pixel_scale=(0.5, 0.5, 0.0))
         size = raster_pixel_size(path)
         assert size is not None
-        assert size.metres_per_px == pytest.approx(0.5)
+        assert size.meters_per_px == pytest.approx(0.5)
         assert raster_pixel_size_reason(path) is None
 
     def test_a_foot_unit_raster_converts_through_the_pyproj_factor(self, tmp_path):
@@ -40,7 +40,7 @@ class TestRasterPixelSize:
         _write_geotiff(path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
         size = raster_pixel_size(path)
         assert size is not None
-        assert size.metres_per_px == pytest.approx(0.3048, abs=1e-3)
+        assert size.meters_per_px == pytest.approx(0.3048, abs=1e-3)
 
     def test_no_georeferencing_tags_has_no_pixel_size(self, tmp_path):
         path = tmp_path / "plain.tif"
@@ -121,7 +121,7 @@ class TestRasterPixelSize:
         _write_geotiff(path, pixel_scale=(0.03, 0.030000001, 0.0))
         size = raster_pixel_size(path)
         assert size is not None
-        assert size.metres_per_px == pytest.approx(0.03)
+        assert size.meters_per_px == pytest.approx(0.03)
 
     def test_a_npy_raster_is_skipped_as_not_a_tiff(self, tmp_path):
         path = tmp_path / "array.npy"

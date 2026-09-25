@@ -1,17 +1,16 @@
 """Find and render the worst predictions for failure analysis.
 
-Ranks by a count-mismatch + low-confidence heuristic (``get_worst_predictions``); no IoU
-matching, so an image with the right box count but every box mislocated scores as good. Not a
-substitute for ``score_predictions(detail=True)``'s IoU-matched TP/FP/FN when mislocalization
-itself is the question. Wraps ``tcip_mcp.tools.vision_tools.render_failure_cases`` with no MCP
-tool registration; the agent reads the grid image this prints the path to with its own
-image-capable tool, then describes and recommends.
+Ranks by a count-mismatch + low-confidence heuristic (``get_worst_predictions``); no IoU matching,
+so an image with the right box count but every box mislocated scores as good. Not a substitute for
+``score_predictions(detail=True)``'s IoU-matched TP/FP/FN when mislocalization itself is the
+question. Wraps ``tcip_mcp.tools.vision_tools.render_failure_cases`` and prints the grid image's
+path.
 
     tcip render-failure-cases <predictions_dir> <labels_dir> --project <project_root>
         [--images-dir DIR] [--task detect|segment] [--top-k N] [--class-names NAMES]
 
-``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names where this run's audit line and
-the rendered grid's cache path land; ``predictions_dir``/``labels_dir`` stay what gets read.
+``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names where this run's audit line and the
+rendered grid's cache path land; ``predictions_dir``/``labels_dir`` stay what gets read.
 """
 
 from __future__ import annotations

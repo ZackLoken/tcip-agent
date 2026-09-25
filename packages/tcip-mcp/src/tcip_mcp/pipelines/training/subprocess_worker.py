@@ -1,20 +1,18 @@
-"""The subprocess entry point ``launch_training`` spawns to run one bespoke training run's
-actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in
-an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any
-other concurrent run's process. Everything here mirrors what running the same body synchronously
-in-process would do; only the process boundary differs.
+"""The subprocess entry point ``launch_training`` spawns to run one bespoke training run's body,
+dataset/loader construction and the audited envelope, ``run_training_envelope()``, in an isolated
+OS process, so a leak/OOM/hang in one run can't take down the launching process or any other
+concurrent run's process.
 
 Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --experiment-id ...
---output-dir ... --resume-from ...``, never imported for its functions elsewhere, only run as
-``__main__``. The bootstrap config is read from the run's own output directory, which is the
-record the launching process wrote it to, so the two processes cannot disagree on where it is.
+--output-dir ... --resume-from ...``. The bootstrap config is read from the run's own output
+directory.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.training.envelope import TrainContext
@@ -30,106 +28,40 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _patch_experiment_config(experiment_id: str, action: str,
-                             mutate: Callable[[dict], None]) -> None:
-    """Best-effort: open the durable experiment record's own ``config.json`` behind its status
-    member, refuse a terminal record, and apply ``mutate`` to the config's ``data`` section
-    inside the same transaction before writing it back, a patch of that section, never a
-    rewrite of the whole record. ``action`` names the operation for both the terminal refusal
-    and its audit line, one string every caller of this run's provenance patches shares with
-    its own identity (``patch_experiment_config_tiling``, ``..._scope``, ``..._split``). Never
-    sinks the run if there is no experiment record to patch (experiment tracking is best-effort
-    throughout this path, same as every other write in it); a terminal record's refusal is the
-    one exception, since a lost provenance write there is itself a run failure, not a
-    degradable one.
-    """
-    from tcip_mcp.experiments import ExperimentTerminal
-
-    try:
-        from tcip_store import store
-
-        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
-
-        key, st_key = config_key(experiment_id), status_key(experiment_id)
-        if not store.exists(key):
-            return
-        with store.transaction(key, st_key) as txn:
-            state = (txn.read(st_key, default={}) or {}).get("state")
-            refuse_if_terminal(experiment_id, action, state)
-            cfg = txn.read(key, default={})
-            data_cfg = cfg.setdefault("data", {})
-            mutate(data_cfg)
-            txn.write(key, cfg)
-    except ExperimentTerminal:
-        raise
-    except Exception:
-        logger.warning("experiment config patch-back failed for %s (%s)", experiment_id, action,
-                       exc_info=True)
-
-
-def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
-                                    replace: bool = False,
-                                    train_native_size: list | None = None) -> None:
-    """Patch the effective tiling geometry into the durable experiment record. ``replace`` swaps
-    the tiling record wholesale instead of merging: an untiled run's record must not keep a
-    stale requested ``tile_size`` a merge would leave behind. ``train_native_size``, when
-    stamped, lands beside it."""
-    def mutate(data_cfg: dict) -> None:
-        if replace:
-            data_cfg["tiling"] = dict(tiling_cfg)
-        else:
-            data_cfg.setdefault("tiling", {}).update(tiling_cfg)
-        if train_native_size is not None:
-            data_cfg["train_native_size"] = list(train_native_size)
-
-    _patch_experiment_config(experiment_id, "patch_experiment_config_tiling", mutate)
-
-
-def _patch_experiment_config_scope(experiment_id: str, scope) -> None:
-    """Patch the class space this run's samples were admitted under into the durable experiment
-    record, through the one write of it
-    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.onto`). Called from ``run()`` after the
-    loaders are built, mirroring where the tiling patch fires; unlike tile geometry this fact is
-    the producer's own and is already on the run's own ``data_cfg`` before the build."""
-    _patch_experiment_config(experiment_id, "patch_experiment_config_scope", scope.onto)
-
-
 def _is_selection_bound_split(split_cfg: object) -> bool:
-    """Whether a run's ``data.split`` block is a selection-bound run's resolved block, the one
-    shape :func:`_patch_experiment_config_split` exists for: a spatial or auto-split run's own
-    resolved block carries per-region/per-stem member identities that stay out of the durable
-    config, so only ``selection_binding``'s presence qualifies."""
+    """Whether a run's ``data.split`` block is a selection-bound run's resolved block: only then is
+    it recorded in the durable config, since a drawn or spatial run's resolved block carries
+    per-member identities that stay out of it."""
     return isinstance(split_cfg, dict) and "selection_binding" in split_cfg
 
 
-def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
-    """Merge this run's resolved split policy into the durable experiment record. A binding to a
-    named selection (``data.split.selection_binding``) is what this exists for:
-    ``launch_config.json``, written before the child exists, never carries it, so the durable
-    record is the only other place a reviewer can see that a recorded partition, not a drawn
-    one, governed the run."""
-    def mutate(data_cfg: dict) -> None:
-        data_cfg.setdefault("split", {}).update(split_cfg)
+def _mirror_data_section(experiment_id: str, data_cfg: dict) -> None:
+    """Write this run's resolved data section whole into the durable experiment record's own
+    ``config.json``: its admitted class space, its effective tiling and frame size, and its
+    ``split`` block when the run is bound to a selection (the record's own ``split`` otherwise).
 
-    _patch_experiment_config(experiment_id, "patch_experiment_config_split", mutate)
-
-
-def _admitted_class_space(data_cfg: dict):
-    """The class space this run's samples were admitted under, or ``None`` when its ground truth
-    carries its own classes and no map was admitted.
-
-    Read off the run's own resolved data config through the one reader of it
-    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`), which ``auto_train_val``
-    writes the admitted scope onto for every route, bound or drawn, built-in loader or bespoke
-    builder: the producer that admitted the samples is the one that states which vocabulary they
-    were admitted in. The registry is never read again here, and nothing is taken off the built
-    dataset object, so a ``subjects.json`` whose declared order changed since the admission
-    cannot stamp a checkpoint with a vocabulary the model never trained in.
+    No experiment record to write is no write. A terminal record refuses with
+    :class:`~tcip_mcp.experiments.ExperimentTerminal`, and every write failure raises.
     """
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_store import store
 
-    scope = ClassScope.recorded_in(data_cfg)
-    return scope if scope.subject and scope.id_map else None
+    from tcip_mcp.experiments import config_key, rewrite_live_member
+
+    key = config_key(experiment_id)
+    if not store.exists(key):
+        return
+    bound = _is_selection_bound_split(data_cfg.get("split"))
+
+    def update(cfg: dict) -> dict:
+        section = dict(data_cfg)
+        recorded = cfg.get("data") or {}
+        if not bound:
+            section.pop("split", None)
+            if "split" in recorded:
+                section["split"] = recorded["split"]
+        return {**cfg, "data": section}
+
+    rewrite_live_member(experiment_id, key, "mirror_data_section", update)
 
 
 def run(experiment_id: str, output_dir: str, resume_from: str) -> None:
@@ -182,80 +114,28 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
     subprocess with its original traceback.
     """
     from tcip_mcp.pipelines.training.generic_trainer import (
-        seeded_loader_kwargs, stamp_effective_data_geometry,
+        run_loaders, run_transforms, stamp_effective_data_geometry,
     )
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import attach_run
-    from tcip_mcp.pipelines.data.split_construction import (
-        auto_train_val, dataset_identity, persist_run_partition,
-    )
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.experiments import lineage_key, read_member
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.tools.training_tools import launch_config_key
 
     config = store.read(launch_config_key(output_dir))
-    run_obj = attach_run(experiment_id, config, output_dir)
+    run_obj = create_run(config, output_dir, id=experiment_id)
 
-    model_source = config.get(MODEL_SOURCE_KEY, {})
     # setdefault, not get: the geometry stamp below mutates this dict and must land in config.
     data_cfg = config.setdefault("data", {})
-    # Task drives collate + measurement routing: the bespoke model_source declares it, falling
-    # back to the data section.
-    task = model_source.get("task") or data_cfg.get("task", "detection")
-
-    aug_config = config.get("augmentation", {})
-    transforms = None
-    if aug_config:
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-        transforms = build_augmentation(aug_config)
-
-    train_ds, val_ds, partition = auto_train_val(task, data_cfg, transforms)
-
-    split_cfg = data_cfg.get("split")
-    if _is_selection_bound_split(split_cfg):
-        _patch_experiment_config_split(experiment_id, split_cfg)
-
-    # The admitted class space already rides on data_cfg, and so onto the checkpoint
-    # (generic_trainer persists run.config into every one); this mirrors it to the durable record.
-    _scope = _admitted_class_space(data_cfg)
-    if _scope is not None:
-        _patch_experiment_config_scope(experiment_id, _scope)
+    task = run_task(config)
+    train_ds, val_ds, partition = auto_train_val(task, data_cfg, run_transforms(config))
 
     # The effective input geometry is only knowable once the dataset is actually built, so it is
-    # stamped here (into the config every checkpoint embeds) and mirrored to the experiment.
-    stamped = stamp_effective_data_geometry(data_cfg, train_ds)
-    # None for a bespoke build: the platform did not build that dataset, so it records nothing.
-    if stamped is not None:
-        _patch_experiment_config_tiling(experiment_id, stamped["tiling"],
-                                        replace=stamped["tiling_replaced"],
-                                        train_native_size=stamped["train_native_size"])
+    # stamped here (into the config every checkpoint embeds) before the section is mirrored.
+    stamp_effective_data_geometry(data_cfg, train_ds)
+    _mirror_data_section(experiment_id, data_cfg)
 
-    from tcip_mcp.pipelines.data.samplers import build_sampler
-    from torch.utils.data import DataLoader
-
-    batch_size = config.get("batch_size", 2)
-    num_workers = config.get("num_workers", 0)
-    # Seeds the loader's shuffle/worker RNG from the run's own seed and scales each worker's
-    # own GDAL cache share by num_workers.
-    loader_kwargs = seeded_loader_kwargs(config.get("seed"), num_workers=num_workers)
-    # Built after the loader context is known: read order depends on the worker regime too.
-    sampler = build_sampler(config.get("sampler", "random"), train_ds,
-                            num_workers=num_workers, batch_size=batch_size)
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size,
-        shuffle=(sampler is None), sampler=sampler,
-        collate_fn=task_collate(task),
-        num_workers=num_workers,
-        **loader_kwargs,
-    )
-    val_loader = None
-    if val_ds is not None:
-        val_loader = DataLoader(
-            val_ds, batch_size=batch_size,
-            shuffle=False,
-            collate_fn=task_collate(task),
-            num_workers=num_workers,
-            **loader_kwargs,
-        )
+    train_loader, val_loader = run_loaders(config, task, train_ds, val_ds, config.get("seed"))
     if val_loader is None and task in ("detection", "instance_seg"):
         logger.warning(
             "No validation loader for %s run %s: best-model selection and early "
@@ -264,12 +144,11 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
             task, experiment_id,
         )
 
-    # The dataset identity this run trains on, recomputed here (recompute-on-read is this fact's
-    # own stated authority) rather than threaded across the process boundary; same deterministic
-    # result the parent's own copy (used for the lineage record) already produced.
-    ds_id, ds_fp = dataset_identity(data_cfg)
+    # The dataset identity the launching process recorded on the run's own lineage.
+    lineage = read_member(lineage_key(experiment_id), {})
     persist_run_partition(experiment_id, data_cfg,
-                           dataset_id=ds_id, dataset_fingerprint=ds_fp,
+                           dataset_id=lineage.get("dataset_id"),
+                           dataset_fingerprint=lineage.get("dataset_fingerprint"),
                            partition=partition)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext

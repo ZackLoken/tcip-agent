@@ -49,7 +49,7 @@ def _build(assignments: dict[str, list[Assignment]]) -> MappingBuild:
         name="mapping", project_root="/proj", dataset_root="/proj/ds", dataset_id="ds-1",
         built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None, dates=sorted(assignments),
-        nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={d: "0" * 16 for d in assignments},
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
@@ -351,7 +351,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> No
         build_mapping(
             tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
             dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
-            plant_registry={"name": "unregistered", "digest": "0" * 64},
+            plant_registry={"name": "unregistered", "digest": "0" * 64}, nn_tolerance_m=10.0,
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureRefusal"
 

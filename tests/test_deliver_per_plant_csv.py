@@ -108,7 +108,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 ):
     """The whole producer chain: a mapping built by ``build_plant_mapping`` over a registered
     registry, a bucket written by ``run_inference``, and records from ``aggregate_per_plant``. The
-    door takes no acknowledgement, so a bare unvalidated delivery refuses; the same delivery ships
+    door takes no acknowledgment, so a bare unvalidated delivery refuses; the same delivery ships
     once the bucket earns a real reference, and records the delivery event under this door's own
     name, once in the dataset's own log and once in the platform's.
     """
@@ -317,7 +317,8 @@ def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_no
 
     registry = register_plant_registry_for([plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry)
+        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
     from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
@@ -366,7 +367,8 @@ def test_deliver_per_plant_csv_refuses_predictions_under_a_different_dataset_tha
 
     registry = register_plant_registry_for([plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry)
+        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
     from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
@@ -436,7 +438,8 @@ def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(
 
     registry = register_plant_registry_for([plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry)
+        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
     pred_dir = dataset_root / "predictions" / "manual" / date
@@ -478,7 +481,8 @@ def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_wa
 
     registry = register_plant_registry_for([plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry)
+        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
     assert mapped["n_mapped"] == 1
 

@@ -1,13 +1,8 @@
 """The one canonical domain-knowledge directory and its one reader.
 
-Every document a client reaches, whether through the generated Claude Code skills under
-``.claude/skills/``, the shared skill tree Codex and Antigravity read under
-``.agents/skills/``, the generated block in ``AGENTS.md``, or the ``serve_domain_knowledge`` MCP
-tool, is a file under :data:`KNOWLEDGE_DIR`:
-the domain documents beside this module and the per-crop documents plus ``crops.yml`` (the
-trait authority) under ``crops/``. The two-field frontmatter (``name``,
-``description``) each document carries is its selection hint, read once here rather than
-re-parsed by every consumer.
+Every document a client reaches is a file under :data:`KNOWLEDGE_DIR`: the domain documents beside
+this module and the per-crop documents plus ``crops.yml`` (the trait authority) under ``crops/``.
+The two-field frontmatter (``name``, ``description``) each document carries is its selection hint.
 """
 
 from __future__ import annotations
@@ -38,13 +33,11 @@ def _iter_markdown_paths() -> list[Path]:
 def _parse_frontmatter(path: Path) -> tuple[dict, str]:
     """A document's frontmatter mapping and its body, the text after the closing ``---``.
 
-    Raises ``ValueError`` naming the file for anything that does not parse: a document that is
-    not valid UTF-8, a missing or unclosed frontmatter block, a non-mapping result, a
-    missing/blank ``name`` or ``description``, a ``name`` that is not a single safe path
-    segment (letters, digits, hyphen), or a ``description`` carrying a newline (the composed
-    tool description is one line per document). A document this rejects is never silently
-    skipped; every reader of the knowledge corpus (the generated skills, the tool description,
-    the guardrails) needs every document accounted for.
+    Raises ``ValueError`` naming the file for anything that does not parse: a document that is not
+    valid UTF-8, a missing or unclosed frontmatter block, a non-mapping result, a missing/blank
+    ``name`` or ``description``, a ``name`` that is not a single safe path segment (letters,
+    digits, hyphen), or a ``description`` carrying a newline (the composed tool description is one
+    line per document).
     """
     import yaml
 
@@ -83,12 +76,10 @@ def _parse_frontmatter(path: Path) -> tuple[dict, str]:
 
 def list_documents() -> list[DocumentInfo]:
     """Every knowledge document's name, description and path, one entry per ``.md`` file under
-    :data:`KNOWLEDGE_DIR`, never a hardcoded count.
+    :data:`KNOWLEDGE_DIR`.
 
-    Raises ``ValueError`` naming the file for a document whose frontmatter is missing or
-    malformed, and the same error for a document whose name duplicates an earlier one: a name
-    collision would make selection ambiguous for every reader, so it is caught here rather than
-    left to whichever reader happens to run first.
+    Raises ``ValueError`` naming the file for a document whose frontmatter is missing or malformed,
+    and the same error for a document whose name duplicates an earlier one.
     """
     documents: list[DocumentInfo] = []
     seen: dict[str, Path] = {}
@@ -106,15 +97,12 @@ def list_documents() -> list[DocumentInfo]:
 
 
 def document_paths() -> list[Path]:
-    """Every knowledge document's path, for a consumer that walks the whole corpus as files (a
-    prose-surface scanner, an example-code checker) rather than selecting one by name."""
+    """Every knowledge document's path."""
     return [document.path for document in list_documents()]
 
 
 def document_path(name: str) -> Path:
-    """The whole file for one named document, for a consumer that reads it as a file (a
-    guardrail, a trait-fidelity check) rather than through :func:`read_document`'s
-    frontmatter-stripped body.
+    """The whole file for one named document, frontmatter included.
 
     Raises ``KeyError`` for a name no document declares.
     """
@@ -125,8 +113,7 @@ def document_path(name: str) -> Path:
 
 
 def read_document(name: str) -> str:
-    """One document's body, with its frontmatter stripped: what the ``serve_domain_knowledge`` tool
-    returns for a named document.
+    """One document's body, with its frontmatter stripped.
 
     Raises ``KeyError`` for a name no document declares.
     """
@@ -135,6 +122,5 @@ def read_document(name: str) -> str:
 
 
 def crops_yml_path() -> Path:
-    """Where the crops.yml controlled vocabulary lives, the trait authority every reader (the
-    runtime trait registry, the guardrails) resolves through this one function."""
+    """Where ``crops.yml`` lives."""
     return KNOWLEDGE_DIR / "crops" / "crops.yml"

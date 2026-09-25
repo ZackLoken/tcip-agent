@@ -6,7 +6,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 afterEach(cleanup);
 
 describe("ConfirmDialog", () => {
-  it("is a labelled, modal dialog", () => {
+  it("is a labeled, modal dialog", () => {
     render(
       <ConfirmDialog heading="Remove x" onClose={vi.fn()}>
         {"body"}

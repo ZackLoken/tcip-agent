@@ -35,7 +35,7 @@ import { useStore } from "@/store";
 // "Switch project" (which returns here) doesn't immediately re-open the same project.
 let autoOpenAttempted = false;
 
-// The subjects/models with data on a given date; empty when nothing is labelled/predicted
+// The subjects/models with data on a given date; empty when nothing is labeled/predicted
 // there, so the selectors never offer a choice that would open a blank canvas.
 const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
@@ -67,17 +67,17 @@ function RemovalDialog({
   const [releaseError, setReleaseError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     api.projects
       .removalPreview(name)
       .then((p) => {
-        if (!cancelled) setPreview(p);
+        if (!canceled) setPreview(p);
       })
       .catch((e) => {
-        if (!cancelled) setPreviewError(e instanceof Error ? e.message : String(e));
+        if (!canceled) setPreviewError(e instanceof Error ? e.message : String(e));
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [name]);
 
@@ -305,17 +305,17 @@ function RenameDialog({
   }, [name]);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     api.projects
       .renamePreview(name)
       .then((p) => {
-        if (!cancelled) setPreview(p);
+        if (!canceled) setPreview(p);
       })
       .catch((e) => {
-        if (!cancelled) setPreviewError(e instanceof Error ? e.message : String(e));
+        if (!canceled) setPreviewError(e instanceof Error ? e.message : String(e));
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [name]);
 
@@ -737,7 +737,7 @@ export function ProjectPicker() {
   }
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     // Claim the attempt now, before the fetch: a picker that unmounts mid-fetch (every load
     // where the app opens the project itself) must still count as having tried.
     const alreadyAttempted = autoOpenAttempted;
@@ -745,7 +745,7 @@ export function ProjectPicker() {
     api.projects
       .list()
       .then((res) => {
-        if (cancelled) return;
+        if (canceled) return;
         setProjects(res.projects);
         setPendingRemoval(res.pending_removal);
         setRemovalOutcomes(res.removal_startup_outcomes);
@@ -755,7 +755,7 @@ export function ProjectPicker() {
         if (!alreadyAttempted) {
           const active = res.projects.find((p) => p.name === res.active);
           const d = active ? defaultDate(active.dates) : "";
-          // Auto-open only when the default date has labelled subjects, else preselect the
+          // Auto-open only when the default date has labeled subjects, else preselect the
           // card; no marker write here, since the app opening what it already names isn't a human adoption.
           if (active && d && subjectsForDate(active, d).length > 0) {
             selectCard(active);
@@ -766,10 +766,10 @@ export function ProjectPicker() {
         }
       })
       .catch((e) => {
-        if (!cancelled) setLoadError(String(e));
+        if (!canceled) setLoadError(String(e));
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
     // Run once on mount.
   }, []);
@@ -878,7 +878,7 @@ export function ProjectPicker() {
                       {p.dependency_problem && (
                         <span className="text-[11px] text-tcip-fp">{p.dependency_problem}</span>
                       )}
-                      {/* Signature: the project's captures across the season, each date labelled. */}
+                      {/* Signature: the project's captures across the season, each date labeled. */}
                       <SeasonRail
                         dates={p.dates}
                         showLabels

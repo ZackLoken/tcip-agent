@@ -32,12 +32,9 @@ from pydantic import BaseModel
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import (
-    HPO_SWEEPS,
-    INFERENCE_JOBS,
     PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
-    REVIEW_PRIORITY_JOBS,
     VALID_PANELS,
 )
 from tcip_mcp.workspace import configured_workspace
@@ -63,20 +60,11 @@ async def _lifespan(_app: FastAPI):
 
     configure_gdal_cache()
     try:
-        from tcip_web import jobstore
         from tcip_web.routes import inference, review, tuning
 
-        # One try per registry, so a refused rehydrate never skips the other two.
-        for registry_name, rehydrate in (
-            (INFERENCE_JOBS, inference.rehydrate_for_current_root),
-            (HPO_SWEEPS, tuning.rehydrate_for_current_root),
-            (REVIEW_PRIORITY_JOBS, review.rehydrate_for_current_root),
-        ):
-            try:
-                rehydrate()
-            except Exception as exc:  # pragma: no cover - rehydrate is best-effort
-                logger.exception("%s registry rehydrate refused", registry_name)
-                jobstore.record_startup_refusal(registry_name, str(exc))
+        for rehydrate in (inference.rehydrate_for_current_root, tuning.rehydrate_for_current_root,
+                          review.rehydrate_for_current_root):
+            rehydrate()
         # Training runs aren't rehydrated from a state file: the training list route
         # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort
@@ -106,14 +94,8 @@ bind_default()
 
 
 class WorkspaceUnsetUnderTest(RuntimeError):
-    """Raised in place of pinning a platform-state root, when this app is served under a test
-    with no ``TCIP_WORKSPACE`` bound.
-
-    Left unrefused, :func:`bind_startup_root` would resolve the default workspace
-    (``tcip_mcp.workspace.workspace_root``, ``~/tcip-projects``) and pin, then write into,
-    whichever project the operator's real active-project marker names: a pytest process, a
-    process that has loaded an in-process test client, or a request arriving from one has no
-    business touching that project.
+    """Raised in place of pinning a platform-state root, when this app is served under a test with
+    no ``TCIP_WORKSPACE`` bound.
     """
 
 
@@ -126,16 +108,7 @@ def _running_under_pytest() -> bool:
 
 
 def _in_process_test_client_loaded() -> bool:
-    """True once this process has imported starlette's ``TestClient`` module, for the whole run.
-
-    Entering ``with TestClient(app):`` runs the lifespan with no request and so no ASGI scope,
-    which :func:`bind_startup_root` calls before either check below can see one; this is the
-    signal that catches that case. Verified in a fresh subprocess: importing ``tcip_web.app``
-    alone leaves ``starlette.testclient`` out of ``sys.modules``, while importing
-    ``fastapi.testclient`` (which re-exports ``starlette.testclient.TestClient``) or
-    ``starlette.testclient`` directly brings it in, and neither module removes itself once
-    imported.
-    """
+    """True once this process has imported starlette's ``TestClient`` module, for the whole run."""
     return "starlette.testclient" in sys.modules
 
 
@@ -150,7 +123,8 @@ traffic never arrives with either identity, source port 123 least of all, a priv
 def _scope_is_in_process_test_client(scope: dict[str, Any]) -> bool:
     """True when an ASGI scope's client address matches an in-process test transport's default
     identity (:data:`_IN_PROCESS_TEST_TRANSPORT_CLIENTS`), naming both starlette's ``TestClient``
-    and httpx's ``ASGITransport`` rather than starlette's alone."""
+    and httpx's ``ASGITransport``.
+    """
     client = scope.get("client")
     return client is not None and tuple(client) in _IN_PROCESS_TEST_TRANSPORT_CLIENTS
 
@@ -158,12 +132,9 @@ def _scope_is_in_process_test_client(scope: dict[str, Any]) -> bool:
 def raise_if_workspace_unset_under_test(scope: dict[str, Any] | None = None) -> None:
     """Refuse to pin a platform-state root under a test that never set ``TCIP_WORKSPACE``.
 
-    Runs ahead of every marker read this app performs: at the top of
-    :func:`bind_startup_root` with no scope available (the pytest-process and test-client-import
-    signals) and in :class:`_BindStartupRootMiddleware` with the request's own scope (all three
-    signals). Passes silently once ``TCIP_WORKSPACE`` is configured
-    (:func:`tcip_mcp.workspace.configured_workspace`) or nothing signals a test is running, so a
-    served app (``python -m tcip_web``) keeps its default workspace untouched.
+    Passes silently once ``TCIP_WORKSPACE`` is configured
+    (:func:`tcip_mcp.workspace.configured_workspace`) or nothing signals a test is running.
+    ``scope``, when given, adds the request's client-address signal to the process-wide ones.
     """
     if configured_workspace() is not None:
         return
@@ -179,43 +150,17 @@ def raise_if_workspace_unset_under_test(scope: dict[str, Any] | None = None) -> 
 
 
 def bind_startup_root() -> None:
-    """Pin this process's platform-state root once, a served app's own responsibility rather
-    than an importer's, and only when nothing has bound one yet.
+    """Pin this process's platform-state root once, only when nothing has bound one yet
+    (:func:`tcip_mcp.project_paths.root_binding`).
 
-    Reached from :class:`_BindStartupRootMiddleware` (ahead of every route, for a request
-    served before the lifespan has run) and from the lifespan's own startup (ahead of its
-    rehydrate), so every way this app is served (``python -m tcip_web``, bare uvicorn,
-    ``--lifespan off``, the reloader's child) pins a root before anything resolves one,
-    while a process that only imports this module (the test suite at collection, a repo
-    script) never calls this and pins nothing.
+    Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is a
+    pytest run or has loaded an in-process test client with no ``TCIP_WORKSPACE`` bound.
 
-    Checks :func:`tcip_mcp.project_paths.root_binding` rather than a flag of its own: a
-    ``activate_project`` repin that lands before the first request already leaves a
-    binding in place, and this must not replace it with a fresh marker read.
-
-    Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is
-    a pytest run or has loaded an in-process test client with no ``TCIP_WORKSPACE`` bound; the
-    scope-carried signals of that rail live in :class:`_BindStartupRootMiddleware`, which alone
-    sees the request scope.
-
-    After the early return's check, and before the marker pin: ``tcip_mcp.project_rename.
-    complete_pending_renames`` walks the workspace and renames every project carrying a
-    pending-rename marker, then ``tcip_mcp.project_removal.complete_pending_removals`` walks it
-    and moves every project carrying a pending-removal marker, each once per process, on the
-    first bind. Renames run first so a rename marker is never walked past inside a tree the
-    removal walk has already moved into the holding directory: the two doors' own
-    ``_request_lock`` keeps one process from writing both markers on one project, but two
-    backends bound to the same workspace can still each write one, and this ordering is what
-    keeps that residual case from stranding a rename marker under a moved tree. Both callers of
-    this function reach it through :func:`_bind_startup_root_serialized` under the module lock,
-    off the event loop, so the walks (which open each project's own database on this thread to
-    read its marker, and may wait the rename budget) never run on a request-serving thread and no
-    request is served before they complete; a non-request thread touching the seam during a
-    test's first bind is the one residual. A failure inside either walk other than its own
-    per-project folds (a workspace that cannot even be listed) is logged and swallowed, since
-    the process must start regardless, the same rule the marker read below already holds. The
-    MCP server never calls this: it is not the breeder's surface, and it may itself be the
-    process holding a target's database.
+    Before the marker pin, once per process: ``tcip_mcp.project_rename.complete_pending_renames``
+    renames every project carrying a pending-rename marker, then
+    ``tcip_mcp.project_removal.complete_pending_removals`` moves every project carrying a
+    pending-removal marker. A failure inside either walk other than its own per-project folds is
+    logged and swallowed.
     """
     raise_if_workspace_unset_under_test()
 
@@ -244,32 +189,17 @@ _bind_startup_root_lock = threading.Lock()
 
 
 def _bind_startup_root_serialized() -> None:
-    """:func:`bind_startup_root` under the module lock, the body the middleware runs in a
-    worker thread.
-
-    Concurrent first requests serialize onto one marker read here: the second waits, then
-    finds the root already bound and returns. The lock is a thread lock taken inside the
-    worker thread, never an asyncio lock, since concurrent requests may arrive on several
-    event loops (one ``TestClient`` per thread), which a lock bound to one loop cannot serve.
+    """:func:`bind_startup_root` under the module thread lock, so concurrent first requests
+    serialize onto one marker read.
     """
     with _bind_startup_root_lock:
         bind_startup_root()
 
 
 class _BindStartupRootMiddleware:
-    """ASGI middleware that calls :func:`bind_startup_root` ahead of every request.
-
-    Covers a request served with the lifespan disabled or never started (``--lifespan off``,
-    a ``TestClient`` used outside its context manager), where the lifespan's own call never
-    runs. The marker read :func:`bind_startup_root` may perform is a store read bounded by a
-    file-lock timeout, so it runs off the event loop in a worker thread, under the module
-    lock above; once a root is bound the check inside :func:`bind_startup_root` is cheap, so
-    later requests still pay the thread hop but no further store read.
-
-    Checks :func:`raise_if_workspace_unset_under_test` with this request's own scope before
-    that thread hop: the scope carries the client-address signal :func:`bind_startup_root`
-    cannot see on its own, so a request from a bare ``TestClient`` or an ``httpx.ASGITransport``
-    client with no ``TCIP_WORKSPACE`` bound is refused here even outside a pytest process.
+    """ASGI middleware that calls :func:`bind_startup_root` ahead of every request, off the event
+    loop in a worker thread, after :func:`raise_if_workspace_unset_under_test` with this request's
+    own scope.
     """
 
     def __init__(self, app: Any) -> None:
@@ -310,8 +240,7 @@ _state_watchers: set[WebSocket] = set()
 
 @app.exception_handler(GuiMutationInvalid)
 async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInvalid) -> JSONResponse:
-    """Every route that mutates GUI state answers an invalid mutation with 400 and the reason,
-    rather than the 500 an unhandled ``ValueError`` would otherwise produce."""
+    """Every route that mutates GUI state answers an invalid mutation with 400 and the reason."""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
@@ -321,10 +250,8 @@ SERVER_EPOCH = uuid.uuid4().hex
 
 
 def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
-    """The one envelope shape both the broadcast and the connect-time replay send.
-
-    ``generation`` is read off ``StateStore`` rather than the binding store, so a broadcast
-    never costs a store read on the event loop.
+    """The state-snapshot envelope: state, version and binding generation (read off
+    ``StateStore``).
     """
     return {
         "type": "state_snapshot",
@@ -362,8 +289,9 @@ class ActiveTabPayload(BaseModel):
 
 @app.post("/api/state/tab")
 async def set_active_tab(payload: ActiveTabPayload) -> dict:
-    """Record which tab the browser is actually showing, so ``gui.json`` (and everything
-    that reads it, like ``view_gui_state``) tracks what the human sees."""
+    """Record which tab the browser is actually showing, so ``gui.json`` tracks what the human
+    sees.
+    """
     await _gui_store.mutate({"active_tab": payload.active_tab})
     return {"status": "ok", "active_tab": payload.active_tab}
 
@@ -420,8 +348,9 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
         _panel_subscribers[panel].discard(ws)
 
 def _static_dir_candidates() -> list[Path]:
-    """The install-layout candidates ``_find_static_dir`` checks, in preference order: the
-    packaged copy inside an installed wheel, then the src-layout checkout."""
+    """The built frontend's install-layout candidates, in preference order: the packaged copy
+    inside an installed wheel, then the src-layout checkout.
+    """
     return [
         Path(__file__).parent / "static",
         Path(__file__).parent.parent.parent / "static",
@@ -497,15 +426,12 @@ def index():
 def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
     """Re-read the workspace's active-project marker and repin this process to it.
 
-    Never trusts ``sent_name``: an unauthenticated event is a signal to re-read the marker
-    the breeder controls, not a name to act on. Returns the fields the event route's response
-    carries: ``platform_root`` on a repin, or ``platform_root_problem`` naming why the marker
-    could not be used (a store refusal, a lock timeout, or a marker naming a project that is
-    not adoptable), never both. A repin's ``platform_root_disagreement`` says when the event's
-    own name differed from what the marker actually named.
-
-    Runs on the calling thread; the route awaits this in a worker thread so the marker read
-    and the rehydrates below never block the event loop.
+    Never trusts ``sent_name``: an unauthenticated event is a signal to re-read the marker the
+    breeder controls, not a name to act on. Returns the fields the event route's response carries:
+    ``platform_root`` on a repin, or ``platform_root_problem`` naming why the marker could not be
+    used (a store refusal, a lock timeout, or a marker naming a project that is not adoptable),
+    never both. A repin's ``platform_root_disagreement`` says when the event's own name differed
+    from what the marker actually named.
     """
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import repin_platform_root
@@ -541,8 +467,8 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
 
     Payload shape: ``{panel, event_type, data}``. The broadcast and replay payload, not this
     route's response, carries every agent identity field the sender declared in its headers
-    (``agent_identity.HEADERS``, each ``None`` when not sent), so a browser and the replay can say
-    which harness steered the GUI. Declared, not verified: any sender can set the headers.
+    (``agent_identity.HEADERS``, each ``None`` when not sent). Declared, not verified: any sender
+    can set the headers.
     """
     from tcip_mcp import agent_identity
 

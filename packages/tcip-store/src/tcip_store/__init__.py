@@ -1,10 +1,4 @@
-"""TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs.
-
-Every operation is addressed by a ``Key``, never by a path, and every write acquires that
-key's lock inside the call. A store declares its kind, its codec, its concurrency policy and
-its durability once, in the module that owns it; the bound backend decides where the bytes
-actually live. What a backend cannot guarantee it refuses or declares, never degrades to.
-"""
+"""TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs."""
 
 from tcip_store.errors import (
     BackendUnavailable,

@@ -7,15 +7,11 @@ every response surface answering a resolved absolute path for a relative stored 
 
 from __future__ import annotations
 
-import os
-import sqlite3
 import zipfile
 from pathlib import Path
 
 import pytest
 import tcip_store as ts
-from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-from tcip_store.store import _backend
 
 from tcip_mcp.model_registry import (
     ModelRegistry,
@@ -26,33 +22,8 @@ from tcip_mcp.model_registry import (
 from tcip_mcp.registry_paths import is_external_form
 
 
-def _seed_v1(root: Path, entries: list[dict]) -> None:
-    ts.replace(registry_index_key(root), entries, expect=ts.Version.ABSENT)
-
-
-def _plant_registry_schema_version_two(root: Path) -> None:
-    """Overwrite an already-written registry index's raw bytes to carry a stray
-    ``schema_version: 2``: the on-disk shape a dev-era writer left behind (the seam's own
-    write-side check refuses the field on any ordinary write, so this is the only way to plant
-    it).
-    """
-    key = registry_index_key(root)
-    document = ts.read(key, default={"entries": []})
-    encoded = ts.get_descriptor(key.store).codec.encode({**document, "schema_version": 2})
-    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
-    if name == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(encoded)
-        return
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute(
-            "update records set value = ? where store = ? and parts = ?",
-            (encoded, key.store, encode_parts(key.parts)),
-        )
-    finally:
-        conn.close()
+def _plant_malformed_registry(root: Path) -> None:
+    ts.replace(registry_index_key(root), {"entries": "not-a-list"}, expect=ts.Version.ABSENT)
 
 
 # ── the document-boundary refusal and its partners ─────────────────────────────────────────
@@ -62,26 +33,10 @@ def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
     assert read_registry_index(tmp_path) == []
 
 
-def test_a_bare_array_refuses_read_stating_nothing_repairs_it_in_place(tmp_path: Path):
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
-
-    with pytest.raises(RegistryVersionRefused, match="nothing repairs it in place"):
-        read_registry_index(tmp_path)
-
-
-def test_a_bare_array_refuses_a_write_stating_nothing_repairs_it_in_place(tmp_path: Path):
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"weights")
-
-    with pytest.raises(RegistryVersionRefused, match="nothing repairs it in place"):
-        ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
-
-
 def test_the_refusal_is_not_a_store_error(tmp_path: Path):
-    """Deliberate: a StoreError catch (bundle's own) must never swallow this into an empty
-    answer, so it is checked as its own type, not merely as raising something."""
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
+    """A StoreError catch must never swallow this into an empty answer, so it is checked as its
+    own type, not merely as raising something."""
+    _plant_malformed_registry(tmp_path)
 
     with pytest.raises(RegistryVersionRefused):
         try:
@@ -90,7 +45,7 @@ def test_the_refusal_is_not_a_store_error(tmp_path: Path):
             pytest.fail("RegistryVersionRefused must not be a StoreError")
 
 
-def test_bundle_propagates_the_refusal_rather_than_reading_an_unconformed_registry_as_empty(
+def test_bundle_propagates_the_refusal_rather_than_reading_a_malformed_registry_as_empty(
     tmp_path: Path,
 ):
     from tcip_mcp.tools.bundle import account_for
@@ -98,54 +53,25 @@ def test_bundle_propagates_the_refusal_rather_than_reading_an_unconformed_regist
     from tcip_mcp.tools.project_tools import initialize_project
 
     initialize_project(str(tmp_path), site="north orchard")
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
+    _plant_malformed_registry(tmp_path)
 
     with pytest.raises(RegistryVersionRefused):
         account_for(tmp_path)
 
 
-def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Path):
+def test_archive_project_refuses_loudly_on_a_malformed_registry(tmp_path: Path):
     from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
     initialize_project(str(tmp_path), site="north orchard")
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
+    _plant_malformed_registry(tmp_path)
 
     result = archive_project(str(tmp_path), str(tmp_path.parent / "out.zip"))
 
     assert "error" in result
-    assert "nothing repairs it in place" in result["error"]
+    assert "not a recognized entries-mapping document" in result["error"]
 
 
-def test_archive_project_refuses_a_schema_version_two_registry_stating_the_fact(
-    tmp_path: Path,
-):
-    """A registry above the ceiling (a stray dev-era ``schema_version: 2``) must refuse the same
-    way a bare array does, not be swallowed into an empty answer and archived without its
-    registered weights."""
-    from tcip_mcp.tools.project_tools import archive_project, initialize_project
-
-    project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
-    weights_dir = project / "weights"
-    weights_dir.mkdir()
-    ckpt = weights_dir / "m.pt"
-    ckpt.write_bytes(b"weights outside the .tcip/models convenience location")
-    ModelRegistry(str(project)).register_model("m", str(ckpt), {}, metrics_source=None)
-    _plant_registry_schema_version_two(project)
-    out = tmp_path / "out.zip"
-
-    result = archive_project(str(project), str(out))
-
-    assert "error" in result
-    assert "above the 1 this reader knows" in result["error"]
-    assert not out.exists()
-
-
-def test_archive_project_accounts_for_a_registered_checkpoint_outside_models_when_unpoisoned(
-    tmp_path: Path,
-):
-    """The admitting partner of the refusal above: the identical project, its registry never
-    poisoned, archives with the registered checkpoint accounted for rather than left behind."""
+def test_archive_project_accounts_for_a_registered_checkpoint_outside_models(tmp_path: Path):
     from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
     project = tmp_path / "proj"
@@ -170,7 +96,7 @@ def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
     from tcip_mcp.tools.project_tools import initialize_project
 
     initialize_project(str(tmp_path), site="north orchard")
-    _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
+    _plant_malformed_registry(tmp_path)
 
     findings: list[tuple[str, str]] = []
     doctor.check_registry(tmp_path, findings)
@@ -179,13 +105,12 @@ def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
     assert "could not be checked" in findings[0][1]
 
 
-def test_a_malformed_mapping_refuses_naming_what_it_found():
+def test_a_document_other_than_the_written_mapping_refuses():
     from tcip_mcp.model_registry import _read_registry_document
 
-    with pytest.raises(RegistryVersionRefused):
-        _read_registry_document({"schema_version": 3, "entries": []})
-    with pytest.raises(RegistryVersionRefused):
-        _read_registry_document({"schema_version": 2, "entries": "not-a-list"})
+    for raw in ([], {"entries": "not-a-list"}, {"schema_version": 1, "entries": []}):
+        with pytest.raises(RegistryVersionRefused):
+            _read_registry_document(raw)
 
 
 # ── the grammar-aware external test, both spellings, both directions ───────────────────────

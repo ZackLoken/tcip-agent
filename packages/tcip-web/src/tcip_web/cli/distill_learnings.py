@@ -1,23 +1,18 @@
 """Distill worksheet: gather one project's learning record in one place.
 
-Learning lands with the project (see the `self-improvement` skill): friction goes to the friction
-reports via ``report_friction``, and end-of-work findings to the retrospectives via
-``write_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
-cheap and nothing is dropped.
+Gathers the friction reports (``report_friction``), the retrospectives (``write_retrospective``)
+and the SessionEnd capture backstop.
 
     conda activate tcip-agent
     tcip distill-learnings [--project <root>]
     tcip distill-learnings --workspace
 
 Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
-then the records themselves. It *gathers*: nothing is written, applied, or promoted anywhere; this
-stays true in ``--workspace`` mode too. ``--workspace`` gathers across every project under the TCIP
-workspace instead of one project root, and surfaces themes recurring across multiple distinct
-projects, a stronger "candidate for a platform change" signal than one project's own recurrence,
-which a single project's own accumulated friction/retrospectives could produce on its own. After
-reviewing a worksheet (either mode), call the ``record_distillation_pass`` MCP tool per project
-covered so its distillation-backlog counters reset; that's the one write in this loop, and it's
-audited, kept out of this script on purpose.
+then the records themselves. Nothing is written, applied, or promoted anywhere, in either mode.
+``--workspace`` gathers across every project under the TCIP workspace instead of one project root,
+and surfaces themes recurring across multiple distinct projects. After reviewing a worksheet
+(either mode), call the ``record_distillation_pass`` MCP tool per project covered so its
+distillation-backlog counters reset.
 """
 
 from __future__ import annotations
@@ -55,10 +50,8 @@ _WORD = re.compile(r"[a-z][a-z0-9']{2,}")
 def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, int]]:
     """Recurring words/phrases across free text: generic, no fixed vocabulary to maintain.
 
-    Unigrams and bigrams built from a stopword-filtered token stream (bigrams keep both
-    words so a real recurring phrase like "operating point" survives, not just single words).
-    Recurrence is the signal, so anything mentioned only once is dropped here; it's still
-    printed in full further down in the friction-reports/retrospectives sections either way.
+    Unigrams and bigrams built from a stopword-filtered token stream; anything mentioned only once
+    is dropped.
     """
     raw = [w for t in texts for w in _WORD.findall(t.lower())]
     counts: Counter[str] = Counter(w for w in raw if w not in _STOPWORDS)
@@ -70,9 +63,7 @@ def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, i
 
 
 def _project_token_set(*texts: str) -> set[str]:
-    """Distinct unigrams/bigrams present in one project's text: membership, not frequency. The
-    building block for cross-project recurrence (_cross_project_themes), which asks "how many
-    distinct projects", not "how many times in one project" (that's _themes' own job)."""
+    """Distinct unigrams/bigrams present in one project's text: membership, not frequency."""
     raw = [w for t in texts for w in _WORD.findall(t.lower())]
     tokens = {w for w in raw if w not in _STOPWORDS}
     tokens.update(
@@ -85,11 +76,8 @@ def _project_token_set(*texts: str) -> set[str]:
 def _cross_project_themes(
     per_project_tokens: dict[str, set[str]], top: int = 12, min_projects: int = 2
 ) -> list[tuple[str, int]]:
-    """Themes appearing in >= min_projects distinct projects' token sets.
-
-    Built from each project's own set (one project can only ever contribute 1 to a token's count,
-    no matter how many times it repeats that token internally), so a single verbose project can
-    never clear the bar alone the way a pooled frequency count over concatenated text would let it.
+    """Themes appearing in >= min_projects distinct projects' token sets; each project contributes
+    at most 1 to a token's count.
     """
     counts: Counter[str] = Counter()
     for tokens in per_project_tokens.values():
@@ -158,11 +146,8 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
 
 
 def _read_reports(project_root: Path) -> list[dict]:
-    """Every friction report of one project, decoded; an unreadable one is skipped.
-
-    The corpus, its decode and its order all come from the store's own owner rather than a
-    directory walk restated here, so this worksheet, the GUI panel and the agent's memory tool
-    read one project in one order.
+    """Every friction report of one project, decoded, in the store owner's order; an unreadable one
+    is skipped.
     """
     from tcip_mcp.tools.meta_tools import report_documents
 
@@ -182,12 +167,10 @@ def _read_retrospectives(project_root: Path) -> list:
 
 def _read_captures(project_root: Path) -> list[dict]:
     """Every SessionEnd capture entry for this project's root, through the store the hook
-    (`agent_learning_capture.py`) appends through, under whichever backend this process bound.
+    (``agent_learning_capture.py``) appends through, under whichever backend this process bound.
 
-    Importing ``tcip_mcp.web_client`` registers the log's store descriptor as a side effect,
-    the same way ``tcip_mcp.store_catalogue`` does for the commands that must cover every store.
-    An undecodable entry is excluded from what ``read_log`` returns here; that page also
-    carries a `corrupt` count of such entries this worksheet does not otherwise surface.
+    An undecodable entry is excluded from what ``read_log`` returns here; that page also carries a
+    ``corrupt`` count of such entries this worksheet does not otherwise surface.
     """
     from tcip_store import read_log
     from tcip_mcp.web_client import learning_capture_key

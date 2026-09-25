@@ -6,7 +6,7 @@ import type { Config } from "tailwindcss";
  * field-notebook paper (warm neutrals) so the Savanna Institute green and persimmon
  * feel botanical rather than "dark IDE + accent". Two tokens are held fixed because
  * the focus-ring accessibility test pins them: `tcip-bg` (#1E1E1E, the ring offset)
- * and `tcip-accent` (#507754 SI_GREEN, the ring colour). The warmth is carried by the
+ * and `tcip-accent` (#507754 SI_GREEN, the ring color). The warmth is carried by the
  * text and panel surfaces you actually look at, plus the phenology season-rail
  * signature (see SeasonRail).
  */
@@ -16,14 +16,14 @@ const config: Config = {
     extend: {
       colors: {
         "tcip-bg": "#1E1E1E", // held fixed (focus-ring offset test)
-        "tcip-canvas": "#26271F", // warm-neutral canvas host, annotation colours read true
+        "tcip-canvas": "#26271F", // warm-neutral canvas host, annotation colors read true
         "tcip-fg": "#E7E5DC", // field-notebook paper (warm off-white)
         "tcip-muted": "#8C9082", // sage gray
         "tcip-border": "#33352C", // bark border
         "tcip-panel": "#20211B", // bark panel surface
         "tcip-hover": "#282922", // warm raised hover surface (secondary controls)
         "tcip-border-hover": "#454A3B",
-        "tcip-accent": "#507754", // SI_GREEN, held fixed (focus-ring colour test)
+        "tcip-accent": "#507754", // SI_GREEN, held fixed (focus-ring color test)
         "tcip-accent-hover": "#46694A", // darker on hover: white 12px text stays AA (6.2:1)
         "tcip-warn": "#E6976B", // SI_PERSIMMON, the warm / autumn signal
         // Phenology season scale (dormant → bud → canopy → late-summer → fruit),

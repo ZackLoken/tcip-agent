@@ -70,7 +70,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
   pointTickOuter,
   scaleLineW,
 }: AnnotationShapesProps) {
-  useSubjectColors(); // re-render on a recolour: subjectColor() below is called fresh each render
+  useSubjectColors(); // re-render on a recolor: subjectColor() below is called fresh each render
   if (!renderLabels) return null;
   return (
     <>

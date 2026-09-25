@@ -151,7 +151,7 @@ describe("CoverageOverlay", () => {
     expect(fills).toHaveLength(1);
   });
 
-  it("a swept cell's dashed stroke is two-tone: a dark halo rect under the coloured one, never colour alone", () => {
+  it("a swept cell's dashed stroke is two-tone: a dark halo rect under the colored one, never color alone", () => {
     const { container } = render(
       <CoverageOverlay
         cells={[cell("A1", 0, 0, 100, 100), cell("B1", 100, 0, 200, 100)]}

@@ -1,23 +1,19 @@
 """``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``.
 
-The single build path is ``model_source``: import a dotted builder the agent wrote and call it.
-No ``exec``; the builder is imported like any module. The CV-scientist agent supplies an arbitrary
-architecture (from scratch or importing plain PyTorch blocks) through this seam. The only
-model-side contract is the measurement boundary (see ``model_contract``): whatever the model is,
-its inference output must be something the platform's library scorers can consume.
+The single build path is ``model_source``: import a dotted builder the agent wrote and call it. No
+``exec``; the builder is imported like any module. The only model-side contract is the measurement
+boundary (see ``model_contract``).
 
 ``model_source`` schema::
 
     {"builder": "my_module:build_net",     # required, 'module:function' (or 'module.function')
      "builder_kwargs": {...},              # optional, passed to the builder
      "source_files": [...],                # optional: the builder's own files; their directories
-                                           # join sys.path before the import (import_source_builder)
+                                           # join sys.path before the import
+                                           (import_source_builder)
                                            # and snapshot_model_source copies them as provenance
      "task": "detection",                  # optional, measurement/eval routing
      "in_chans": 3}                        # optional, channel-compat check
-
-At import time this reaches no further than the standard library and the storage seam; torch
-imports lazily inside the builder so MCP-server startup stays fast.
 """
 
 from __future__ import annotations
@@ -54,10 +50,8 @@ def _split_dotted(target: str) -> tuple[str, str]:
 
 
 def _import_dotted(target: object) -> Any:
-    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable.
-
-    The one refusal site for a non-string or empty ``builder``; callers pass whatever they hold
-    (typed or not) and let this guard narrow it.
+    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable;
+    a non-string or empty ``builder`` refuses.
     """
     if not isinstance(target, str) or not target:
         raise ValueError(f"builder must be a non-empty 'module:function' string, got {target!r}")
@@ -95,12 +89,9 @@ def _make_source_files_importable(source: dict) -> None:
 
     The root is resolved from the dotted ``builder`` and the file's path (:func:`_import_root`), so
     a packaged builder (``mypkg.model:build`` at ``project/mypkg/model.py``) imports from
-    ``project`` as a top-level one (``model:build`` at ``project/model.py``) does. The one place a
-    bespoke source's own directory enters the import path: the same ``sys.path`` feeds
-    :func:`child_pythonpath`, so the training subprocess, a Ray trial worker and an inference load
-    in another process all inherit the entry without each finding the directory again. A source
-    whose files do not hold the builder's module changes nothing, and a root already on the path is
-    not added twice.
+    ``project`` as a top-level one (``model:build`` at ``project/model.py``) does. A source whose
+    files do not hold the builder's module changes nothing, and a root already on the path is not
+    added twice.
     """
     import sys
 
@@ -119,10 +110,6 @@ def _make_source_files_importable(source: dict) -> None:
 def import_source_builder(source: dict) -> Any:
     """Resolve a ``model_source`` or ``dataset_source`` mapping's ``builder`` to the callable,
     making its own ``source_files`` importable first.
-
-    The one import site for a bespoke builder: preflight, the model build and the dataset build
-    all call this, so a builder that lives outside the interpreter's search path (an agent's
-    own project directory) imports here, in the training child and in the Ray worker alike.
     """
     if not isinstance(source, dict):
         raise ValueError("a builder source must be a dict carrying 'builder'")
@@ -131,23 +118,14 @@ def import_source_builder(source: dict) -> Any:
 
 
 def child_pythonpath() -> str:
-    """The ``PYTHONPATH`` string that makes this process's extra import path entries importable
-    in a child process: every non-empty ``sys.path`` entry, then the existing ``PYTHONPATH`` env
-    value appended if set, joined with ``os.pathsep``. A child process appends its own leading
-    ``sys.path`` entries first, so this string lands after them rather than reproducing this
-    process's search order.
-
-    A bespoke ``model_source``/``training_source``/``dataset_source`` importable to this
-    process (an editable install's extra path entries, a test runner's rootdir insertion, an
-    agent's own working-directory convention) is not automatically importable to a process this
-    platform spawns, or a Ray worker: neither inherits this interpreter's ``sys.path``, only its
-    own defaults plus whatever ``PYTHONPATH`` it is handed. Every caller that needs a bespoke
-    source importable across that boundary composes its child/worker environment from this.
+    """The ``PYTHONPATH`` string that makes this process's extra import path entries importable in
+    a child process or Ray worker: every non-empty ``sys.path`` entry, then the existing
+    ``PYTHONPATH`` env value appended if set, joined with ``os.pathsep``. A child process appends
+    its own leading ``sys.path`` entries first, so this string lands after them.
 
     Ray workers apply environment-variable expansion to ``env_vars`` values (a ``${NAME}`` or
     ``%NAME%`` pattern inside an entry is substituted or stripped), while the subprocess launch
-    path passes the string literally, so the two consumers agree on the composed string, not on
-    every byte reaching the interpreter.
+    path passes the string literally.
     """
     import os
     import sys
@@ -162,13 +140,9 @@ def child_pythonpath() -> str:
 def run_in_chans(model_source: Any, data_cfg: "Mapping[str, Any] | None") -> int | None:
     """The width a run reads its sources at: what its model declares (its own ``in_chans`` or its
     ``builder_kwargs``' one), else what its data config records
-    (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`), since a build that declares
-    none trained at the width its run resolved and the trainer's channel check is what would
-    otherwise have stopped it. ``None`` when neither states it, a dataset the platform did not
-    build and no width anyone recorded.
-
-    The one reader of this fact, so the contract dims, the trainer's check, the predictor and
-    preflight's channel firewall all answer from one place."""
+    (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`). ``None`` when neither states
+    it.
+    """
     ms = model_source if isinstance(model_source, dict) else {}
     bk = ms.get("builder_kwargs")
     bk = bk if isinstance(bk, dict) else {}
@@ -183,12 +157,21 @@ def run_in_chans(model_source: Any, data_cfg: "Mapping[str, Any] | None") -> int
         return None
 
 
-def build_from_model_source(model_source: dict) -> Any:
-    """Import the agent's builder and call it. Registry-free; no ``exec``.
+def run_task(config: "Mapping[str, Any]") -> str:
+    """The task a run's config names: ``model_source.task``, else ``data.task``. Raises
+    ``ValueError`` when neither states one."""
+    task = ((config.get(MODEL_SOURCE_KEY) or {}).get("task")
+            or (config.get("data") or {}).get("task"))
+    if not task:
+        raise ValueError(
+            "this config states no task: name it as model_source.task (detection, "
+            "instance_seg, classification, ...), the task the builder's model is for")
+    return task
 
-    Only ``builder`` is required to construct the model; the rest of the schema is
-    provenance / measurement metadata consumed elsewhere (the envelope snapshot, the
-    predictor's channel check, eval routing).
+
+def build_from_model_source(model_source: dict) -> Any:
+    """Import the agent's builder and call it. Registry-free; no ``exec``. Only ``builder`` is
+    required to construct the model; the rest of the schema is provenance / measurement metadata.
     """
     if not isinstance(model_source, dict):
         raise ValueError("model_source must be a dict")
@@ -214,18 +197,14 @@ def resolve_contract_dims(config: dict, task: str, *, scope: "ClassScope",
     """The dimensions a synthetic smoke batch is shaped at, or ``None`` when this run states no
     width and the caller must smoke a real batch instead.
 
-    Read from the same config the builder reads: a model with a minimum-spatial-size assumption
-    must be smoked at the size it will actually see, or a valid model false-fails. ``img_size``
-    is the tile edge when detection tiling is on (the real training input), else a safe non-tiny
-    fallback that clears typical stride-32 backbones.
+    Read from the same config the builder reads: ``img_size`` is the tile edge when detection
+    tiling is on (the real training input), else a safe non-tiny fallback that clears typical
+    stride-32 backbones.
 
     ``sizes`` is what this run resolved for its own loaders
-    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`), handed over by its caller like
-    ``scope``: preflight's own resolution before a bind, and the run's recorded sizes after one.
-    The width is :func:`run_in_chans` over it, and the count is ``scope``'s map for a scoped run
-    and the resolved class or rank count for ground truth carrying its own classes, so the smoke
-    forwards at what the run trains at rather than at a size nobody resolved. A run that carries
-    no count states none here, and the contract says whether its task needed one. The +1
+    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). The width is :func:`run_in_chans`
+    over it, and the count is ``scope``'s map for a scoped run and the resolved class or rank count
+    for ground truth carrying its own classes. A run that carries no count states none here. The +1
     background offset lives only in the loader, never here.
     """
     in_chans = run_in_chans(config.get(MODEL_SOURCE_KEY), sizes)
@@ -352,15 +331,8 @@ register_store(
 
 
 def snapshot_manifest_key(exp_dir: Path | str) -> Key:
-    """What one run's source snapshot claims to hold: the files, the env, what was missed.
-
-    A record and not a blob because it is a document the platform reads back and reasons
-    about, while the files it lists are opaque bytes. ``last_writer_wins``: one snapshot pass
-    composes the whole manifest and writes it once.
-
-    Keyed off the directory holding the experiment rather than the experiment's own directory,
-    so every experiment's records hang off the one experiments-root scope its other members
-    already use. The file lands exactly where it always did.
+    """What one run's source snapshot claims to hold: the files, the env, what was missed. A
+    record, keyed off the directory holding the experiment; ``last_writer_wins``.
     """
     directory = Path(exp_dir).resolve()
     return Key(SNAPSHOT_MANIFEST_STORE, str(directory.parent), (directory.name, "manifest"))
@@ -376,18 +348,15 @@ def snapshot_file_key(exp_dir: Path | str, content: str, filename: str) -> Key:
 
 
 def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
-    """Copy a bespoke run's model + training + dataset source into ``<exp>/model_src/`` with sha256 + env.
+    """Copy a bespoke run's model + training + dataset source into ``<exp>/model_src/`` with sha256
+    + env.
 
-    Called by the training envelope when ``model_source`` / ``training_source`` / ``data.dataset_source``
-    is set. Records the agent-written source files (each source's ``source_files`` + the builder/loop
-    module files) so the run is reproducible from importable builders, never ``exec``. Best-effort: a
-    missing file is skipped and any failure returns without raising (provenance must not sink a run),
-    but the manifest is self-describing about what it failed to capture (``missing``/``snapshot_errors``)
-    rather than silently indistinguishable from a complete one. Destination files are
-    content-addressed (``<sha256[:8]>/<basename>``), so two distinct source files sharing a basename never
-    clobber each other, and the same file reached via two different path spellings dedups to one entry
-    rather than two rows claiming the same basename with different hashes.
-    Returns the manifest, or ``None`` when there is nothing bespoke to snapshot.
+    Records the agent-written source files (each source's ``source_files`` + the builder/loop
+    module files) of ``model_source`` / ``training_source`` / ``data.dataset_source``. Best-effort:
+    a missing file is skipped and any failure returns without raising, and the manifest records
+    what it failed to capture (``missing``/``snapshot_errors``). Destination files are
+    content-addressed (``<sha256[:8]>/<basename>``). Returns the manifest, or ``None`` when there
+    is nothing bespoke to snapshot.
     """
     import hashlib
 
@@ -450,7 +419,6 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         "missing": missing,
         "snapshot_errors": snapshot_errors,
         "env": capture_env(),
-        "seed": config.get("seed"),
     }
     store.replace(snapshot_manifest_key(exp_dir), manifest)
     return manifest
@@ -459,14 +427,10 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
 def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = None) -> dict:
     """Stamp a checkpoint payload with its ``model_source`` reference, kind, and experiment id.
 
-    So a hand-rolled loop's checkpoint (via ``ctx.save_checkpoint``) and the default trainer's are
-    both reproducible, kind-routable, and traceable back to the run that produced them. Uses
-    ``setdefault``, an explicit value the caller already put in ``payload`` wins. ``experiment_id``
-    is optional: a raw/foreign checkpoint legitimately has none, so it is stamped only when known.
+    Uses ``setdefault``, so an explicit value the caller already put in ``payload`` wins.
+    ``experiment_id`` is stamped only when known.
 
-    Refuses to stamp ``kind``/``model_source`` onto a payload with no ``STATE_DICT_KEY``: that
-    stamp is what a predictor sniffs to load the checkpoint's weights, and a payload with none
-    would fail at inference with a bare ``KeyError`` naming no contract.
+    Refuses to stamp ``kind``/``model_source`` onto a payload with no ``STATE_DICT_KEY``.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 

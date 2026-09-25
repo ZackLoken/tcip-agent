@@ -12,10 +12,12 @@ import {
   isPlantMappingDisclosure,
   isPlantRegistryDisclosure,
   type DeliveryEventRecord,
-  type DocumentBinding,
-  type ReconciledDimension,
-  type ReconciledDocument,
 } from "@/api/inference";
+import type {
+  DocumentBinding,
+  ReconciledDimension,
+  ReconciledDocument,
+} from "@/api/types.generated";
 
 function bucketStatusText(binding: DocumentBinding): string {
   if (binding.ok && binding.claimed) return "verified";
@@ -37,7 +39,7 @@ function reconciliationLine(key: string, entry: ReconciledDocument | ReconciledD
 }
 
 function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
-  const buckets = Object.entries(record.documents ?? {});
+  const buckets = Object.entries(record.documents);
   return (
     <li
       className="rounded border border-tcip-border p-3"
@@ -60,7 +62,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
             <dt className="text-tcip-muted">Acknowledged by</dt>
             <dd>{record.acknowledged_by}</dd>
             <dt className="text-tcip-muted">Reason</dt>
-            <dd>{record.acknowledgement_reason}</dd>
+            <dd>{record.acknowledgment_reason}</dd>
           </>
         )}
       </dl>
@@ -77,8 +79,8 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         </div>
       )}
       {(() => {
-        const documentEntries = Object.entries(record.document_reconciliations ?? {});
-        const dimensionEntries = Object.entries(record.dimension_reconciliations ?? {});
+        const documentEntries = Object.entries(record.document_reconciliations);
+        const dimensionEntries = Object.entries(record.dimension_reconciliations);
         if (documentEntries.length === 0 && dimensionEntries.length === 0) return null;
         return (
           <div className="mt-2 flex flex-col gap-0.5">

@@ -408,11 +408,11 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     assert "error" not in result, result
 
     with caplog.at_level(logging.INFO):
-        r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+        r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", tile=True,
                                    conf_threshold=0.0)
 
     assert "error" not in r
-    assert r["tiled"] is True and len(r["results"]) == 1
+    assert r["operating_point"]["tiled"]["value"] is True and len(r["results"]) == 1
     tile_param = r["operating_point"]["tile_size"]
     assert tile_param["value"] == TILE
     assert tile_param["validated_against"] != "false"
@@ -432,9 +432,9 @@ def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
+    r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", conf_threshold=0.0)
 
-    assert r["tiled"] is False
+    assert r["operating_point"]["tiled"]["value"] is False
     assert r["operating_point"]["tile_size"]["value"] is None
 
 
@@ -451,9 +451,9 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
+    r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", conf_threshold=0.0)
 
-    assert "error" not in r and r["tiled"] is False and len(r["results"]) == 1
+    assert "error" not in r and r["operating_point"]["tiled"]["value"] is False and len(r["results"]) == 1
 
 
 def _native_frame_gt(images_dir: Path, labels_dir: Path) -> None:
@@ -725,7 +725,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+    r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", tile=True,
                                tile_size=64, conf_threshold=0.0)
 
     assert "error" in r
@@ -745,7 +745,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+    r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", tile=True,
                                tile_size=64, conf_threshold=0.0)
 
     assert "error" in r
@@ -763,7 +763,7 @@ def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_p
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+    r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", tile=True,
                                tile_size=TILE, conf_threshold=0.0)
 
     assert "error" not in r

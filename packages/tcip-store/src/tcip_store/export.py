@@ -1,15 +1,10 @@
 """Writing one root's database back out as the file layout, and saying when it is stale.
 
-Every tool that reads TCIP's state as files rather than through the seam (the data-state
-doctor, an archive, an auditor tailing a log) keeps working under a database backend because
-this module puts the bytes back where each store's locator says they belong. It is the one
-sanctioned writer of database-owned record and log files, and it writes through the file
-backend's staging and durable-directory helpers, below the public write API where the
-file-backend conform rail sits, so the rail never fires on an export by construction.
+This module is the sanctioned writer of database-owned record and log files, through the file
+backend's staging and durable-directory helpers, below its public write API.
 
-The counters are the other half: a store's ``change_counter`` moves on every write and its
-``exported_counter`` only here, so a reader of the files can ask whether what it is about to
-read is what the database currently holds, instead of assuming.
+A store's ``change_counter`` moves on every write and its ``exported_counter`` only here, so a
+reader of the files can ask whether they are what the database currently holds.
 """
 
 from __future__ import annotations
@@ -105,9 +100,7 @@ def read_store_states(db_path: Path) -> dict[str, StoreState]:
 
 def stale_stores(db_path: Path, stores: tuple[str, ...] | None = None) -> tuple[str, ...]:
     """The named stores (or every written store) whose files are behind the database, sorted.
-
-    ``stores`` names what a particular reader reads; None asks about everything the database
-    holds, which is what a bundle carrying the whole tree needs.
+    ``stores`` names what a particular reader reads; None asks about everything the database holds.
     """
     states = read_store_states(db_path)
     considered = states.values() if stores is None else [states[s] for s in stores if s in states]
@@ -122,15 +115,11 @@ def export_root(
 ) -> RootExport:
     """Write one root's database-held records and logs back out as files.
 
-    The order is fixed and each step exists for a failure it prevents. Everything is collected
-    from one read snapshot, so no store's files straddle a concurrent write. Every logical
-    key's target path is computed and compared before a single file changes, so a key that
-    would land on another store's file is caught rather than acted on. Records and log files
-    are written through the file backend's own staging, so an export's bytes reach disk exactly
-    the way a file-backend write would. Deletions are driven by tombstones alone and never by
-    enumerating a directory, because locator shapes collide and enumeration would sweep away a
-    neighbouring store's file. The stamps come last, one short write transaction per store,
-    each landing only if that store has not moved since it was read.
+    In order: everything is collected from one read snapshot; every logical key's target path is
+    computed and compared before a single file changes; records and log files are written through
+    the file backend's own staging; deletions are driven by tombstones alone, never by enumerating
+    a directory; the stamps come last, one short write transaction per store, each landing only if
+    that store has not moved since it was read.
     """
     directory = require_absolute_root(root)
     db_path = database_file(root)
@@ -171,7 +160,7 @@ def _collect(conn: sqlite3.Connection, root: str) -> tuple[_Collected, ...]:
             raise StoreError(
                 f"{root} holds rows for store {store!r}, which nothing has registered, so "
                 "there is no locator to write them back out with. Import "
-                "tcip_mcp.store_catalogue, which imports the module that declares it, before "
+                "tcip_mcp.store_catalog, which imports the module that declares it, before "
                 "exporting."
             ) from exc
         records = tuple(
@@ -229,12 +218,7 @@ def _target(
 def _refuse_colliding_targets(
     collected: tuple[_Collected, ...], directory: Path, root: str
 ) -> None:
-    """Refuse before any file changes if two logical keys name one file.
-
-    Thirteen stores share the ``.tcip/state`` json shape, so a mis-parted key maps cleanly onto
-    another store's file. Caught here it costs an operator a message; acted on it would have
-    one store's bytes overwrite another's, or a tombstone delete a live record.
-    """
+    """Refuse before any file changes if two logical keys name one file."""
     claimed: dict[str, tuple[str, tuple[str, ...], str]] = {}
     for item in collected:
         logical = [(parts, "record") for parts, _ in item.records]
@@ -292,11 +276,9 @@ def _write_file(files: FileBackend, path: Path, data: bytes, durable: bool) -> N
 def _stamp(
     conn: sqlite3.Connection, item: _Collected, written: tuple[int, int, tuple[str, ...]]
 ) -> StoreExport:
-    """Record that this store's files are current, unless it moved while they were written.
-
-    Its own short write transaction, never the read snapshot the files came from: a snapshot
-    upgraded to a write raises a conflict class no busy timeout covers. The stamp and the
-    tombstone prune are bookkeeping and bump no counter, so an export cannot invalidate itself.
+    """Record that this store's files are current, unless it moved while they were written, in its
+    own short write transaction. The stamp and the tombstone prune are bookkeeping and bump no
+    counter.
     """
     records_written, logs_written, deleted = written
     conn.execute("begin immediate")

@@ -47,7 +47,7 @@ describe("useBandSelection", () => {
     expect(useStore.getState().bandSelection.byBandSet).toEqual({});
   });
 
-  it("returns null for a plain colour frame, and its setter writes nothing", () => {
+  it("returns null for a plain color frame, and its setter writes nothing", () => {
     const { result } = renderHook(() => useBandSelection(bandsResponse(RGBA)));
     const [selection, setSelection] = result.current;
     expect(selection).toBeNull();

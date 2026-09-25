@@ -2,18 +2,18 @@
 
 The dataset's subject registry is a single nested ``<dataset_root>/subjects.json`` describing every
 subject, its attributes, and their value names: never integer ids or colors (a label references
-these names; an id is a per-training-run artifact and a color is GUI-local). Shape::
+these names; an id is a per-training-run artifact and a color is GUI-local). Shape, with ``tree``
+as an example subject::
 
     {
-      "bush":      {"description": "one plant crown"},
+      "tree":      {"description": "one tree crown"},
       "<subject>": {"description": "...",
                     "attributes": {"<attribute>": {"type": "categorical",
                                                     "values": ["<value1>", "<value2>"]}}}
     }
 
-Read/written through :mod:`tcip_mcp.subject_registry` (the one registry authority), so the GUI and the
-agent tools agree by construction. The registry travels with the image set: a name-based label is
-undecodable without it.
+Read/written through :mod:`tcip_mcp.subject_registry`. The registry travels with the image set: a
+name-based label is undecodable without it.
 """
 
 from __future__ import annotations
@@ -37,10 +37,9 @@ router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
 def _guard_dataset_root(root: str) -> str:
-    """Confine a resolved dataset root to the allowed image roots (no-op unless ``TCIP_IMAGE_ROOTS``
-    is set): the same lockdown the rest of the backend applies to absolute reads. The single choke
-    point every ``subjects.py`` route resolves through, so a new caller can't forget it the way a
-    route-local guard could."""
+    """Confine a resolved dataset root to the allowed roots
+    (:func:`tcip_web.paths.assert_path_allowed`).
+    """
     from tcip_web.paths import assert_path_allowed
 
     try:
@@ -61,17 +60,11 @@ def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a dataset-native GUI mutation in that dataset's own audit log: this module's own
-    ``image_status.json`` and ``subjects.json`` writes.
+    """Record a dataset-native GUI mutation (this module's own ``image_status.json`` and
+    ``subjects.json`` writes) in that dataset's own audit log.
 
-    Both are dataset-native, not project-private (a dataset can be opened by more than one
-    project, see ``dataset_layout.image_status_path`` and ``dataset_layout.dataset_root_of``), so
-    there is no single project's audit log a write here unambiguously belongs to. Colocating the
-    trail with the state it describes, rather than guessing a project, is deliberate. A failed
-    append raises ``AuditEntryNotWritten``: the mutation has already committed by the time this
-    runs, so the caller answers the gap rather than have it pass as silently recorded. Every
-    caller (``save_subjects``, ``set_image_status``, ``set_image_status_bulk``) refuses a falsy root before calling this, so there is no
-    empty-scope case here to guard against.
+    A failed append raises ``AuditEntryNotWritten``: the mutation has already committed by the time
+    this runs.
     """
     from tcip_web.routes.audit_gap import record_committed
 
@@ -105,16 +98,13 @@ def load_subjects(
     """Load the dataset's nested subject registry.
 
     Resolution: the dataset's saved ``subjects.json`` -> else a draft registry of the subjects
-    actually present in the labels (detection-only, no attributes) -> else empty. Returns
-    ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable": [paths]}``:
-    ``version`` is the stored registry's compare-and-set token when one was saved, else ``None`` (a
-    draft or empty registry names nothing to assert against); ``unreadable`` names every
-    per-image label file under ``annotations_dir`` that would not read, scanned whether or not a
-    registry is saved (a saved registry answers the subject list on its own, but a corrupt label
-    file is still worth surfacing to the breeder), and left out of a draft subject scan
-    rather than aborting it. A save posting this ``version`` back is refused with 409 if the stored
-    registry has moved on since; a save posting ``None`` is an unconditional write, since it names
-    no version to assert against.
+        actually present in the labels (detection-only, no attributes) -> else empty. Returns
+        ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable":
+        [paths]}``: ``version`` is the stored registry's compare-and-set token when one was saved,
+        else ``None``; ``unreadable`` names every per-image label file under ``annotations_dir``
+        that would not read, scanned whether or not a registry is saved, and left out of a draft
+        subject scan. A save posting this ``version`` back is refused with 409 if the stored
+        registry has moved on since; a save posting ``None`` is an unconditional write.
     """
     from tcip_mcp.subject_registry import (
         RegistryError,
@@ -165,19 +155,12 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     """Write the dataset's subject registry through :func:`subject_registry.replace_registry`.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
-    declares: the GUI's own save is additive by construction (see ``AnnotateToolbar``), so a drop
-    arriving here means the browser held a stale registry, and the refusal names what it would
-    have lost. Also refuses (400) a same-values attribute type change (categorical to ordinal or
-    back): this route never passes ``allow_type_changes`` (nor ``allow_removals``) to
-    :func:`~tcip_mcp.subject_registry.replace_registry`, so the GUI has no door for either and
-    always refuses; a deliberate flip is stated through ``write_subject_registry`` instead. Refuses
-    (409) a stale ``version``. Changing a subject's attribute vocabulary
-    invalidates the confirmations made under the old one, so once the write lands the outgoing
-    digest is recorded onto that subject's still-unstamped confirmations; they then read as
-    predating the change instead of as made under the new vocabulary. That never blocks the write
-    it accompanies; what it stamped, the confirmations that now predate the vocabulary in effect
-    (a confirmation already stamped, whether by this write or an earlier one, whose digest is not
-    the subject's new digest), and any warning, ride back in ``schema_change_sweep``.
+    declares, naming what it would have lost. Also refuses (400) a same-values attribute type
+    change (categorical to ordinal or back): this route passes neither ``allow_type_changes`` nor
+    ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
+    ``version``. Once the write lands, the outgoing digest is recorded onto the changed subject's
+    still-unstamped confirmations; what it stamped, the confirmations that now predate the
+    vocabulary in effect, and any warning, ride back in ``schema_change_sweep``.
     """
     from tcip_store import Version, VersionConflict
 
@@ -239,8 +222,7 @@ class ImageStatusPayload(BaseModel):
 
 
 def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str:
-    """``_resolve_dataset_root``, but a write must locate the dataset or fail loudly (mirrors
-    ``save_subjects``): a silent fallback would write a human's Complete nowhere anyone reads it."""
+    """``_resolve_dataset_root``, but a write must locate the dataset or fail."""
     root = _resolve_dataset_root(dataset_root, annotations_dir)
     if not root:
         raise HTTPException(400, "cannot locate the dataset to record image status against; "
@@ -250,14 +232,14 @@ def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 def _load_status_store(dataset_root: str) -> dict[str, dict[str, str]]:
     """The dataset's status store, normalized. Absence is an empty store; a store that will not
-    decode is a 500 rather than an empty answer, because reading it as empty would tell the
-    breeder their confirmations are gone."""
+    decode is a 500.
+    """
     from tcip_store import DecodeError, read
 
-    from tcip_mcp.dataset_layout import image_status_key, normalize_status_store
+    from tcip_mcp.dataset_layout import image_status_key, status_tokens
 
     try:
-        return normalize_status_store(read(image_status_key(dataset_root), default={}))
+        return status_tokens(read(image_status_key(dataset_root), default={}))
     except DecodeError as exc:
         raise HTTPException(500, f"the image status store under {dataset_root} "
                                  f"does not decode: {exc}") from exc
@@ -270,10 +252,7 @@ def _bucket(subject: str | None, date: str | None) -> str:
 
 
 def _require_bucket(subject: str | None, date: str | None) -> str:
-    """``_bucket``, but a deliberate image-status write (single or bulk) must be scoped to a real
-    subject or fail loudly (mirrors ``_require_dataset_root``): the "" bucket a missing subject
-    silently falls back to is one ``get_image_status`` never returns anything meaningful for, so
-    the write would land nowhere anyone reads it back from."""
+    """``_bucket``, but an image-status write (single or bulk) must name a real subject or fail."""
     if not subject:
         raise HTTPException(400, "cannot record image status with no subject; pass a subject")
     return _bucket(subject, date)
@@ -281,16 +260,14 @@ def _require_bucket(subject: str | None, date: str | None) -> str:
 
 def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
                   image_names: Iterable[str]) -> bool | None:
-    """Record the subject's current attribute-schema digest against each of ``image_names``, so a
-    later read can tell a confirmation made under a since-changed schema from one still valid.
+    """Record the subject's current attribute-schema digest against each of ``image_names``.
+
     Never blocks the status write: an unreadable registry, an absent one, or a failure writing the
-    sidecar itself just leaves these images unstamped (admitted, not quarantined, on read; see
-    ``stale_finished_names``), because the status the human recorded is already committed by the
-    time this runs. Returns ``None`` when there was nothing to stamp (no subject, no
-    ``subjects.json``, an unreadable or subject-less registry), not a failure, since no
-    confirmation was ever asserted against a schema that says nothing about this subject;
-    ``True`` once the stamp lands, and ``False`` only when the write itself raised, so a caller
-    can tell a mark it is about to clear still describes reality."""
+    sidecar itself leaves these images unstamped (admitted, not quarantined, on read; see
+    ``stale_finished_names``). Returns ``None`` when there was nothing to stamp (no subject, no
+    ``subjects.json``, an unreadable or subject-less registry); ``True`` once the stamp lands, and
+    ``False`` only when the write itself raised.
+    """
     if not subject:
         return None
     from tcip_mcp.subject_registry import attribute_schema_digest, read_registry
@@ -414,12 +391,9 @@ class DerivePayload(BaseModel):
 def derive_image_status(payload: DerivePayload) -> dict:
     """Compute initial per-image status from the per-image label files.
 
-    The mapping itself is ``dataset_layout.derive_status``, the same one the review tab's Complete
-    goes through, so the two cannot disagree about what a Complete on an empty image means.
-    ``has_content`` is scoped to ``subject`` through ``annotations_hold_subject``, the predicate
-    the review route's own Complete derives its token through. An image whose label file would
-    not read is left out of ``statuses`` and its label document's path is reported in
-    ``unreadable`` instead: one bad file costs that image, never the whole batch.
+    The mapping itself is ``dataset_layout.derive_status``, with ``has_content`` scoped to
+    ``subject`` through ``annotations_hold_subject``. An image whose label file would not read is
+    left out of ``statuses`` and its label document's path is reported in ``unreadable`` instead.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
 

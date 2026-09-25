@@ -1,6 +1,6 @@
 """bucket_content_digest: the content identity a delivery recomputes over the buckets it reads.
 
-Behaviour, not surface: any change to a bucket's prediction files that happened before the delivery
+Behavior, not surface: any change to a bucket's prediction files that happened before the delivery
 began is detected, a provenance stamp written beside them is not a change to what was counted, and
 the memo that keeps one delivery from hashing a bucket twice never survives into the next call.
 """

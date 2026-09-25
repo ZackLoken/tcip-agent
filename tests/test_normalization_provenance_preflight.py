@@ -245,7 +245,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25), "the draw is the fixture"
     drawn = read_selection(out)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]
-    assert len({s.member_stem for s in bound}) < len(bound), (
+    assert len({s.member for s in bound}) < len(bound), (
         "the fixture must hold one member name on two dates for this to bite")
     assert {Path(s.source).parent.name for s in bound} == set(DATES)
 

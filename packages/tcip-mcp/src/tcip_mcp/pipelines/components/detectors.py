@@ -50,14 +50,10 @@ def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, .
 
 
 def _probe_in_chans(adapter: Any) -> int | None:
-    """A *hint* at the input band count, from the first ``Conv2d`` in registration order.
+    """A hint at the input band count, from the first ``Conv2d`` in registration order.
 
-    Only ever consulted when the caller passes no ``in_chans``, and never allowed to contradict
-    one. ``modules()`` yields in attribute-assignment order, which says nothing about the forward
-    graph: an adapter that registers its neck first reports the neck's width, and one that
-    band-projects N bands through a 1x1 conv into a pretrained 3-channel backbone reports whichever
-    conv was assigned first. Treating this as authoritative both blocks correct builds and lets
-    wrong ones through, so it stays a fallback. ``None`` when there is no conv at all.
+    Consulted only when the caller passes no ``in_chans``, and never allowed to contradict one:
+    registration order says nothing about the forward graph. ``None`` when there is no conv at all.
     """
     for module in adapter.modules():
         if isinstance(module, nn.Conv2d):
@@ -71,10 +67,8 @@ def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
 
     torchvision's ``GeneralizedRCNNTransform`` defaults to 3-element ImageNet statistics and
     broadcasts them against a ``[C, H, W]`` input, so any ``C != 3`` raises inside the transform
-    with an error naming no channel concept. Nothing is synthesized here: per-band statistics are a
-    property of the dataset, so an N-channel build without them is refused rather than normalized
-    against numbers the platform picked. Derive them with
-    ``pipelines.derivations.band_normalization_stats`` and pass them.
+    with an error naming no channel concept. An N-channel build without per-band statistics is
+    refused; derive them with ``pipelines.derivations.band_normalization_stats`` and pass them.
     """
     # The caller is authoritative: only they know the band count, and the probe is a registration-
     # order guess that is wrong for band-projection and neck-first adapters alike.
@@ -252,10 +246,8 @@ def _accepted_kwargs(name: str) -> set[str]:
 def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
     """Instantiate a detector builder by name.
 
-    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, so a
-    mistyped or inapplicable key cannot leave the parameter it was meant to set at a pinned default
-    with no error and no record. Accepted keys are the builder's own plus the torchvision detector
-    class's, which the builder forwards: the library's real surface, not a shorter list of it.
+    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg. Accepted
+    keys are the builder's own plus the torchvision detector class's, which the builder forwards.
 
     An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std`` of that length;
     see ``_normalization``.

@@ -237,16 +237,14 @@ def compute_class_weights(
 ) -> torch.Tensor:
     """Per-class loss weights from a class-count distribution.
 
-    Schemes: ``balanced`` (sklearn-style ``total/(n_present*count)``, the same
-    inverse-frequency formula ``ClassBalancedSampler`` uses), ``inverse``
-    (``1/count``), or ``effective`` (Cui et al. 2019, ``(1-beta)/(1-beta**count)``).
-    Zero-count classes get weight 1.0. When ``normalize``, weights are rescaled so
-    the mean over present classes is 1.0.
+    Schemes: ``balanced`` (sklearn-style ``total/(n_present*count)``), ``inverse`` (``1/count``),
+        or ``effective`` (Cui et al. 2019, ``(1-beta)/(1-beta**count)``). Zero-count classes get
+        weight 1.0. When ``normalize``, weights are rescaled so the mean over present classes is
+        1.0.
 
     ``num_classes`` unstated is the count the distribution itself implies
-    (:func:`~tcip_mcp.pipelines.derivations.num_classes_from_distribution`), so a weight vector
-    and a run's loaders are sized by one rule; a distribution that counted nothing implies no
-    classes and weights none.
+    (:func:`~tcip_mcp.pipelines.derivations.num_classes_from_distribution`); a distribution that
+    counted nothing implies no classes and weights none.
     """
     if num_classes is None:
         num_classes = num_classes_from_distribution(class_distribution)
@@ -310,10 +308,9 @@ def build_loss(
     """Build a loss by name, or parse combined like 'bce+dice'.
 
     When ``class_distribution`` is supplied and the loss is weightable
-    (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
-    tensor is injected unless ``weight`` was passed explicitly. Supplying it for a loss that
-    cannot consume it raises rather than dropping it: imbalance handling that silently vanishes
-    is worse than a build that refuses.
+    (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight`` tensor is
+    injected unless ``weight`` was passed explicitly. Supplying it for a loss that cannot consume
+    it raises.
 
     In a combined loss each keyword goes to the terms whose constructor accepts it, so a per-term
     hyperparameter (``weight`` for the CE term, ``smooth`` for the dice term) reaches its own term

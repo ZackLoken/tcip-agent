@@ -94,12 +94,12 @@ def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(tmp_path
         list_subjects(root)
 
 
-def test_declared_subjects_and_subjects_labelled_on_a_date_are_not_interchangeable(
+def test_declared_subjects_and_subjects_labeled_on_a_date_are_not_interchangeable(
     tmp_path: Path,
 ) -> None:
     """The date's own labels, not the registry, decide what a date offers.
 
-    A subject the registry declares but that nobody has labelled on the selected date lands the
+    A subject the registry declares but that nobody has labeled on the selected date lands the
     user on an empty canvas, so the two lists are different facts and each has its own source.
     """
     root = tmp_path

@@ -1,16 +1,11 @@
 """Task-agnostic training loop for a bespoke ``model_source`` model.
 
-This trainer works with *any* task type (detection, classification,
-ordinal, regression, segmentation) because it delegates everything
-to the model's forward() which returns a loss dict in train mode.
+This trainer works with any task type (detection, classification, ordinal, regression,
+segmentation) because it delegates everything to the model's forward() which returns a loss dict in
+train mode.
 
-Provides: TensorBoard, JSONL metrics, progressive unfreezing,
-early stopping, mixed precision, gradient accumulation, checkpoints.
-
-The run registry (``TrainRun``, create/attach/get/list/cancel_run) lives in
-``run_registry.py``; the collate functions (``task_collate`` and friends) live in
-``collation.py``; ``checkpoint_key``/``write_checkpoint``/``RUN_CHECKPOINT_STORE`` are this
-module's own persistence concern, distinct from either.
+Provides: TensorBoard, JSONL metrics, progressive unfreezing, early stopping, mixed precision,
+    gradient accumulation, checkpoints.
 """
 
 from __future__ import annotations
@@ -20,7 +15,6 @@ import logging
 import math
 import random
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +25,7 @@ from torch.utils.data import DataLoader
 from tcip_store import Key, StoreDescriptor, register_store, store, stored_numbers
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.pipelines.data.datasets import instance_targets
+from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
 from tcip_mcp.pipelines.model_contract import TCIPModel
 from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
@@ -41,12 +35,16 @@ from tcip_mcp.pipelines.model_build import (
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_mcp.pipelines.schemas import DEFAULT_BATCH_SIZE
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
     VAL_METRIC_PREFIX,
     evaluate,
 )
 from tcip_mcp.pipelines.training.optimizer_factory import (
+    DEFAULT_BACKBONE_LR,
+    DEFAULT_HEAD_LR,
+    DEFAULT_WEIGHT_DECAY,
     build_optimizer,
     compute_lr_scale,
     restore_optimizer_state,
@@ -79,12 +77,7 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
 
 
 def capture_rng_state() -> dict[str, Any]:
-    """Snapshot the four generator streams set_seed seeds, restorable with restore_rng_state.
-
-    Lets a caller that reseeds transiently (the overfit diagnostic) put the generators back
-    exactly where a concurrent caller left them, rather than leaving the process-global streams
-    seeded after a voluntary check.
-    """
+    """Snapshot the four generator streams set_seed seeds, restorable with restore_rng_state."""
     return {
         "python_rng_state": random.getstate(),
         "numpy_rng_state": np.random.get_state(),
@@ -96,7 +89,7 @@ def capture_rng_state() -> dict[str, Any]:
 def restore_rng_state(state: dict[str, Any]) -> None:
     """Restore generator state captured by capture_rng_state."""
     torch.set_rng_state(state["torch_rng_state"])
-    if torch.cuda.is_available() and state.get("cuda_rng_state") is not None:
+    if state["cuda_rng_state"] is not None:
         torch.cuda.set_rng_state_all(state["cuda_rng_state"])
     np.random.set_state(state["numpy_rng_state"])
     random.setstate(state["python_rng_state"])
@@ -142,41 +135,62 @@ def seeded_loader_kwargs(seed: int | None, num_workers: int | None = None) -> di
     return kwargs
 
 
+def run_transforms(config: dict) -> Any:
+    """The training transforms ``config["augmentation"]`` declares, or ``None`` for none."""
+    if not config.get("augmentation"):
+        return None
+    from tcip_mcp.pipelines.data.augmentations import build_augmentation
+
+    return build_augmentation(config["augmentation"])
+
+
+def run_loaders(config: dict, task: str, train_ds: Any, val_ds: Any, seed: int | None
+                ) -> tuple[DataLoader, DataLoader | None]:
+    """A run's train loader and, when ``val_ds`` is given, its val loader, at the config's
+    ``batch_size`` (:data:`~tcip_mcp.pipelines.schemas.DEFAULT_BATCH_SIZE` when unstated),
+    ``num_workers`` and ``sampler``, seeded from ``seed``."""
+    from tcip_mcp.pipelines.data.samplers import build_sampler
+    from tcip_mcp.pipelines.training.collation import task_collate
+
+    batch_size = config.get("batch_size", DEFAULT_BATCH_SIZE)
+    num_workers = config.get("num_workers", 0)
+    loader_kwargs = seeded_loader_kwargs(seed, num_workers=num_workers)
+    # Built after the loader context is known: read order depends on the worker regime too.
+    sampler = build_sampler(config.get("sampler", "random"), train_ds,
+                            num_workers=num_workers, batch_size=batch_size)
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler,
+        collate_fn=task_collate(task), num_workers=num_workers, **loader_kwargs)
+    val_loader = None if val_ds is None else DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, collate_fn=task_collate(task),
+        num_workers=num_workers, **loader_kwargs)
+    return train_loader, val_loader
+
+
 def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict | None:
     """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place, or
     ``None`` for a dataset the platform did not build.
 
     A run whose loaders came from a bespoke ``data.dataset_source`` builder stamps nothing and
     answers ``None``: this reads a dataset's own tile attributes and probes its sources, and a
-    bespoke dataset that exposes none of them is a dataset this function cannot measure, not one
-    serving untiled frames. Stamping ``{"enabled": False}`` there would record a geometry nobody
-    measured onto the checkpoint every predictor and every tiled-eval default reads back. The
-    fact's absence is the honest record, and every reader of the stamp already reads it with a
-    default.
+    bespoke dataset exposes none of them.
 
-    ``data_cfg`` is the live ``config["data"]`` dict the run persists (checkpoints embed the
-    run config by reference; an HPO trial's resolved-config snapshot is written from the
-    trial's tracked config, so a mutation this function makes lands in that snapshot only when
-    ``data_cfg`` is reached through the tracked tree), so this must run after the dataset is
-    built and before training starts.
+    ``data_cfg`` is the live ``config["data"]`` dict the run persists, so this must run after the
+    dataset is built and before training starts.
 
     A tiled train dataset (one carrying a ``tile_size``) stamps its effective
     ``tile_size``/``overlap`` into the tiling record, filling in defaults the caller's config
-    omitted. An untiled one replaces the tiling record with ``{"enabled": False}`` outright,
-    never a merge: a requested-but-unrealized ``tile_size`` surviving in the persisted config
-    would read back as the frame the model trained on (predictor tile geometry, contract-dim
-    resolution, tiled-eval defaults).
+    omitted. An untiled one replaces the tiling record with ``{"enabled": False}`` outright, never
+    a merge.
 
     ``train_native_size``: an untiled run whose training frames all share one size stamps
-    ``data_cfg["train_native_size"] = [width, height]``; mixed sizes stamp nothing, since
-    there is no single native frame to record. Tiled runs stamp nothing here either: their
-    native frame is the tile, and the stamped ``tile_size`` already carries it. Probing is
-    header-only for the common containers (``image_dimensions``) and needs the dataset's
-    source list; a dataset that exposes none cannot be probed, so nothing is stamped.
+        ``data_cfg["train_native_size"] = [width, height]``; mixed sizes stamp nothing. Tiled runs
+        stamp nothing here either: the stamped ``tile_size`` carries their frame. Probing is
+        header-only for the common containers (``image_dimensions``) and needs the dataset's source
+        list.
 
-    Returns the stamped facts, ``{"tiling": dict, "tiling_replaced": bool,
-    "train_native_size": [w, h] | None}``, so a caller can mirror the identical stamp into a
-    durable experiment record instead of re-deriving it.
+    Returns the stamped facts, ``{"tiling": dict, "tiling_replaced": bool, "train_native_size": [w,
+    h] | None}``.
     """
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
@@ -202,7 +216,7 @@ def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict | None:
 def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
     """The one ``(width, height)`` every training source shares, or ``None`` when sizes differ,
     a source cannot be probed, or the dataset exposes no source list to probe."""
-    stems = getattr(train_ds, "stems", None)
+    stems = sorted(indexed_sample_keys(train_ds))
     resolve = getattr(train_ds, "_resolve_path", None)
     if not stems or resolve is None:
         return None
@@ -220,27 +234,6 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
         elif (int(dims[0]), int(dims[1])) != size:
             return None
     return size
-
-
-# ====================================================================
-# TrainConfig
-# ====================================================================
-
-@dataclass
-class TrainConfig:
-    """Constructor-time config carrier for ``launch_training``'s data-loader setup.
-
-    Only ``sampler``/``batch_size``/``num_workers`` are ever read off an instance, the
-    trainer itself reads every other setting straight from ``run.config`` (see ``train()``'s own
-    ``config.get(...)`` calls), so this dataclass does not double as a config record. Do not add a
-    field here expecting ``train()`` to honor it; wire it into ``run.config`` instead.
-    """
-    model_source: dict
-    dataset: dict           # {task, images_dir, labels_dir, ...}
-    augmentation: dict = field(default_factory=dict)
-    sampler: str = "random"
-    batch_size: int = 4
-    num_workers: int = 2
 
 
 RUN_CHECKPOINT_STORE = "run_checkpoint"
@@ -283,12 +276,19 @@ def write_checkpoint(payload: dict, key: Key) -> Path:
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
-    """One epoch's metrics normalized the one way every destination stores them
-    (:func:`stored_numbers`): a checkpoint's own ``metrics`` field (the three stamp sites in this
-    module) and the run's metrics log row (``envelope.TrainContext._epoch_sink``, which calls
-    this too) agree by construction, so a diverged run's ``nan`` reads back as ``null`` plus a
-    state companion on both, never as a value the log accepted and the checkpoint refused."""
+    """One epoch's metrics normalized the way every destination stores them
+    (:func:`stored_numbers`): a diverged run's ``nan`` reads back as ``null`` plus a state
+    companion.
+    """
     return stored_numbers(metrics)
+
+
+_RESUME_KEYS = (
+    STATE_DICT_KEY, "optimizer_state_dict", "scheduler_state_dict", "scaler_state_dict",
+    "stage", "stage_epoch", "epoch", "best_metric", "es_best", "es_counter", "global_step",
+    "torch_rng_state", "numpy_rng_state", "python_rng_state", "cuda_rng_state",
+)
+"""The resume contract: every key :func:`_save_checkpoint` writes and a resume reads."""
 
 
 def _save_checkpoint(
@@ -296,18 +296,14 @@ def _save_checkpoint(
     stage_idx: int, stage_epoch: int, run: "TrainRun",
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
-    """Write a resumable periodic checkpoint.
-
-    ``GenericPredictor`` reads the model reference (``model_source``), the weights and the width
-    this run recorded on its config, so those three are what a payload must carry to be predicted
-    from.
+    """Write a resumable periodic checkpoint carrying ``model_source``, the weights and the run's
+    width.
     """
-    write_checkpoint(stamp_model_ref({
+    state = {
         STATE_DICT_KEY: model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
         "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
-        "config": config,
         "stage": stage_idx,
         "stage_epoch": stage_epoch,
         "epoch": run.current_epoch,
@@ -315,11 +311,11 @@ def _save_checkpoint(
         "es_best": es_best,
         "es_counter": es_counter,
         "global_step": global_step,
-        "seed": seed,
-        "metrics": _checkpoint_metrics(metrics),
-        # Full RNG state at save time, so a resume can pick the streams up exactly where
-        # they were rather than silently re-seeding from stream position zero.
         **capture_rng_state(),
+    }
+    write_checkpoint(stamp_model_ref({
+        **{k: state[k] for k in _RESUME_KEYS}, "config": config, "seed": seed,
+        "metrics": _checkpoint_metrics(metrics),
     }, config), key)
 
 
@@ -377,31 +373,23 @@ def resolve_selection_metric(
     task: str, trait: str | None, requested: str | None, *, has_val_loader: bool = True,
 ) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
-    both ``model_best.pt`` and early stopping, deliberately the same key for both.
+    both ``model_best.pt`` and early stopping.
 
-    Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit
-    ``requested`` is honored, except it is rejected when ``trait`` is a center-match trait and
-    ``requested`` names a metric that trait's own localization criterion demotes to
-    comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``).
+    Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit ``requested``
+        is honored, except it is rejected when ``trait`` is a center-match trait and ``requested``
+        names a metric that trait's own localization criterion demotes to comparability-only
+        (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``).
 
-    Reads the trait's recorded localization kind (``TraitSpec.localization`` is derived
-    once from real GT and persisted, never authored). This runs at preflight time, before any GT is
-    loaded, so it cannot itself derive a kind, an unrecorded kind (``spec.localization == ""``, a
-    trait never yet calibrated/evaluated against real data) means nothing is known yet, so no
-    metric is rejected here; ``resolve_match_criterion`` is what fills the recording in the first
-    time real GT is available, and every later preflight call sees it.
+    Reads the trait's recorded localization kind (``TraitSpec.localization``); an unrecorded kind
+    (``spec.localization == ""``) rejects nothing here.
 
     A resolved metric (default or explicit) with no declared ranking direction
-    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected: ``model_best.pt`` and early
-    stopping both compare by whichever direction this metric improves, and a direction guessed
-    from the key's spelling is exactly the defect this declaration exists to remove.
+    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected.
 
-    ``has_val_loader``: every metric but ``"loss"`` needs a validation pass to exist at all, so a
-    run with no validation loader can only select on ``"loss"`` (the training loss); anything
-    else, including the ``"objective"``/``"loss"`` default itself, is rejected rather than
-    silently degraded to the training loss at selection time. Defaults to ``True`` for a caller,
-    such as ``preflight_config``, that has not built a loader yet and so cannot state the fact
-    either way; ``train()`` passes the real ``val_loader is not None``.
+    ``has_val_loader``: every metric but ``"loss"`` needs a validation pass, so a run with no
+        validation loader can only select on ``"loss"`` (the training loss); anything else,
+        including the ``"objective"`` default, is rejected. Defaults to ``True`` for a caller that
+        has not built a loader yet.
     """
     default = "objective" if task in ("detection", "instance_seg") else "loss"
     resolved = requested or default
@@ -433,21 +421,27 @@ def resolve_selection_metric(
     return resolved
 
 
+def config_selection_metric(config: dict, *, has_val_loader: bool = True) -> str:
+    """:func:`resolve_selection_metric` for a run config: its task
+    (:func:`~tcip_mcp.pipelines.model_build.run_task`) and its ``evaluation`` block's ``trait``
+    and ``selection_metric``."""
+    from tcip_mcp.pipelines.model_build import run_task
+
+    eval_cfg = config.get("evaluation") or {}
+    return resolve_selection_metric(run_task(config), eval_cfg.get("trait"),
+                                    eval_cfg.get("selection_metric"),
+                                    has_val_loader=has_val_loader)
+
+
 def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
     """Best-model/early-stopping driver: ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
 
-    Raises when the resolved selection metric is not among this epoch's validation metrics: a
-    task/trait mismatch (the metric the run asked for is not one this task's ``evaluate()``
-    produces), since silently substituting a different number here can win the selection
-    comparison under a name nobody chose. The one exception is ``metric == "loss"`` with no
-    validation pass at all (``val_metrics`` empty, ``resolve_selection_metric`` already refused
-    any other metric for such a run): the training loss ``avg_loss`` is what it means to select
-    on loss with nothing to validate against.
+    Raises when the resolved selection metric is not among this epoch's validation metrics. The one
+    exception is ``metric == "loss"`` with no validation pass at all (``val_metrics`` empty): the
+    training loss ``avg_loss`` answers.
 
-    A present value of ``None`` (evaluation.stored_number already normalized a diverged metric
-    to ``null`` plus a state companion) comes back as ``nan``, not ``None``: every comparison
-    and rounding this value goes through already treats a non-finite candidate as never
-    improving, the same convention a raw diverged float would get, and ``None`` has neither.
+    A present value of ``None`` (a diverged metric ``evaluation.stored_number`` normalized to
+    ``null``) comes back as ``nan``, which never improves.
     """
     key = f"{VAL_METRIC_PREFIX}{metric}"
     if key in val_metrics:
@@ -470,9 +464,8 @@ def _is_scalar_metric(value: Any) -> bool:
 
 def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
     """Whether ``candidate`` beats ``incumbent`` as a selection value, in the direction the run's
-    selection metric actually improves in. The one comparison ``model_best.pt``, the per-stage
-    optimizer-state handoff, and early stopping all make, so a higher-is-better metric (``f1``)
-    and a lower-is-better one (``loss``) are never compared the same way by accident."""
+    selection metric improves in.
+    """
     return candidate > incumbent if higher_is_better else candidate < incumbent
 
 
@@ -483,11 +476,10 @@ def apply_stage_freeze(
     """Apply a stage's progressive-unfreeze policy and return the resulting trainable-param count.
 
     ``freeze_to``: ``0`` (or a model with no ``freeze_backbone``) trains everything; ``<0`` freezes
-    all backbone stages; ``>0`` freezes up to that stage, best-effort, a bespoke model need not
-    expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
-    unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow it).
-    Shared so a hand-rolled ``train(ctx)`` gets the identical policy and guard the default
-    trainer uses.
+        all backbone stages; ``>0`` freezes up to that stage, best-effort, a bespoke model need not
+        expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
+        unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow
+        it).
     """
     if not freeze_to or not hasattr(model, "freeze_backbone"):
         for p in model.parameters():
@@ -540,43 +532,37 @@ def train(
     run: TrainRun,
     train_loader: DataLoader,
     val_loader: DataLoader | None = None,
-    task: str = "detection",
+    *,
+    task: str,
     epoch_callback=None,
     resume_from: str = "",
 ) -> TrainRun:
     """Execute a task-agnostic training run.
 
     The model is built from run.config["model_source"] via build_model().
-    ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the
-    run's metrics log and, under HPO, the pruner: this loop composes the row and hands it over
-    rather than writing a log of its own, so one sink decides where a row lands. It may raise
-    to abort the run (e.g. ``optuna.TrialPruned``).
+    ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the run's
+    metrics log and, under HPO, the pruner. It may raise to abort the run (e.g.
+    ``optuna.TrialPruned``).
 
-    This is the canonical, ground-truth list of every ``run.config`` key this function reads
-    (every other surface, e.g. ``preflight_config``'s docstring and the training skill's
-    example, points here rather than re-deriving its own copy). ``run.config`` is an open dict,
-    not a fixed schema (``TrainConfigSchema``/``StageSpec`` both keep ``extra="allow"``), a bespoke
-    ``model_source``/``dataset_source``/``training_source`` may read its own additional keys this
-    function never touches.
+    Every ``run.config`` key this function reads; ``run.config`` is an open dict
+    (``TrainConfigSchema`` keeps ``extra="allow"``), and a bespoke
+    ``model_source``/``dataset_source``/``training_source`` may read its own additional keys:
 
     - ``device`` (str, default cuda-if-available else cpu)
-    - ``batch_size`` (int), only as a fallback when ``train_loader`` itself has no ``.batch_size``
-      (the DataLoader's own batch size, set at construction, is the primary source).
+    - ``batch_size`` (int), only as a fallback when ``train_loader`` itself has no ``.batch_size``.
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
-      build. ``create_run`` already draws and records a seed when none is configured, so
-      ``seed`` is never actually ``None`` here in practice.
+      build.
     - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
-    - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored,
-      see ``optimizer`` below), default a single 10-epoch full-unfreeze stage.
-    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default
-      adamw/1e-4/1e-3/1e-4), the one source of learning rate, applied uniformly across
-      every stage.
+    - ``stages`` (list of ``{freeze_to, epochs}``), default a single 10-epoch full-unfreeze stage.
+    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default adamw/1e-4/1e-3/1e-4),
+      the one source of learning rate, applied uniformly across every stage.
     - ``scheduler`` (``{type, ...}``; ``type`` in cosine/plateau/onecycle/step, default cosine).
     - ``lr_scaling`` (``{enabled, reference_effective_batch, scale_power, max_lr}``, default
       disabled), effective-batch LR scaling at stage boundaries.
-    - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default True).
-    - ``gradient_accumulation_steps`` (int, default 1; a stage may override its own), and a
-      per-stage ``gradient_accumulation_steps`` override.
+    - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default
+      True).
+    - ``gradient_accumulation_steps`` (int, default 1), and a per-stage
+      ``gradient_accumulation_steps`` override.
     - ``checkpoint_every_n_epochs`` (int, default 5), periodic resumable checkpoints.
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
@@ -584,8 +570,7 @@ def train(
       max_dets, score_weights}``, all optional). ``trait`` and ``selection_metric`` drive
       ``resolve_selection_metric``; the rest pass through to ``_validate``/``evaluate``.
 
-    Every key sits at the top level of the config; there is no nested ``training`` section and
-    ``preflight_config`` refuses one by name.
+    Every key sits at the top level of the config.
     """
     config = run.config
     run.status = "running"
@@ -628,22 +613,22 @@ def train(
         use_amp = config.get("mixed_precision", True) and device.type == "cuda"
         scaler = torch.amp.GradScaler(device.type) if use_amp else None
 
-        opt_cfg = config.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4})
+        opt_cfg = config.get("optimizer", {})
         sched_cfg = config.get("scheduler", {"type": "cosine"})
 
         # Progressive-unfreezing fidelity setup.
-        base_backbone_lr = opt_cfg.get("backbone_lr", 1e-4)
-        base_head_lr = opt_cfg.get("head_lr", 1e-3)
+        base_backbone_lr = opt_cfg.get("backbone_lr", DEFAULT_BACKBONE_LR)
+        base_head_lr = opt_cfg.get("head_lr", DEFAULT_HEAD_LR)
         lr_scaling_cfg = config.get("lr_scaling", {})
         stage_warmup_epochs = int(config.get("stage_warmup_epochs", 0))
         enforce_monotonic_unfreeze = config.get("enforce_monotonic_unfreeze", True)
-        physical_batch = getattr(train_loader, "batch_size", None) or config.get("batch_size") or 1
+        physical_batch = (getattr(train_loader, "batch_size", None)
+                          or config.get("batch_size", DEFAULT_BATCH_SIZE))
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
         eval_cfg = config.get("evaluation") or {}
         trait = eval_cfg.get("trait")
-        selection_metric = resolve_selection_metric(
-            task, trait, eval_cfg.get("selection_metric"), has_val_loader=val_loader is not None)
+        selection_metric = config_selection_metric(config, has_val_loader=val_loader is not None)
         run.best_metric_name = selection_metric
         # The losing-side sentinel for this run's own direction: any real value beats it.
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[selection_metric]
@@ -663,33 +648,28 @@ def train(
         resume_stage_epoch = 0
         ckpt = None
         if resume_from:
-            ckpt = torch.load(resume_from, map_location=device, weights_only=False)
-            missing = [k for k in (STATE_DICT_KEY, "optimizer_state_dict") if k not in ckpt]
-            if missing:
-                # Fail loudly instead of silently restarting from scratch.
+            # On CPU: the RNG byte tensors must stay there, and load_state_dict moves the rest.
+            loaded = torch.load(resume_from, map_location="cpu", weights_only=False)
+            # The contract's one read: every restore below indexes this projection, never loaded.
+            try:
+                ckpt = {k: loaded[k] for k in _RESUME_KEYS}
+            except KeyError:
+                missing = [k for k in _RESUME_KEYS if k not in loaded]
                 raise ValueError(
-                    f"Cannot resume from {resume_from}: checkpoint is missing {missing} "
-                    "(a non-resumable checkpoint, e.g. model_best.pt, which never carries resume "
-                    "state). Resume "
+                    f"Cannot resume from {resume_from}: checkpoint is missing {missing}. Resume "
                     "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
-                )
+                ) from None
             model.load_state_dict(ckpt[STATE_DICT_KEY])
-            resume_stage = ckpt.get("stage", 0)
-            resume_stage_epoch = ckpt.get("stage_epoch", 0)
-            run.current_epoch = ckpt.get("epoch", 0)
-            run.best_metric = ckpt.get("best_metric", run.best_metric)
-            es_best = ckpt.get("es_best", es_best)
-            es_counter = ckpt.get("es_counter", es_counter)
-            global_step = ckpt.get("global_step", 0)
-            # Restore RNG state after the fresh `set_seed()` call above (never skip that
-            # call, it also configures cudnn.deterministic/benchmark) so the resumed streams
-            # overwrite the freshly-seeded ones rather than starting over from stream position
-            # zero. A checkpoint carrying no RNG state degrades to the fresh seed instead.
-            if "torch_rng_state" in ckpt:
-                restore_rng_state(ckpt)
-                run.rng_state_restored = True
-            else:
-                run.rng_state_restored = False
+            resume_stage = ckpt["stage"]
+            resume_stage_epoch = ckpt["stage_epoch"]
+            run.current_epoch = ckpt["epoch"]
+            run.best_metric = ckpt["best_metric"]
+            es_best = ckpt["es_best"]
+            es_counter = ckpt["es_counter"]
+            global_step = ckpt["global_step"]
+            # After the fresh set_seed() above, which also configures cudnn, so the resumed
+            # streams overwrite the freshly-seeded ones.
+            restore_rng_state(ckpt)
             logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
                         resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
 
@@ -733,7 +713,7 @@ def train(
                 model,
                 backbone_lr=stage_backbone_lr,
                 head_lr=stage_head_lr,
-                weight_decay=opt_cfg.get("weight_decay", 1e-4),
+                weight_decay=opt_cfg.get("weight_decay", DEFAULT_WEIGHT_DECAY),
             )
 
             # Hand off momentum from the previous stage's best epoch.
@@ -763,14 +743,11 @@ def train(
             start_epoch = 0
             if stage_idx == resume_stage and ckpt is not None:
                 start_epoch = resume_stage_epoch
-                try:
-                    optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-                    if scheduler is not None and ckpt.get("scheduler_state_dict") is not None:
-                        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-                    if scaler is not None and ckpt.get("scaler_state_dict") is not None:
-                        scaler.load_state_dict(ckpt["scaler_state_dict"])
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Resume: optimizer/scheduler restore failed (%s); using fresh state.", exc)
+                optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                if scheduler is not None:
+                    scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+                if scaler is not None:
+                    scaler.load_state_dict(ckpt["scaler_state_dict"])
                 ckpt = None
 
             for epoch in range(start_epoch, stage_epochs):
@@ -971,8 +948,8 @@ def train(
         if diverged:
             logger.info("Training run %s stopped: %s", run.id, run.error)
         elif run.should_cancel():
-            run.status = "cancelled"
-            logger.info("Training run %s cancelled at epoch %d", run.id, run.current_epoch)
+            run.status = "canceled"
+            logger.info("Training run %s canceled at epoch %d", run.id, run.current_epoch)
         else:
             run.status = "completed"
 

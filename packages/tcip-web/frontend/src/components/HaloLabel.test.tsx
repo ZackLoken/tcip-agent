@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("HaloLabel", () => {
-  it("renders AnnotateTab's usage (a shape label) as a black halo behind the subject-colour fill", () => {
+  it("renders AnnotateTab's usage (a shape label) as a black halo behind the subject-color fill", () => {
     const { getAllByTestId } = render(
       <HaloLabel x={10} y={20} text="tree" fill="#33cc33" size={11} />,
     );

@@ -143,7 +143,7 @@ def build_overviews(path: str | Path,
             f"{path} already fits the display bound ({DISPLAY_MAX_EDGE}px longest edge); there "
             "is no overview level to build")
 
-    def cancelled(fraction: float) -> bool:
+    def canceled(fraction: float) -> bool:
         return progress_cb is not None and progress_cb(fraction) is False
 
     def abandon(reason: str) -> None:
@@ -151,8 +151,8 @@ def build_overviews(path: str | Path,
             sidecar.unlink()
         raise RuntimeError(reason)
 
-    if cancelled(0.0):
-        abandon(f"overview build for {path} cancelled before it started")
+    if canceled(0.0):
+        abandon(f"overview build for {path} canceled before it started")
 
     child = subprocess.Popen(
         [sys.executable, "-c", _BUILD_CHILD, str(path), ",".join(str(v) for v in levels)],
@@ -161,10 +161,10 @@ def build_overviews(path: str | Path,
     while child.poll() is None:
         time.sleep(_BUILD_POLL_SECONDS)
         grown = sidecar.stat().st_size if sidecar.exists() else 0
-        if cancelled(min(grown / predicted, 0.99)):
+        if canceled(min(grown / predicted, 0.99)):
             child.terminate()
             child.wait(timeout=30)
-            abandon(f"overview build for {path} cancelled")
+            abandon(f"overview build for {path} canceled")
     if child.returncode != 0:
         assert child.stderr is not None, "stderr=subprocess.PIPE was passed to Popen above"
         abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")

@@ -1,12 +1,9 @@
 """The storage seam's public surface: module functions bound to one backend per process.
 
-Every operation takes a ``Key``, never a path, and every write takes its key's lock inside
-the call rather than around it, so there is no write form that can skip the lock. The
-module functions hold the rules that must mean the same thing on every backend (kind and
-key validation, the concurrency policy, the transaction-misuse rules) and delegate the
-storage itself to the bound backend, so each operation has exactly one implementation.
-The one exception is :func:`close_connections`: a process-lifecycle operation over every
-key the bound backend has ever touched, never one key of its own.
+The module functions hold the rules that must mean the same thing on every backend (kind and key
+validation, the concurrency policy, the transaction-misuse rules) and delegate the storage itself
+to the bound backend. :func:`close_connections` is a process-lifecycle operation over every key the
+bound backend has touched.
 """
 
 from __future__ import annotations
@@ -42,10 +39,8 @@ class Txn(Protocol):
     """A transaction's handle: reads and staged writes over exactly the keys it holds."""
 
     def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
-        """One of the transaction's keys, including this transaction's own staged write.
-
-        A key the transaction does not hold raises ``TransactionMisuse``: an unheld read
-        inside a transaction is the lost update the seam exists to prevent.
+        """One of the transaction's keys, including this transaction's own staged write. A key the
+        transaction does not hold raises ``TransactionMisuse``.
         """
         ...
 
@@ -103,13 +98,8 @@ _open_transaction = threading.local()
 
 
 def bind(backend: Store) -> None:
-    """Bind this process's backend, at an entry point: the MCP server, the web backend, a
-    training subprocess, a test fixture.
-
-    A backend that cannot provide a guarantee it would have to declare refuses at its own
-    construction with ``BackendUnavailable``. There is no degraded mode: a storage layer
-    that quietly falls back to in-process locking has stopped providing the one thing it
-    exists for.
+    """Bind this process's backend, at an entry point. A backend that cannot provide a guarantee it
+    would have to declare refuses at its own construction with ``BackendUnavailable``.
     """
     global _bound
     _bound = backend
@@ -139,24 +129,13 @@ def capabilities() -> Capabilities:
 def close_connections() -> None:
     """Close every connection the bound backend holds, on every thread.
 
-    A process-lifecycle operation, not a per-key one: the callers are an entry point
-    closing the instance its own startup opened before another instance takes over
-    (``tcip_web/__main__.py``), and two console commands that walk a workspace and rename
-    project directories out from under a backend that must hold no open handle while a
-    rename is in flight (``tcip_mcp.project_removal.complete_pending_removals``,
-    ``tcip_mcp.project_rename.complete_pending_renames``). Refuses
-    with ``TransactionMisuse`` inside an open transaction, the same rule ``replace`` and
-    ``delete`` hold, since a transaction's own connection cannot be closed out from under it.
+    Refuses with ``TransactionMisuse`` inside an open transaction.
 
-    The sqlite backend closes every connection of every root and every thread: a connection
-    is opened with ``check_same_thread=False``, so closing one while another thread is
-    inside a statement on it kills the process, and a thread that fetched a connection from
-    the slot cache just before this call meets a ``ProgrammingError`` on its next use. The
-    caller guarantees no other thread is inside the seam for the call's duration; the
-    thread-local transaction guard here sees only the calling thread's own transaction and
-    cannot check that guarantee for it. The file backend holds nothing between operations, so
-    its own ``close`` releases nothing; both exist so a binder has one lifecycle method to call
-    regardless of which backend is bound.
+    The sqlite backend closes every connection of every root and every thread: a connection is
+    opened with ``check_same_thread=False``, so closing one while another thread is inside a
+    statement on it kills the process. The caller guarantees no other thread is inside the seam for
+    the call's duration; the thread-local transaction guard here sees only the calling thread's own
+    transaction. The file backend's own ``close`` releases nothing.
     """
     _refuse_inside_transaction("close_connections", _CLOSES_UNDER_ANOTHER_THREAD)
     _backend().close()
@@ -222,11 +201,8 @@ def read_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
 
 
 def exists(key: Key) -> bool:
-    """Whether the record or blob exists, without reading it.
-
-    A check, not a guard: a create-only write is ``replace(..., expect=Version.ABSENT)``,
-    one call, no window. This answers the question a caller has about a multi-gigabyte blob
-    it does not want to read.
+    """Whether the record or blob exists, without reading it. A create-only write is ``replace(...,
+    expect=Version.ABSENT)``.
     """
     backend = _backend()
     validate_key(key, expect_kind=("record", "blob"), operation="exists")
@@ -236,15 +212,13 @@ def exists(key: Key) -> bool:
 def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
     """Replace one record whole, atomically, and return its new version.
 
-    Acquires the key's lock for the whole call, across threads and across OS processes. The
-    acquisition is inside this call, never around it, so no caller can write without taking
-    it, whether or not ``expect`` is given.
+    Acquires the key's lock for the whole call, across threads and across OS processes, whether or
+    not ``expect`` is given.
 
     ``expect`` compares against the stored version re-read under the lock: a mismatch raises
-    ``VersionConflict`` with nothing written. ``Version.ABSENT`` writes only if no record
-    exists, which is how a create-once record is expressed. ``None`` is an unconditional
-    replace under the lock, and is refused with ``PolicyViolation`` on a store that declares
-    ``concurrency='cas'``.
+    ``VersionConflict`` with nothing written. ``Version.ABSENT`` writes only if no record exists,
+    which is how a create-once record is expressed. ``None`` is an unconditional replace under the
+    lock, and is refused with ``PolicyViolation`` on a store that declares ``concurrency='cas'``.
 
     Raises ``TransactionMisuse`` if the calling thread holds an open transaction.
     """
@@ -256,10 +230,8 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
 
 
 def delete(key: Key, *, expect: Version | None = None) -> None:
-    """Remove the record or blob. Absence is not an error.
-
-    Same locking, ``expect``, concurrency-policy and transaction-misuse rules as
-    ``replace``: dropping an entry another writer just changed is a lost update too.
+    """Remove the record or blob. Absence is not an error. Same locking, ``expect``,
+    concurrency-policy and transaction-misuse rules as ``replace``.
     """
     backend = _backend()
     validate_key(key, expect_kind=("record", "blob"), operation="delete")
@@ -272,27 +244,21 @@ def delete(key: Key, *, expect: Version | None = None) -> None:
 def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
     """Serialize a read-modify-write over exactly ``keys``, across threads and processes.
 
-    Name every key the body will touch, up front. Locks are acquired in an order derived
-    from the keys themselves, so two callers naming the same set in different orders cannot
-    deadlock. Reads inside see a consistent view of those keys, including this
-    transaction's own staged writes; writes are applied on a clean exit, in the order the
-    keys were named, not the order they were written. An exception inside applies nothing.
+    Name every key the body will touch, up front. Locks are acquired in an order derived from the
+    keys themselves, so two callers naming the same set in different orders cannot deadlock. Reads
+    inside see a consistent view of those keys, including this transaction's own staged writes;
+    writes are applied on a clean exit, in the order the keys were named, not the order they were
+    written. An exception inside applies nothing.
 
-    A thread holds at most one transaction; opening a second raises ``TransactionMisuse``
-    naming the multi-key form. Two nested transactions on one file backend would both
-    succeed on a counted lock and then the inner write would be overwritten by the outer
-    apply, while on a database backend the inner one would commit separately.
+    A thread holds at most one transaction; opening a second raises ``TransactionMisuse`` naming
+    the multi-key form.
 
-    Every named key hangs off one root, compared through ``canonical_path`` so two
-    spellings of one directory are one root; keys from two roots raise ``TransactionMisuse``
-    naming them. A backend that holds one database per root has no place to commit the
-    second root's write from inside the first root's transaction.
+    Every named key hangs off one root, compared through ``canonical_path`` so two spellings of one
+    directory are one root; keys from two roots raise ``TransactionMisuse`` naming them.
 
-    What this does not promise on a file backend: all-or-nothing application across more
-    than one key. A crash during the apply can leave a prefix of the named key order on
-    disk, each record individually intact and decodable. A caller needing crash consistency
-    across two records orders them so a crash leaves a detectably stale state rather than a
-    falsely consistent one, or asks ``capabilities().multi_key_atomic_commit`` and refuses.
+    On a file backend this does not promise all-or-nothing application across more than one key: a
+    crash during the apply can leave a prefix of the named key order on disk, each record
+    individually intact and decodable. ``capabilities().multi_key_atomic_commit`` says which.
 
     Raises ``StoreBusy`` naming the contended key if the locks are not acquired in time.
     """
@@ -331,9 +297,8 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
 def keys(store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
     """Every key in ``store`` under ``root`` whose parts begin with ``prefix``, sorted.
 
-    Raises ``ListingUnsupported`` naming the store when its descriptor declares no
-    enumeration, rather than returning an empty list that reads as "none". Backend
-    bookkeeping is never returned as a key.
+    Raises ``ListingUnsupported`` naming the store when its descriptor declares no enumeration.
+    Backend bookkeeping is never returned as a key.
     """
     backend = _backend()
     descriptor = get_descriptor(store)
@@ -348,14 +313,11 @@ def keys(store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
 def append(key: Key, record: Mapping[str, Any]) -> None:
     """Append one entry to an append-only log, durably.
 
-    Returns only once the entry will survive a crash of this process and is readable by
-    another process. Concurrent appenders from any process are serialized, so entries are
-    never interleaved or lost. ``replace`` and ``delete`` against a log key raise
-    ``WrongKind``: append-only is enforced by the interface, not by convention.
+    Returns only once the entry will survive a crash of this process and is readable by another
+    process. Concurrent appenders from any process are serialized, so entries are never interleaved
+    or lost. ``replace`` and ``delete`` against a log key raise ``WrongKind``.
 
-    Raises ``TransactionMisuse`` if the calling thread holds an open transaction: a
-    transaction names records, and an entry that returned durable is not one a rollback of
-    somebody else's body may take back.
+    Raises ``TransactionMisuse`` if the calling thread holds an open transaction.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="append")
@@ -366,13 +328,12 @@ def append(key: Key, record: Mapping[str, Any]) -> None:
 def read_log(key: Key, *, after: str | None = None) -> LogPage:
     """Entries after the cursor ``after`` (from the start when None), plus a new cursor.
 
-    See ``LogPage`` for the torn-tail and interior-corruption reporting. The cursor is
-    opaque: a byte offset here, a commit-ordered sequence number under a database, which is
-    what lets an incremental metrics tail survive a backend change.
+    See ``LogPage`` for the torn-tail and interior-corruption reporting. The cursor is opaque: a
+    byte offset under the file backend, a commit-ordered sequence number under a database.
 
-    On the file backend this waits for any other holder of the same key: an append in
-    flight, a clear, or another reader, since the key's lock is exclusive. The database
-    backend's read waits on no writer at all.
+    On the file backend this waits for any other holder of the same key: an append in flight, a
+    clear, or another reader, since the key's lock is exclusive. The database backend's read waits
+    on no writer at all.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="read_log")
@@ -382,32 +343,15 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
 def clear_log(key: Key) -> int:
     """Remove every entry from an append-only log and report how many entries it held.
 
-    For a one-off operator clearing development-era history before a root reaches its
-    intended readers, never a runtime path: nothing in the platform's own doors calls this.
-    Not a format change: the store's kind, codec and
-    schema_version ceiling are exactly what they were before and after, since only entries
-    are removed and the next ``append`` starts a log identical in shape to the one this
-    replaced; ``frozen-formats.json`` names no row for this operation because it changes
-    none of the fields that manifest states.
-
-    A cursor taken before this call stays comparable to one taken after it: replaying it
-    against the log this call leaves behind returns exactly the entries appended since the
-    clear, never the cleared ones and never a misreading of new bytes as damaged, on either
+    A cursor taken before this call stays comparable to one taken after it: replaying it against
+    the log this call leaves behind returns exactly the entries appended since the clear, on either
     backend.
 
-    An exception from this call on the file backend leaves the log in one of two states,
-    never something between them. Raised before the unlink (staging the pending watermark,
-    or the unlink itself failing) leaves every entry exactly where it was: the clear never
-    committed, and the next append or clear_log on this log discards the stale stage it
-    left behind. Raised after the unlink leaves the entries gone and only the cursor
-    watermark pending, and the next append or clear_log installs it before doing anything
-    else. Either way a caller that retries or moves on sees a log consistent with which of
-    the two already happened.
+    An exception from this call on the file backend leaves either every entry where it was (the
+    next append or clear_log discards the stale stage) or the entries gone with only the cursor
+    watermark pending (the next append or clear_log installs it first).
 
-    Raises ``TransactionMisuse`` if the calling thread holds an open transaction, checked
-    here in the seam before either backend is called, matching ``append``: a log is not
-    transactional on either backend, and neither backend's own ``clear_log`` carries this
-    check itself.
+    Raises ``TransactionMisuse`` if the calling thread holds an open transaction.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="clear_log")
@@ -418,10 +362,8 @@ def clear_log(key: Key) -> int:
 def read_blob_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
     """A blob's bytes and its version token, read together so the pair cannot straddle a write.
 
-    The token is the input to ``put_blob(expect=...)`` and ``write_blob(expect=...)``, which is
-    how a caller that loads a blob, edits it and writes it back gets a compare-and-set instead
-    of a check-then-act. ``default`` answers absence the way ``read_versioned`` does, paired
-    with ``Version.ABSENT`` so a caller can write create-only against what it read. A blob too
+    The token is the input to ``put_blob(expect=...)`` and ``write_blob(expect=...)``. ``default``
+    answers absence the way ``read_versioned`` does, paired with ``Version.ABSENT``. A blob too
     large to hold in memory is read with ``open_blob`` instead, which carries no token.
     """
     backend = _backend()
@@ -432,11 +374,10 @@ def read_blob_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
 def put_blob(key: Key, data: bytes, *, expect: Version | None = None) -> Version:
     """Write a blob whole, atomically, and return the version derived from its bytes.
 
-    ``expect`` compares against the stored version re-read under the same lock the write
-    takes: a mismatch raises ``VersionConflict`` with nothing written, and the prior bytes
-    stay readable. ``Version.ABSENT`` writes only if no blob exists, which is how a
-    capture-once artifact is expressed in one call rather than an existence check with a
-    window after it. ``None`` is an unconditional write under the lock.
+    ``expect`` compares against the stored version re-read under the same lock the write takes: a
+    mismatch raises ``VersionConflict`` with nothing written, and the prior bytes stay readable.
+    ``Version.ABSENT`` writes only if no blob exists. ``None`` is an unconditional write under the
+    lock.
     """
     backend = _backend()
     validate_key(key, expect_kind="blob", operation="put_blob")
@@ -459,15 +400,12 @@ def write_blob(key: Key, *, expect: Version | None = None) -> AbstractContextMan
 
 
 def put_blob_from_path(key: Key, source: Path | str, *, expect: Version | None = None) -> Version:
-    """Write a blob whose bytes already sit in a file on disk, streamed through rather than
-    read whole into memory first, for a producer whose source can be a large raster.
+    """Write a blob whose bytes already sit in a file on disk, streamed through ``write_blob``
+    rather than read whole into memory first.
 
-    A facade over ``write_blob``, not a new backend operation: ``expect`` is checked under the
-    key's lock before any byte moves, the destination is fsynced before the replace, and a
-    failure partway through the copy leaves the previous bytes untouched, exactly as
-    ``write_blob`` already guarantees. The version returned hashes the bytes as they stream
-    through, matching the content-hash every backend derives a blob's version from, rather than
-    a second read taken once the lock has released.
+    ``expect`` is checked under the key's lock before any byte moves, the destination is fsynced
+    before the replace, and a failure partway through the copy leaves the previous bytes untouched.
+    The version returned hashes the bytes as they stream through.
     """
     hasher = hashlib.sha256()
     with write_blob(key, expect=expect) as dst, open(source, "rb") as src:
@@ -486,14 +424,9 @@ def open_blob(key: Key) -> AbstractContextManager[BinaryIO]:
 
 
 def blob_path(key: Key) -> Path:
-    """A real filesystem path for the blob, for a library that cannot take a file object.
-
-    Capability-gated twice over: the bound backend must declare ``local_blob_paths`` and the
-    store's descriptor must declare itself path-readable. Both are declarations a reviewer
-    can grep, which is what keeps this from becoming the escape hatch every
-    library-integration site reaches for. A backend that would have to download the bytes
-    to answer does not declare the capability, and the callers holding a path are then the
-    ones that must be converted.
+    """A real filesystem path for the blob, for a library that cannot take a file object. Requires
+    the bound backend to declare ``local_blob_paths`` and the store's descriptor to declare itself
+    path-readable.
     """
     backend = _backend()
     descriptor = validate_key(key, expect_kind="blob", operation="blob_path")

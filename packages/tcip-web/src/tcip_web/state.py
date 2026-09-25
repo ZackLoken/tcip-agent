@@ -28,10 +28,8 @@ class GuiMutationInvalid(ValueError):
 
 
 class GuiVocabulary(BaseModel):
-    """``active_tab`` and ``mode``, held together as one small model rather than the whole of
-    :class:`GuiState`, for ``tools/generate_frontend_types.py`` to project into
-    ``frontend/src/api/types.generated.ts``. ``store/types.ts``'s ``Mode`` takes the ``mode``
-    field's type from the generated module instead of restating the literal union by hand.
+    """``active_tab`` and ``mode`` as one model, projected into
+    ``frontend/src/api/types.generated.ts`` by ``tools/generate_frontend_types.py``.
     """
 
     active_tab: ActiveTab
@@ -48,7 +46,7 @@ class DatasetSelection(BaseModel):
 
     project_root: Optional[str] = None
     dataset_root: Optional[str] = None
-    subject: Optional[str] = None          # e.g. "bush"
+    subject: Optional[str] = None          # e.g. "tree"
     date: Optional[str] = None             # e.g. "2-11-26"
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
@@ -83,11 +81,9 @@ class ReviewFilters(BaseModel):
 class GuiState(BaseModel):
     """Complete GUI state, persisted to gui.json and broadcast to browsers.
 
-    Only the *backend-authoritative* slice (``dataset``) meaningfully round-trips:
-    the browser owns navigation / view / mode / class / review-filter state and
-    keeps its own copy (the FE merges snapshots rather than replacing), so those
-    fields here are advisory. Training-run / inference-job / class-registry state
-    lives with the corresponding tabs, not here.
+    Only the backend-authoritative slice (``dataset``) meaningfully round-trips: the browser owns
+    navigation / view / mode / class / review-filter state and keeps its own copy, so those fields
+    here are advisory.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -132,12 +128,8 @@ class StateStore:
     @property
     def binding_generation(self) -> Optional[int]:
         """The ``canvas_open_binding`` generation the last ``/dataset/select`` recorded, or
-        ``None`` before any select has run this process.
-
-        Held here rather than re-read from the binding store on every broadcast: the envelope
-        (:func:`tcip_web.app.state_snapshot_message`) reads this in-process value on the event
-        loop, and :meth:`set_binding_generation` is the only writer, called by the same select
-        that wrote the binding record.
+        ``None`` before any select has run this process. An in-process value;
+        :meth:`set_binding_generation` is its writer.
         """
         return self._binding_generation
 
@@ -147,14 +139,8 @@ class StateStore:
     def refresh_binding_generation_from_record(self) -> None:
         """Re-read ``canvas_open_binding`` and adopt whatever generation it currently names.
 
-        The in-process value :meth:`set_binding_generation` writes is memory only, so nothing
-        moves it when the record changes for a reason outside this process's own select: a
-        deleted record, an export/adopt pass, or a second web process's own bump. Call this at
-        startup and before every WS connect-time replay (never per broadcast, which stays
-        memory-fed) so a rendezvous with a browser always answers from the durable record rather
-        than an in-memory value that a change like that would otherwise leave stale forever. A
-        read failure degrades to ``None``, the same answer an absent record gives, since either
-        way this process has nothing current to report.
+        Call at startup and before every WS connect-time replay. A read failure degrades to
+        ``None``, the same answer an absent record gives.
         """
         try:
             binding = read(canvas_open_binding_key(create=False), default=None)
@@ -278,14 +264,10 @@ class StateStore:
     def load_from_disk(self, project_root: Path) -> bool:
         """Load a previous snapshot from ``<project_root>/.tcip/state/gui.json``.
 
-        Returns ``True`` if a snapshot was loaded, ``False`` otherwise. Called when
-        a project becomes known (dataset select) so backend state survives a restart.
-        An absent snapshot is the ordinary first-open answer and returns quietly; one that
-        exists and will not decode is logged, because that is a project losing state it had.
-        A snapshot that will not decode also drops the state held in memory back to
-        ``GuiState()`` defaults: without this, the previously open project's state would stay
-        live under the new project's root and the next mutation would flush it into the new
-        project's own gui.json.
+        Returns ``True`` if a snapshot was loaded, ``False`` otherwise. An absent snapshot returns
+        quietly; one that exists and will not decode is logged, and also drops the state held in
+        memory back to ``GuiState()`` defaults, so the previously open project's state never
+        flushes into the new project's own gui.json.
         """
         try:
             data = read(gui_snapshot_key(project_root), default=None)

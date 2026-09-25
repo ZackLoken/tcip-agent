@@ -37,8 +37,7 @@ export interface RegionCompleteness {
   activeComplete: ReadonlySet<string>;
   /** Cells attested complete for the active subject on the current grid but now stale. */
   activeStale: ReadonlySet<string>;
-  /** The active subject's scale provenance per attested cell, on the current grid; empty for a
-   *  cell attested before this field existed. */
+  /** The active subject's scale provenance per attested cell, on the current grid. */
   activeCellsAttestedView: Readonly<Record<string, CellAttestedView>>;
   /** Cells attested complete for another subject on the current grid, stale ones excluded. */
   otherComplete: ReadonlySet<string>;

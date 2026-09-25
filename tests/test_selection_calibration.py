@@ -1,5 +1,5 @@
 """Inference-side binding to a named selection: the calibration universe is the selection's
-third, calibration side under the labels directory the door names, instead of every labelled
+third, calibration side under the labels directory the door names, instead of every labeled
 stem with an image.
 """
 
@@ -81,7 +81,7 @@ def test_selection_calibration_universe_holds_only_the_calibration_side(tmp_path
     root = _two_date_dataset(tmp_path / "ds")
     drawn = _draw(root, tmp_path / "m")
 
-    stems, group_by, group_key_map, excluded, _samples = \
+    stems, group_by, group_key_map, excluded, _counts, _samples = \
         selection_calibration_universe(drawn, _labels_dir(root))
 
     assert set(stems) == set(_calibration_this_date(drawn))
@@ -250,7 +250,7 @@ def test_a_selection_restricted_calibration_reads_its_own_recorded_sources(tmp_p
         Image.new("RGB", (IMG, IMG), color=(5, 5, 5)).save(decoy / f"{stem}.jpg")
 
     labels_dir = _labels_dir(root)
-    stems, _gb, _gkm, _excl, samples = \
+    stems, _gb, _gkm, _excl, _counts, samples = \
         selection_calibration_universe(drawn, str(labels_dir))
 
     assert stems
@@ -422,22 +422,6 @@ def test_calibrate_operating_point_selection_conflicts_with_group_by(tmp_path: P
             **_CAL_KWARGS)
 
 
-def test_calibrate_operating_point_selection_requires_images_dir(tmp_path: Path):
-    """A labels-only universe can include a stem whose image is gone, a lock the redraw would
-    address that no selection-restricted calibration ever draws; refuse by name rather than raise
-    a bare ``KeyError`` out of the stem-to-image narrowing."""
-    import tcip_mcp.pipelines.calibration as calibration
-
-    root = _two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-
-    with pytest.raises(ValueError, match="images_dir"):
-        calibration.calibrate_operating_point(
-            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]), None,
-            selection_dir=str(out), **_CAL_KWARGS)
-
-
 def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_selection(
     tmp_path: Path,
 ):
@@ -498,8 +482,7 @@ def _evaluate_under(root: Path, out: Path, tmp_path: Path, **kwargs):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     return evaluate_model(
-        ckpt, str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0]),
-        task="detection", selection_dir=str(out), **kwargs)
+        ckpt, str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0]), selection_dir=str(out), **kwargs)
 
 
 def _corner_dataset(root: Path) -> Path:
@@ -670,10 +653,11 @@ def test_force_redraw_refuses_a_document_selection_that_records_no_subject(tmp_p
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     out = tmp_path / "unscoped"
     write_selection(out, Selection(samples=tuple(
-        Sample(source=str(images_dir / f"{stem}.jpg"),
+        Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
                ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                confirmation_bucket=f"{SUBJECT}/{DATES[0]}")
-        for stem, side in zip(_STEMS, ("train", "val", "calibration", "calibration")))))
+        for stem, side in zip(_STEMS, ("train", "val", "calibration", "calibration"))),
+        seed=0, group_by="stem"))
 
     result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(labels_dir), images_dir=str(images_dir),
@@ -681,23 +665,6 @@ def test_force_redraw_refuses_a_document_selection_that_records_no_subject(tmp_p
     )
 
     assert "error" in result and "records no subject" in result["error"]
-
-
-def test_force_redraw_selection_requires_images_dir(tmp_path: Path):
-    """A labels-only universe can include a stem whose image is gone, a lock the redraw would
-    address that no selection-restricted calibration ever draws; refuse rather than address it."""
-    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
-
-    root = _two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-
-    result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
-        selection_dir=str(out), subject=SUBJECT, reason="test redraw",
-    )
-
-    assert "error" in result and "images_dir" in result["error"]
 
 
 def test_force_redraw_selection_refuses_the_same_missing_image_the_universe_names(tmp_path: Path):

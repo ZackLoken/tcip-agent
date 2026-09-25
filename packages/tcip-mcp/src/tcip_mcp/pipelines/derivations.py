@@ -1,11 +1,5 @@
-"""Tier-A data/model derivations, read the artifact in hand, compute the value.
-
-These are the "deterministic" and "distribution" derivations (CLAUDE.md "Parameters: derive, don't
-pin"): channels from *this* raster, num_classes from *this* label set, anchor aspect ratios from
-*this* dataset's GT box shapes. The agent's model builder / train(ctx) calls these to size a bespoke
-model to the data in hand, never a value frozen from a different dataset.
-
-Heavy deps (PIL/numpy/tifffile) are imported lazily so this stays cheap to import.
+"""Tier-A derivations: compute a parameter (channels, num_classes, anchor ratios) from the artifact
+in hand.
 """
 
 from __future__ import annotations
@@ -21,11 +15,10 @@ if TYPE_CHECKING:
 
 
 def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
-    """Band count of a raster read from disk, the artifact in hand, not a sensor-name guess.
+    """Band count of a raster read from disk.
 
-    A :class:`~tcip_mcp.pipelines.data.band_groups.BandGroupRef` (sibling single-band files
-    grouped as one logical image) probes each sibling on its own and sums them, usually 1 each,
-    never assumed, since a group's members are independent files with no shared header to trust.
+    A :class:`~tcip_mcp.pipelines.data.band_groups.BandGroupRef` (sibling single-band files grouped
+    as one logical image) probes each sibling on its own and sums them.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.image_utils import _channels_from_shape
@@ -68,14 +61,11 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
                      quantiles: tuple[float, float] = (0.1, 0.9)) -> list[float] | None:
     """Aspect ratios (h/w) spanning the GT box-shape distribution, for anchor coverage.
 
-    Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), so anchors
-    match the actual object shapes in this dataset rather than a fixed (0.5, 1, 2).
+    Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0).
     ``class_distribution_boxes`` is a list of ``(w, h)`` in pixels. Returns ``None`` when no valid
-    box gives a ratio, underivable, so the caller stamps an honest default rather than receiving
-    this function's own pinned fallback dressed as a derivation.
+    box gives a ratio.
 
-    Wiring (derive -> pass; the agent's builder path, never auto-injected into build_detector so a
-    method isn't re-pinned)::
+    Wiring (derive, then pass to the builder)::
 
         from tcip_mcp.pipelines.derivations import gt_aspect_ratios
         from tcip_mcp.pipelines.components.detectors import build_detector
@@ -102,13 +92,8 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
 def _validate_gt_boxes_per_image(
     gt_boxes_per_image: "Sequence[Sequence[Sequence[float]]]", *, fn_name: str,
 ) -> list[list[tuple[float, float, float, float]]]:
-    """Validate and normalize ``gt_boxes_per_image`` into concrete ``(x, y, w, h)`` float tuples, or
-    raise ``ValueError`` naming exactly what was wrong.
-
-    Every ``derive_*`` function that consumes this shape calls this once, so a malformed call fails
-    the same way everywhere in this module, one exception type with a real message, rather than
-    surfacing whatever bare exception the first downstream operation (an unpack, a comparison, a
-    numpy cast) happened to raise first.
+    """Validate and normalize ``gt_boxes_per_image`` into concrete ``(x, y, w, h)`` float tuples,
+    or raise ``ValueError`` naming exactly what was wrong.
     """
     if not isinstance(gt_boxes_per_image, Sequence) or isinstance(gt_boxes_per_image, (str, bytes)):
         raise ValueError(
@@ -199,14 +184,9 @@ def derive_localization_tolerance_frac(
     """Center-match tolerance, as a fraction of the class's characteristic size, from the GT's own
     nearest-neighbor spacing, or ``None`` if underivable.
 
-    A tolerance that reaches into a neighboring object's territory starts double-matching two
-    distinct nearby objects to the same detection, so it has to stay well inside how close real
-    same-class neighbors actually sit: take each GT box's distance to its nearest same-image
-    neighbor, pool that across images, take a low percentile (the closest real pairs set the
-    ceiling a safe tolerance cannot cross) with a safety margin, and normalize by the same
-    characteristic size ``gt_class_avg_size`` measures, so the fraction is comparable across
-    datasets. No image anywhere has two or more of this class -> ``None`` (underivable; the caller
-    stamps an honest default, never a derivation label on that number).
+    Takes each GT box's distance to its nearest same-image neighbor, pools that across images,
+    takes a low percentile with a safety margin, and normalizes by the characteristic size
+    ``gt_class_avg_size`` measures. No image anywhere has two or more of this class -> ``None``.
 
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
@@ -230,11 +210,7 @@ def derive_localization_tolerance_frac(
 
 
 def char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
-    """``sqrt(w*h)`` per GT box across every image, filtered to positive sizes, the shared size
-    measure ``derive_localization_kind`` and ``derive_iou_match_threshold`` both derive from, so
-    the two agree on what "this trait's characteristic object size" means by construction. Boxes
-    are ``(x, y, w, h)`` tuples, not ``xyxy``: a caller holding ``xyxy`` boxes (``datasets.py``'s
-    ``TiledDetectionDataset``) converts before calling, rather than this function guessing a shape."""
+    """``sqrt(w*h)`` per positive GT box across every image; boxes are ``(x, y, w, h)``."""
     sizes = [
         (max(w, 0.0) * max(h, 0.0)) ** 0.5
         for boxes in gt_boxes_per_image for _, _, w, h in boxes
@@ -244,9 +220,8 @@ def char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]
 
 def _achievable_iou(avg_size: float, jitter_px: float) -> float:
     """Best-case IoU between two same-size boxes of characteristic size ``avg_size``, offset by
-    ``jitter_px`` along one axis, the shared geometric basis ``derive_localization_kind`` and
-    ``derive_iou_match_threshold`` both compute from (never two independent formulas for the same
-    fact)."""
+    ``jitter_px`` along one axis.
+    """
     return max(0.0, avg_size - jitter_px) / (avg_size + jitter_px)
 
 
@@ -257,29 +232,14 @@ def derive_localization_kind(
     """Whether IoU-matching or center-matching should govern this trait's "found the object" call,
     from the GT's own characteristic box size, or ``None`` if underivable.
 
-    IoU is unreliable on small objects: a realistic detector-vs-GT localization disagreement (not
-    just human annotator imprecision, a genuinely correct detection's box rarely lands pixel-
-    identical to the GT box either) changes IoU by a large relative amount when the box itself is
-    small. Model two same-size boxes of characteristic size ``s`` (``sqrt(w*h)``, matching
-    ``derive_localization_tolerance_frac``'s own size measure) offset by ``jitter_px`` along one
-    axis: their achievable IoU is ``(s - jitter_px) / (s + jitter_px)``. When that achievable IoU
-    falls below ``iou_floor`` (0.5, the standard "hit" convention this platform already uses
-    elsewhere), even a correctly-localized detection could not clear an IoU-match criterion under
-    realistic jitter, so center-match must govern instead, this is a genuine geometric fact about
-    the object's scale, not a per-trait preference. No valid boxes anywhere -> ``None``
-    (underivable; the caller stamps an honest default, never a derivation label on that number),
-    same contract as every other function in this module.
+    Models two same-size boxes of characteristic size ``s`` (``sqrt(w*h)``) offset by ``jitter_px``
+    along one axis: their achievable IoU is ``(s - jitter_px) / (s + jitter_px)``. When that falls
+    below ``iou_floor`` (0.5), center-match governs. No valid boxes anywhere -> ``None``.
 
-    ``jitter_px``'s default (15.0px) is a plain, documented platform default, not a value
-    validated against this platform's real detector/annotation precision, same shape and same
-    caveat as ``operating_point._DEFAULT_KAPPA_FLOOR``. It sets where the center-match/IoU-match
-    crossover falls (currently ``s = 3 * jitter_px`` = ~45px characteristic size); a future pass
-    with real per-trait localization-agreement data (repeated-annotation studies, or measured
-    prediction-vs-GT offset on a validated model) could derive it properly instead of assuming it.
-    This is exactly why a derived kind is recorded with ``data_derived_at_runtime`` provenance and
-    re-checked for divergence on later calls (see ``resolve_match_criterion``) rather than trusted
-    as a one-shot final answer, the safety net is the revisit check, not a perfectly-tuned formula
-    up front.
+    ``jitter_px``'s default (15.0 px) is provisional, not validated against detector precision; it
+    puts the crossover at ``s = 3 * jitter_px``. A derived kind is recorded with
+    ``data_derived_at_runtime`` provenance and re-checked for divergence on later calls
+    (``resolve_match_criterion``).
 
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
@@ -301,32 +261,16 @@ def derive_iou_match_threshold(
     gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
     jitter_px: float = 15.0, margin: float = 0.1, clamp: tuple[float, float] = (0.3, 0.7),
 ) -> float | None:
-    """The IoU threshold for an ``iou_match`` trait, from the GT's own characteristic box size,
-    or ``None`` if underivable.
+    """The IoU threshold for an ``iou_match`` trait, from the GT's own characteristic box size, or
+    ``None`` if underivable.
 
-    Uses the same achievable-IoU-under-jitter basis ``derive_localization_kind`` uses to decide
-    whether ``iou_match`` should govern at all: an ``iou_match`` trait must derive its own IoU
-    threshold here rather than fall back to a pinned ``0.5`` literal with no real basis behind it.
+    Uses the achievable-IoU-under-jitter basis :func:`derive_localization_kind` uses, less
+    ``margin``, clamped to a sane range around IoU@0.5. A recorded ``iou_match`` trait revisited
+    with small current-call GT can see an achievable IoU below the floor; the clamp bounds the
+    result then.
 
-    When ``resolve_match_criterion`` derives the kind fresh from this same call's GT
-    (``kind_source == "data_derived_at_runtime"``), the characteristic size already cleared
-    ``iou_floor``'s achievable-IoU bar by construction (see ``derive_localization_kind``), so the
-    achievable IoU here is at or above that floor for that call. That is not guaranteed for a
-    recorded ``iou_match`` trait revisited with a different call's GT, the kind isn't re-validated
-    against the current box sizes, only compared for a divergence warning, so a recorded trait
-    with unusually small current-call GT can still see an achievable IoU below the floor; the
-    ``clamp`` below is what keeps the result sane in that case, not an assumption that it can't
-    occur. ``margin`` subtracts a safety buffer below the achievable IoU so a typically-jittered
-    correct detection clears the threshold, not only the mathematical best case, the same
-    "percentile plus margin" shape every other derivation in this module uses (e.g.
-    ``derive_cross_tile_nms``), rather than gating on the exact boundary value. Clamped to a sane
-    range around the conventional IoU@0.5 comparability convention.
-
-    ``jitter_px``'s default (15.0px) and ``margin``'s default (0.1) are plain, documented
-    platform defaults, same caveat as ``derive_localization_kind``'s own ``jitter_px``,
-    not validated against this platform's real detector precision yet; the same
-    ``data_derived_at_runtime`` recording and revisit-on-divergence discipline applies once this
-    is wired into ``resolve_match_criterion``.
+    ``jitter_px`` (15.0 px) and ``margin`` (0.1) are provisional defaults, not validated against
+    detector precision.
 
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
@@ -351,18 +295,12 @@ def derive_sliver_frac(
     """Tile-seam sliver cutoff, as a fraction of the class's characteristic size, from the GT's own
     size spread, or ``None`` if underivable.
 
-    The cutoff has to tell a genuinely small-but-complete object (natural size variation, e.g. an
-    earlier growth/bloom stage) from a real object a tile boundary clipped down to a fragment, a
-    fixed fraction can't: a class with wide natural size variation needs a lower cutoff or it
-    discards real small instances as slivers, while a tightly-sized class can use a higher one. So
-    take a low percentile of this dataset's own characteristic-size distribution (the small end of
-    genuinely complete objects) relative to its mean, clamped to a sane range. Fewer than
-    ``min_samples`` boxes -> ``None``: a percentile from a handful of points is not a spread, it is
-    noise (with 1-2 boxes the ratio is trivially ~1.0 regardless of the class's real variation), the
-    caller stamps an honest default, never a derivation label on that number.
+    Takes a low percentile of this dataset's own characteristic-size distribution relative to its
+    mean, clamped to a sane range, so a class with wide natural size variation gets a lower cutoff.
+    Fewer than ``min_samples`` boxes -> ``None``.
 
     ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class; see
-    :func:`char_sizes_from_boxes` for the shared computation callers derive it from.
+    :func:`char_sizes_from_boxes`.
     """
     import numpy as np
     char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
@@ -381,29 +319,24 @@ def derive_block_scale_px(
     *, tile_size: int, gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
     plants: "list | None" = None, raster_path: "str | Path | None" = None,
 ) -> tuple[int, str]:
-    """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored
-    at ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own hard floor
-    for a boundary buffer: a smaller gap cannot guarantee two bands never share pixels/context).
+    """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored at
+    ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own floor for a
+    boundary buffer).
 
     Two derivation paths:
 
     - Plant-spacing-derived, only attempted when ``plants`` is supplied: this dataset's own
-      planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels through the
-      raster's own pixel size in metres, resolved by
+      planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels through the raster's
+      own pixel size in meters, resolved by
       :func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size` (the CRS unit read from the EPSG
       code, so a foot-unit raster converts correctly). A raster whose georeferencing falls short
       (rotated, incomplete tags, unprojected, a user-defined or compound CRS, a unit other than
-      metre or foot, a zero, negative or anisotropic scale) is not a refusal for this path, it
-      falls back to the GT-object-spacing path below instead. A ``raster_path`` that is not a
-      raster file at all, or is a raster file this derivation cannot open at all (truncated,
-      corrupt, or otherwise unreadable), is a file-level problem and is refused by name, never
-      silently downgraded to the fallback. A ``plants`` list with fewer than two georeferenced
-      plants (``grid_pitch_m`` returns ``0.0``) *is* refused by name: the caller explicitly asked
-      for this derivation and it produced nothing usable, not a case to quietly downgrade to a
-      different mechanism it didn't ask for.
-    - GT-object-spacing-derived (``plants`` omitted, or the raster's pixel size unresolvable):
-      the median nearest-neighbor spacing of ``gt_boxes_per_image``'s own box centers, the same
-      per-image neighbor-distance primitive :func:`derive_localization_tolerance_frac` pools.
+      meter or foot, a zero, negative or anisotropic scale) falls back to the GT-object-spacing
+      path below. A ``raster_path`` that is not a raster file, or one this derivation cannot open
+      (truncated, corrupt, or otherwise unreadable), is refused by name. A ``plants`` list with
+      fewer than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) is refused by name.
+    - GT-object-spacing-derived (``plants`` omitted, or the raster's pixel size unresolvable): the
+      median nearest-neighbor spacing of ``gt_boxes_per_image``'s own box centers.
 
     Raises ``ValueError`` naming exactly why when neither path can derive a scale (no ``plants``
     and no image with two or more GT boxes to measure a spacing from).
@@ -453,7 +386,7 @@ def derive_block_scale_px(
             else:
                 resolved, _reason = pixel_size_module.resolve_pixel_size(raster)
                 if resolved is not None:
-                    pitch_px = pitch_m / resolved.metres_per_px
+                    pitch_px = pitch_m / resolved.meters_per_px
                     return (
                         max(tile_size, round(pitch_px)),
                         f"plant grid pitch ({pitch_m:.2f}m) via {resolved.source_clause}, "
@@ -477,33 +410,28 @@ def derive_block_scale_px(
 
 def _image_stats_label(path) -> str:
     """The path string both normalization-statistics derivations record for one raster: its own
-    path, or a band group's manifest path when the source is a :class:`BandGroupRef`, the same
-    label ``preflight_config``'s containment check resolves the run's own images to."""
+    path, or a band group's manifest path when the source is a :class:`BandGroupRef`.
+    """
     return str(getattr(path, "manifest_path", path))
 
 
 def band_normalization_stats(
     image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float], list[str]] | None:
-    """Per-band ``(mean, std, paths_read)`` in [0, 1] over *this* dataset's rasters, or ``None``.
+    """Per-band ``(mean, std, paths_read)`` in [0, 1] over this dataset's rasters, or ``None`` when
+    no raster could be read.
 
     The statistics a detector normalizes with. torchvision defaults to 3-element ImageNet values,
     which are wrong on any band set that is not RGB photography: at 1 channel they silently
-    broadcast the image to 3, and at any count other than 3 they raise inside the transform.
-    Sample the training split and pass ``mean``/``std`` to ``build_detector`` as ``image_mean``/
-    ``image_std``; ``paths_read`` (the paths this call actually decoded and accepted, after the
-    ``max_images`` cap and after dropping any raster whose band count disagreed) is what
-    :func:`image_stats_provenance` renders into ``model_source.image_stats_sampling``, carried
-    beside ``builder_kwargs`` rather than inside it.
+    broadcast the image to 3, and at any count other than 3 they raise inside the transform. Sample
+    the training split and pass ``mean``/``std`` to ``build_detector`` as
+    ``image_mean``/``image_std`` through ``model_source.builder_kwargs``: torchvision keeps them as
+    plain lists on the transform, not as buffers, so they are absent from the checkpoint.
+    ``paths_read`` (the paths this call decoded and accepted, after the ``max_images`` cap and
+    after dropping any raster whose band count disagreed) is what :func:`image_stats_provenance`
+    renders into ``model_source.image_stats_sampling``.
 
-    Derive, then pass; never auto-inject (the ``gt_aspect_ratios`` rule): the factory never reads
-    the dataset. Pass the derived values through ``model_source.builder_kwargs`` rather than calling
-    this from inside your builder body, torchvision keeps ``image_mean``/``image_std`` as plain
-    lists on the transform, not as buffers, so they are absent from the checkpoint and a builder
-    that re-derives them at load time will normalize differently at inference than at training.
-    Returns ``None`` when no raster could be read, an honest underivable, not a stand-in constant.
-
-    ``max_images`` caps the sample; band statistics converge long before a full orchard is read.
+    ``max_images`` caps the sample.
     """
     import numpy as np
 
@@ -526,11 +454,8 @@ def band_normalization_stats(
 
 
 class _BandMoments:
-    """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels.
-
-    The arithmetic :func:`band_normalization_stats` and :func:`band_normalization_stats_sampled`
-    share, so the exact statistic and the sampled one can only ever differ in which pixels they
-    read, never in how those pixels are composed into a mean and a standard deviation.
+    """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels, for
+    :func:`band_normalization_stats` and :func:`band_normalization_stats_sampled`.
     """
 
     def __init__(self, num_channels: int):
@@ -566,11 +491,8 @@ class _BandMoments:
 @dataclass(frozen=True)
 class SampledNormalizationStats:
     """Per-band ``(mean, std)`` in [0, 1] tensor units over a sample of a dataset's pixels.
-
     ``sampling`` names the windows read, the seed that chose them and the pixel fraction they
-    cover. A caller passes ``mean``/``std`` to ``build_detector`` through
-    ``model_source.builder_kwargs`` and this whole result to :func:`image_stats_provenance`, since
-    these numbers describe a sample of the rasters and not all of their pixels.
+    cover.
     """
 
     mean: list[float]
@@ -591,10 +513,8 @@ def band_normalization_stats_sampled(
     ``max_windows_per_image`` covering every cell of a raster's grid reads all of it and gives the
     exact sibling's own answer.
 
-    Pixels are scaled by ``image_utils.pil_to_tensor``, the same call the exact sibling and the
-    dataset itself make, never a scale re-derived here. ``seed`` has no default: a sampled
-    statistic is reproducible only when the caller states what chose the sample. Returns ``None``
-    when no raster could be read, the honest underivable the exact sibling returns.
+    Pixels are scaled by ``image_utils.pil_to_tensor``. ``seed`` is required. Returns ``None`` when
+    no raster could be read.
     """
     import numpy as np
 
@@ -635,10 +555,9 @@ def image_stats_provenance(
 
     Accepts :func:`band_normalization_stats`'s ``(mean, std, paths_read)`` tuple or
     :func:`band_normalization_stats_sampled`'s :class:`SampledNormalizationStats`, and returns the
-    mapping ``preflight_config`` checks, that rides beside ``builder_kwargs`` rather than inside
-    it. ``window_size``/``max_windows_per_image`` are the sampled call's own parameters, not
-    carried on ``WindowSampling`` itself, so the caller passes them through here to keep a sampled
-    record reproducible; they are ignored for the exact result.
+    mapping that rides beside ``builder_kwargs``. ``window_size``/``max_windows_per_image`` are the
+    sampled call's own parameters, not carried on ``WindowSampling`` itself; they are ignored for
+    the exact result.
     """
     if isinstance(result, SampledNormalizationStats):
         sampling = result.sampling
@@ -720,16 +639,12 @@ _CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.operating_point.derive_operating_poi
 
 
 def _derivation_implementations() -> dict[str, object]:
-    """Every registered derivation label, the count-objective ones read from the picker registry.
+    """Every registered derivation label, the count-objective ones read from the picker registry
+    (``operating_point.COUNT_OBJECTIVE_PICKERS`` plus
+    ``operating_point.REVIEW_VERDICT_LABEL_SUFFIX``).
 
-    A picker's label, and the variant it earns sweeping confirmed review verdicts, are the picker
-    registry's to state (``operating_point.COUNT_OBJECTIVE_PICKERS`` plus
-    ``operating_point.REVIEW_VERDICT_LABEL_SUFFIX``), so registering a picker registers its labels
-    and no second list of them can drift from the text a run actually stamps.
-
-    Resolved on access rather than at import: ``operating_point`` imports this module, and it pulls
-    torch in with it, which reaching the picker registry eagerly would impose on every caller of a
-    torch-free derivation.
+    Resolved on access rather than at import: ``operating_point`` imports this module and pulls
+    torch in with it.
     """
     from tcip_mcp.pipelines.operating_point import (
         COUNT_OBJECTIVE_PICKERS,

@@ -1,21 +1,15 @@
 """Validation routes: promote a completed review into a validation reference.
 
-validate_reference reconstructs a review's verdicts into the COCO records
-resolve_operating_point consumes (the review_calibration adapter) and runs them through the
-identical disjoint-split + count-bias gate and conf-censoring guard the held-out-GT path uses,
-so a review can only stamp a bucket's operating_point.json VALIDATED_REVIEW_CONFIRMED with a
-record outside the bucket answering for it.
-
-Shares review.py's engine cache and bucket-key helpers, the same verdict store
-the review routes read and write, rather than a second implementation of any of them.
+validate_reference reconstructs a review's verdicts into the COCO records resolve_operating_point
+consumes (the review_calibration adapter) and runs them through the disjoint-split + count-bias
+gate and conf-censoring guard, so a review can only stamp a bucket's operating_point.json
+VALIDATED_REVIEW_CONFIRMED with a record outside the bucket answering for it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -33,9 +27,9 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 def _recorded_prediction_digests(image_state: dict) -> set[Optional[str]]:
     """Every prediction-document identity recorded against one reviewed image at review time.
 
-    The image-level producer fact a confirmed negative carries, plus the one on each verdict
-    entry. A recorded identity carrying no digest reads as None, the same value an image with no
-    prediction document records, so an unrecorded identity is compared rather than waved through.
+    The image-level producer fact a confirmed negative carries, plus the one on each verdict entry.
+    A recorded identity carrying no digest reads as None, the same value an image with no
+    prediction document records.
     """
     from tcip_annotation.verdicts import decode_verdict
 
@@ -71,29 +65,21 @@ class ValidateReferenceResponse(BaseModel):
 
 @router.post("/validate_reference")
 def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceResponse:
-    """Promote a completed review session into a validation reference for its (model, trait, date-set).
+    """Promote a completed review of one prediction bucket into a validation reference for its
+    (model, trait, date).
 
-    Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (the
-    ``review_calibration`` adapter) and runs them through the identical disjoint-split + count-bias
-    gate and conf-censoring guard the held-out-GT path uses: no shortcut to "validated". A passing
-    gate is earned through ``open_validation``/``seal_validation``, which append the validation
-    record and hand back the stamp carrying its pointer, so the bucket's ``operating_point.json`` can
-    only claim ``VALIDATED_REVIEW_CONFIRMED`` with a record outside the bucket answering for it; on
-    refusal an honest ``validated=false`` placeholder is written and the reason is returned.
+    The review's verdicts become the COCO records ``resolve_operating_point`` consumes (the
+    ``review_calibration`` adapter) and run through the disjoint-split, count-bias and
+    conf-censoring gate. A passing gate is earned through ``open_validation``/``seal_validation``,
+    so the bucket's ``operating_point.json`` claims ``VALIDATED_REVIEW_CONFIRMED`` only with a
+    record outside the bucket answering for it; a refusal stamps an honest ``validated=false`` and
+    returns the reason.
 
-    The promotion verifies before it decides. A bucket whose stamp claims validation that no record
-    answers for is treated as unvalidated and is promotable over, and a review whose prediction
-    documents are no longer the ones the reviewer saw earns nothing at all.
-
-    A bucket carrying no ``operating_point.json`` stamp at all, or one with no usable
-    ``(subject, attribute)`` pair, is refused here before the review's operating point is
-    resolved: no producer ever named a checkpoint, an experiment or a generation conf for such a
-    bucket to validate. A raw store write straight to the stamp's key can still manufacture one
-    past this refusal, the accepted limit of the scope rail itself (``resolution._check_stamp_claim``).
-
-    Each act is recorded by the library that makes it: the sealed record by ``seal_validation``
-    and each bucket's stamp by ``update_sidecar``, one bucket at a time. Each writes before its
-    line, so a dropped append answers 409 with the buckets stamped so far, not a 500.
+    A stamp whose claim no record answers for is promotable over. Refuses (400) a request naming no
+    dataset root or subject, a bucket under another dataset root, a bucket with no
+    ``operating_point.json`` stamp, and an explicit tile edge whose stamp omits why it is trusted;
+    a review whose prediction documents changed since the verdicts earns nothing. A lost audit line
+    after a record or stamp landed answers 409 with the buckets stamped so far.
     """
     if not req.dataset_root:
         raise HTTPException(
@@ -108,29 +94,23 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             "than leaving it unstated.",
         )
     pred_dir = _guard_path(req.pred_dir)
-    bucket_dirs = [pred_dir] if pred_dir else []
-    if not bucket_dirs:
+    if not pred_dir:
         return ValidateReferenceResponse(
             validated=False, reference=None, reviewed_image_count=0, conf=None,
             reason="No predictions are selected to validate. Choose a model with predictions for "
                    "this dataset, then try again.",
             buckets_stamped=[])
-    assert pred_dir is not None  # bucket_dirs is non-empty only when pred_dir was truthy above
 
     from tcip_mcp.dataset_layout import bucket_dataset_root
-    from tcip_mcp.pipelines.resolution import (
-        StampScopeUnstated,
-        read_operating_point_sidecar,
-        scope_of_stamp,
-        verify_stamp_binding,
-    )
+    from tcip_mcp.pipelines.data.splits import same_directory
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
     from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
     # A bucket answering a different root than the stated one is another dataset's evidence; a
     # bucket under no dataset root answers nothing to cross-check and is legitimate work.
     named_root = bucket_dataset_root(pred_dir)
-    if named_root is not None and named_root != Path(req.dataset_root).resolve():
+    if named_root is not None and not same_directory(named_root, req.dataset_root):
         raise HTTPException(
             400,
             f"the predictions at {pred_dir} belong to dataset {named_root}, not to "
@@ -138,10 +118,10 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             "dataset root, so the verdicts, the validation record and the stamp all hang off one "
             "dataset.")
 
-    stems = bucket_stems(*bucket_dirs)
+    stems = bucket_stems(pred_dir)
     engine = _get_engine(req.dataset_root)
-    # The verdicts recorded against the bucket being promoted, so a stem that exists under two
-    # buckets contributes only what was reviewed here.
+    # The verdicts recorded against this bucket, so a stem under two buckets contributes only
+    # what was reviewed here.
     reviewed = {
         name: data
         for name, data in engine.image_states(_bucket_of_dir(pred_dir)).items()
@@ -150,22 +130,21 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     completed = {name: data for name, data in reviewed.items() if Path(name).stem in stems}
     n = len(completed)
 
-    # A claim no record answers for is an assertion: unvalidated, and promotable over. Strict: an
-    # undecodable stamp is never one a review answers for the same way an absent one is.
+    # Strict: an undecodable stamp is never one a review answers for the way an absent one is.
     try:
-        sidecars = {d: (read_operating_point_sidecar(d, strict=True) or {}) for d in bucket_dirs}
+        sidecar = read_operating_point_sidecar(pred_dir, strict=True) or {}
     except StoreBusy as exc:
         raise HTTPException(503, str(exc)) from exc
     except (DecodeError, SchemaVersionRefused) as exc:
         raise HTTPException(400, str(exc)) from None
     digest_memo: dict[str, str] = {}
-    bindings = {d: verify_stamp_binding(sc, d, document="operating_point", digest_memo=digest_memo)
-                for d, sc in sidecars.items()}
-    if all(b.claimed and b.ok for b in bindings.values()):
-        ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_against")
-                    for sc in sidecars.values()), None)
+    binding = verify_stamp_binding(sidecar, pred_dir, document="operating_point",
+                                   digest_memo=digest_memo)
+    stamped_op = sidecar.get("operating_point") or {}
+    if binding.claimed and binding.ok:
         return ValidateReferenceResponse(
-            validated=True, reference=ref, reviewed_image_count=n, conf=None,
+            validated=True, reference=(stamped_op.get("conf") or {}).get("validated_against"),
+            reviewed_image_count=n, conf=None,
             reason="These predictions are already validated, so a review reference isn't needed here.",
             buckets_stamped=[])
 
@@ -176,23 +155,18 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                    "mark the images Reviewed, then try again.",
             buckets_stamped=[])
 
-    for d, sc in sidecars.items():
-        if not sc:
-            raise HTTPException(
-                400,
-                f"{d} carries no operating_point.json stamp: no producer wrote a checkpoint, "
-                "experiment or generation conf this validation could rest on. A staged bucket is "
-                "reviewed through the accept path and is never promoted to a validation reference."
-            )
-        try:
-            scope_of_stamp(sc, d)
-        except StampScopeUnstated as exc:
-            raise HTTPException(400, str(exc)) from None
+    if not sidecar:
+        raise HTTPException(
+            400,
+            f"{pred_dir} carries no operating_point.json stamp: no producer wrote a checkpoint, "
+            "experiment or generation conf this validation could rest on. A staged bucket is "
+            "reviewed through the accept path and is never promoted to a validation reference."
+        )
 
     # A prediction document that changed, appeared or vanished since review is evidence for nothing.
     diverged = sorted(
         name for name, data in reviewed.items()
-        if any(recorded != _prediction_digest(req.pred_dir, name)
+        if any(recorded != _prediction_digest(pred_dir, name)
                for recorded in _recorded_prediction_digests(data))
     )
     if diverged:
@@ -214,100 +188,51 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         review_reference_hash,
         review_to_records,
     )
+    from tcip_mcp.pipelines.resolution import tile_size_source_of
     from tcip_mcp.traits import TraitUnknownError
 
     review_state = {"image": completed}
-    # Thread the producing run's experiment_id through so the calibration's train-disjointness
-    # gate can check the reviewed images against that run's training split. Sourced from the
-    # buckets' own operating_point.json sidecars (stamped by run_inference), never asserted:
-    # when multiple buckets disagree on which run produced them, pass None (mixed-provenance
-    # shouldn't silently vouch for one run's disjointness) rather than raising, so this route keeps
-    # working for a legitimate multi-bucket review call.
-    bucket_exp_ids = {sc.get("experiment_id") for sc in sidecars.values() if sc.get("experiment_id")}
-    review_experiment_id = next(iter(bucket_exp_ids)) if len(bucket_exp_ids) == 1 else None
-
-    # Scope every verdict/negative record to the bucket(s) actually being validated, at the
-    # deepest choke point (resolve_operating_point_from_review), not just here.
-    bucket_identities = [
-        {"checkpoint_sha256": sc.get("checkpoint_sha256"), "experiment_id": sc.get("experiment_id")}
-        for sc in sidecars.values()
-    ]
-    # The review path's effective staging floor is max(generation_conf, review_conf_threshold):
-    # the generation half read off the same sidecars already loaded above, the review half read
-    # off the verdicts' own recorded conf_threshold (scoped identically to the bucket(s) above).
-    # Either half unknown makes the combined floor None (fails closed).
-    gen_confs = [
-        v for sc in sidecars.values()
-        if isinstance(v := ((sc.get("operating_point") or {}).get("conf") or {}).get("value"),
-                     (int, float))
-    ]
-    generation_conf = max(float(v) for v in gen_confs) if gen_confs else None
+    # The producing run named by the bucket's own stamp, never asserted, so the calibration's
+    # train-disjointness gate checks the reviewed images against that run's training split.
+    review_experiment_id = sidecar["experiment_id"]
+    bucket_identities = [{"checkpoint_sha256": sidecar["checkpoint_sha256"],
+                          "experiment_id": review_experiment_id}]
+    # The effective staging floor is max(generation conf, the verdicts' own recorded
+    # conf_threshold); either half unknown makes it None (fails closed).
+    generation_conf = (stamped_op.get("conf") or {}).get("value")
     review_conf = review_conf_threshold(review_state, bucket_identities=bucket_identities,
                                         only_completed=True)
     staged_conf_floor = (
-        max(generation_conf, review_conf)
-        if generation_conf is not None and review_conf is not None
+        max(float(generation_conf), review_conf)
+        if isinstance(generation_conf, (int, float)) and review_conf is not None
         else None
     )
 
-    # Thread tile_size/tiled + their sources off the same sidecars already loaded above, so a
-    # review-confirmed bundle honestly reports "derived"/"explicit" instead of always falling
-    # back to "default" regardless of what the buckets actually carry. A single bucket's own
-    # stamp is used; a mixed set of sources across buckets is not resolvable to one fact, so it
-    # falls back to the honest default.
-    from tcip_mcp.pipelines.resolution import tile_size_source_of
-
-    tile_sizes = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("value")
-                  for sc in sidecars.values()}
+    tile_size_prov = stamped_op.get("tile_size") or {}
+    tiled_prov = stamped_op.get("tiled") or {}
+    review_tile_size = tile_size_prov.get("value")
     # From validated_against, not the bare source field, which a native-ratio edge shares with a
     # real persisted one: reading source alone would silently re-validate native-ratio on review.
-    tile_size_valid_refs = {
-        ((sc.get("operating_point") or {}).get("tile_size") or {}).get("validated_against")
-        for sc in sidecars.values()}
-    tiled_vals = {((sc.get("operating_point") or {}).get("tiled") or {}).get("value")
-                 for sc in sidecars.values()}
-    tiled_sources = {((sc.get("operating_point") or {}).get("tiled") or {}).get("source")
-                     for sc in sidecars.values()}
-    tile_size_derived_froms = {
-        ((sc.get("operating_point") or {}).get("tile_size") or {}).get("derived_from")
-        for sc in sidecars.values()}
-    review_tile_size = next(iter(tile_sizes)) if len(tile_sizes) == 1 else None
-    review_tile_size_valid_ref = (
-        next(iter(tile_size_valid_refs)) if len(tile_size_valid_refs) == 1
-        and review_tile_size is not None else None)
     review_tile_size_source = tile_size_source_of(
-        review_tile_size_valid_ref, tile_size=review_tile_size)
-    # The stamp's own derived_from text, carried forward unchanged: this route holds no predictor
-    # to compose one from, only the record the producing run already wrote.
+        tile_size_prov.get("validated_against") if review_tile_size is not None else None,
+        tile_size=review_tile_size)
     review_tile_size_derived_from = (
-        next(iter(tile_size_derived_froms)) if len(tile_size_derived_froms) == 1
-        and review_tile_size is not None else None)
-    review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
-    _review_tiled_source_recorded = (
-        next(iter(tiled_sources)) if len(tiled_sources) == 1
-        and review_tiled is not None else None)
-    # A recorded but unrecognized (non-str, e.g. a stamp with no "source" sub-key) value falls
-    # back the same as a mixed or absent one: an honest default, never a fabricated source label.
+        tile_size_prov.get("derived_from") if review_tile_size is not None else None)
+    review_tiled = tiled_prov.get("value")
+    recorded_tiled_source = tiled_prov.get("source") if review_tiled is not None else None
     review_tiled_source = (
-        _review_tiled_source_recorded if isinstance(_review_tiled_source_recorded, str)
-        else "default")
+        recorded_tiled_source if isinstance(recorded_tiled_source, str) else "default")
 
-    # Refuse here, naming the bucket(s), rather than let the resolver's bare ValueError surface.
     if review_tile_size_source == "explicit" and review_tile_size_derived_from is None:
-        per_bucket_derived_from = {
-            d: ((sc.get("operating_point") or {}).get("tile_size") or {}).get("derived_from")
-            for d, sc in sidecars.items()
-        }
         raise HTTPException(
             400,
-            "these predictions carry an explicit tile edge but disagree about, or omit, why it is "
-            f"trusted ({per_bucket_derived_from}), so the review promotion cannot state one "
-            "derivation for the validated claim. Validate the disagreeing bucket separately, or "
-            "re-export the predictions from one run so their stamps agree.",
+            f"the predictions at {pred_dir} carry an explicit tile edge but their stamp omits why "
+            "it is trusted, so the review promotion cannot state a derivation for the validated "
+            "claim. Re-export the predictions from a run that records one.",
         )
 
-    # One spelling of the evidence, shared by the description and open_validation's own resolver run.
-    resolver_inputs = {
+    # One spelling of the evidence, shared by the resolver call and open_validation's own record.
+    resolver_inputs: dict[str, Any] = {
         "review_state": review_state,
         "only_completed": True,
         "bucket_identities": bucket_identities,
@@ -321,33 +246,13 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "scope_root": req.dataset_root,
         # Where the reviewed images' own ground truth lives: a bound checkpoint's selection check
         # narrows the run's val members to this directory, as the calibration door does.
-        "calibration_labels_dir": str(annotation_dir(req.dataset_root, prediction_bucket_date(pred_dir))),
-        # True when the buckets named more than one producing run, false when none named one: both
-        # collapse review_experiment_id to None above, but only the first is a real disagreement.
-        "experiment_id_ambiguous": len(bucket_exp_ids) > 1,
+        "calibration_labels_dir": str(
+            annotation_dir(req.dataset_root, prediction_bucket_date(pred_dir))),
         "subject": req.subject,
     }
     try:
-        # Named explicitly, not **resolver_inputs: that dict's values mix types for the evidence
-        # record above, not the one uniform type a **-unpack needs against differently-typed params.
         bundle = resolve_operating_point_from_review(
-            trait_name=req.trait,
-            experiment_id=review_experiment_id,
-            review_state=review_state,
-            only_completed=True,
-            bucket_identities=bucket_identities,
-            staged_conf_floor=staged_conf_floor,
-            tile_size=review_tile_size,
-            tile_size_source=review_tile_size_source,
-            tile_size_derived_from=review_tile_size_derived_from,
-            tiled=review_tiled,
-            tiled_source=review_tiled_source,
-            scope_root=req.dataset_root,
-            calibration_labels_dir=str(
-                annotation_dir(req.dataset_root, prediction_bucket_date(pred_dir))),
-            experiment_id_ambiguous=len(bucket_exp_ids) > 1,
-            subject=req.subject,
-        )
+            trait_name=req.trait, experiment_id=review_experiment_id, **resolver_inputs)
     except TraitUnknownError:
         raise HTTPException(
             400,
@@ -356,8 +261,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         ) from None
     except ValueError as exc:
         # A locked cal/holdout split refusing this call: a reviewed image was deleted/renamed
-        # since the split locked, or the lock file itself is corrupt. Either way
-        # this is an honest refusal, not a 500: surface it as such.
+        # since the split locked, or the lock file itself is corrupt.
         raise HTTPException(400, str(exc)) from None
     except AuditEntryNotWritten as exc:
         # The split lock was drawn and its receipt lost; nothing was validated or sealed.
@@ -365,8 +269,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     result = describe_review_validation(bundle, reviewed_image_count=n)
 
-    # Stamp each bucket's provenance sidecar (operating_point.json is not a label, so this never
-    # touches the reviewed per-image predictions or the verdict-immutability guard).
     from tcip_mcp.pipelines.resolution import (
         claim_payload,
         open_validation,
@@ -375,24 +277,17 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     )
     from tcip_mcp.prediction_buckets import review_state_dir_of
 
-    op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
         review_to_records(review_state, bucket_identities=bucket_identities, subject=req.subject))
-    now_iso = datetime.now(timezone.utc).isoformat()
-    stamped: list[str] = []
-    gap: AuditEntryNotWritten | None = None
-
-    try:
-        draft = None
-        if result["validated"]:
-            shas = {sc.get("checkpoint_sha256") for sc in sidecars.values()
-                    if sc.get("checkpoint_sha256")}
+    draft = None
+    if result["validated"]:
+        try:
             draft = open_validation(
                 document="operating_point",
                 evidence={"resolver": "resolve_operating_point_from_review",
                           "inputs": resolver_inputs},
                 trait=req.trait,
-                checkpoint_sha256=next(iter(shas)) if len(shas) == 1 else None,
+                checkpoint_sha256=sidecar["checkpoint_sha256"],
                 producing_experiment_id=review_experiment_id,
                 reference_inputs={
                     "dataset_root": req.dataset_root,
@@ -400,54 +295,37 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                     "stated_values": {"review_reference_hash": ref_hash, "review_image_count": n},
                 },
             )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     def _stamp_body(stored: dict) -> dict:
-        """This promotion merged over whatever the producing run left in ``stored``.
-
-        The trait is written only when a gate was cleared, so a bucket carries the trait its claim
-        was earned for and an honest placeholder claims no scope at all.
-
-        ``stored`` is never empty for the body this route read and refused on before taking the
-        lock: a bucket with no stamp of its own was already refused before the review's operating
-        point was resolved. The in-lock read in ``_promote`` below can still be empty, if the
-        stamp was deleted between that read and this one; ``update_sidecar``'s own rail refuses a
-        merge that ends up with neither key. Its own pair (present or, for a pre-key stamp,
-        absent) is carried forward unchanged by the plain ``dict(stored)`` below.
+        """This promotion merged over whatever the producing run left in ``stored``: the trait only
+        when a gate was cleared, so an honest placeholder claims no scope at all.
         """
-        merged = dict(stored)
-        merged.update({
-            "operating_point": op_prov,
-            "validated": result["validated"],
-            "validated_reference": result["reference"],
-            "validation_source": "review_confirmed",
-            "review_reference_hash": ref_hash,
-            "review_image_count": n,
-            "shippable_issues": bundle.shippable_issues(),
-            "validated_at": now_iso,
-        })
-        merged.setdefault("produced_at", now_iso)
+        merged = {**stored, "operating_point": bundle.to_provenance()["operating_point"],
+                  "validated": result["validated"],
+                  "shippable_issues": bundle.shippable_issues()}
         if draft is not None:
             merged["trait"] = req.trait
         return merged
 
-    def _promotion_of(pred_dir: str, earned: dict) -> Callable[[dict], Optional[dict]]:
-        """The merge one bucket's stamp is promoted through, run inside that stamp's own lock."""
+    stamped: list[str] = []
+    gap: AuditEntryNotWritten | None = None
+    try:
+        Path(pred_dir).mkdir(parents=True, exist_ok=True)
+        # Sealed outside the stamp's lock: no store write may open inside another's transaction.
+        earned = _stamp_body(sidecar)
+        if draft is not None:
+            earned = seal_validation(
+                draft, dataset_root=req.dataset_root, bucket_dirs=[pred_dir], stamp_body=earned)
 
         def _promote(stored: dict) -> dict | None:
-            """Merge this promotion into whatever the producing run left, inside the stamp's lock.
-
-            The no-downgrade decision is made against the stored stamp, not the copy read before the
-            lock: predictions whose validation a record answers for (held-out GT, an earlier review)
-            stay as they are, and a producer that stamped the bucket while this review was being
-            reconciled is not overwritten. ``earned`` is the body the record was sealed over, so the
-            pointer is merged only while the stamp still makes the claim that record answers for; a
-            claim that moved under the lock leaves the record inert rather than misnamed.
-            """
-            binding = verify_stamp_binding(stored, pred_dir, document="operating_point",
-                                           digest_memo=digest_memo)
-            if binding.claimed and binding.ok:
+            """Merge this promotion into the stamp as stored, inside its lock: a stamp a record
+            now answers for is left as it is, and the pointer is merged only while the stamp
+            still makes the claim ``earned`` was sealed over."""
+            now = verify_stamp_binding(stored, pred_dir, document="operating_point",
+                                       digest_memo=digest_memo)
+            if now.claimed and now.ok:
                 return None
             merged = _stamp_body(stored)
             if draft is None:
@@ -458,34 +336,19 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             merged["validated_by"] = earned["validated_by"]
             return merged
 
-        return _promote
-
-    try:
-        for d in bucket_dirs:
-            if bindings[d].claimed and bindings[d].ok:
-                continue  # a mixed set: a bucket whose validation a record answers for is left alone
-            Path(d).mkdir(parents=True, exist_ok=True)
-            # Sealed outside the stamp's lock: no store write may open inside another's transaction.
-            earned = _stamp_body(sidecars[d])
-            if draft is not None:
-                _digest, earned = seal_validation(
-                    draft, dataset_root=req.dataset_root, bucket_dirs=list(bucket_dirs),
-                    stamp_body=earned)
-            try:
-                if update_sidecar(d, _promotion_of(d, earned)):
-                    stamped.append(d)
-            except AuditEntryNotWritten:
-                stamped.append(d)  # the stamp landed; only its line was lost
-                raise
+        try:
+            if update_sidecar(pred_dir, _promote):
+                stamped.append(pred_dir)
+        except AuditEntryNotWritten:
+            stamped.append(pred_dir)  # the stamp landed; only its line was lost
+            raise
     except StoreBusy as exc:
-        # Contention is a retryable infrastructure fault, never a malformed request; the
-        # dataset select route's own StoreBusy handling is the platform's precedent.
+        # Contention is a retryable infrastructure fault, never a malformed request.
         raise HTTPException(503, str(exc)) from exc
     except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
     except AuditEntryNotWritten as exc:
-        # A record or stamp already landed; only its library's audit line failed. The buckets
-        # this call had not yet stamped when it raised stay unstamped.
+        # A record or stamp already landed; only its library's audit line failed.
         gap = exc
     committed = ValidateReferenceResponse(
         validated=bool(result["validated"]),

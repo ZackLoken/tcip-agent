@@ -58,12 +58,10 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
     persisted: loads the registered checkpoint and calls ``_run_inference_verified``
     directly, the same private pass ``run_inference`` itself calls once it has resolved a bucket.
 
-    ``overrides`` supplies whichever of the pass' own keyword arguments (``image_paths``
-    included, which ``run_inference`` does not expose) a test cares about; every other one takes
-    the unstated-sentinel default the tool forwards when a caller states nothing. A checkpoint
-    the registry refuses (``UnregisteredCheckpoint``) returns ``{"error": ...}``, the same catch
-    every real caller of ``load_registered_checkpoint`` wraps it in, rather than raising out of
-    this stand-in for one.
+    ``overrides`` supplies whichever of the pass' own keyword arguments a test cares about; every
+    other one takes the unstated-sentinel default the tool forwards when a caller states nothing.
+    The pass' ``results`` stream is drawn into a list, the way a door with no bucket consumes it.
+    A checkpoint the registry refuses (``UnregisteredCheckpoint``) returns ``{"error": ...}``.
     """
     import inspect
 
@@ -78,7 +76,7 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
     # private pass cannot drift from the door it stands in for.
     door_defaults = inspect.signature(run_inference).parameters
     kwargs: dict[str, Any] = {
-        "image_paths": None, "images_dir": None, "conf_threshold": None, "device": None,
+        "images_dir": None, "conf_threshold": None, "device": None,
         "tile": None, "tile_size": None, "overlap": None,
         "tile_batch_size": door_defaults["tile_batch_size"].default,
         "global_nms_iou": None, "max_dets": None, "postprocess": "nms", "trait": None,
@@ -89,7 +87,10 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
         "selection_dir": None,
     }
     kwargs.update(overrides)
-    return _run_inference_verified(checkpoint, **kwargs)
+    result = _run_inference_verified(checkpoint, **kwargs)
+    if "results" in result:
+        result["results"] = list(result["results"])
+    return result
 
 
 def stub_verified_checkpoint(
@@ -112,7 +113,8 @@ def stub_verified_checkpoint(
     """
     from tcip_mcp.model_registry import VerifiedCheckpoint
 
-    payload: dict[str, Any] = {"config": {"data": config_data or {}}}
+    payload: dict[str, Any] = {"config": {"data": config_data or {}},
+                               "model_source": {"task": "detection"}}
     if kind is not None:
         payload["kind"] = kind
     if experiment_id is not None:

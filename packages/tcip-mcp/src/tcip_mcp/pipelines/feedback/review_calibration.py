@@ -1,9 +1,8 @@
 """Reconstruct a calibration reference from human review verdicts.
 
-Turns per-image review verdicts (the same shards ``materialize.py`` reads) into the COCO record
-shape ``resolve_operating_point`` consumes, so a breeder-confirmed sample of the model's own
-outputs can validate the count operating point, not only dense held-out GT (the shared-reference
-principle, CLAUDE.md). Per record:
+Turns per-image review verdicts into the COCO record shape ``resolve_operating_point`` consumes, so
+a breeder-confirmed sample of the model's own outputs can validate the count operating point. Per
+record:
 
   - ``gt`` = the boxes the breeder affirmed exist: accepted/edited matches, confirmed misses (FN),
     and false-positives the breeder promoted to real (accepted FP). Rejected boxes never enter gt.
@@ -11,18 +10,9 @@ principle, CLAUDE.md). Per record:
     verdict, so the curve derivation re-derives TP/FP/FN by center-matching dt against the affirmed
     gt exactly as the GT path does.
 
-The review-confirmed reference passes the identical disjoint-split + count-bias gate the held-out-GT
-path passes; ``resolve_operating_point`` stamps it ``VALIDATED_REVIEW_CONFIRMED`` (distinct from
-``VALIDATED_HELD_OUT`` so provenance records which reference validated). The conf-censoring guard in
-``resolve_operating_point`` still applies: verdicts whose predictions were staged above the display
-floor are truncated and cannot stamp a validated claim, the reviewed predictions must have been
-generated at a floored conf for the curve to reach the low-conf tail.
-
-Producer-identity scoping and FN-adjudication coverage both live here: every verdict (and
-confirmed-negative image record) is scoped to the producing bucket(s) it was actually recorded
-against before any gate statistic sees it, and every record carries whether the image was genuinely
-adjudicated for missed objects, the two facts a review-confirmed reference must never let a caller
-skip.
+Every verdict (and confirmed-negative image record) is scoped to the producing bucket(s) it was
+recorded against before any gate statistic sees it, and every record carries whether the image was
+adjudicated for missed objects.
 
 Torch-free.
 """
@@ -39,6 +29,7 @@ from tcip_annotation.json_io import xywh
 from tcip_annotation.state import BBox
 from tcip_annotation.verdicts import Verdict, decode_verdict
 
+from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_GROUP_BY, DEFAULT_HOLDOUT_RATIO
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
 
 # Every name resolve_operating_point can put in gate_evidence["failures"] (cross-cutting named-failure
@@ -141,7 +132,7 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. The split between kinds of object doesn't agree with your review, the model is "
      "finding too many of one kind and too few of another, in a way that can cancel out in the "
      "total even when the total itself agrees. Any result that separates the kinds (a percentage "
-     "of one kind, for instance) would be wrong. Correcting the mislabelled kinds in your review, "
+     "of one kind, for instance) would be wrong. Correcting the mislabeled kinds in your review, "
      "or improving the model, can help."),
     # Raised by review_to_records before the gate ever runs (a verdict's class identity couldn't be
     # resolved against its producing bucket), not one of resolve_operating_point's own gate-evidence
@@ -157,9 +148,7 @@ _KNOWN_FAILURE_NAMES = {name for names, _ in _FAILURE_MESSAGES for name in names
 
 
 def _breeder_message(name: str) -> str:
-    """The breeder-facing text for one named failure in :data:`_FAILURE_MESSAGES`, the single
-    vocabulary every review-based calibration refusal reads from rather than authoring its own
-    prose inline."""
+    """The breeder-facing text for one named failure in :data:`_FAILURE_MESSAGES`."""
     for names, msg in _FAILURE_MESSAGES:
         if name in names:
             return msg
@@ -183,15 +172,19 @@ def _selection_movement_sentence(gate_evidence: dict) -> str:
             "calibrated on a universe that moved: redraw the split or re-confirm those labels.")
 
 
+_UNIT_SQUARE = (1.0, 1.0)
+"""The frame a verdict's box is recorded on when its image's dimensions are unknown."""
+
+
 def _to_xywh(box_norm: Sequence[float], dims: tuple[int, int] | None) -> list[float]:
-    """A verdict's normalized box scaled to its image (:meth:`BBox.from_normalized_centre`) as
+    """A verdict's normalized box scaled to its image (:meth:`BBox.from_normalized_center`) as
     the stored ``[x, y, w, h]`` on the stored pixel grid (``json_io.xywh``).
 
     With no image dimensions the record stays on the unit square, off any pixel grid, keeping
     every record on one consistent normalized scale, valid for the count curve, whose tolerance
     is derived from the same records.
     """
-    b = BBox.from_normalized_centre(box_norm, *(dims or (1.0, 1.0)))
+    b = BBox.from_normalized_center(box_norm, *(dims or _UNIT_SQUARE))
     return xywh(b.x1, b.y1, b.x2, b.y2, on_grid=dims is not None)
 
 
@@ -201,8 +194,7 @@ def _same_producer(entry_identity: dict, target: dict) -> bool:
 
     Prefers ``checkpoint_sha256`` (the exact model bytes) when both sides recorded one; falls back
     to ``experiment_id`` only when a side has no sha to compare against. Missing on both sides is
-    not a match, there is nothing here to reconcile, so an unresolvable identity fails closed
-    rather than being treated as "unknown, so allow it".
+    not a match.
     """
     e_sha, t_sha = entry_identity.get("checkpoint_sha256"), target.get("checkpoint_sha256")
     if e_sha is not None and t_sha is not None:
@@ -227,14 +219,13 @@ def _scoped_verdicts(entries: list[dict], bucket_identities: list[dict]) -> list
 
 
 def covers(slot: Any, subject: str | None) -> bool:
-    """True when a zero-verdict image's own recorded ``adjudication_covered`` map confirms
-    coverage for ``subject``, ``None`` read as ``"*"``: the subject's own entry when the map has
-    one, whatever it says, never overridden by a subject-less Complete's ``"*"`` entry; the "*"
-    entry answers only when the subject has no entry of its own.
+    """True when a zero-verdict image's own recorded ``adjudication_covered`` map confirms coverage
+    for ``subject``, ``None`` read as ``"*"``: the subject's own entry when the map has one,
+    whatever it says, never overridden by a subject-less Complete's ``"*"`` entry; the "*" entry
+    answers only when the subject has no entry of its own.
 
-    ``slot`` is that map, or ``None`` for an image with no such record. A bare boolean is not a
-    shape any writer produces; reading one as covering everything, or nothing, would guess at the
-    subject the writer confirmed, so it is refused by name instead.
+    ``slot`` is that map, or ``None`` for an image with no such record. A bare boolean is refused
+    by name.
     """
     if slot is None:
         return False
@@ -259,66 +250,43 @@ def review_to_records(
 ) -> list[dict]:
     """Reconstruct per-image COCO records (gt=affirmed, dt=model predictions) from review verdicts.
 
-    ``bucket_identities`` (required, no default that would silently skip scoping): the
-    producer identity/identities (``checkpoint_sha256``/``experiment_id``) of the prediction
-    bucket(s) this reference is being built for. Only verdict entries (and confirmed-negative image
-    records) recorded against a matching producer are included:
+    ``bucket_identities`` (required): the producer identity/identities
+        (``checkpoint_sha256``/``experiment_id``) of the prediction bucket(s) this reference is
+        being built for. Only verdict entries (and confirmed-negative image records) recorded
+        against a matching producer are included:
 
       - an image with verdict entries: only entries whose ``producer_identity`` matches any of
-        ``bucket_identities`` contribute to ``gt``/``dt``. If none of an image's entries match, the
-        whole image is dropped, it carries no evidence for this bucket, so it must not silently
-        count as a zero-bias/zero-object agreement for it (model A's review verdicts must not
-        validate model B's bucket).
+        ``bucket_identities`` contribute to ``gt``/``dt``; if none match, the whole image is
+        dropped.
       - an image with zero verdict entries (a confirmed negative via ``mark_complete``) carries its
-        producer identity at the image level instead (``img_data["producer_identity"]``), checked
-        the same way; a mismatch or missing stamp drops the image entirely rather than counting it
-        as a negative for the wrong bucket.
+        producer identity at the image level (``img_data["producer_identity"]``), checked the same
+        way; a mismatch or missing stamp drops the image.
 
-    A verdict/image with no recorded identity at all always fails closed here, excluded.
+    A verdict/image with no recorded identity at all is excluded.
 
-    Each returned record also carries ``adjudication_covered``, ``True`` when there is
-    positive evidence a human could have caught a missed object on this image:
+    Each returned record also carries ``adjudication_covered``, ``True`` when there is positive
+    evidence a human could have caught a missed object on this image:
 
       - a verdict-bearing image: the image's ``gt_preexisting`` fact is ``True``, or at least one
-        of its (scoped) verdict entries carries ``missed_object_attested``, a fact
-        ``record_detection_action`` stamps explicitly at the moment a verdict is recorded (from
-        whether the caller supplied neither a ``gt_idx`` nor a ``pred_idx``, the exact shape only
-        the "mark missed object" tool produces), never reconstructed here from the entry's bbox
-        geometry. Geometry alone is ambiguous: a rejected or accepted pre-existing FN (an existing,
-        already-indexed GT box being corrected or confirmed, not a newly-attested miss) ends up with
-        the identical ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once persisted, so inferring
-        coverage from that shape would silently count an FN correction as if it were a
-        swept-for-a-missed-object attestation. Both ``gt_preexisting`` and the attestation are
-        recorded at the image level, not scoped to any subject, so a reference built for one
-        subject can be admitted on evidence that concerned a different subject on the same image;
-        scoping either fact to the subject actually being validated is unimplemented.
-      - a zero-verdict (``mark_complete``) image: the recorded ``adjudication_covered`` map the
-        route stamped at completion time, read through :func:`covers` for ``subject`` (``"*"`` when
-        ``subject`` is ``None``): ``True`` only when that subject's own entry, or a subject-less
-        Complete's ``"*"`` entry, says the bucket held zero predictions resolving to it, never for a
-        bulk-accept of a populated image the breeder never individually reviewed. A missing map,
-        or a map with neither key set, is ``False``, fails closed, matching every other
-        unrecorded-fact rule here.
+        of its (scoped) verdict entries carries ``missed_object_attested``, the fact
+        ``record_detection_action`` stamps when a verdict is recorded. Both facts are recorded at
+        the image level, not scoped to a subject, so evidence about one subject admits a reference
+        built for another subject on the same image; scoping them to the validated subject is
+        unimplemented.
+      - a zero-verdict (``mark_complete``) image: the recorded ``adjudication_covered`` map, read
+        through :func:`covers` for ``subject`` (``"*"`` when ``subject`` is ``None``). A missing
+        map, or a map with neither key set, is ``False``.
 
     ``subject`` (default ``None``, read as ``"*"``) is the object identity this reference is being
-    built to validate, the GUI's own ``dataset.subject``: threaded to :func:`covers` so a zero-
-    verdict image's coverage is judged against the subject actually being validated, not against
-    whichever subject (or none) a different Complete on that image confirmed.
-
-    ``resolve_operating_point_from_review`` passes this field to ``resolve_operating_point`` as a
-    gate, every record must satisfy it or the whole reference is refused, never a per-record
-    filter (a filter here is a fail-open: the excluded set correlates with the quantity being
-    measured, see ``resolve_operating_point``'s docstring).
+    built to validate, threaded to :func:`covers`.
 
     ``image_dims`` maps image name (with extension, as review state keys it) -> ``(width, height)``
-    to denormalize boxes to pixels (the faithful scale); omit it to keep records on the normalized
-    unit square. ``only_completed`` restricts to fully-reviewed images (a partially-reviewed image
-    is not a confirmed reference).
+    to denormalize boxes to pixels; omit it to keep records on the normalized unit square.
+    ``only_completed`` restricts to fully-reviewed images.
 
-    Each record carries ``image_id=Path(img_name).stem``, the stem, not the extensioned review-
-    state key. Training stems (``split.json``'s ``"train"`` list) never carry an extension, so
-    only a stemmed ``image_id`` can match a training stem in ``_train_disjointness``. Stemming
-    also keeps tile groups coherent: ``_TILE_GROUP_RE`` matches only a bare stem.
+    Each record carries ``image_id=Path(img_name).stem``, the stem, not the extensioned
+    review-state key, so it matches a training stem in ``_train_disjointness`` and
+    ``_TILE_GROUP_RE``'s bare-stem tile groups.
     """
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record, dt_record, gt_record
 
@@ -328,7 +296,7 @@ def review_to_records(
         if only_completed and img_data.get("img_status") != "completed":
             continue
         img_dims = dims.get(img_name)
-        img_w, img_h = img_dims or (1.0, 1.0)
+        img_w, img_h = img_dims or _UNIT_SQUARE
         detections = img_data.get("detections") or []
         gt_preexisting = bool(img_data.get("gt_preexisting"))
 
@@ -395,7 +363,7 @@ def review_reference_hash(records: list[dict]) -> str:
     them, so a field a record builder adds never re-keys a reference.
 
     Scopes the derived conf to *this* reference so the firewall can flag it being inherited across a
-    different one, the review analogue of ``resolution.dataset_hash`` over label bytes.
+    different one, the review analog of ``resolution.dataset_hash`` over label bytes.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_facts
 
@@ -411,22 +379,16 @@ def review_reference_hash(records: list[dict]) -> str:
 def review_conf_threshold(
     review_state: dict, *, bucket_identities: list[dict], only_completed: bool = True,
 ) -> float | None:
-    """The review session's effective confidence-display threshold, from recorded
-    verdict facts, the max ``conf_threshold`` across every (bucket-scoped) verdict entry on the
-    images this reference includes, never a re-typed default.
+    """The review session's effective confidence-display threshold, from recorded verdict facts:
+    the max ``conf_threshold`` across every (bucket-scoped) verdict entry on the images this
+    reference includes.
 
-    Scoped by ``bucket_identities`` the same way :func:`review_to_records` scopes gt/dt (the same
-    predicate, ``_matches_any_bucket``, one implementation, not a second one that could drift), so
-    an unrelated review session over a different model's predictions never inflates or deflates the
-    floor this reference was actually shown at.
+    Scoped by ``bucket_identities`` the same way :func:`review_to_records` scopes gt/dt
+    (``_matches_any_bucket``).
 
     ``None`` when any image (with at least one bucket-scoped verdict entry) recorded no
-    ``conf_threshold`` on any of them, the review-side term is then unknown, which the caller
-    combines with the generation-side floor via ``max(...)``;
-    either half unknown makes the combined ``staged_conf_floor`` ``None`` (fails closed per
-    ``_conf_censored``, the same rule a missing producer identity follows). An image with zero
-    bucket-scoped verdict entries (nothing walked/reviewed against this bucket) contributes
-    nothing here, neither raising a value nor tripping the unknown case.
+    ``conf_threshold`` on any of them. An image with zero bucket-scoped verdict entries contributes
+    nothing here.
     """
     thresholds: list[float] = []
     for img_data in review_state.get("image", {}).values():
@@ -454,10 +416,10 @@ def resolve_operating_point_from_review(
     tiled_source: str = "default",
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
-    group_by: str = "tile_prefix",
+    group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
-    seed: int = 0,
-    holdout_ratio: float = 0.5,
+    seed: int = DEFAULT_CAL_SEED,
+    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
     experiment_id_ambiguous: bool = False,
@@ -467,61 +429,41 @@ def resolve_operating_point_from_review(
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
     Splits the reviewed images into a locked, group-aware calibration/holdout split
-    (``resolve_locked_cal_holdout_split``, keyed by the review reference's own content hash so a
-    later call over the same verdicts returns the same split rather than a fresh cut) and hands
-    both to ``resolve_operating_point`` with ``validated_reference=VALIDATED_REVIEW_CONFIRMED``, so the
-    same disjoint + count-bias + content-overlap + train-disjointness gate decides whether the
-    conf is shippable, and the conf-censoring guard still fails a display-floored reference
-    closed. Returns a bundle whose conf is stamped ``VALIDATED_REVIEW_CONFIRMED`` only if that gate passes,
-    else ``false``. ``seed``/``holdout_ratio`` only govern the first (locking) draw for this
-    reference's identity hash, a later call over the same verdicts returns the locked split
-    regardless, and any divergence is surfaced on the bundle's conf gate evidence, not just logged
+    (``resolve_locked_cal_holdout_split``, keyed by the review reference's own content hash) and
+    hands both to ``resolve_operating_point`` with
+    ``validated_reference=VALIDATED_REVIEW_CONFIRMED``. Returns a bundle whose conf is stamped
+    ``VALIDATED_REVIEW_CONFIRMED`` only if that gate passes, else ``false``.
+    ``seed``/``holdout_ratio`` only govern the first (locking) draw for this reference's identity
+    hash; any divergence is surfaced on the bundle's conf gate evidence
     (``attach_split_policy_provenance``).
 
-    ``scope_root`` (required, no default): the root the locked split is stored under, the dataset
-    root the reviewed records themselves live under (the one the verdict store was opened on).
-    Passed rather than resolved here, and never defaulted to the platform root, which adopting a
-    project repins mid-life: the same verdicts would then resolve a different lock and be re-cut
-    into a fresh split. See ``pipelines.data.splits.cal_holdout_lock_key``.
+    ``scope_root`` (required): the root the locked split is stored under, the dataset root the
+        reviewed records themselves live under. See ``pipelines.data.splits.cal_holdout_lock_key``.
 
-    ``bucket_identities`` (required, no default): threaded straight to
-    ``review_to_records``, see there for the scoping/fail-closed semantics. There is no
-    legitimate call to this function without a target bucket; a caller who genuinely has none must
-    still say so explicitly by passing an empty list (which, per the same fail-closed rule, refuses
-    every verdict rather than silently admitting them all).
+    ``bucket_identities`` (required): threaded to ``review_to_records``; an empty list refuses
+        every verdict.
 
-    ``staged_conf_floor`` is the effective floor the reviewed predictions were staged/shown
-    at, ``max(generation_conf, review_conf_threshold)``, computed by the caller
-    (``routes/review.py``, which has both the buckets' ``operating_point.json`` sidecars and
-    ``review_conf_threshold``'s recorded-verdict computation) and passed straight through to
-    ``resolve_operating_point``. This function does not derive it.
+    ``staged_conf_floor`` is the effective floor the reviewed predictions were staged/shown at,
+    ``max(generation_conf, review_conf_threshold)``, computed by the caller and passed through to
+    ``resolve_operating_point``.
 
-    ``tile_size_derived_from`` is likewise the caller's own fact, never derived here: this path
-    holds no predictor to check a stated edge against, so the caller reads it off the sidecar's own
-    stamp (the text the run that actually produced the predictions already composed) and forwards
-    it unchanged.
+    ``tile_size_derived_from`` is the caller's own fact, read off the sidecar's stamp and forwarded
+    unchanged.
 
-    ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
-    longer among the reviewed images, or when its lock file is corrupt, this
-    propagates to the caller rather than crashing later on a missing dict lookup. This function
-    takes no selection: the universe here is the breeder's own confirmations, which a split
-    manifest has no say over.
+    ``resolve_locked_cal_holdout_split``'s ``ValueError`` (a lock referencing a stem no longer
+    among the reviewed images, or a corrupt lock file) propagates. This function takes no
+    selection.
 
-    ``experiment_id_ambiguous`` is true when the caller's own buckets named more than one
-    producing run rather than none at all (``routes/review.py`` collapses both cases to
-    ``experiment_id=None`` before this function ever sees it, since neither can vouch for one
-    run's disjointness); carried onto the sealed train-disjointness fact so
-    :func:`describe_review_validation` can tell the two apart in its breeder-facing sentence,
-    never asserted by the resolver itself.
+    ``experiment_id_ambiguous`` is true when the caller's buckets named more than one producing run
+    rather than none; carried onto the sealed train-disjointness fact so
+    :func:`describe_review_validation` can tell the two apart.
 
-    ``subject`` (default ``None``) is forwarded to :func:`review_to_records`, see there: the
-    object identity a zero-verdict image's own coverage claim is judged against.
+    ``subject`` (default ``None``) is forwarded to :func:`review_to_records`.
 
-    ``calibration_labels_dir`` is the caller's own fact, never derived here (the directory the
-    reviewed bucket's own labels live in, when the caller can name one): forwarded to
-    ``resolve_operating_point``'s selection-disjointness check, which is applicable only when the
-    checkpoint named by ``experiment_id`` carries a ``selection_binding``, since this function
-    reads no selection of its own, the universe here is the breeder's own confirmations.
+    ``calibration_labels_dir`` (the directory the reviewed bucket's own labels live in, when the
+    caller can name one) is forwarded to ``resolve_operating_point``'s selection-disjointness
+    check, applicable only when the checkpoint named by ``experiment_id`` carries a
+    ``selection_binding``.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (
@@ -563,23 +505,15 @@ def resolve_operating_point_from_review(
 
 
 def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: int) -> dict[str, Any]:
-    """Translate a review-confirmed operating-point bundle into a breeder-legible validation result.
+    """Translate a review-confirmed operating-point bundle into a breeder-legible validation
+    result.
 
-    Reads the conf param's own gate evidence (the same gate output ``resolve_operating_point``
-    already produced, never a re-run) and maps them to plain language a non-CV breeder can act on.
-    ``resolve_operating_point``'s named ``failures`` list (cross-cutting) is the single source of
-    truth for which check(s) refused; this function's job is only to translate each name to a
-    message, exhaustively, so an unrecognized failure name is a loud error here, not a silent
-    fallthrough to the generic "counts didn't agree" message. When more than one named failure
-    applies at once (e.g. too few images and a censored floor), every one of them gets its own
-    message rather than only the highest-priority match, a breeder who fixes the first blocker and
-    resubmits must not discover the second only then. Pure over the bundle, no torch, no
-    re-derivation.
+    Reads the conf param's own gate evidence and maps each of ``resolve_operating_point``'s named
+    ``failures`` to plain language a non-CV breeder can act on: every named failure gets its own
+    message; an unknown name raises. Pure over the bundle, no torch.
 
-    The "Validated" message's miss-coverage claim is read directly off the exact-conf holdout
-    curve entry (``gate_evidence['holdout_bias']``, already carrying ``tp``/``fn``/``recall``
-    at precisely the shipped conf), never a second, independently-computed miss statistic that could
-    drift from what the gate actually decided.
+    The "Validated" message's miss-coverage claim is read off ``gate_evidence['holdout_bias']``
+    (``tp``/``fn``/``recall`` at the shipped conf).
     """
     conf = bundle.params.get("conf")
     validated = bool(conf is not None and conf.is_shippable)

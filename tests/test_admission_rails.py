@@ -178,7 +178,7 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path):
 
 def test_a_noncanonical_labelme_document_refuses_rather_than_reading_as_empty(tmp_path):
     """A document in another tool's schema is unreadable ground truth, not an empty one: reading
-    it as empty would train a labelled image as entirely background."""
+    it as empty would train a labeled image as entirely background."""
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     images = tmp_path / "images"
@@ -241,7 +241,7 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
     built = dataset_over(
         "keypoints", images, labels, subject=BUD,
         dataset_source={"builder": "tests.test_dataset_source_seam:build_point_ds"})
-    assert sorted(s.member_stem for s in built.samples) == ["p0", "p1"]
+    assert sorted(s.member for s in built.samples) == ["p0", "p1"]
     assert built.points == [(20.0, 30.0), (21.0, 31.0)]
 
     pixels = torch.stack([built[i][0].mean(dim=(1, 2)) for i in range(len(built))])
@@ -274,7 +274,7 @@ def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
 
     admitted = admit_over(images, labels, subject=BUD)
     samples = admitted.samples({stem: "train" for stem in stems}, lambda s: s)
-    by_stem = {sample.member_stem: sample for sample in samples}
+    by_stem = {sample.member: sample for sample in samples}
     # The run's own sizes, resolved once over both sides, as a run builds its loaders.
     sizes = resolve_sizes("detection", {}, samples)
     train_ds = build_dataset("detection", samples=[by_stem[s] for s in stems[:2]],
@@ -379,7 +379,7 @@ def _rail_fixture(tmp_path):
 
 def test_only_annotated_and_confirmed_negatives_train(tmp_path):
     """Samples come from the annotated set, never from an image list: a project where the breeder
-    labelled 30 of 400 images must not train on the other 370 asserted to be empty."""
+    labeled 30 of 400 images must not train on the other 370 asserted to be empty."""
     images, labels = _rail_fixture(tmp_path)
 
     admitted = admit_over(images, labels, subject=BUD)

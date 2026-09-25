@@ -11,7 +11,7 @@ import type { ToastSlice } from "@/store/slices/toasts";
 import type { UserSlice } from "@/store/slices/user";
 
 /**
- * The whole store's shape, one slice interface per labelled group in the create() call that
+ * The whole store's shape, one slice interface per labeled group in the create() call that
  * composes them: each slice file stays a self-contained read of its own group, and this is the
  * one place they combine into the type every slice's StateCreator is typed against.
  */

@@ -194,7 +194,7 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
     real_seal = resolution.seal_validation
 
     def _seal_then_die(draft, **kw):
-        digest, body = real_seal(draft, **kw)
+        body = real_seal(draft, **kw)
         sealed.update(body["validated_by"])
         raise RuntimeError("the process died between the record and the stamp")
 

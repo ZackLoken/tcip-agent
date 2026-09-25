@@ -1,15 +1,11 @@
-"""Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones.
-Every surface (the tcip-web Results route, the MCP ``deliver_phenology_milestones`` tool) routes through here,
-so a phenology date always means the same thing, for whichever registered trait it's computed for.
+"""Canonical phenology measurement: a trait's positive-fraction milestones, for whichever
+registered trait it's computed for.
 
-Trait definition (authoritative; see the ``phenology`` skill + the CLAUDE.md measurement-
-integrity invariant): the positive-state fraction = the fraction of a plant's detected objects
-that are in the trait's positive/measured state, an expert-defined visible morphological stage
-emitted by a *validated*
-classifier (the trait's ``positive_value``), never a geometric proxy such as bbox height.
-Milestone columns come entirely from the trait's own ``TraitSpec`` (``phenology_prefix`` plus
-each ``milestone_fractions`` entry), so a different registered trait yields its own prefix and
-columns with no code change:
+The positive-state fraction = the fraction of a plant's detected objects that are in the trait's
+positive/measured state, an expert-defined visible morphological stage emitted by a validated
+classifier (the trait's ``positive_value``), never a geometric proxy such as bbox height. Milestone
+columns come entirely from the trait's own ``TraitSpec`` (``phenology_prefix`` plus each
+``milestone_fractions`` entry):
 
     ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
                                             for each fraction the spec declares
@@ -17,21 +13,17 @@ columns with no code change:
                                             (``TraitSpec.majority_milestone``), present only
                                             when the spec names one
 
-A spec's majority-crossing alias is a breeder-confirmed reading of the trait's own definition
-text, flagged crossing-unconfirmed (``TraitSpec.majority_provisional``) until confirmed; correct
-the mapping in the spec if the breeder rules otherwise. ``positive_onset_date`` (the first date
-any positive-state observation appears) is a separate helper, not the delivered trait.
+A spec's majority-crossing alias is a breeder-confirmed reading of the trait's own definition text,
+flagged crossing-unconfirmed (``TraitSpec.crossing_unconfirmed``) until confirmed.
+``positive_onset_date`` (the first date any positive-state observation appears) is a separate
+helper, not the delivered trait.
 
-This module is pure (stdlib only, plus ``resolution.py`` and ``operationalization.py``, both of
-which are themselves torch-free): it consumes
-prediction buckets and never touches pixels or model machinery. A classified bucket's own
-recorded scope (``resolution.bucket_scope``) says which prediction records carry the classifier's
-decoded call: ``.subject`` names the object class and the call sits under
-``.attributes[attribute]``, the same shape ground truth carries (see ``count_by_class``'s
-docstring for the full picture). If the bucket
-never assessed the trait's positive-class axis at all, the fraction is not a valid measurement,
-``per_plant_phenology`` surfaces that via per-plant/per-date disclosure fields so callers never
-deliver a curve built on unclassified or missing detections.
+Pure (stdlib only, plus the torch-free ``resolution.py`` and ``operationalization.py``): it
+    consumes prediction buckets and never touches pixels or model machinery. A classified bucket's
+    own recorded scope (``resolution.bucket_scope``) says which prediction records carry the
+    classifier's decoded call: ``.subject`` names the object class and the call sits under
+    ``.attributes[attribute]`` (see ``count_by_class``). A bucket that never assessed the trait's
+    positive-class axis is disclosed per plant and per date by ``per_plant_phenology``.
 """
 
 from __future__ import annotations
@@ -45,29 +37,22 @@ from typing import TYPE_CHECKING, Optional
 
 from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.operationalization import OperationalizationBasis
-from tcip_mcp.pipelines.resolution import Acknowledgement, bucket_scope
+from tcip_mcp.pipelines.resolution import Acknowledgment, bucket_scope
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.resolution import BucketScope
 
 
 def _milestone_targets(spec) -> dict[str, float]:
-    """Milestone crossing fractions from the trait's confirmed semantics (Tier C, read never derived).
-
-    Resolved per call (not a module-load snapshot) so a config-authored trait or a repinned project
-    is honored. Keyed "NNper" to match the CSV column names.
+    """Milestone crossing fractions from the trait's confirmed semantics, resolved per call. Keyed
+    "NNper" to match the CSV column names.
     """
     return {f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions}
 
 
 def _milestone_columns(spec) -> list[tuple[str, str]]:
-    """``(column_suffix, crossing_key)`` for every milestone this trait actually delivers.
-
-    The single owner of which milestone columns exist. ``plant_milestones`` iterates it to emit each
-    date and its bound; the schema functions map it to names. The majority alias enters only when the
-    spec names a crossing for it, and declaration and production share this same condition, so a
-    trait with no ``majority_milestone`` never declares a majority date/bound/crossing-unconfirmed
-    column that no producer fills.
+    """``(column_suffix, crossing_key)`` for every milestone this trait actually delivers; the
+    majority alias enters only when the spec names a crossing for it.
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
     if spec.majority_milestone:
@@ -78,24 +63,13 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
 def milestone_date_columns(spec) -> list[str]:
     """The milestone/date column names a trait's phenology delivery carries, a proper subset of
     ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
-
-    Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. Not an export gate:
-    the web door computes what it exports directly rather than checking for these names in a
-    caller-supplied table.
     """
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
 
 def majority_crossing_unconfirmed_column(spec) -> str | None:
-    """The column that marks a trait's majority alias as not yet breeder-confirmed, or ``None`` when
-    the spec names no majority crossing for it to qualify.
-
-    The single owner of that column's name. ``phenology_csv_columns`` declares it, and
-    ``_write_phenology_delivery`` (the one writer both ``write_phenology_csv`` and
-    ``write_phenology_curve_csv`` share, and this column's one caller) composes it through this same
-    function, so declaration and production cannot disagree.
-    ``tests/test_phenology.py``'s ``test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns``
-    holds the writer's composed cells to exactly the schema's provenance columns plus this marker.
+    """The column that marks a trait's majority alias as not yet breeder-confirmed, or ``None``
+    when the spec names no majority crossing for it to qualify.
     """
     if not spec.majority_milestone:
         return None
@@ -106,10 +80,9 @@ def phenology_csv_columns(spec) -> list[str]:
     """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
 
     The milestone/alias column names come from the spec (``phenology_prefix`` + each milestone key,
-    plus the majority alias/crossing-unconfirmed columns built from ``majority_label``) so the schema
-    carries no trait vocabulary of its own: every registered trait resolves through its own spec to
-    its own prefix and columns with no change here. The surrounding provenance columns (operating
-    point, classifier validation, producer identity, coverage disclosure) are genuinely trait-neutral.
+    plus the majority alias/crossing-unconfirmed columns built from ``majority_label``). The
+    surrounding provenance columns (operating point, classifier validation, producer identity,
+    coverage disclosure) are trait-neutral.
     """
     crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
     return [
@@ -167,7 +140,7 @@ PROVENANCE_COLUMNS = [
     # Who acknowledged this delivery unvalidated, and why; blank on either when nothing was
     # acknowledged (a fully-validated delivery, or one refused outright).
     "acknowledged_by",
-    "acknowledgement_reason",
+    "acknowledgment_reason",
 ]
 
 
@@ -181,7 +154,7 @@ CURVE_MEASUREMENT_COLUMNS = [
 def curve_csv_columns() -> list[str]:
     """The delivered per-(plant, date) curve CSV schema.
 
-    A curve is the same phenology measurement as the milestone summary, un-summarised, which is why it
+    A curve is the same phenology measurement as the milestone summary, un-summarized, which is why it
     takes the identical delivery gate, so it carries the identical provenance tail. Trait-neutral:
     unlike the milestone schema it names no crossings, only the counts the fraction is built from.
     """
@@ -192,15 +165,11 @@ def curve_csv_columns() -> list[str]:
 
 
 def date_key(date_str: str) -> tuple[int, int, int]:
-    """ISO ``YYYY-MM-DD`` → ``(year, month, day)`` for chronological sort.
+    """ISO ``YYYY-MM-DD`` -> ``(year, month, day)`` for chronological sort.
 
-    A value that is not a calendar-legal ISO date (the ``undated/`` bucket, a non-numeric
-    folder, or an out-of-range one like ``2026-13-01``) sorts first as ``(0, 0, 0)`` and is
-    excluded from milestone math, an image with no valid capture date can't sit on a time
-    series. Validating the *whole* date here (not just "three integers") keeps ``date_key``,
-    ``crossing_date`` (which builds ``datetime.date`` objects to interpolate) and
-    ``positive_onset_date`` agreeing on exactly which points are real, and prevents a
-    malformed folder from raising mid-interpolation.
+    A value that is not a calendar-legal ISO date (the ``undated/`` bucket, a non-numeric folder,
+    or an out-of-range one like ``2026-13-01``) sorts first as ``(0, 0, 0)`` and is excluded from
+    milestone math.
     """
     parts = date_str.split("-")
     if len(parts) != 3:
@@ -254,11 +223,10 @@ class Crossing:
 def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Crossing]:
     """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
 
-    Linear interpolation between neighbouring observed dates when the crossing falls between two
+    Linear interpolation between neighboring observed dates when the crossing falls between two
     points; a left-censored crossing (the first observed point already meets the target) or a
-    right-censored one (the last observed point still hasn't) is flagged as such rather than
-    silently returned as if it were a real single-date crossing, or as a bare ``None`` indistinguishable
-    from no observations at all. ``None`` only when there are no real observed points to begin with.
+    right-censored one (the last observed point still hasn't) is flagged as such. ``None`` only
+    when there are no real observed points.
     """
     points = _real_points(series)
     if not points:
@@ -287,13 +255,11 @@ def positive_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
 
 
 def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
-    """The phenology dates for one plant's positive-fraction series, keyed by the trait's own columns.
+    """The phenology dates for one plant's positive-fraction series, keyed by the trait's own
+    columns.
 
-    Both the column names (``phenology_prefix`` + each milestone key, plus the majority alias) and the
-    crossing fractions and majority mapping come from the trait's semantics (``TraitSpec``), so the
-    milestone definition lives in one place instead of scattered literals. ``spec`` is required: no
-    silent default trait, a caller that forgets to thread the trait spec must fail loudly, not emit
-    one trait's columns for another.
+    The column names (``phenology_prefix`` + each milestone key, plus the majority alias), the
+    crossing fractions and the majority mapping come from ``spec``, which is required.
     """
     prefix = spec.phenology_prefix
     crossings = {key: crossing_date(series, frac) for key, frac in _milestone_targets(spec).items()}
@@ -314,11 +280,8 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
 def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
     """Resolve a trait's positive class id from a prediction bucket's own recorded ``id_map``.
 
-    The single resolution both delivery doors' ``positive_class_id`` surfaces call, not a separate
-    registry re-derivation, which could disagree with the map predictions were actually decoded
-    through. Returns ``(class_id, message)``; ``class_id`` is ``None`` when no bucket's ``id_map``
-    contains the trait's positive value, so the caller refuses rather than guessing with a bare
-    default.
+    Returns ``(class_id, message)``; ``class_id`` is ``None`` when no bucket's ``id_map`` contains
+    the trait's positive value.
     """
     name = spec.positive_value
     if not name:
@@ -335,12 +298,8 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
 
 
 def bucket_id_map(pred_dir: Path) -> dict | None:
-    """The bucket's recorded ``id_map`` (name -> int), or ``None`` if absent/malformed.
-
-    Read from ``operating_point.json``, the same sidecar every prediction-bucket writer
-    (``run_inference``, the GUI worker) stamps ``id_map`` into, never re-derived. A non-dict
-    ``id_map`` (a malformed/foreign sidecar) is treated the same as absent, fail closed, never
-    duck-typed.
+    """The bucket's recorded ``id_map`` (name -> int) from ``operating_point.json``, or ``None`` if
+    absent or not a dict.
     """
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -357,28 +316,20 @@ def count_by_class(
 ) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
-    ``scope`` is the bucket's own recorded scope (:func:`~tcip_mcp.pipelines.resolution.
-    bucket_scope`). Under no scope, a detector scope, or a classified scope whose recorded
-    ``id_map`` lacks ``positive_value``, every detection is unclassified: a whole-bucket decision,
-    since only a bucket that classified along an attribute assessed a state at all. This also
-    means a detector bucket whose one map key happens to equal ``positive_value`` never counts a
-    positive: a bare single-class detector never assessed the trait's positive state.
+    ``scope`` is the bucket's own recorded scope
+    (:func:`~tcip_mcp.pipelines.resolution.bucket_scope`). Under no scope, a detector scope, or a
+    classified scope whose recorded ``id_map`` lacks ``positive_value``, every detection is
+    unclassified: a whole-bucket decision. A detector bucket whose one map key happens to equal
+    ``positive_value`` never counts a positive.
 
     Under a classified scope, every record is held to
     :func:`~tcip_annotation.json_io.require_classified_record` under the bucket's own recorded
-    vocabulary (``id_map``'s keys, the vocabulary its producer decoded through): a value outside
-    that vocabulary refuses by name (a pre-conform record or a foreign document), rather than
-    reading as unclassified. A record whose value equals ``positive_value`` counts positive; every
-    other classified record counts toward neither positive nor unclassified.
+    vocabulary (``id_map``'s keys): a value outside that vocabulary refuses by name. A record whose
+    value equals ``positive_value`` counts positive; every other classified record counts toward
+    neither positive nor unclassified. A classified bucket's record carries the object class in
+    ``subject`` and the classifier's decoded call in ``attributes[attribute]``.
 
-    Predictions decode differently from GT annotations, verified against the real writer,
-    ``write_predictions_json``: a classified bucket's record carries the object class in
-    ``subject`` and the classifier's decoded call in ``attributes[attribute]``, the same shape
-    ground truth carries.
-
-    A missing prediction file is the caller's concern (a missing observation, not an observed zero,
-    see ``per_plant_series``), not this function's: it is only ever called for a file confirmed to
-    exist.
+    Called only for a prediction file confirmed to exist.
     """
     from tcip_annotation import json_io
 
@@ -398,11 +349,17 @@ def count_by_class(
 
 
 class EmptyPopulation(ValueError):
-    """A phenology measurement was asked for with no plants named.
-
-    The population is the caller's explicit list of plants; a mapping names every plot the
-    plant CSVs carry, which is never the same thing, so nothing here ever stands in for it.
+    """A phenology measurement was asked for with no plants named; the population is the caller's
+    explicit plant list.
     """
+
+
+def measurement_refusals() -> tuple[type[Exception], ...]:
+    """The exceptions :func:`per_plant_phenology` refuses a measurement with, each naming why."""
+    from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
+    from tcip_store import StoreError
+
+    return (UnreadableLabelDocument, ClassifiedRecordRefused, StoreError, EmptyPopulation)
 
 
 def _population(plants: Sequence[str]) -> list[str]:
@@ -422,31 +379,23 @@ def per_plant_series(
     positive_value: str,
     plants: Sequence[str],
 ) -> dict[str, dict]:
-    """Aggregate classified predictions into a per-plant positive-fraction series, for exactly
-    the plants in ``plants``.
+    """Aggregate classified predictions into a per-plant positive-fraction series, for exactly the
+    plants in ``plants``.
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
     ``.plot_name`` / ``.accession_name`` (attributes or dict keys). ``plants`` is the delivery's
-    population, the caller's own list of plant ids: every plant in it gets an entry, in the
-    order given, and a plant the mapping names that is not in it is never read. A population
-    plant the mapping never names on a date has no entry for that date; one the mapping never
-    names at all has an empty series, so a row exists for it and says so rather than the plant
-    silently dropping out of the delivery. Returns
+    population: every plant in it gets an entry, in the order given, and a plant the mapping names
+    that is not in it is never read. A population plant the mapping never names on a date has no
+    entry for that date; one the mapping never names at all has an empty series. Returns
     ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing, n_images),
     ...]}}``. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is
-    excluded from every plant's coverage; its count is disclosed once, at delivery scope, by
-    ``plant_mapping.MappingBuild.unattributed``, never recomputed here.
+    excluded from every plant's coverage; its count is
+    ``plant_mapping.MappingBuild.unattributed``'s.
 
-    Coverage is measured against the stems the plant mapping actually names for each (plant, date),
-    not merely against whatever prediction files happen to exist: a named stem with no
-    corresponding prediction file is a missing observation, disclosed separately, never read as an
-    observed zero. This applies at the date level too: a date the
-    mapping names for which the caller simply omits a ``predictions_by_date`` entry is not skipped,
-    every stem the mapping names for it counts as missing, the same as a named stem with no file,
-    rather than the date vanishing from the series with no disclosure at all. Which stems count as
-    read, rather than missing, is decided by ``plant_mapping.stems_delivery_reads``, the same
-    predicate ``plant_mapping.verify_mapping_inputs`` uses to decide what a delivery may check a
-    fresh stamp for, so the two can never disagree about what this delivery actually reads.
+    Coverage is measured against the stems the plant mapping names for each (plant, date): a named
+    stem with no corresponding prediction file is a missing observation, and a date the mapping
+    names with no ``predictions_by_date`` entry counts every stem it names as missing. Which stems
+    count as read is ``plant_mapping.stems_delivery_reads``.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         assignment_is_attributed,
@@ -505,24 +454,16 @@ def per_plant_phenology(
     spec,
     plants: Sequence[str],
 ) -> dict:
-    """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones,
-    one row per plant in ``plants`` and no other.
+    """Full canonical pipeline: classified predictions + plant mapping -> per-plant milestones, one
+    row per plant in ``plants`` and no other, in its order (see :func:`per_plant_series`).
 
-    ``plants`` is the delivery's population, the caller's explicit list (see
-    :func:`per_plant_series`): the rows come back in its order and number exactly as many as
-    it names, a plant the mapping never covers included, with an empty series.
-    Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the positive-
-    fraction series, the milestone dates, and coverage-disclosure fields
+    Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the
+    positive-fraction series, the milestone dates, and coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``). A plant's milestones are computed only
-    over dates that are both fully classified (``unclassified == 0``) and fully observed
-    (``missing == 0``) for that date, conjunctive across dates, not an "any date" union: a plant
-    with even one partially-unclassified or partially-missing date does not earn milestone dates
-    for that plant, it earns disclosure of which dates were excluded and why. The top-level
+    when every one of its dates is both fully classified (``unclassified == 0``) and fully observed
+    (``missing == 0``); otherwise it earns disclosure of which dates were excluded and why.
     ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
-    fully classified, distinguishing "the classifier bridge was never wired at all" (nothing here,
-    refuse the whole call) from "wired, with some per-plant/per-date gaps" (deliver, with per-row
-    disclosure). An unattributed image's count is a delivery-wide disclosure, not a per-plant
-    field, and is not this function's: see ``plant_mapping.MappingBuild.unattributed``.
+    fully classified.
     """
     per_plant = per_plant_series(mapping, predictions_by_date, positive_value, plants)
     rows = []
@@ -567,16 +508,9 @@ def per_plant_phenology(
 def phenology_delivery_flags(
     classifier_state: str | None, operating_point_state: str | None, tile_recon: dict,
 ) -> dict[str, str | None]:
-    """The ``check_delivery_gate`` flags dict a phenology delivery gates on.
-
-    Both delivery doors (``deliver_phenology_milestones``, the web ``export_csv``) reconcile the classifier and
-    the count operating point themselves, from evidence that differs per door (a caller-supplied
-    bucket list for the classifier there, the delivery's own buckets here), and hand the reconciled
-    states here rather than assembling the flags dict a second time each. ``tile_size`` enters only
-    when ``tile_recon["operative"]`` is true (``reconcile_tile_size_validity``'s own read of whether
-    these buckets ran tiled at all): an untiled delivery's flags carry no ``tile_size`` key, never a
-    floored one, since ``check_delivery_gate`` reads a dimension's absence differently from an
-    unvalidated value present under it.
+    """The ``check_delivery_gate`` flags dict a phenology delivery gates on, from the caller's
+    reconciled classifier and count operating point states. ``tile_size`` enters only when
+    ``tile_recon["operative"]`` is true; an untiled delivery's flags carry no ``tile_size`` key.
     """
     flags: dict[str, str | None] = {
         "classifier": classifier_state, "operating_point": operating_point_state,
@@ -591,14 +525,9 @@ def _operating_point_conf_cell(
     operating_point_confs: Mapping[str, float | None],
 ) -> float | str | None:
     """The delivered ``operating_point_conf`` cell: the single value every delivered bucket
-    records, when they all record the same one, otherwise one entry per date in
-    ``dates_delivered`` order, ``;``-joined, an empty entry for a bucket with no numeric conf, so
-    a multi-date delivery whose dates were calibrated apart still names every date's conf instead
-    of collapsing to a blank cell. Read off ``dates_delivered`` through ``predictions_by_date``
-    rather than off ``predictions_by_date`` directly, so this cell and the ``dates_delivered``
-    cell beside it (also built from ``dates_delivered``) align position by position by
-    construction, whatever order the caller's ``predictions_by_date`` mapping happens to iterate
-    in."""
+    records, when they all record the same one, otherwise one entry per date in ``dates_delivered``
+    order, ``;``-joined, an empty entry for a bucket with no numeric conf.
+    """
     values = [operating_point_confs.get(str(predictions_by_date[d])) for d in dates_delivered]
     non_none = {v for v in values if v is not None}
     if values and len(non_none) == 1 and all(v is not None for v in values):
@@ -615,7 +544,7 @@ def _write_phenology_delivery(
     *,
     include_majority_marker: bool,
     flags: dict[str, str | None],
-    acknowledgement: Acknowledgement | None,
+    acknowledgment: Acknowledgment | None,
     basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
@@ -624,61 +553,35 @@ def _write_phenology_delivery(
     project_root: str | Path | None,
     plant_mapping: dict,
 ) -> dict:
-    """Gate, compose and write one phenology delivery's provenance cells, then record the delivery.
+    """Gate, compose and write one phenology delivery's provenance cells, then record the delivery,
+    for ``write_phenology_csv`` and ``write_phenology_curve_csv``.
 
-    Shared by ``write_phenology_csv`` (the milestone table) and ``write_phenology_curve_csv`` (the
-    curve table): the schema (``columns``) and whether the majority crossing-unconfirmed marker
-    applies (``include_majority_marker``) are the only difference between the two tables, so both
-    entry points call through here rather than each running its own gate, composing its own cells,
-    or recording its own delivery event.
+    Runs ``check_delivery_gate`` over ``flags``: a gate that does not pass raises ``ValueError``
+    with the gate's own reason, and nothing is written. ``acknowledgment`` is the breeder's own
+    act (or ``None``) the caller already resolved. ``basis`` is what a passing
+    ``check_operationalization`` returned, and it is required.
 
-    Runs ``check_delivery_gate`` over ``flags`` itself, the way its sibling writers
-    (``export_aggregated_csv``, ``export_detection_csv``) run their own gate before opening a file:
-    a gate that does not pass raises ``ValueError`` with the gate's own reason, and nothing is
-    written. ``acknowledgement`` is the breeder's own act (or ``None``) the caller already resolved,
-    the same value ``check_operationalization``'s ``basis`` is: neither is built here. ``basis`` is
-    what a passing ``check_operationalization`` returned, and it is required: this writer takes a
-    spec object rather than a project it could read the record from, so it cannot prove the
-    precondition itself.
-
-    Composes every provenance cell the schema declares (the operating-point and classifier
-    validity columns, the producer tail and ``produced_at``, the delivery's own
-    ``acknowledged_by``/``acknowledgement_reason``, all through the shared
-    ``resolution.delivered_tail``, the one composition every delivered tail routes through, and,
+    Composes every provenance cell the schema declares (the operating-point and classifier validity
+    columns, the producer tail and ``produced_at``, the delivery's own
+    ``acknowledged_by``/``acknowledgment_reason``, all through ``resolution.delivered_tail``, and,
     when ``include_majority_marker`` is set, the trait's majority-alias marker through
-    ``majority_crossing_unconfirmed_column``) and returns them, so a caller fills its own response
-    from what was actually written rather than re-deriving the same values.
-    Records the delivery through ``record_delivery_binding_event`` after the file is written, under
-    the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
-    cannot exist without both the gate having run and the delivery having been recorded. The event
-    is given the gate's own ``effective_acknowledgement()``, not the caller's ``acknowledgement``
-    argument verbatim: the gate already discards an acknowledgement that cleared nothing (every
-    dimension validated), and the CSV tail (through ``delivered_tail``) reads the same discarded
-    value off the gate, so the tail and the event agree by construction rather than by two callers
-    independently doing the same thing. That write is best-effort, so the returned dict carries one
-    key beyond the schema's own columns, ``delivery_event_recorded``, the write's own success bool,
-    for a caller (the web export route) to disclose alongside an already-delivered file.
+    ``majority_crossing_unconfirmed_column``) and returns them. Records the delivery through
+    ``record_delivery_binding_event`` after the file is written, under the caller-stated ``door``
+    and the explicit ``project_root``, with the gate's own ``effective_acknowledgment()``. That
+    write is best-effort; the returned dict carries ``delivery_event_recorded``, the write's own
+    success bool, beyond the schema's own columns.
 
-    ``plant_mapping`` is the mapping this delivery attributed detections through, shaped exactly
-    as ``delivery_events_schema.PlantMappingDisclosure`` declares and produced by the caller's own
-    ``MappingBuild.delivery_disclosure``. Required, never defaulted: a phenology delivery always
-    reads a mapping, so there is no legitimate case with nothing to thread through. Its
-    ``dates_delivered`` fills the CSV's own column (``";"``-joined), ``images_unattributed`` and
-    ``plant_attribution`` fill theirs directly, and the whole dict travels to the delivery event
-    unchanged; the event is where what the delivery could not verify
-    (``captures_unverified``/``plant_csvs_unverified``) is recorded, once, never on every row.
+    ``plant_mapping`` is the mapping this delivery attributed detections through, shaped as
+    ``delivery_events_schema.PlantMappingDisclosure`` declares
+    (``MappingBuild.delivery_disclosure``); required. Its ``dates_delivered`` fills the CSV's own
+    column (``";"``-joined), ``images_unattributed`` and ``plant_attribution`` fill theirs
+    directly, and the whole dict travels to the delivery event unchanged.
 
-    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
-    ``record_delivery_binding_event`` takes, threaded straight through to it; this writer derives
-    the count operating point's own ``bindings`` and ``confs`` from
-    ``document_reconciliations["operating_point"]`` rather than taking either as a separate
-    argument, so the writer carries one fact one way instead of three arguments that could
-    disagree. This writer always declares both ``operating_point`` and
-    ``classifier_operating_point`` to the event writer, so when ``predictions_by_date`` is
-    non-empty both must already have an entry in ``document_reconciliations``, checked before the
-    gate runs and before anything is written: a caller passing the count entry alone is refused
-    here, with nothing on disk, rather than by the event writer after the file. With an empty
-    ``predictions_by_date`` no entry is required.
+    ``document_reconciliations`` and ``dimension_reconciliations`` are threaded straight through to
+    ``record_delivery_binding_event``; the count operating point's ``bindings`` and ``confs`` are
+    read from ``document_reconciliations["operating_point"]``. When ``predictions_by_date`` is
+    non-empty, both ``operating_point`` and ``classifier_operating_point`` must have an entry,
+    checked before the gate runs and before anything is written.
 
     Raises:
         ValueError: ``basis`` is not an ``OperationalizationBasis``, ``predictions_by_date`` is
@@ -687,8 +590,7 @@ def _write_phenology_delivery(
             any of these cases.
         AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
             could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
-            already written to ``out_path``. Both ``write_phenology_csv`` and
-            ``write_phenology_curve_csv`` inherit this, since both delegate here.
+            already written to ``out_path``.
     """
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(
@@ -717,7 +619,7 @@ def _write_phenology_delivery(
         check_delivery_gate, delivered_tail, record_delivery_binding_event,
     )
 
-    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
+    gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
     if not gate.ok:
         raise ValueError(gate.reason)
     if "classifier" not in gate.stamp:
@@ -741,7 +643,7 @@ def _write_phenology_delivery(
     if include_majority_marker:
         crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
         if crossing_unconfirmed_column:
-            cells[crossing_unconfirmed_column] = "true" if spec.majority_provisional else "false"
+            cells[crossing_unconfirmed_column] = "true" if spec.crossing_unconfirmed else "false"
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -758,7 +660,7 @@ def _write_phenology_delivery(
         document_reconciliations=document_reconciliations,
         dimension_reconciliations=dimension_reconciliations,
         measurement_documents=list(declared_documents),
-        scale_document=None, acknowledgement=gate.effective_acknowledgement(),
+        acknowledgment=gate.effective_acknowledgment(),
         trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,
     )
@@ -772,7 +674,7 @@ def write_phenology_csv(
     spec,
     *,
     flags: dict[str, str | None],
-    acknowledgement: Acknowledgement | None,
+    acknowledgment: Acknowledgment | None,
     basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
@@ -783,26 +685,16 @@ def write_phenology_csv(
 ) -> dict:
     """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
 
-    Emits exactly ``phenology_csv_columns(spec)`` through ``_write_phenology_delivery``: the gate,
-    the composed provenance cells (including the trait's majority crossing-unconfirmed marker when
-    the spec names one) and the recorded delivery event are all that function's, not a second copy
-    of any of them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
-    ``predictions_by_date`` is the date-to-bucket mapping both delivery doors already hold; the
-    ``operating_point_conf`` cell is read off it through ``dates_delivered``, so it aligns with the
-    ``dates_delivered`` cell beside it regardless of this mapping's own iteration order.
-    ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
-    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
-    ``record_delivery_binding_event`` takes; see ``_write_phenology_delivery`` for how this writer
-    derives its own ``bindings``/``operating_point_conf`` cell from the former.
-    ``acknowledgement`` is ``None`` for every MCP-tool call (``deliver_phenology_milestones`` takes
-    no acknowledgement) and a real :class:`~tcip_mcp.pipelines.resolution.Acknowledgement` only from
-    the web ``export_csv`` route; the web ``export_count_csv`` route builds its own for the count
-    kinds it serves, never for phenology.
+    Emits exactly ``phenology_csv_columns(spec)`` through ``_write_phenology_delivery`` (including
+    the trait's majority crossing-unconfirmed marker when the spec names one). ``door`` is the name
+    ``record_delivery_binding_event`` records the delivery under. ``predictions_by_date`` is the
+    date-to-bucket mapping the delivery reads. ``plant_mapping``, ``document_reconciliations``,
+    ``dimension_reconciliations`` and ``acknowledgment`` are ``_write_phenology_delivery``'s.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, phenology_csv_columns(spec),
         include_majority_marker=True, flags=flags,
-        acknowledgement=acknowledgement, basis=basis,
+        acknowledgment=acknowledgment, basis=basis,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,
@@ -816,7 +708,7 @@ def write_phenology_curve_csv(
     spec,
     *,
     flags: dict[str, str | None],
-    acknowledgement: Acknowledgement | None,
+    acknowledgment: Acknowledgment | None,
     basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
@@ -825,21 +717,14 @@ def write_phenology_curve_csv(
     project_root: str | Path | None,
     plant_mapping: dict,
 ) -> dict:
-    """Write per-(plant, date) curve rows to the delivery CSV, for the given trait's spec.
-
-    Emits exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``, the same gate,
-    provenance composition and delivery recording ``write_phenology_csv`` runs, minus the
-    milestone-only majority crossing-unconfirmed marker: a curve names no crossing for one to
-    qualify. ``predictions_by_date`` is the same date-to-bucket mapping ``write_phenology_csv``
-    takes. ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
-    ``document_reconciliations`` and ``dimension_reconciliations`` are the same two mappings
-    ``write_phenology_csv`` takes. ``acknowledgement`` is the same required, caller-resolved value
-    ``write_phenology_csv`` takes.
+    """Write per-(plant, date) curve rows to the delivery CSV, for the given trait's spec: exactly
+    ``curve_csv_columns()`` through ``_write_phenology_delivery``, without the majority
+    crossing-unconfirmed marker. The arguments are :func:`write_phenology_csv`'s.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, curve_csv_columns(),
         include_majority_marker=False, flags=flags,
-        acknowledgement=acknowledgement, basis=basis,
+        acknowledgment=acknowledgment, basis=basis,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,

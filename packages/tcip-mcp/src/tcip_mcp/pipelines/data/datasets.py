@@ -1,8 +1,7 @@
 """Multi-task datasets with standardized interfaces.
 
-Every loader here is built from the samples the producer named
-(``label_queries.admit``): each sample reads its own source and the ground truth that answers for
-it, and nothing here enumerates a directory or a table. Each dataset type returns
+Every loader here is built from the samples the producer named (``label_queries.admit``): each
+sample reads its own source and the ground truth that answers for it. Each dataset type returns
 (image_tensor, target_dict) where the target format is task-specific but always dict-based. A
 factory function `build_dataset` dispatches to the correct class by task type, or, for a task the
 known loaders don't cover, to a bespoke ``dataset_source`` builder the agent supplies (mirrors
@@ -72,22 +71,20 @@ class BaseDataset(Dataset, ABC):
 class BaseImageDataset(BaseDataset):
     """Base for image datasets, centralizes channel-aware loading + finalization.
 
-    Subclasses set ``self.transforms`` (and inherit ``expected_channels`` from build_dataset),
-    then build only the task-specific target.
+    Subclasses set ``self.transforms`` (and inherit ``expected_channels`` from build_dataset), then
+    build only the task-specific target.
 
     Every loader here is built from a recorded sample list and sets ``sample_sources`` and
     ``sample_ground_truth``: each sample's own source and ground-truth path, keyed by the sample
-    key this dataset indexes by. Every read then goes to the path the sample recorded rather than
-    to a directory listing, which is what lets one dataset span capture dates and keeps two dates'
-    same-named images apart. ``sample_member_stems`` holds the bare stem a membership record names
-    each sample by.
+    key this dataset indexes by, so one dataset spans capture dates and keeps two dates' same-named
+    images apart. ``sample_members`` holds the member name a membership record names each sample
+    by.
 
     ``ground_truth_shape`` is the one shape this loader reads
-    (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass
-    and refused once in :meth:`refuse_other_shapes`. ``takes`` names the class-space facts this
-    loader is built with beyond its samples and transforms, which the factory reads to hand it
-    exactly those and nothing else. ``reads_geometry`` declares which geometries answer for this
-    loader's measurement, for the loaders whose ground truth is a document.
+    (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass and
+    refused in :meth:`refuse_other_shapes`. ``takes`` names the class-space facts this loader is
+    built with beyond its samples and transforms. ``reads_geometry`` declares which geometries
+    answer for this loader's measurement, for the loaders whose ground truth is a document.
     """
 
     ground_truth_shape: str = DOCUMENT
@@ -98,37 +95,31 @@ class BaseImageDataset(BaseDataset):
     transforms: Any = None
     sample_sources: dict[str, str]
     sample_ground_truth: dict[str, str]
-    sample_member_stems: dict[str, str]
-    sample_counts: dict[str, int]
+    sample_members: dict[str, str]
+    _keys: list[str]
     id_map: dict[str, int] | None
     _num_classes: int
 
     @property
+    def stems(self) -> list[str]:
+        """Each indexed sample's key, its source identity, in index order."""
+        return self._keys
+
+    @property
     def record_stems(self) -> list[str]:
-        """The bare ground-truth stem naming each indexed sample, in index order.
-
-        The key a membership record, a cal/holdout lock and a leakage join all name a member by.
-        A loader indexes by each sample's source identity, which keeps two dates' same-named
-        images apart but is not what those records spell, so the sample's own member stem is read
-        back here rather than each measurement door converting on its own.
+        """The member name of each indexed sample, in index order: the key a membership record, a
+        cal/holdout lock and a leakage join name a member by.
         """
-        keys: list[str] = list(getattr(self, "stems", None) or getattr(self, "_stems", []))
-        return [self.member_stem_of(key) for key in keys]
+        return [self.member_of(key) for key in self.stems]
 
-    def member_stem_of(self, key: str) -> str:
+    def member_of(self, key: str) -> str:
         """The bare stem a membership record names one indexed sample by, as the sample itself
         stated it."""
-        return self.sample_member_stems[key]
+        return self.sample_members[key]
 
     @classmethod
     def refuse_other_shapes(cls, samples: Sequence[Sample]) -> None:
-        """Refuse a sample whose own ground truth is not the shape this loader reads, naming it.
-
-        The one statement of that refusal, asked where a run's sizes are resolved
-        (:func:`resolve_sizes`) before anything reads a sample's ground truth: the sizes a run is
-        built at are read off that ground truth, so a sample of another shape is named there
-        rather than by whichever reader opens it first.
-        """
+        """Refuse a sample whose own ground truth is not the shape this loader reads, naming it."""
         wrong = [s.identity for s in samples if s.shape != cls.ground_truth_shape]
         if wrong:
             raise ValueError(
@@ -141,48 +132,32 @@ class BaseImageDataset(BaseDataset):
 
     @staticmethod
     def read_mask(path: "str | Path") -> np.ndarray:
-        """One mask raster as the integer class ids it carries.
-
-        The one read of a mask ground truth: what a mask loader serves a sample from, and what the
-        run's class count is resolved over (:func:`resolve_sizes`), so the two can never read one
-        file differently. A sample is admitted on the strength of this exact file, so a mask gone
-        since raises from here rather than reading as background.
-        """
+        """One mask raster as the integer class ids it carries; a mask gone since admission raises."""
         return np.array(load_image(path, 1))
 
-    def _init_from_samples(self, samples: Sequence[Sample]) -> list[str]:
-        """Index a recorded sample list and answer the keys this dataset indexes: each sample's
-        own source and ground truth, and nothing rediscovered from a directory.
+    def _init_from_samples(self, samples: Sequence[Sample]) -> None:
+        """Index a recorded sample list: each sample's own source and ground truth.
 
-        Each sample is keyed by its own source identity, distinct across capture dates by
-        construction, so two dates holding a same-named image index as two samples rather than
-        collapsing into one, and the bare stem a membership record names it by rides beside the
-        key. Refuses, before indexing any of it, a sample no loader here can read
-        (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`) and, where this
+        Each sample is keyed by its own source identity, distinct across capture dates, with its
+        member name beside the key. Refuses, before indexing any of it, a sample no loader here can
+        read (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`) and, where this
         loader declares which geometries it reads, one whose document carries the subject only in
-        geometries it does not (:meth:`_refuse_unreadable_geometry`), which reads this instance's
-        own subject. Whether a sample's ground truth is the shape this loader reads is
-        :meth:`refuse_other_shapes`, asked where the run's sizes are resolved, before this runs.
+        geometries it does not (:meth:`_refuse_unreadable_geometry`).
         """
         refuse_unreadable_samples(samples)
         self._refuse_unreadable_geometry(samples)
         self.sample_sources = {s.identity: s.source for s in samples}
         self.sample_ground_truth = {s.identity: s.ground_truth for s in samples}
-        self.sample_member_stems = {s.identity: s.member_stem for s in samples}
-        self.sample_counts = {}
-        return [s.identity for s in samples]
+        self.sample_members = {s.identity: s.member for s in samples}
+        self._keys = [s.identity for s in samples]
 
     def _refuse_unreadable_geometry(self, samples: Sequence[Sample]) -> None:
-        """Refuse a sample whose document carries this run's subject only in geometries this
-        loader does not read, naming it.
+        """Refuse a sample whose document carries this run's subject only in geometries this loader
+        does not read (:attr:`reads_geometry`), naming it.
 
-        Admission asks whether a document carries the subject at all; which geometries answer for
-        a measurement is this loader's own fact, declared in :attr:`reads_geometry`. A document
-        carrying the subject as a point, or as an image-level record, has real ground truth this
-        loader cannot turn into a target, so training it would put a real object's pixels in the
-        background class with no human having said the image is empty. A loader that declares no
-        geometry (a mask raster, a table row) reads the whole of what it was handed and refuses
-        nothing here.
+        A document carrying the subject as a point, or as an image-level record, has real ground
+        truth this loader cannot turn into a target. A loader that declares no geometry (a mask
+        raster, a table row) refuses nothing here.
         """
         if self.reads_geometry is None:
             return
@@ -264,16 +239,12 @@ class BaseImageDataset(BaseDataset):
 # ====================================================================
 
 def record_stems_of(dataset: Any) -> list[str] | None:
-    """The bare ground-truth stem naming each of ``dataset``'s samples, in index order, or
-    ``None`` when the dataset names its samples nothing.
+    """The member name of each of ``dataset``'s samples, in index order, or ``None`` when the
+    dataset names its samples nothing.
 
-    The one place a measurement asks a loader what to call its samples. A platform loader answers
-    from :attr:`BaseImageDataset.record_stems`, which reads a sample-built dataset's own recorded
-    ground truth back. A dataset the ``dataset_source`` seam admitted answers from the ``stems``
-    list that interface has always exposed, in the vocabulary its own builder chose: the seam
-    accepts any Torch dataset, so nothing may require it to have grown a second attribute. A
-    dataset with neither leaves each record's ``image_id`` the integer index it was generated
-    with, which is what a per-image join downstream then reports it cannot resolve.
+    A platform loader answers from :attr:`BaseImageDataset.record_stems`; a ``dataset_source``
+    dataset answers from its ``stems`` list, in the vocabulary its own builder chose. A dataset
+    with neither returns ``None``.
     """
     for attribute in ("record_stems", "stems"):
         named = getattr(dataset, attribute, None)
@@ -288,10 +259,9 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
     A per-image dataset indexes one example per sample, so every sample it was handed is here. A
     tiled dataset indexes one example per kept tile and names no example at all for a source whose
     tiles all fall outside its keep regions or carry no ground truth, so such a source is absent
-    here. A caller that handed a dataset an explicit sample set asks here which of them the loader
-    will still read, rather than reading a per-example count that cannot answer it.
+    here.
     """
-    return set(getattr(dataset, "stems", None) or getattr(dataset, "_stems", None) or [])
+    return set(getattr(dataset, "stems", None) or [])
 
 
 def target_tensors(target: Any) -> dict[str, torch.Tensor]:
@@ -304,10 +274,14 @@ def target_tensors(target: Any) -> dict[str, torch.Tensor]:
     }
 
 
+PER_BOX_KEYS = ("boxes", "labels", "masks", "iscrowd")
+"""The target keys holding one row per box, which every row filter keeps in step."""
+
+
 def crowd_of(target: Mapping[str, Any]) -> torch.Tensor:
     """A detection target's per-box crowd flags. A target a bespoke dataset built without
-    ``iscrowd`` states no crowd region, so every one of its rows is an instance: the one decision
-    for a target the platform's loaders did not build, which always state the flag."""
+    ``iscrowd`` states no crowd region, so every one of its rows is an instance.
+    """
     crowd = target.get("iscrowd")
     if crowd is not None:
         return crowd
@@ -317,8 +291,8 @@ def crowd_of(target: Mapping[str, Any]) -> torch.Tensor:
 
 def object_rows(iscrowd: Any) -> Any:
     """Which rows of a target's parallel per-box values are each one object: a boolean mask,
-    ``True`` where the row is not a crowd region, over a tensor, an array or a list of flags. The
-    one place a tensor or array target asks which rows count, size or train as objects."""
+    ``True`` where the row is not a crowd region, over a tensor, an array or a list of flags.
+    """
     flags = iscrowd if isinstance(iscrowd, (torch.Tensor, np.ndarray)) else np.asarray(iscrowd)
     return flags == 0
 
@@ -334,25 +308,17 @@ def instance_targets(targets: list[dict]) -> list[dict]:
     out = []
     for t in targets:
         keep = object_rows(crowd_of(t))
-        out.append({k: v[keep] if k in ("boxes", "labels", "masks", "iscrowd") else v
+        out.append({k: v[keep] if k in PER_BOX_KEYS else v
                     for k, v in t.items()})
     return out
 
 
-class DetectionDataset(BaseImageDataset):
-    """Object detection over a recorded sample list.
+class DocumentDataset(BaseImageDataset):
+    """A loader over samples whose ground truth is a per-image label document, read under the
+    run's own subject, attribute and ``id_map``."""
 
-    Membership is exactly what the producer recorded: each sample reads its own source and the
-    label document that answers for it, no directory is scanned and no admission is re-derived,
-    so the dataset spans whatever capture dates the draw did. Targets come from each sample's own
-    per-image document of the json_io schema, read through the run's own ``id_map``.
-    """
-
-    task_type = "detection"
     ground_truth_shape = DOCUMENT
     takes = ("subject", "attribute", "id_map")
-    reads_geometry = staticmethod(box_derivable)
-    reads_description = "a box or a polygon of its subject"
 
     def __init__(
         self,
@@ -365,26 +331,8 @@ class DetectionDataset(BaseImageDataset):
         self.transforms = transforms
         self.subject = subject
         self.attribute = attribute
-        self.stems = self._init_from_samples(samples)
+        self._init_from_samples(samples)
         self._init_class_ids_from_draw(id_map)
-
-    def det_targets(self, stem: str) -> dict[str, list]:
-        """One sample's own label document as ``{"boxes", "labels", "iscrowd"}`` parallel lists
-        (pixel xyxy, 1-indexed label, crowd flag), the target shape ``json_det_targets`` reads.
-
-        Public, because a delivery-grade measurement scores against the ground truth this run
-        trains on and reads it here rather than opening the document itself: one statement of
-        what this run's targets are, under this run's own class map.
-
-        The samples were already admitted with any image carrying an instance unlabeled for
-        ``attribute`` held out (the producer's ``skipped_incomplete_attribute`` rail, a
-        fixed-length dataset can't act on this per-``__getitem__`` call, only once, up front), so
-        the unlabeled count ``json_det_targets`` also returns is always 0 here by construction.
-        """
-        target, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
-            reads=self.reads_geometry)
-        return target
 
     @property
     def num_classes(self) -> int:
@@ -393,6 +341,29 @@ class DetectionDataset(BaseImageDataset):
     @property
     def num_samples(self) -> int:
         return len(self.stems)
+
+
+class DetectionDataset(DocumentDataset):
+    """Object detection over a recorded sample list: each sample reads its own source and the label
+    document that answers for it.
+    """
+
+    task_type = "detection"
+    reads_geometry = staticmethod(box_derivable)
+    reads_description = "a box or a polygon of its subject"
+
+    def det_targets(self, stem: str) -> dict[str, list]:
+        """One sample's own label document as ``{"boxes", "labels", "iscrowd"}`` parallel lists
+        (pixel xyxy, 1-indexed label, crowd flag), under this run's own class map, the target shape
+        ``json_det_targets`` reads.
+
+        The samples were admitted with any image carrying an instance unlabeled for ``attribute``
+        held out, so the unlabeled count ``json_det_targets`` also returns is always 0 here.
+        """
+        target, _n_unlabeled = json_det_targets(
+            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
+            reads=self.reads_geometry)
+        return target
 
     @property
     def class_distribution(self) -> dict[int, int]:
@@ -419,7 +390,7 @@ the tiler reads it, so a split deriving its block geometry before the dataset ex
 dataset itself resolve one lattice."""
 
 TILE_OVERLAP = 0.2
-"""Fraction of a tile shared with its neighbour when a tiled run's config states none, beside
+"""Fraction of a tile shared with its neighbor when a tiled run's config states none, beside
 :data:`TILE_SIZE` and read by the same two callers."""
 
 
@@ -494,7 +465,7 @@ class TiledDetectionDataset(BaseImageDataset):
         # sample maps, so it takes the band count and the paths off the base it was handed.
         self.sample_sources = base.sample_sources
         self.sample_ground_truth = base.sample_ground_truth
-        self.sample_member_stems = base.sample_member_stems
+        self.sample_members = base.sample_members
         self.expected_channels = base.expected_channels
         self.tile_size = tile_size
         self.overlap = overlap
@@ -646,15 +617,12 @@ class TiledDetectionDataset(BaseImageDataset):
     def _read_windowed_tile(self, stem: str, info: dict, tile_x: int, tile_y: int):
         """One tile through the pooled windowed source, clipped to bounds and zero-padded; PIL
         where the dtype has a faithful mode (so augmentation applies), else ndarray. A 4-channel
-        tile only converts when the source's own ``band_interpretations`` names the 4th band
-        alpha (see :func:`to_pil_if_faithful`); an untagged or genuinely spectral 4th band stays
-        ndarray, same as any other mode PIL can't represent faithfully.
+        tile only converts when the source's own ``band_interpretations`` names the 4th band alpha
+        (see :func:`to_pil_if_faithful`); an untagged or genuinely spectral 4th band stays ndarray,
+        same as any other mode PIL can't represent faithfully.
 
-        The recorded frame is checked against the pooled source's own dims: the pool keys on the
-        file's mtime and size, so a file replaced since the index was built opens fresh here, and
-        a dims disagreement means tiles cut from a frame the boxes were never clipped to. The
-        returned window's shape is also checked against the requested rect, the one witness left
-        against a decoder disagreeing with its own header. Refuse either way, don't reconcile.
+        Refuses when the recorded frame disagrees with the pooled source's own dims, or the
+        returned window's shape disagrees with the requested rect.
         """
         src = raster_source.pooled_source(self._resolve_path(stem), self.expected_channels)
         if (src.width, src.height) != (info["width"], info["height"]):
@@ -704,37 +672,13 @@ class TiledDetectionDataset(BaseImageDataset):
 # Instance Segmentation
 # ====================================================================
 
-class InstanceSegDataset(BaseImageDataset):
+class InstanceSegDataset(DocumentDataset):
     """Instance masks from per-image polygons: the producer's own samples, each naming its own
     source and the label document that answers for it."""
 
     task_type = "instance_seg"
-    ground_truth_shape = DOCUMENT
-    takes = ("subject", "attribute", "id_map")
     reads_geometry = staticmethod(polygonal)
     reads_description = "a polygon of its subject"
-
-    def __init__(
-        self,
-        samples: Sequence[Sample],
-        transforms: Any = None,
-        subject: str | None = None,
-        attribute: str | None = None,
-        id_map: dict[str, int] | None = None,
-    ) -> None:
-        self.transforms = transforms
-        self.subject = subject
-        self.attribute = attribute
-        self.stems = self._init_from_samples(samples)
-        self._init_class_ids_from_draw(id_map)
-
-    @property
-    def num_classes(self) -> int:
-        return self._num_classes
-
-    @property
-    def num_samples(self) -> int:
-        return len(self.stems)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
@@ -792,8 +736,7 @@ class SemanticSegDataset(BaseImageDataset):
         num_classes: int,
     ) -> None:
         self.transforms = transforms
-        self.stems = self._init_from_samples(samples)
-        self.sample_counts = {"annotated": len(self.stems), "skipped_unannotated": 0}
+        self._init_from_samples(samples)
         self._num_classes = num_classes
 
     @property
@@ -818,13 +761,8 @@ class SemanticSegDataset(BaseImageDataset):
 # ====================================================================
 
 def _values_by_sample(samples: Sequence[Sample]) -> list[str]:
-    """Each sample's own value, read out of the table its ``row_key`` names a row of.
-
-    Each table is read once however many samples it answers for. Whether a recorded row is still
-    there is the one re-admission's question
-    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`), which every
-    bound route runs before a loader is built and which a drawn route cannot fail by
-    construction, so this reads the row the sample names rather than restating that check.
+    """Each sample's own value, read out of the table its ``row_key`` names a row of. Each table is
+    read once however many samples it answers for.
     """
     tables: dict[str, dict[str, str]] = {}
     values: list[str] = []
@@ -856,7 +794,7 @@ class ClassificationDataset(BaseImageDataset):
         num_classes: int,
     ) -> None:
         self.transforms = transforms
-        self._stems = self._init_from_samples(samples)
+        self._init_from_samples(samples)
         self._labels = [int(v) for v in _values_by_sample(samples)]
         self._num_classes = num_classes
 
@@ -866,14 +804,14 @@ class ClassificationDataset(BaseImageDataset):
 
     @property
     def num_samples(self) -> int:
-        return len(self._stems)
+        return len(self.stems)
 
     @property
     def class_distribution(self) -> dict[int, int]:
         return dict(Counter(self._labels))
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        stem = self._stems[idx]
+        stem = self.stems[idx]
         img = self._open_image(stem)
         target = {"labels": self._labels[idx]}
         return self._finalize(img, target)
@@ -900,7 +838,7 @@ class OrdinalDataset(BaseImageDataset):
         num_ranks: int,
     ) -> None:
         self.transforms = transforms
-        self._stems = self._init_from_samples(samples)
+        self._init_from_samples(samples)
         self._ranks = [int(v) for v in _values_by_sample(samples)]
         self._num_ranks = num_ranks
 
@@ -910,14 +848,14 @@ class OrdinalDataset(BaseImageDataset):
 
     @property
     def num_samples(self) -> int:
-        return len(self._stems)
+        return len(self.stems)
 
     @property
     def class_distribution(self) -> dict[int, int]:
         return dict(Counter(self._ranks))
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        stem = self._stems[idx]
+        stem = self.stems[idx]
         img = self._open_image(stem)
         # Key matches the OrdinalHead loss contract (plural, like "labels"/"masks"). The rank
         # count is the head's own, never restated per item.
@@ -942,7 +880,7 @@ class RegressionDataset(BaseImageDataset):
         transforms: Any = None,
     ) -> None:
         self.transforms = transforms
-        self._stems = self._init_from_samples(samples)
+        self._init_from_samples(samples)
         self._values = [float(v) for v in _values_by_sample(samples)]
 
     @property
@@ -951,10 +889,10 @@ class RegressionDataset(BaseImageDataset):
 
     @property
     def num_samples(self) -> int:
-        return len(self._stems)
+        return len(self.stems)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        stem = self._stems[idx]
+        stem = self.stems[idx]
         img = self._open_image(stem)
         # Key matches the RegressionHead loss contract.
         target = {"values": self._values[idx]}
@@ -985,26 +923,20 @@ def build_from_dataset_source(
     ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
     module.
 
-    The lowest boundary, and the only one: the context below is the whole call, every field
-    stated, so there is no shape of call that hands a builder anything else. ``samples`` is the
-    sample list for the side being built, ``id_map``
-    the class map those samples were admitted under (``None`` where the ground-truth shape carries
-    its own classes and no admitted map exists, which is a mask raster or a table row: derive the
-    class space from the ground truth you were handed, the way :func:`resolve_sizes` reads it
-    for the platform's own loaders), plus ``task`` and ``transforms``. Never a directory, a
-    document path or a format flag: the platform names the samples and the builder builds over
-    them, so nothing here asks what a bespoke dataset looks like.
+    The builder is called with a context of ``samples`` (the sample list for the side being built),
+    ``id_map`` (the class map those samples were admitted under; ``None`` where the ground-truth
+    shape carries its own classes, a mask raster or a table row, whose class space the builder
+    derives from the ground truth it was handed), ``task`` and ``transforms``.
 
-    ``builder_kwargs`` configure the builder and never restate what the producer named: a key the
-    context already states refuses by name, since a builder that overrode ``samples`` or
-    ``id_map`` would train on membership and a class space the run's own record does not describe.
+    ``builder_kwargs`` configure the builder; a key the context already states refuses by name.
     Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
 
     ``dataset_source`` schema (parallels ``model_source``)::
 
         {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
          "builder_kwargs": {...},          # optional, the builder's own configuration
-         "source_files": [...],            # optional, provenance (snapshot_model_source copies these)
+         "source_files": [...],            # optional, provenance (snapshot_model_source copies
+         these)
          "task": "..."}                    # optional, measurement/eval routing
     """
     if not isinstance(dataset_source, dict):
@@ -1033,12 +965,8 @@ def build_from_dataset_source(
 def _band_count(samples: Sequence[Sample]) -> int:
     """The band count the sources of ``samples`` carry, one count for all of them.
 
-    Every source is probed, not one of them, so a run whose sources disagree refuses by name
-    rather than sizing the model for whichever one a probe happened to open first and reading
-    every other image at the wrong band count. A source that will not probe refuses the same way:
-    a confidently-wrong count sizes the model wrong for every image the run reads. Each source is
-    read once for the count, off a header where its container carries one and by decoding where it
-    does not, paid where a run's sizes are resolved and only where no width is stated.
+    Every source is probed, off a header where its container carries one and by decoding where it
+    does not; sources that disagree, or a source that will not probe, refuse by name.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
 
@@ -1092,15 +1020,13 @@ def resolve_sizes(
     """The sizes a run's loaders are built at: what its caller states, and, for each size stated
     nowhere, what the samples themselves carry.
 
-    The one resolution, for the run's own routes and for a single-loader measurement door alike,
-    read over every sample the loaders are built from: a class reaching only one side sizes both,
-    and two sources disagreeing about their band count refuse rather than one of them governing. A
-    stated band count is how the caller reads its sources, so it is taken as given and nothing is
-    probed; a stated class or rank count below what the ground truth reaches refuses.
+    Read over every sample the loaders are built from: a class reaching only one side sizes both,
+    and two sources disagreeing about their band count refuse. A stated band count is taken as
+    given and nothing is probed; a stated class or rank count below what the ground truth reaches
+    refuses.
 
     Only what the caller states, for a task no built-in loader reads and for a bespoke
-    ``dataset_source``: a builder sizes the dataset it builds, so nothing is derived for one the
-    platform does not build.
+    ``dataset_source``.
     """
     resolved = stated_sizes(stated)
     cls = _DATASET_MAP.get(task)
@@ -1134,9 +1060,8 @@ def resolve_sizes(
 
 def tile_kwargs_from_tiling(tiling: dict) -> dict:
     """The ``TiledDetectionDataset`` constructor kwargs a ``tiling`` config dict carries, keys
-    omitted so the class's own constructor defaults apply. Shared by ``build_dataset`` and any
-    caller that must resolve tiling geometry before construction (a spatial split derives its
-    block geometry at the same ``tile_size``/``overlap`` the dataset will actually use)."""
+    omitted so the class's own constructor defaults apply.
+    """
     return {k: tiling[k] for k in
             ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty", "keep_regions")
             if k in tiling}
@@ -1149,34 +1074,22 @@ def build_dataset(
 ) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
-    ``samples`` is the producer's own sample list and the one membership any loader here is built
-    from, required on every route: each sample reads its own source and the ground truth that
-    answers for it, its own label document, its own mask raster or the row its ``row_key`` names,
-    so the dataset spans whatever capture dates the draw did and nothing here scans a directory or
-    a table. ``scope`` is the class space those samples were admitted under
-    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), ``None`` for ground truth that
-    carries its own classes.
+    ``samples`` is the producer's own sample list, required on every route: each sample reads its
+    own source and the ground truth that answers for it, its own label document, its own mask
+    raster or the row its ``row_key`` names. ``scope`` is the class space those samples were
+    admitted under (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), ``None`` for ground
+    truth that carries its own classes.
 
     ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`), the band count its
-    sources are read at and the class or rank count its ground truth carries. Nothing is derived
-    here: one run's loaders are built at one set of sizes because one resolution answered for all
-    of them, and a sample whose ground truth is not the shape the selected loader reads has
-    already refused by name there. Each recipient is handed exactly what it declares and nothing
-    else: a built-in loader its own :attr:`BaseImageDataset.takes`, a bespoke builder the
-    producer-owned context :func:`build_from_dataset_source` states. Anything this factory was
-    given that no recipient could take refuses by name, before anything is read off it, here and
-    through a bespoke ``train(ctx)`` body's own ``ctx.build_dataset`` call, which is this same
-    factory.
+    sources are read at and the class or rank count its ground truth carries. Each recipient is
+    handed exactly what it declares: a built-in loader its own :attr:`BaseImageDataset.takes`, a
+    bespoke builder the context :func:`build_from_dataset_source` states. Anything given that no
+    recipient could take refuses by name.
 
-    An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
-    dedup_iou, skip_empty, keep_regions}``) wraps the detection dataset in a
-    :class:`TiledDetectionDataset`; a bespoke builder composes its own tiling over its own
-    samples, so it never reaches one, and it states no size either: a builder's own dataset sizes
-    itself, and this factory neither reads nor writes anything on an object it did not build.
-
-    The known loaders stay the default; the ``Unknown task`` error below is still raised for a bad
-    known-task name with no builder (an honest typo signal), the seam is the escape for a
-    genuinely new task.
+    An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac, dedup_iou,
+    skip_empty, keep_regions}``) wraps the detection dataset in a :class:`TiledDetectionDataset`; a
+    bespoke builder composes its own tiling and sizes itself. An unknown task with no builder
+    raises ``Unknown task``.
     """
     if unowned:
         raise ValueError(

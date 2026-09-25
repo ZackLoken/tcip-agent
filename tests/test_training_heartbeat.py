@@ -1,6 +1,6 @@
 """A training run reconstructed from experiment records reads as 'running' while its
 heartbeat is fresh (still training in another process, e.g. the MCP agent) and only
-'interrupted' once the heartbeat goes stale. Prevents the GUI mislabelling an
+'interrupted' once the heartbeat goes stale. Prevents the GUI mislabeling an
 agent-launched run as dead and inviting a duplicate launch."""
 
 from datetime import datetime, timedelta, timezone
@@ -96,7 +96,8 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
 
     monkeypatch.setattr(training_tools, "TCIP_HEARTBEAT_STALE_SECONDS", 30.0)
 
-    create_experiment("exp-window", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    create_experiment("exp-window", {"model_source": {"builder": "my_models:det",
+                                                      "task": "detection"}})
     update_status("exp-window", "running")
     key = status_key("exp-window")
     with ts.transaction(key) as txn:

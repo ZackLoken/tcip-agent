@@ -172,8 +172,8 @@ beforeEach(() => {
   // The coverage-grid fetch is gated on a real canvas-host measurement (useCoverageGrid); jsdom's
   // own getBoundingClientRect is always zero, so every test needing that fetch stubs one here.
   vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
-  // One jsdom instance per file, not per test: a recolour left by an earlier test must not leak
-  // into a later one's derived-colour assertions.
+  // One jsdom instance per file, not per test: a recolor left by an earlier test must not leak
+  // into a later one's derived-color assertions.
   try {
     localStorage.removeItem("tcip.annotate.subjectColors");
   } catch {
@@ -379,7 +379,7 @@ describe("AnnotateTab audit-gap handling", () => {
 });
 
 describe("AnnotateTab subject rendering", () => {
-  it("renders a box with the subject-derived colour, named on selection", async () => {
+  it("renders a box with the subject-derived color, named on selection", async () => {
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({ gui: { ...s.gui, active_subject: "tip" } }));
     render(<AnnotateTab />);
@@ -391,7 +391,7 @@ describe("AnnotateTab subject rendering", () => {
         .getState()
         .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
     );
-    // Colour is GUI-local (name-derived); the label is the subject name, no integer id, and
+    // Color is GUI-local (name-derived); the label is the subject name, no integer id, and
     // appears on selection (labels are hover/selection-only; the legend is the standing key).
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("tip"));
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
@@ -494,7 +494,7 @@ describe("AnnotateTab subject rendering", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    // The core sits exactly on the coordinate, in the subject's colour...
+    // The core sits exactly on the coordinate, in the subject's color...
     const core = screen.getByTestId("k-circle");
     expect(core).toHaveAttribute("data-x", "100");
     expect(core).toHaveAttribute("data-y", "200");
@@ -505,7 +505,7 @@ describe("AnnotateTab subject rendering", () => {
     expect(screen.queryAllByTestId("k-rect")).toHaveLength(0);
   });
 
-  it("polygon mode draws every ring of an occlusion-split shape, labelled once", async () => {
+  it("polygon mode draws every ring of an occlusion-split shape, labeled once", async () => {
     // An organ behind a branch loads as one annotation with two disjoint regions. Drawing only
     // the first would show the breeder part of the object and let them confirm it as the whole.
     useStore.getState().setRegistry({ tip: {} });
@@ -540,7 +540,7 @@ describe("AnnotateTab subject rendering", () => {
       "0,0,10,0,10,10",
       "40,40,60,40,60,60",
     ]);
-    // Both parts wear the annotation's own colour...
+    // Both parts wear the annotation's own color...
     expect(lines.every((l) => l.getAttribute("data-stroke") === subjectColor("tip"))).toBe(true);
     // ...and selecting it names the annotation once, not once per ring (HaloLabel = halo + fill).
     fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 8, clientY: 5 });
@@ -703,7 +703,7 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().canvas.points).toHaveLength(1);
   });
 
-  it("right-click removes the point under the cursor and leaves a neighbour alone", async () => {
+  it("right-click removes the point under the cursor and leaves a neighbor alone", async () => {
     await mountPointMode([
       { x: 100, y: 100 },
       { x: 400, y: 400 },
@@ -989,7 +989,7 @@ describe("AnnotateTab legend keyboard access", () => {
     fireEvent.click(legendButton);
     expect(legendButton).toHaveAttribute("aria-expanded", "true");
 
-    const subjectRow = screen.getByTitle("Change subject_a's colour (this browser only)");
+    const subjectRow = screen.getByTitle("Change subject_a's color (this browser only)");
     expect(subjectRow).toBeInTheDocument();
     // DOM order: the panel follows the button, so a forward Tab from it reaches the row.
     expect(
@@ -997,21 +997,21 @@ describe("AnnotateTab legend keyboard access", () => {
     ).toBeTruthy();
   });
 
-  it("opens the colour picker as a labelled dialog with a named hex input", async () => {
+  it("opens the color picker as a labeled dialog with a named hex input", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     fireEvent.click(screen.getByRole("button", { name: "Legend" }));
-    fireEvent.click(screen.getByTitle("Change subject_a's colour (this browser only)"));
+    fireEvent.click(screen.getByTitle("Change subject_a's color (this browser only)"));
 
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleName(
-      "subject_a's colour (this browser only; derives from the name elsewhere)",
+      "subject_a's color (this browser only; derives from the name elsewhere)",
     );
-    expect(screen.getByRole("textbox", { name: "hex colour" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "hex color" })).toBeInTheDocument();
   });
 });
 
@@ -1114,7 +1114,7 @@ describe("AnnotateTab legend", () => {
     expect(screen.queryByText("Dashed = polygon's box (read-only)")).not.toBeInTheDocument();
   });
 
-  it("a recoloured subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
+  it("a recolored subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1406,7 +1406,7 @@ describe("Cut gesture", () => {
   });
 
   const POLYGON_CHANGED_SENTENCE =
-    "The polygon changed since the first click; the cut was cancelled. Select it and place both " +
+    "The polygon changed since the first click; the cut was canceled. Select it and place both " +
     "points again.";
 
   it("a selection change between the clicks refuses with the polygon-changed sentence", async () => {
@@ -1437,7 +1437,7 @@ describe("Cut gesture", () => {
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     act(() => useStore.getState().dragVertex(0, 0, 0, [11, 11]));
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
-    expect(useStore.getState().canvas.polygons).toHaveLength(2); // unchanged: the cut was cancelled
+    expect(useStore.getState().canvas.polygons).toHaveLength(2); // unchanged: the cut was canceled
     expect(useStore.getState().toasts.at(-1)?.message).toBe(POLYGON_CHANGED_SENTENCE);
   });
 
@@ -1754,7 +1754,7 @@ describe("AnnotateTab labels show on selection or hover only", () => {
     useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: "tip" } }));
   }
 
-  it("a box is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+  it("a box is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
     setupSubject("box");
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1780,7 +1780,7 @@ describe("AnnotateTab labels show on selection or hover only", () => {
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
   });
 
-  it("a polygon is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+  it("a polygon is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
     setupSubject("polygon");
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
@@ -1820,7 +1820,7 @@ describe("AnnotateTab labels show on selection or hover only", () => {
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
   });
 
-  it("a point is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+  it("a point is unlabeled at rest, labeled while hovered, labeled while selected", async () => {
     setupSubject("point");
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({

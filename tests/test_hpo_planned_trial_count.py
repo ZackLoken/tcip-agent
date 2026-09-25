@@ -1,9 +1,9 @@
 """planned_trial_count answers the trial count run_hyperparameter_search's own budget door checks
-against: Ray's BasicVariantGenerator variant count over the identical space _search_space_and_points
-builds for tune_search, so the two can never diverge. Every count here comes from Ray's own
-generator rather than a fake, and no Ray session is started. The last section walks a separately
-built generator to exhaustion and checks that the total_samples tally planned_trial_count reads
-back is the number of trials Ray would really yield, the property the door's bound rests on."""
+against: Ray's own variant count over the identical specification _search_space_and_points
+prepares for tune_search, so the two can never diverge, and no Ray session is started. The last
+section drains the searcher tune_search itself builds to exhaustion and checks that
+planned_trial_count's answer is the number of trials it really yields, the property the door's
+bound rests on."""
 
 from __future__ import annotations
 
@@ -114,23 +114,19 @@ def test_planned_trial_count_raises_on_a_categorical_with_no_choices():
         planned_trial_count({"x": {"type": "categorical"}}, 2, "grid", 1, False, None)
 
 
-def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high_under_grid():
-    """An int axis with low above high turns into an empty grid_search list; add_configurations
-    itself only tallies the axis's own length and counts 0 with no exception, but the one trial
-    this function draws to validate the space actually generates raises IndexError out of Ray's
-    own variant iterator ("pop from empty list")."""
+@pytest.mark.parametrize("search_alg", ["grid", "random"])
+def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high(search_alg):
+    """An int axis with low above high names no value to train, gridded or sampled:
+    _to_tune_space refuses it by name, before anything is counted."""
     space = {"batch_size": {"type": "int", "low": 8, "high": 2}}
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError, match="'batch_size'.*exceeds high"):
+        planned_trial_count(space, 2, search_alg, 1, False, None)
+
+
+def test_planned_trial_count_raises_on_a_categorical_with_an_empty_choice_list():
+    space = {"x": {"type": "categorical", "choices": []}}
+    with pytest.raises(ValueError, match="'x'.*no choices"):
         planned_trial_count(space, 2, "grid", 1, False, None)
-
-
-def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high_under_random():
-    """The same malformed int axis sampled rather than gridded: add_configurations counts a
-    number that ignores the malformed bound (no exception at that point), and the one drawn
-    trial raises ValueError evaluating the sample expression."""
-    space = {"batch_size": {"type": "int", "low": 8, "high": 2}}
-    with pytest.raises(ValueError):
-        planned_trial_count(space, 2, "random", 1, False, None)
 
 
 def test_planned_trial_count_raises_overflowerror_on_a_huge_int_span():
@@ -164,7 +160,7 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(t
     with pytest.raises(RuntimeError, match="stop before Ray"):
         hpo.tune_search(
             objective_fn=lambda config, report: report(0.0), param_space=space,
-            num_samples=3, search_alg="random", scheduler=None, storage_path=str(tmp_path),
+            num_samples=3, search_alg="random", scheduler=None, storage_path=str(tmp_path), seed=0
         )
 
     assert len(calls) == 2
@@ -181,9 +177,8 @@ def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
 
 
 def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_path, monkeypatch):
-    """planned_trial_count's own storage_path is a discarded tempfile.TemporaryDirectory, never
-    Ray's own ~/ray_results default nor the process's cwd, so a monkeypatched home directory and
-    project root both stay empty after a real count."""
+    """planned_trial_count builds no searcher and no experiment, so a monkeypatched home
+    directory and project root both stay empty after a real count."""
     home = tmp_path / "home"
     home.mkdir()
     project_root = tmp_path / "project"
@@ -206,15 +201,16 @@ def _trials_ray_yields(
     param_space: dict, num_samples: int, search_alg: str | None, draws: int,
     warm_start: bool, baseline_params: dict | None, storage_path,
 ) -> tuple[int, int]:
-    """Build the generator planned_trial_count builds and drain it, returning the number of
-    trials next_trial() actually yielded and the total_samples tally read back afterwards."""
+    """Build the searcher tune_search launches for this sweep and drain it, returning the number
+    of trials next_trial() actually yielded and the total_samples tally read back afterwards."""
     from ray.tune.experiment import Experiment
-    from ray.tune.search.basic_variant import BasicVariantGenerator
 
-    space, points, _alg = _search_space_and_points(
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+
+    space, points, alg = _search_space_and_points(
         param_space, search_alg, draws, warm_start, baseline_params)
-    generator = BasicVariantGenerator(
-        constant_grid_search=(draws > 1), points_to_evaluate=points)
+    generator = build_search_alg(alg, seed=0, points_to_evaluate=points,
+                                 constant_grid_search=draws > 1)
     generator.add_configurations(Experiment(
         name="drained_count", run=lambda config: None, config=space,
         num_samples=num_samples, storage_path=str(storage_path),

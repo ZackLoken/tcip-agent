@@ -1,18 +1,5 @@
-"""The agent-facing surface for authoring and field-editing a trait spec: two doors of one
-surface, deliberately no more.
-
-``author_trait_spec`` registers a trait that does not yet exist, recording the agent's own
-account of why, in the breeder's terms; the breeder confirms it from the web GUI, through a route
-no MCP tool can reach. A single tool doing both authoring and confirmation would put the
-confirmation inside the agent's own tool surface and make honest attribution depend on the agent
-choosing not to fill a field. ``revise_trait_spec`` is the other door: it edits fields on a
-spec already on record, never creates one, and states or restates the trait-spec authoring
-statement when its edit calls for it, the door named for a spec with a stale statement or none
-at all wherever a stated meaning needs the breeder's own confirmation. Authoring creates,
-field-editing merges, and authoring also restates: a spec on record whose statement never landed,
-or one ``trait_spec_unconformed`` answers a reason for (whatever its own statement), are the two
-documented cases where authoring writes onto an already-registered spec rather than refusing.
-Field-editing still refuses either.
+"""The agent-facing doors for authoring (``author_trait_spec``) and field-editing
+(``revise_trait_spec``) a trait spec; the breeder confirms from the web GUI.
 """
 
 from __future__ import annotations
@@ -33,7 +20,7 @@ def author_trait_spec(
     milestone_fractions: list[float] | None = None,
     milestone_on: str = "",
     majority_milestone: str = "",
-    majority_provisional: bool = False,
+    crossing_unconfirmed: bool = False,
     phenology_prefix: str = "",
     majority_label: str = "",
     count_objective: str = "",
@@ -50,40 +37,26 @@ def author_trait_spec(
     """Register a trait that does not yet exist, and record why, in the breeder's terms.
 
     Cross-checked against the crops.yml controlled vocabulary: `delivers` must name at least one
-    real phenotype, or this refuses rather than registering a fabricated trait. Refuses when a
-    spec and its authoring statement are both already on record for this trait; change an
-    already-registered spec's fields with `revise_trait_spec` instead.
+    real phenotype, or this refuses. Refuses when a spec and its authoring statement are both
+    already on record for this trait; change an already-registered spec's fields with
+    `revise_trait_spec` instead.
 
-    A spec that predates the subject-registry rename (no `schema_version: 2` stamp) is not a
-    collision, whatever its statement: state every field the spec carries here to restate it, since
-    a field left unstated is written at its default and nothing here can tell the two apart. The
-    response, and only the response, then carries `replaced_values`, naming every authored field
-    whose value this call replaced (the retired `positive_class_name` against the new
-    `positive_value`) as `{"recorded": <old>, "authored": <new>}`, and `prior_confirmation`, the
-    `confirmed_by` and `confirmed_at` of the statement this call replaced when the breeder had
-    confirmed it, else null, since the fresh statement is unconfirmed and that confirmation no
-    longer stands; both absent on every other call, and neither is written into the statement
-    record.
-
-    Ask the breeder what the trait's measurement is, in their own terms, and record their answer
-    here. Propose the semantics the breeder actually stated, never a plausible-sounding guess: a
-    fabricated definition becomes the definition, and the measurement is theirs to define. Writing
-    this does not confirm anything on its own; the breeder confirms the statement in the GUI before
-    it can back a delivery.
+    Writing this does not confirm anything on its own; the breeder confirms the statement in the
+    GUI before it can back a delivery.
 
     Args:
         project_root: The project whose registry holds the trait.
         trait: The name to register this trait's spec under.
         delivers: The crop-vocabulary phenotype name(s) this trait's spec claims to deliver.
             Required, and every entry must be in crops.yml.
-        rationale: The agent's account of why it chose these values, from the breeder's own
-            words. Prose, read by a breeder, not parsed.
+        rationale: The agent's account of why it chose these values, from the breeder's own words.
+            Prose, read by a breeder, not parsed.
         positive_value: The `subjects.json` subject the positive call resolves to, if any.
         milestone_fractions: Crossing fractions for a milestone-delivering trait.
         milestone_on: The quantity the milestones cross, e.g. `positive_fraction`.
         majority_milestone: The crops.yml majority-date crossing key this trait's milestones map
             to, e.g. `95per`.
-        majority_provisional: Whether that mapping is not yet breeder-confirmed.
+        crossing_unconfirmed: Whether that mapping is not yet breeder-confirmed.
         phenology_prefix: The phenology CSV column prefix this trait's milestones use.
         majority_label: The label the majority-alias column carries.
         count_objective: What the delivered number needs to be reliable for
@@ -92,8 +65,8 @@ def author_trait_spec(
         count_bias_tolerance_frac: Max acceptable relative per-image count bias on the held-out
             split, a breeder-authored measurement decision with no platform-derived value.
         count_error_tolerance: Max acceptable p90 per-image count error on the held-out split.
-        classifier_agreement_floor: Min acceptable Cohen's kappa for the classifier operating
-            point to count as validated.
+        classifier_agreement_floor: Min acceptable Cohen's kappa for the classifier operating point
+            to count as validated.
         ordinal_agreement_floor: Min acceptable ordinal agreement criterion value.
         regression_skill_floor: Min acceptable regression skill/agreement criterion value.
         scale_tolerance_frac: Max acceptable relative disagreement a physical-scale calibration's
@@ -107,8 +80,7 @@ def author_trait_spec(
             the agent. It is surfaced in a delivery refusal and never clears it.
 
     Returns the unconfirmed statement as written, plus `record_seen`, the content hash the
-    confirming surface compares against so a click cannot confirm text nobody displayed, and
-    `replaced_values` and `prior_confirmation` on a restatement over a pre-rename record.
+    confirming surface compares against.
     """
     try:
         statement = traits.author_trait_spec(
@@ -119,7 +91,7 @@ def author_trait_spec(
             milestone_fractions=milestone_fractions or (),
             milestone_on=milestone_on,
             majority_milestone=majority_milestone,
-            majority_provisional=majority_provisional,
+            crossing_unconfirmed=crossing_unconfirmed,
             phenology_prefix=phenology_prefix,
             majority_label=majority_label,
             count_objective=count_objective,
@@ -146,16 +118,8 @@ def revise_trait_spec(
 ) -> dict:
     """Update one or more fields on an already-registered trait's spec, and record why.
 
-    Hand-editing a trait spec's YAML directly bypasses the audit record and skips re-validation.
-    This refuses if the trait has no existing spec file (creating a new
-    trait is a separate, still-manual authoring step) or if the merged result would fail the same
-    crops.yml cross-check every config-authored spec already goes through. Returns the updated
-    spec.
-
-    This is what a real localization-kind derivation (from actual GT box geometry) or a real
-    breeder-answered count objective gets recorded through, never a silent default and never
-    copied from another trait's values, both durable, audited facts instead of living only in a
-    session's memory.
+    Refuses if the trait has no existing spec file or if the merged result would fail the crops.yml
+    cross-check every config-authored spec goes through. Returns the updated spec.
 
     Every call carries a rationale, so after its write the trait's own trait-spec statement is
     stated fresh whenever it was absent or stale, or whenever this call moves a field the
@@ -163,34 +127,29 @@ def revise_trait_spec(
     statement or a stale one, a carried-forward edit over a stale statement all restate), and is
     left alone whenever it is current and this call moved no authored field. A fresh statement is
     unconfirmed; the breeder confirms it in the Results tab, and `statement_restated` and
-    `statement_note` say what happened here so the agent learns it now rather than at the next
-    delivery refusal. `rationale` is the breeder's own account of the spec's authored values
-    whenever this call restates, a carried-forward edit included; it is not parsed.
+    `statement_note` say what happened here. `rationale` is the breeder's own account of the spec's
+    authored values whenever this call restates, a carried-forward edit included; it is not parsed.
 
     An operationalization the breeder confirmed covers the field values it was confirmed against,
     so a field this call moves can leave one superseded. That is reported in `superseded`, naming
-    the delivery kind and both values, as a convenience so the agent learns here rather than at the
-    next delivery refusal. It is not the enforcement point: the delivery precondition re-reads the
-    spec and refuses on its own, which also catches a spec edited by hand.
+    the delivery kind and both values; the delivery precondition re-reads the spec and refuses on
+    its own.
 
     Args:
-        project_root: The project whose spec registry to update. Required: the platform root this
-            process is pinned to can be a different project entirely, and a spec written to the
-            wrong registry is a measurement decision recorded where nothing reads it.
+        project_root: The project whose spec registry to update. Required.
         trait_name: Name of the already-registered trait whose spec file to update.
         fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
             fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
-        rationale: The agent's account of why it chose these values, from the breeder's own
-            words. Prose, read by a breeder, not parsed. Required, and must say something.
+        rationale: The agent's account of why it chose these values, from the breeder's own words.
+            Prose, read by a breeder, not parsed. Required, and must say something.
         relayed_note: What the breeder said away from the GUI, recorded as a relay attributed to
             the agent, on the trait-spec statement this call writes; the breeder reads it in the
             Results tab's statement panel. Nothing surfaces it in a refusal.
 
-    Returns the updated spec as stored, `schema_version` included (the current ceiling, stamped
-    on every write), `superseded`, `statement_restated` (true when this call stated or restated the
+    Returns the updated spec as stored, `schema_version` included (the current ceiling, stamped on
+    every write), `superseded`, `statement_restated` (true when this call stated or restated the
     trait's trait-spec statement) and `statement_note`; when it did, also `record_seen`, the
-    content hash the confirming surface compares against so a click cannot confirm text nobody
-    displayed.
+    content hash the confirming surface compares against.
     """
     from tcip_mcp import operationalization
 

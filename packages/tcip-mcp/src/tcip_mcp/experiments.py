@@ -3,9 +3,8 @@
 An experiment is one run's immutable record: named by the caller before the run or minted at
 launch, and nothing groups runs into anything larger. A relaunch of a record that already has
 history forks a new record instead of reopening it, its ``parent_experiment`` naming the one it
-forked from. ``experiment_id`` is that record's id wherever a store key, a tool parameter, a
-route path or a delivered column carries the term; this paragraph is the term's one definition,
-and every parameter docstring that takes one points here rather than restating it.
+forked from. ``experiment_id`` is that record's id wherever a store key, a tool parameter, a route
+path or a delivered column carries the term.
 
 Stores experiment state in .tcip/experiments/<experiment_id>/:
   config.json, full training config snapshot
@@ -18,10 +17,9 @@ Stores experiment state in .tcip/experiments/<experiment_id>/:
   env.json, the library versions, seed and model kind behind a reproducible run
   validations.jsonl, the claims earned against this run's evidence (append-only)
 
-This module declares the record's members, so it is also the one place they are addressed:
-every reader and writer takes a key from a constructor here rather than composing a path of
-its own, and ``experiment_dir`` serves the run artifacts that live beside the record without
-being members of it (checkpoints, TensorBoard logs, a bespoke run's source snapshot).
+This module declares the record's members and their key constructors; ``experiment_dir`` serves the
+run artifacts that live beside the record without being members of it (checkpoints, TensorBoard
+logs, a bespoke run's source snapshot).
 """
 
 from __future__ import annotations
@@ -34,6 +32,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from tcip_store import (
@@ -69,9 +68,8 @@ def experiments_dir() -> Path:
 def experiment_dir(experiment_id: str) -> Path:
     """One experiment's directory: the record's members plus the run artifacts beside them.
 
-    A caller that needs a member document asks for its key instead. This serves the files the
-    record's own layout does not name: weights, TensorBoard event files, and the per-file
-    source snapshot a bespoke run copies in.
+    Serves the files the record's own layout does not name: weights, TensorBoard event files, and
+    the per-file source snapshot a bespoke run copies in.
     """
     return experiments_dir() / experiment_id
 
@@ -88,11 +86,8 @@ _MEMBER_LOG = RootedFileLocator(suffix=".jsonl")
 def experiments_scope(root: Path | str | None = None) -> str:
     """The root every experiment key hangs off: the experiment store, made absolute.
 
-    Absolute because a key names a root rather than a process's current directory, and
-    resolved per call because ``EXPERIMENTS_DIR`` is relative until a platform root is
-    pinned, and a pin can land mid-process. ``root`` names a different platform root than
-    this process's own, for a caller (the web backend serving a run of the project the
-    browser has open) whose subject is a project it is not itself pinned to.
+    Resolved per call because ``EXPERIMENTS_DIR`` is relative until a platform root is pinned, and
+    a pin can land mid-process. ``root`` names a different platform root than this process's own.
     """
     if root is None:
         return str(experiments_dir().resolve())
@@ -153,17 +148,14 @@ STATUS_DOCUMENT = "status"
 def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The run's state, timestamps, liveness heartbeat and launcher declaration.
 
-    ``cas``: every writer here reads the document and updates fields inside it, from the
-    training subprocess and the tool process at once, so an unconditional write drops the
-    heartbeat or the run identity another writer just stamped.
+    ``cas``: every writer here reads the document and updates fields inside it, from the training
+        subprocess and the tool process at once.
 
     ``launched_by`` is a mapping naming who launched the run, stamped by
     :func:`stamp_run_identity`: ``{"launcher": "gui"}`` for a launch through the web app's own
     route, ``{"launcher": "agent", **agent_identity.audit_fields()}`` for a launch inside an MCP
     handshake, ``{"launcher": "process"}`` for a launch from neither. Absent on a record whose
-    experiment tracking never reached the stamp, or whose stamp otherwise failed; a reader
-    treats an absent field as "launcher not recorded" rather than guessing. Provenance only:
-    nothing reads it to decide anything.
+    experiment tracking never reached the stamp, or whose stamp otherwise failed.
     """
     return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, STATUS_DOCUMENT, root)
 
@@ -184,11 +176,7 @@ register_store(
 
 
 def lineage_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The data to model to predictions chain.
-
-    ``cas``: ``update_lineage`` merges fields into the stored document under a lock, so an
-    unconditional write erases an edge another writer recorded.
-    """
+    """The data to model to predictions chain, written compare-and-set."""
     return _member_key(EXPERIMENT_LINEAGE_STORE, experiment_id, "lineage", root)
 
 
@@ -208,11 +196,7 @@ register_store(
 
 
 def artifacts_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The run's artifact pointers.
-
-    ``cas``: ``record_artifact`` adds one name to the stored mapping under a lock, so an
-    unconditional write drops the pointers already recorded.
-    """
+    """The run's artifact pointers, written compare-and-set."""
     return _member_key(EXPERIMENT_ARTIFACTS_STORE, experiment_id, "artifacts", root)
 
 
@@ -232,10 +216,7 @@ register_store(
 
 
 def env_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The environment capture behind a reproducible run.
-
-    ``last_writer_wins``: the envelope writes it whole, once, from state it already holds.
-    """
+    """The environment capture behind a reproducible run, last writer wins."""
     return _member_key(EXPERIMENT_ENV_STORE, experiment_id, "env", root)
 
 
@@ -255,11 +236,7 @@ register_store(
 
 
 def split_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The train/val membership, seed and dataset identity this run's metrics belong to.
-
-    ``last_writer_wins``: one writer composes the whole manifest once, from the datasets the
-    run actually built, and nothing merges into it afterwards.
-    """
+    """The train/val membership, seed and dataset identity of this run, last writer wins."""
     return _member_key(EXPERIMENT_SPLIT_STORE, experiment_id, "split", root)
 
 
@@ -305,28 +282,22 @@ def validations_key(experiment_id: str, *, root: Path | str | None = None) -> Ke
     return _member_key(EXPERIMENT_VALIDATIONS_STORE, experiment_id, "validations", root)
 
 
-# Once terminal, a record is immutable and additive-only. Excludes "cancelled": that record
+# Once terminal, a record is immutable and additive-only. Excludes "canceled": that record
 # stays writable; a resume always mints a fresh id via _ensure_experiment rather than reopening it.
 _TERMINAL_STATES = {"completed", "failed"}
 
 # A different concept sharing similar vocabulary, states reconstruct_run_status trusts as
 # already-decided and never re-derives from heartbeat freshness. Unlike _TERMINAL_STATES above,
-# this does include "cancelled": a gracefully cancelled run recorded its own final state honestly
+# this does include "canceled": a gracefully canceled run recorded its own final state honestly
 # (model_final.pt was written, cancel_training's own documented contract), and re-deriving it from
 # heartbeat staleness would misreport it as "running" then permanently as "interrupted", implying
 # a crash that never happened. Named separately rather than reusing _TERMINAL_STATES so the two
 # purposes (mutation-lock vs. heartbeat-reconstruction) can never silently drift onto each other.
-_RECORDED_AS_DONE = {"completed", "failed", "cancelled"}
+_RECORDED_AS_DONE = {"completed", "failed", "canceled"}
 
 
 def read_member(key: Key, default: Any = None) -> Any:
-    """One member document, with an unreadable record folded onto ``default``.
-
-    Every caller of an experiment member already treats a corrupt one the way it treats an absent
-    one, so the fold is stated once rather than repeated at each read. The read every consumer of
-    a member document goes through, in this module and outside it, so none of them reaches past
-    the seam for the bytes.
-    """
+    """One member document, with an unreadable record folded onto ``default``."""
     try:
         return store.read(key, default=default)
     except DecodeError:
@@ -337,53 +308,59 @@ def read_member(key: Key, default: Any = None) -> Any:
 def experiment_exists(experiment_id: str, *, root: Path | str | None = None) -> bool:
     """Whether this id names a real experiment record, by its config snapshot.
 
-    ``root`` defaults to the current platform root; a caller resolving a run under a root
-    other than the one it started under (a launch's own watchdog, after the process has
-    since adopted a different project) passes the launch root explicitly.
+    ``root`` defaults to the current platform root; a caller resolving a run under a root other
+    than the one it started under passes the launch root explicitly.
     """
     return store.exists(config_key(experiment_id, root=root))
 
 
+def recorded_state(status: Mapping[str, Any]) -> str:
+    """The ``state`` a status record states, which :func:`create_experiment` writes on every one."""
+    return status["state"]
+
+
 def _current_state(experiment_id: str, *, root: Path | str | None = None) -> str | None:
-    status = read_member(status_key(experiment_id, root=root), {})
-    return status.get("state") if isinstance(status, dict) else None
+    """The experiment's recorded ``state``, or ``None`` when no status record exists for it."""
+    status = read_member(status_key(experiment_id, root=root), None)
+    return None if status is None else recorded_state(status)
 
 
 class ExperimentTerminal(RuntimeError):
     """A write reached an experiment record already in a terminal state (completed/failed;
-    cancelled stays resumable and is never terminal here). Raised by :func:`refuse_if_terminal`;
-    a caller that reports refusal as a return value (``log_metrics``, ``record_artifact``) catches
-    it and maps it to that value, a caller for whom the lost write is itself a run failure (the
-    training worker's provenance patches, the run's partition) lets it propagate uncaught.
+    canceled stays resumable and is never terminal here).
     """
 
 
 def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
     """Raise :class:`ExperimentTerminal` if ``state`` is terminal.
 
-    ``state`` is the value the caller already read, inside its own transaction when it holds
-    one (so the check and the write it guards see the same value) or via :func:`_current_state`
-    when it doesn't. The one implementation of "is this experiment terminal" every writer of an
-    experiment member consults, rather than each comparing against ``_TERMINAL_STATES`` itself.
-    :func:`record_artifact` (and the shared :func:`pointer_frozen` predicate the callers outside
-    this module consult) apply a narrower, additive-only rule instead: a still-empty field takes
-    its first write even past terminal, only a populated one is frozen, so ``record_artifact``
-    decides by that rule first and calls this only to build the message once it already has.
-    :func:`update_lineage` calls this first instead, inside its own transaction, as its initial
-    terminal gate; only when it raises does ``update_lineage`` fall back to the same
-    additive-only rule to decide which of the fields it was given the refusal actually blocks.
+    ``state`` is the value the caller already read, inside its own transaction when it holds one
+    (so the check and the write it guards see the same value) or via :func:`_current_state` when it
+    doesn't.
     """
     if state in _TERMINAL_STATES:
         raise ExperimentTerminal(f"Experiment {experiment_id} is {state} (terminal); refusing to {op}.")
+
+
+def rewrite_live_member(experiment_id: str, key: Any, op: str,
+                        update: Callable[[Any], Any]) -> None:
+    """Rewrite one member of a live experiment record inside its status lock: ``update`` takes the
+    member's stored value (``None`` when absent) and returns what is written.
+
+    Raises :class:`ExperimentTerminal` naming ``op`` for a terminal record, and whatever the store
+    raises on any other read or write failure.
+    """
+    st_key = status_key(experiment_id)
+    with store.transaction(key, st_key) as txn:
+        refuse_if_terminal(experiment_id, op, recorded_state(txn.read(st_key)))
+        txn.write(key, update(txn.read(key, default=None)))
 
 
 def mint_experiment_id() -> str:
     """A fresh, unclaimed experiment id: ``run_<epoch-seconds>_<6 hex chars>``.
 
     The uuid suffix, not a counter, so two ids minted in the same process, or in two different
-    processes sharing one experiment store, never collide on the same clock second. The one
-    minting function: every id this platform assigns unprompted (a caller naming none at launch,
-    a relaunch's own fork of a record that already has history) comes from here.
+    processes sharing one experiment store, never collide on the same clock second.
     """
     return f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
 
@@ -400,16 +377,13 @@ def create_experiment(
     """Create a new experiment record with its config snapshot.
 
     The config snapshot is written create-only, so an id that already names an experiment is
-    refused inside the write's own lock rather than after a separate existence check that two
-    callers could both pass.
+    refused inside the write's own lock.
 
-    ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on (the
-    content end of the reproduce-a-number chain), written into the immutable lineage at creation. They
-    are set once here and never via ``update_lineage`` (identity, not a mutable edge).
+    ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on,
+    written into the immutable lineage at creation. They are set once here and never via
+    ``update_lineage``.
 
-    The config is the caller's own dict, so it is checked against what JSON can hold before
-    the write, naming the offending field rather than leaving the codec to refuse a payload
-    it can only describe by store and key.
+    The config is checked against what JSON can hold before the write, naming the offending field.
     """
     check_json_value(config, path="config")
     try:
@@ -445,23 +419,15 @@ def create_experiment(
 
 
 def is_pristine(state: str | None, metrics_logged: bool) -> bool:
-    """Whether an experiment record with this ``state`` and ``metrics_logged`` may still take a
-    full ``config.json`` rewrite: ``state == "created"`` and no metrics logged yet.
-
-    The one implementation of the pristine predicate, read by :func:`overwrite_config_if_pristine`
-    from inside the transaction that also reads ``state``. :func:`stamp_run_identity`'s own
-    config-carrying precondition tests the identical fact inline rather than through this
-    function, since it already holds ``state`` and ``metrics_logged`` from its own read.
+    """Whether an experiment record with this ``state`` and ``metrics_logged`` was never launched,
+    and so may still take a full ``config.json`` rewrite: ``state == "created"`` and no metrics
+    logged yet.
     """
     return state == "created" and not metrics_logged
 
 
 def metrics_logged_of(status: dict[str, Any] | None) -> bool:
-    """Whether a status record already carries the ``metrics_logged`` marker :func:`log_metrics`
-    stamps before its first append: the one read of that field, shared by
-    :func:`overwrite_config_if_pristine`'s own transaction and :func:`stamp_run_identity`'s
-    precondition when it is given a config to write, rather than each re-deriving it from the
-    record."""
+    """Whether a status record carries the ``metrics_logged`` marker :func:`log_metrics` stamps."""
     return bool(status.get("metrics_logged")) if isinstance(status, dict) else False
 
 
@@ -471,23 +437,11 @@ def overwrite_config_if_pristine(
     """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
     still pristine (state == "created" and no epochs logged yet).
 
-    A pre-created experiment's ``config.json`` is written once, at ``create_experiment`` time,
-    before effective tiling geometry and the training seed are resolved (see
-    ``training_tools.launch_training``). The launch's own path to that same refresh is
-    :func:`stamp_run_identity`, given a ``config`` to write in the same transaction as the stamp;
-    this function stays the standalone primitive for a caller wanting the config rewrite alone,
-    with no stamp beside it. Refuses once :func:`is_pristine` says the
-    record is no longer pristine, a "created" record that already has metrics rows must stay
-    protected too, not just the terminal-state lock alone.
+    Refuses once :func:`is_pristine` says the record is no longer pristine. Both of its inputs,
+    ``state`` and ``metrics_logged``, are read from the one status record this opens a transaction
+    over.
 
-    Both of :func:`is_pristine`'s inputs, ``state`` and ``metrics_logged``, are read from the
-    same status record this opens one transaction over, closing the race a log-key read outside
-    the transaction could not: a ``log_metrics`` call now decides pristineness by writing to that
-    same record, under the same lock, rather than a key no record transaction can name.
-
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
+    ``root`` names a platform root other than this process's own.
     """
     check_json_value(config, path="config")
     if not experiment_exists(experiment_id, root=root):
@@ -497,8 +451,8 @@ def overwrite_config_if_pristine(
     metrics_logged = False
     refused = False
     with store.transaction(cfg_key, st_key) as txn:
-        status = txn.read(st_key, default={})
-        state = status.get("state") if isinstance(status, dict) else None
+        status = txn.read(st_key)
+        state = recorded_state(status)
         metrics_logged = metrics_logged_of(status)
         refused = not is_pristine(state, metrics_logged)
         if not refused:
@@ -510,9 +464,7 @@ def overwrite_config_if_pristine(
 
 
 def _mark_completed(status: dict[str, Any]) -> None:
-    """Write the terminal completed state into a status record in place: state, heartbeat and
-    ended timestamp together, the one transition :func:`update_status` and :func:`complete_run`
-    both apply when a run finishes normally, so neither carries its own copy of the triple."""
+    """Write the completed state, heartbeat and ended timestamp into a status record in place."""
     now = datetime.now(timezone.utc).isoformat()
     status["state"] = "completed"
     status["heartbeat"] = now
@@ -528,21 +480,19 @@ def update_status(
 ) -> dict[str, Any]:
     """Update experiment state (created → running → completed | failed).
 
-    A repeat of the record's current state is idempotent: nothing restamps (not ``heartbeat``,
-    not ``ended``), and ``error`` lands only when the record does not already carry one, so the
-    watchdog's reasoned ``failed`` landing after the child's own reasonless ``failed`` still
-    records the wall-clock reason, and a second reason never overwrites a first. Any other write
-    to a terminal record (``completed``/``failed``, the other terminal state included) refuses
-    through :func:`refuse_if_terminal`. ``cancelled`` is not
-    terminal here, so a record in that state still takes any write, including back to ``running``.
+    A repeat of the record's current state is idempotent: nothing restamps (not ``heartbeat``, not
+    ``ended``), and ``error`` lands only when the record does not already carry one, so a second
+    reason never overwrites a first. Any other write to a terminal record
+    (``completed``/``failed``, the other terminal state included) refuses through
+    :func:`refuse_if_terminal`. ``canceled`` is not terminal here, so a record in that state still
+    takes any write, including back to ``running``.
 
     ``error`` records a specific failure reason (e.g. a wall-clock-timeout kill) into
     ``status.json["error"]``; outside the idempotent-repeat case above, omitted/``None`` never
     clears a previously-recorded error, only an explicit new value overwrites it.
 
-    ``root`` defaults to the current platform root; a launch's wall-clock watchdog passes the
-    root it captured at launch, so its write reaches the run's own record even after this
-    process has since adopted a different project.
+    ``root`` defaults to the current platform root; a caller passes another to reach a run's own
+    record under a root other than this process's.
     """
     if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -551,8 +501,8 @@ def update_status(
     current: str | None = None
     refused = False
     with store.transaction(key) as txn:
-        status = txn.read(key, default={})
-        current = status.get("state")
+        status = txn.read(key)
+        current = recorded_state(status)
         if state == current:
             if error is not None and status.get("error") is None:
                 status["error"] = error
@@ -591,25 +541,18 @@ def complete_run(
     """Mark a run completed and record its final weights pointer and their digest, as one
     transaction.
 
-    Hashes ``final_weights`` before opening the transaction: the store's locks cover records, not
-    a checkpoint read, and holding three record locks through that read against the file backend's
-    lock timeout would buy nothing. A declared deliverable this run cannot read is refused, not
-    completed with a phantom pointer: a missing or unreadable file returns an error naming the
-    path and the read failure, and writes nothing (no transaction is even opened).
+    Hashes ``final_weights`` before opening the transaction. A missing or unreadable file returns
+    an error naming the path and the read failure, and writes nothing (no transaction is even
+    opened).
 
     Names the artifacts key before the lineage key, and the lineage key before the status key: a
     file-backend transaction applies its writes in named-key order and is not crash-atomic across
     keys, so a crash mid-apply leaves a detectably stale record (a pointer with no digest, or a
     digest recorded on a record still ``running``), never a ``completed`` record carrying a
-    mismatched or absent digest. Refuses a run already terminal, naming the weights file that exists on disk so an operator can find it; the
-    refusal's ``state`` carries the state the record actually holds, so a caller can reconcile to
-    it. The digest is what this call observed of the file, sealed into the transaction that makes
-    the run terminal, so nothing a caller does to the path afterwards changes what the run
-    recorded.
+    mismatched or absent digest. Refuses a run already terminal, naming the weights file; the
+    refusal's ``state`` carries the state the record actually holds.
 
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
+    ``root`` names a platform root other than this process's own.
     """
     if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -630,8 +573,8 @@ def complete_run(
     current: str | None = None
     try:
         with store.transaction(art_key, lin_key, st_key) as txn:
-            status = txn.read(st_key, default={})
-            current = status.get("state") if isinstance(status, dict) else None
+            status = txn.read(st_key)
+            current = recorded_state(status)
             refuse_if_terminal(experiment_id, "complete_run", current)
 
             recorded_at = datetime.now(timezone.utc).isoformat()
@@ -658,16 +601,8 @@ def complete_run(
 
 class StampPreconditionFailed(RuntimeError):
     """Raised by :func:`stamp_run_identity` when the record is not a fresh, unstamped one: its
-    state is not ``"created"``, it already carries an ``output_dir``, or (when the stamp was
-    given a config to write) it already carries a metrics row.
-
-    ``training_tools._ensure_experiment`` catches it on both launch branches: the fresh-creation
-    branch, where it means another launch's pristine-reuse won this record between the creation
-    and this stamp, and the pristine-reuse branch, where it means another launch won the same
-    race first; either way the caller falls back to forking a fresh id instead of returning an
-    error, since losing that race is not a failure the launch itself should report. Every other
-    caller lets it propagate, since a fresh or newly forked record failing this precondition is
-    not a race any caller should silently paper over.
+    state is not ``"created"``, it already carries an ``output_dir``, or (when the stamp was given
+    a config to write) it already carries a metrics row.
     """
 
 
@@ -675,44 +610,29 @@ def stamp_run_identity(
     experiment_id: str, output_dir: str, *, launched_by: dict[str, Any],
     config: dict[str, Any] | None = None,
 ) -> None:
-    """Stamp a launch onto this experiment's ``status.json``, moving it to ``running`` in the
-    same write: ``output_dir`` (the real, caller-influenced artifact directory), ``launched_by``
-    (who launched it), and the ``state``/``heartbeat``/``started`` triple :func:`update_status`
-    writes for that transition.
+    """Stamp a launch onto this experiment's ``status.json``, moving it to ``running`` in the same
+    write: ``output_dir`` (the real, caller-influenced artifact directory), ``launched_by`` (who
+    launched it), and the ``state``/``heartbeat``/``started`` triple :func:`update_status` writes
+    for that transition.
 
     One compare-and-set transaction, requiring ``state == "created"``, no ``output_dir`` already
-    stamped, and, when ``config`` is given, no metrics logged yet: the record's own
-    linearization point for a launch. Raises :class:`StampPreconditionFailed` when that
-    precondition fails, so two launches racing to stamp one pristine record never both win it,
-    and raises whatever the store itself raises on any other write failure: no launch proceeds
-    unstamped, and no failure here is logged and swallowed the way a best-effort write would be.
+    stamped, and, when ``config`` is given, no metrics logged yet. Raises
+    :class:`StampPreconditionFailed` when that precondition fails, so two launches racing to stamp
+    one pristine record never both win it, and raises whatever the store itself raises on any other
+    write failure.
 
-    ``config``, given, is the pristine-reuse branch's own path: the transaction also spans
-    ``config_key``, written before ``status_key`` (a file-backend transaction applies its writes
-    in the order its keys were named), so the config actually launched lands in the pre-created
-    record's snapshot in the same write as the stamp. That closes the window a separate
-    ``overwrite_config_if_pristine`` call followed by this one would leave open: two launches
-    both passing the pristine check could otherwise interleave their config writes and their
-    stamps, leaving a record running under one launch's identity with the other's config
-    snapshot. Omitted (a fresh or forked record, which has no pre-created snapshot to refresh),
-    the transaction spans ``status_key`` alone.
-
-    ``launched_by`` is resolved once by ``launch_training`` before ``_ensure_experiment`` runs:
-    ``{"launcher": "agent", **agent_identity.audit_fields()}`` inside an MCP handshake,
-    ``{"launcher": "gui"}`` for the Training tab's launch route, ``{"launcher": "process"}`` for a
-    caller with neither. A record with no ``launched_by`` at all is one that predates the field or
-    whose stamp never reached this transaction; every reader treats the two cases the same, as
-    "launcher not recorded".
+    ``config``, given, makes the transaction also span ``config_key``, written before
+    ``status_key`` (a file-backend transaction applies its writes in the order its keys were
+    named), so the config actually launched lands in the pre-created record's snapshot in the same
+    write as the stamp. Omitted, the transaction spans ``status_key`` alone.
     """
     key = status_key(experiment_id)
     cfg_key = config_key(experiment_id) if config is not None else None
     keys = (cfg_key, key) if cfg_key is not None else (key,)
     with store.transaction(*keys) as txn:
-        status = txn.read(key, default={})
-        refused = status.get("state") != "created" or status.get("output_dir")
-        if config is not None:
-            refused = refused or metrics_logged_of(status)
-        if refused:
+        status = txn.read(key)
+        logged = config is not None and metrics_logged_of(status)
+        if not is_pristine(recorded_state(status), logged) or status.get("output_dir"):
             raise StampPreconditionFailed(
                 f"experiment {experiment_id!r} is not a fresh, unstamped record "
                 f"(state={status.get('state')!r}, output_dir={status.get('output_dir')!r}); "
@@ -730,43 +650,18 @@ def stamp_run_identity(
 
 
 def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
-    """Every experiment id the store holds a status record for, sorted.
-
-    Every experiment gets a status record at creation, so this is the whole set, and it is the
-    enumeration for any caller that wants the experiments themselves: what names an experiment is a
-    record the store holds, so directories a backend happens to keep beside them are not candidate
-    ids and a backend that keeps none at all still answers. Enumerating one member store answers
-    with every member key under the scope, and the document part says which member a key names.
-    """
+    """Every experiment id the store holds a status record for, sorted."""
     found = store.keys(EXPERIMENT_STATUS_STORE, experiments_scope(root))
     return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
-
-
-def is_launched(status: dict[str, Any] | None) -> bool:
-    """Whether a status record names a launched run rather than one only created: a stamped
-    ``output_dir``, a state other than ``"created"``, or the ``metrics_logged`` marker
-    :func:`log_metrics` stamps before its first append, so a record from before this stamp moved
-    to a single transaction, one whose ``output_dir`` landed but whose separate ``state``
-    write never reached ``"running"``, still counts. The one implementation of "was this ever
-    launched", shared by ``training_tools.py``'s own run enumeration and
-    :func:`compare_experiments`, which consults it before deriving a heartbeat state at all: a
-    pre-created, never-launched record carries a heartbeat of ``None`` and would otherwise derive
-    to ``"interrupted"``, misreporting a run that never started as a crashed one.
-    """
-    if not isinstance(status, dict):
-        return False
-    return bool(status.get("output_dir")) or status.get("state") != "created" or bool(status.get("metrics_logged"))
 
 
 def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
     """The state a status record reads as once heartbeat freshness applies: a state already
     recorded as done (:data:`_RECORDED_AS_DONE`) is trusted as-is; any other state derives to
-    ``"running"`` while the heartbeat is fresh, else ``"interrupted"``. The one implementation
-    :func:`reconstruct_from_status` and :func:`compare_experiments` both read through, so a run
-    whose process died reads the same way everywhere rather than as ``"running"`` in one place.
+    ``"running"`` while the heartbeat is fresh, else ``"interrupted"``.
     """
-    state = status.get("state", "unknown") if isinstance(status, dict) else "unknown"
-    heartbeat = status.get("heartbeat") if isinstance(status, dict) else None
+    state = recorded_state(status)
+    heartbeat = status.get("heartbeat")
     if state not in _RECORDED_AS_DONE:
         state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
     return state
@@ -775,23 +670,17 @@ def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
 def reconstruct_from_status(
     experiment_id: str, status: dict[str, Any], *, stale_seconds: float, read_progress: bool,
 ) -> dict[str, Any]:
-    """One record's run row, reconstructed from a status document the caller already read: the
-    shape :func:`reconstruct_run_status` returns for the record it read, and the shape the run
-    enumeration in ``training_tools.py`` builds per record. ``current_epoch``, ``best_metric``
-    and ``best_metric_name``
-    cost one metrics-log read and are included only when ``read_progress`` is true, read back
-    through :func:`best_selection_from_log` from what the run itself stamped, never re-derived
-    from the config.
+    """One record's run row, reconstructed from a status document the caller already read.
+    ``current_epoch``, ``best_metric`` and ``best_metric_name`` cost one metrics-log read and are
+    included only when ``read_progress`` is true, read back through :func:`best_selection_from_log`
+    from what the run itself stamped.
 
     ``launched_by`` carries the record's own stamped declaration (see :func:`stamp_run_identity`)
-    whole, or ``None`` for a record that predates the field or whose stamp was dropped; a reader
-    treats both the same way, as "launcher not recorded".
+    whole, or ``None`` for a record never launched.
 
     ``heartbeat`` carries the record's own last-touched instant (see :func:`_touch_heartbeat`)
-    whole, the same value :func:`derived_state` already reads to decide ``running`` vs
-    ``interrupted``: no process id is persisted anywhere this reconstruction can check, so a
-    caller showing this row as ``running`` shows this instant beside it rather than implying a
-    liveness check that does not exist.
+    whole, the same value :func:`derived_state` reads to decide ``running`` vs ``interrupted``; no
+    process id is persisted.
     """
     current_epoch = None
     best_metric_name = None
@@ -814,18 +703,10 @@ def reconstruct_from_status(
 
 
 def reconstruct_run_status(
-    experiment_id: str, *, stale_seconds: float = 600.0,
+    experiment_id: str, *, stale_seconds: float,
 ) -> dict[str, Any] | None:
-    """Reconstruct one experiment's status from disk for a caller whose in-memory registry
-    doesn't have it, either it was never in this process (a different process launched it) or it
-    was subprocess-delegated and the in-memory record is stale by design.
-
-    Returns ``None`` when ``experiment_id`` names no record on disk, or names one no record could
-    ever carry (a path separator, an empty or dot name; ``BadKey`` folded to ``None`` the same way
-    an absent record is), an honestly unknown run either way, never a guess. ``stale_seconds``
-    lets ``training_tools.py``'s own callers (``monitor_training``, ``cancel_training``) pass
-    their configured heartbeat window (``TCIP_HEARTBEAT_STALE_SECONDS``) rather than being pinned
-    to this module's default. The reconstruction itself is :func:`reconstruct_from_status`.
+    """Reconstruct one experiment's status from disk; ``None`` for an absent or unaddressable id (a
+    path separator, an empty or dot name). ``stale_seconds`` is the heartbeat window.
     """
     try:
         key = status_key(experiment_id)
@@ -839,13 +720,9 @@ def reconstruct_run_status(
 
 
 def _parse_iso_instant(value: Any) -> datetime | None:
-    """One timestamp read as an instant: a non-string, or a string ``datetime.fromisoformat``
-    can't parse (a trailing ``Z`` and an offset both parse fine on this platform's Python), is
-    ``None`` rather than a raise, so a caller comparing many rows skips a malformed one instead of
-    aborting the whole comparison. Every platform writer stamps UTC with an explicit offset; a
-    naive value (a row a bespoke loop appended with its own clock) is read as UTC so it compares
-    against those on one clock rather than raising. Shared by :func:`_heartbeat_fresh` and
-    :func:`compare_experiments`'s ``rows_after_end``, the one place either fact is parsed.
+    """One timestamp read as an instant: a non-string, or a string ``datetime.fromisoformat`` can't
+    parse (a trailing ``Z`` and an offset both parse fine), is ``None`` rather than a raise. A
+    naive value is read as UTC.
     """
     if not isinstance(value, str):
         return None
@@ -858,12 +735,10 @@ def _parse_iso_instant(value: Any) -> datetime | None:
     return parsed
 
 
-def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
+def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float) -> bool:
     """True if ``hb_iso`` (ISO-8601) is within the staleness window, a process is still actively
-    updating this run. Missing/unparseable → not fresh (treat as dead). This module's own
-    default window; a caller with a configured one (``training_tools.py``'s
-    ``TCIP_HEARTBEAT_STALE_SECONDS``, read from ``$TCIP_HEARTBEAT_STALE_SECONDS``) passes its own
-    ``stale_seconds`` through rather than being pinned to this default."""
+    updating this run. Missing/unparseable → not fresh (treat as dead).
+    """
     hb = _parse_iso_instant(hb_iso)
     if hb is None:
         return False
@@ -873,9 +748,8 @@ def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
 def _touch_heartbeat(experiment_id: str, *, root: Path | str | None = None) -> None:
     """Best-effort: stamp the current time into ``status.json['heartbeat']``.
 
-    Called each epoch so a run still training in another process (e.g. the MCP agent) reads
-    as live to a web client reconstructing run state, instead of being flagged interrupted.
-    Never raises, a heartbeat failure must not break metric logging.
+    Called each epoch so a run still training in another process reads as live. Never raises, a
+    heartbeat failure must not break metric logging.
     """
     key = status_key(experiment_id, root=root)
     if not store.exists(key):
@@ -910,17 +784,12 @@ def best_selection_from_log(rows: list[dict[str, Any]]) -> tuple[str | None, flo
 
     Every row a training body writes carries ``selection_metric`` (the bare name
     ``generic_trainer.train()`` resolved once, before the first epoch) and ``selection`` (that
-    epoch's value on it); this reads those back rather than re-deriving a name from the run's
-    config, which is a second, disagreeing resolution (a bespoke loop's rows, or a config whose
-    ``training.evaluation`` and top-level ``evaluation`` blocks differ, are exactly where a second
-    resolution drifts from the trainer's own).
+    epoch's value on it); this reads those back.
 
     The name is the most recently stamped one; the best is compared over every row stamped with
     that name in its declared ranking direction (``evaluation.HIGHER_IS_BETTER_BY_METRIC`` on the
-    bare name, the same declaration ``resolve_selection_metric`` enforces before a run can select
-    on it). A row with no name or a non-finite value is skipped when finding the best. No name in
-    any row, or a name the declaration table does not carry, leaves both ``None``: a metric this
-    function cannot rank is never guessed at.
+    bare name). A row with no name or a non-finite value is skipped when finding the best. No name
+    in any row, or a name the declaration table does not carry, leaves both ``None``.
     """
     name: str | None = None
     for row in reversed(rows):
@@ -958,26 +827,14 @@ def log_metrics(
 ) -> dict[str, Any]:
     """Append epoch metrics to the run's metrics log and refresh its liveness heartbeat.
 
-    The one writer of that log: a training body routes its rows here rather than opening the
-    file beside it, so the module that declares the record's members is the module that
-    appends to them and the terminal-state lock cannot be written around.
+    A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or a
+    non-finite loss is named here.
 
-    A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or
-    a non-finite loss is named here, where the caller can see which metric it was.
+    Stamps ``status.json["metrics_logged"] = True`` before appending, so a marker written but then
+    an append that fails still reads non-pristine, never the reverse. A failure inside that marker
+    transaction raises.
 
-    ``check_json_value`` admits any JSON-encodable value, wider than the frontend's own
-    ``MetricRow`` type (``number | string | null | undefined`` per key), which renders only the metric
-    shapes it recognizes and drops the rest silently.
-
-    Stamps ``status.json["metrics_logged"] = True`` before appending, the record
-    :func:`is_pristine` reads instead of a log key no record transaction can name. The marker
-    goes before the append, not after, so a marker written but then an append that fails still
-    reads non-pristine, never the reverse. A failure inside that marker transaction is left to
-    raise rather than caught: no marker means no row follows it, the safe direction.
-
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
+    ``root`` names a platform root other than this process's own.
     """
     check_json_value(metrics, path="metrics")
     if not experiment_exists(experiment_id, root=root):
@@ -1038,12 +895,7 @@ a ``selection_binding``, ``null`` for ``resolve_scale``.
 
 
 def _content_digest(value: dict[str, Any]) -> str:
-    """A mapping's content identity: sha256 over its canonical JSON, first 16 hex characters.
-
-    Canonical spelling because the digest is an agreement between separate processes: a writer
-    and every later reader must spell the same mapping the same way to compute the same
-    identity. The width matches the platform's other content identities.
-    """
+    """A mapping's content identity: sha256 over its canonical JSON, first 16 hex characters."""
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
@@ -1051,9 +903,7 @@ def _content_digest(value: dict[str, Any]) -> str:
 def validation_digest(body: dict[str, Any]) -> str:
     """The content identity of a validation row.
 
-    Pure: a reader recomputes it from a row it read, which is what lets a stamp name one
-    specific row rather than an experiment in general. It is not stored in the row, since a
-    row carrying its own digest would be vouching for itself.
+    Pure: a reader recomputes it from a row it read. It is not stored in the row.
     """
     return _content_digest(body)
 
@@ -1061,13 +911,8 @@ def validation_digest(body: dict[str, Any]) -> str:
 def _append_validation(experiment_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Append one earned claim to this experiment's validations log.
 
-    Module-private: a validation is earned by running the gate over the evidence, so the only
-    caller is the primitive that ran it, and there is no supported appender a caller can hand
-    a verdict to. The storage seam's own generic append against this key stays reachable and
-    is a stated residual rather than something this module closes.
-
     The row is checked against ``_VALIDATION_FIELDS`` first: a missing field is refused, never
-    filled in, because a defaulted provenance field is a claim nobody made.
+    filled in.
     """
     check_json_value(body, path="validation")
     if not experiment_exists(experiment_id):
@@ -1133,15 +978,12 @@ def ensure_calibration_experiment(
 ) -> str:
     """The experiment a calibration's claims hang off, created when it does not exist yet.
 
-    A claim is earned against a real experiment record, and a door that calibrated predictions
-    no experiment produced (a bespoke or unregistered checkpoint) holds none. The id is derived
-    from the same content that constitutes the claim's identity, so a second calibration of the
-    same document, checkpoint, reference and trait resolves to the same experiment and agrees
-    with its config by construction rather than by comparison.
+    The id is derived from the same content that constitutes the claim's identity, so a second
+    calibration of the same document, checkpoint, reference and trait resolves to the same
+    experiment.
 
-    ``config`` is the free text describing the calibration. The identity fields are written
-    here from the arguments the id was derived from, so a config restating one is refused
-    rather than left free to contradict the id.
+    ``config`` is the free text describing the calibration. The identity fields are written here
+    from the arguments the id was derived from, so a config restating one is refused.
     """
     identity = {
         "document": document,
@@ -1171,9 +1013,9 @@ def ensure_calibration_experiment(
 
 
 def _pointer_populated(doc: dict[str, Any], field: str) -> bool:
-    """Whether ``field`` already carries a real value in ``doc`` (an artifacts or lineage
-    record): present and not an empty placeholder. The additive-lock's own definition of
-    "populated", shared by every writer and pre-checker that consults it."""
+    """Whether ``field`` already carries a real value in ``doc`` (an artifacts or lineage record):
+    present and not an empty placeholder.
+    """
     return doc.get(field) not in (None, "", [], {})
 
 
@@ -1185,11 +1027,9 @@ def _artifact_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool
 
 
 def _lineage_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
-    """The lineage member's additive lock: a populated field freezes unless the write would
-    record the same value it already holds, so a repeat of an idempotent write is admitted rather
-    than refused (a re-export whose own bucket resolved to no document on its first, empty-input
-    pass, so a second, real pass in place records the same path a terminal experiment already
-    holds)."""
+    """The lineage member's additive lock: a populated field freezes unless the write would record
+    the same value it already holds.
+    """
     return _pointer_populated(doc, field) and doc.get(field) != value
 
 
@@ -1202,15 +1042,11 @@ _POINTER_MEMBER_KEYS = {"artifacts": artifacts_key, "lineage": lineage_key}
 def pointer_frozen(experiment_id: str, member: str, field: str, value: Any) -> str | None:
     """Whether writing ``value`` into ``field`` of the named member (``"artifacts"`` or
     ``"lineage"``) would be refused right now: the experiment terminal and the member's own
-    additive lock (:data:`_MEMBER_WRITE_REFUSED`), the same predicate :func:`record_artifact` and
-    :func:`update_lineage` evaluate inside their transactions.
+    additive lock (:data:`_MEMBER_WRITE_REFUSED`).
 
-    An untransacted pre-check for a caller about to write a file outside the store (a blob write
-    cannot join a record transaction), so it can refuse by name before writing anything, rather
-    than after. The window between this read and the write is real, the record could still turn
-    terminal in between, and the writer's own transactional refusal, sharing this same predicate,
-    still catches that residual; this only spares the ordinary case its file write. Returns the
-    refusal text, or ``None`` when the write would be admitted.
+    An untransacted pre-check for a caller about to write a file outside the store; the writer's
+    own transactional refusal still decides. Returns the refusal text, or ``None`` when the write
+    would be admitted.
     """
     doc = read_member(_POINTER_MEMBER_KEYS[member](experiment_id), {})
     state = _current_state(experiment_id)
@@ -1231,9 +1067,7 @@ def record_artifact(
 ) -> dict[str, Any]:
     """Register an artifact (model weights, predictions, etc.).
 
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
+    ``root`` names a platform root other than this process's own.
     """
     if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1243,7 +1077,7 @@ def record_artifact(
     refused_overwrite = False
     with store.transaction(key, state) as txn:
         artifacts = txn.read(key, default={})
-        current = (txn.read(state, default={}) or {}).get("state")
+        current = recorded_state(txn.read(state))
         # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
         # but an existing one is frozen, no silent overwrite of a delivered pointer.
         refused_overwrite = current in _TERMINAL_STATES and _MEMBER_WRITE_REFUSED["artifacts"](
@@ -1277,17 +1111,15 @@ def update_lineage(
 ) -> dict[str, Any]:
     """Update lineage fields (predictions, data_source, review_session, etc.).
 
-    The updates are the caller's own kwargs, merged whole into the stored document, so they
-    are checked against what JSON can hold before any of them lands. ``model_weights`` and
+    The updates are the caller's own kwargs, merged whole into the stored document, so they are
+    checked against what JSON can hold before any of them lands. ``model_weights`` and
     ``model_weights_sha256`` are ``complete_run``'s alone: naming either raises ``ValueError``
     before any field, including a legitimate companion in the same call, lands.
 
     A field refused (a dataset identity field, or a populated field of a terminal run) is named
     under ``refused`` in the result, and the others land.
 
-    ``root`` names a platform root other than this process's own, the same escape hatch
-    :func:`update_status` offers a caller resolving a run under a root other than the one it
-    started under.
+    ``root`` names a platform root other than this process's own.
     """
     check_json_value(updates, path="updates")
     completion_fields = sorted(f for f in _COMPLETION_ONLY_LINEAGE_FIELDS if f in updates)
@@ -1307,7 +1139,7 @@ def update_lineage(
     refused: dict[str, Any] = {}
     with store.transaction(key, state) as txn:
         lineage = txn.read(key, default={})
-        current_state = (txn.read(state, default={}) or {}).get("state")
+        current_state = recorded_state(txn.read(state))
         # Additive-only, unlike refuse_if_terminal's own all-or-nothing refusal: a still-empty
         # field may take its first write post-terminal, only a populated one is frozen.
         try:
@@ -1336,42 +1168,34 @@ def register_model_from_experiment(
     """Bind the registry's own entry to the run that produced it: the digest completion recorded.
 
     Requires a completed run whose completion recorded a digest (``complete_run``'s own write): a
-    run in ``created`` or ``running``, or one that ended ``failed``/``cancelled``, has not said
-    what it produced and refuses by name. Hashes the caller's ``checkpoint_path`` through the same
-    function completion hashed with and refuses when the two digests differ, naming both and the
-    path completion recorded: the caller's path may be the recorded path or any byte-identical
-    copy, never a different file. ``project_path``, when given, must be the directory the
-    experiment's own keys hang off (compared through ``splits.same_directory``, tolerant of a
-    different spelling of the same directory); any other directory refuses by name, naming the
-    root this call would otherwise have searched.
+    run in ``created`` or ``running``, or one that ended ``failed``/``canceled``, refuses by name.
+    Hashes the caller's ``checkpoint_path`` through the same function completion hashed with and
+    refuses when the two digests differ, naming both and the path completion recorded: the caller's
+    path may be the recorded path or any byte-identical copy, never a different file.
+    ``project_path``, when given, must be the directory the experiment's own keys hang off
+    (compared through ``splits.same_directory``, tolerant of a different spelling of the same
+    directory); any other directory refuses by name, naming the root this call would otherwise have
+    searched.
 
     Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced this
     checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training epoch.
-    Registers with no tags (the retired ``experiment:<id>`` convention named no verified fact) and
-    writes only the registry's own entry, with ``experiment_id`` set to this run: the run's own
-    lineage pointer (``model_weights``, ``model_weights_sha256``) is ``complete_run``'s alone, not
-    this call's. Metrics are read, never fabricated: a checkpoint that carries no metrics dict, or
-    that will not load at all, registers with an empty ``metrics`` and a ``metrics_source`` of
-    ``None`` rather than substituting a different epoch's numbers (the run's own metrics log
-    describes a different model state than the checkpoint being registered). The unpickle and its
-    ``schema_version`` check are ``model_registry._load_verified_payload``, the same function
-    ``load_registered_checkpoint`` calls after its own registry-name identity check: this call's
-    identity check is the digest match above instead, but the payload rules (``weights_only=True``,
-    the version ceiling) are one implementation, never a second ``torch.load`` of its own.
+    Registers with no tags and writes only the registry's own entry, with ``experiment_id`` set to
+    this run. A checkpoint that carries no metrics dict, or that will not load at all, registers
+    with an empty ``metrics`` and a ``metrics_source`` of ``None``. The unpickle and its
+    ``schema_version`` check are ``model_registry._load_verified_payload``.
 
     ``metrics_source`` records which path produced the numbers, not that anyone verified them:
     ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
     ``default_train`` computed them), ``"training_source"`` when it does (a bespoke loop's own
     saved state), and ``None`` when the checkpoint carries no metrics.
 
-    A name a prior run bound is not evicted by this call unless ``experiment_id`` is that same
-    run: the registry's own eviction rail refuses, returned here as an error naming the run that
-    holds the name (see ``model_registry.EntryOwnedByRun``).
+    A name a prior run bound is not evicted by this call unless ``experiment_id`` is that same run:
+    the registry's own eviction rail refuses, returned here as an error naming the run that holds
+    the name (see ``model_registry.EntryOwnedByRun``).
 
-    ``root`` names the platform root the experiment's own keys hang off, other than this
-    process's own, the same escape hatch :func:`update_status` offers a caller resolving a run
-    under a root other than the one it started under; the default is this process's pinned
-    platform root, and ``project_path``'s own check is against whichever one applies.
+    ``root`` names the platform root the experiment's own keys hang off; the default is this
+    process's pinned platform root, and ``project_path``'s own check is against whichever one
+    applies.
     """
     if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1399,8 +1223,7 @@ def register_model_from_experiment(
 
     digest = _sha256_of_bytes(data)
 
-    status = read_member(status_key(experiment_id, root=root), {})
-    state = status.get("state") if isinstance(status, dict) else None
+    state = _current_state(experiment_id, root=root)
     lineage = read_member(lineage_key(experiment_id, root=root), {})
     recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
     recorded_path = lineage.get("model_weights") if isinstance(lineage, dict) else None
@@ -1432,7 +1255,7 @@ def register_model_from_experiment(
             "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
         )
     if payload is not None:
-        kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
+        kind = payload.get("kind")
         stamped = payload.get("metrics")
         if isinstance(stamped, dict) and stamped:
             final_metrics = dict(stamped)
@@ -1480,19 +1303,12 @@ def get_experiment(
     """Read full experiment state.
 
     ``metrics`` is the run's own log: every row the run's own :func:`log_metrics` appended, in
-    order, oldest first. Its last row is only the last one logged, not a verified result, and
-    nothing binds a row written to that log outside :func:`log_metrics` itself, so a row a
-    bespoke loop appended reaches display through this reader (and :func:`compare_experiments`'s
-    ``last_logged_metrics``) exactly like any other, and neither one is a promotion decision:
-    registering a checkpoint (:func:`register_model_from_experiment`) reads that checkpoint's own
-    stamped metrics, never this log, and ranking a registered model (``model_registry.
-    best_model``) reads the registry entry's own ``metrics_source``, not this log either.
+    order, oldest first. Its last row is only the last one logged, not a verified result.
 
-    ``metrics`` can be paginated for long runs: ``metrics_offset`` and ``metrics_limit`` index
-    into the row list, so ``n_rows`` (the row count) is the paging bound, not ``n_epochs`` (the
-    count of distinct ``epoch`` values; the stock loop logs one row per epoch, a bespoke one may
-    log several). Defaults return all metrics. ``validations`` is the whole claim history,
-    unpaginated: a run earns few claims where it logs many epochs.
+    ``metrics`` can be paginated for long runs: ``metrics_offset`` and ``metrics_limit`` index into
+    the row list, so ``n_rows`` (the row count) is the paging bound, not ``n_epochs`` (the count of
+    distinct ``epoch`` values; the stock loop logs one row per epoch, a bespoke one may log
+    several). Defaults return all metrics. ``validations`` is the whole claim history, unpaginated.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1520,13 +1336,10 @@ def get_experiment(
 def list_experiments() -> list[dict[str, Any]]:
     """List every experiment the store holds a status record for, run or not.
 
-    Covers a calibration experiment (id derived from a claim's content, unreconstructable any
-    other way), a review-feedback lineage, a pre-created experiment never launched, and a
-    launched one, none of which the tool door's ``launched_only=True`` view (a launched record
-    only) lists. The ids come from the status-record enumeration itself
-    (:func:`experiment_ids_with_status`), the whole set the store holds.
-    ``has_model_source`` is whether the config carries a ``model_source`` (a training run) versus
-    an experiment that tracks something else.
+    Covers a calibration experiment (id derived from a claim's content), a review-feedback lineage,
+    a pre-created experiment never launched, and a launched one. The ids come from
+    :func:`experiment_ids_with_status`. ``has_model_source`` is whether the config carries a
+    ``model_source`` (a training run) versus an experiment that tracks something else.
     """
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -1537,7 +1350,7 @@ def list_experiments() -> list[dict[str, Any]]:
             config = read_member(config_key(experiment_id), {})
             experiments.append({
                 "experiment_id": experiment_id,
-                "state": status.get("state", "unknown"),
+                "state": recorded_state(status),
                 "created": status.get("created"),
                 "has_model_source": bool(isinstance(config, dict) and config.get(MODEL_SOURCE_KEY)),
             })
@@ -1549,40 +1362,31 @@ def _split_summary(experiment_id: str) -> dict[str, Any]:
     """The partition column for one experiment: :func:`read_run_partition_checked` reduced to
     the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
     exists but will not decode; ``{"case": "none"}`` for a run that never wrote one;
-    ``{"case": "bound", "selection_dir": ..., "seed": ..., "redrawn_within_selection": bool}`` for
-    a run bound to a named selection (``split.json``'s own ``selection_binding``), the flag
-    read from ``split.json``'s own top-level ``redrawn_within_selection`` so a selection bound at
-    seed 42 and a redraw inside that same selection at seed 42 never compare as the same data;
-    ``{"case": "drawn", "seed": ...}`` otherwise.
+    ``{"case": "bound", "selection_dir": ..., "seed": ..., "redraw": bool}`` for a run bound to
+    a named selection, ``selection_dir`` and ``redraw`` as ``split.json``'s own
+    ``selection_binding`` records them; ``{"case": "drawn", "seed": ...}`` otherwise.
     """
     partition, decode_error = read_run_partition_checked(experiment_id)
     if decode_error is not None:
         return {"case": "error", "error": decode_error}
     if not partition:
         return {"case": "none"}
-    binding = partition.get("selection_binding")
-    if isinstance(binding, dict) and binding.get("selection_dir"):
-        return {
-            "case": "bound", "selection_dir": binding["selection_dir"],
-            "seed": partition.get("seed"),
-            "redrawn_within_selection": bool(partition.get("redrawn_within_selection")),
-        }
-    return {"case": "drawn", "seed": partition.get("seed")}
+    if "selection_binding" in partition:
+        binding = partition["selection_binding"]
+        return {"case": "bound", "selection_dir": binding["selection_dir"],
+                "seed": partition["seed"], "redraw": binding["redraw"]}
+    return {"case": "drawn", "seed": partition["seed"]}
 
 
 def _index_registry_entries(
     experiment_ids: list[str],
 ) -> tuple[dict[str, list[dict[str, Any]]] | None, str | None]:
     """Every registered model entry naming one of ``experiment_ids`` as its producer, indexed by
-    experiment id, from one read of the platform root's registry index, the root every column
-    this comparison shows is read from. Returns ``(index, error)``: ``index`` is ``None`` and
-    ``error`` names why whenever the caller must not treat "no entries matched" as an answer:
-    the index document itself could not be read (an absent registry reads as a legitimate empty
-    index, not this case), or the registry carries an entry with no ``metrics_source`` key at
-    all (an entry predating the field, the same condition :meth:`ModelRegistry.best_model`
-    refuses ranking on), named rather than silently matching nothing. Otherwise ``index`` holds
-    every match, each entry reduced to ``name``, ``metrics``, ``metrics_source``,
-    ``registered_at``; an experiment with no registered entry is simply absent from the index.
+    experiment id, from one read of the platform root's registry index. Returns ``(index, error)``:
+    ``index`` is ``None`` and ``error`` names why when the index document could not be read (an
+    absent registry reads as an empty index). Otherwise ``index`` holds every match, each entry
+    reduced to ``name``, ``metrics``, ``metrics_source``, ``registered_at``; an experiment with no
+    registered entry is absent from the index.
     """
     from tcip_mcp.model_registry import read_registry_index
     from tcip_mcp.project_paths import platform_state_root
@@ -1592,66 +1396,46 @@ def _index_registry_entries(
     except Exception as exc:
         return None, f"registry unreadable: {exc}"
 
-    stale = sorted(str(e.get("name")) for e in entries if "metrics_source" not in e)
-    if stale:
-        return None, (f"registry entries {stale} predate metrics_source and cannot be matched "
-                       "to a producing experiment or ranked until conformed")
-
     wanted = set(experiment_ids)
     index: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
-        eid = e.get("experiment_id")
+        eid = e["experiment_id"]
         if eid not in wanted:
             continue
         index.setdefault(eid, []).append({
-            "name": e.get("name"), "metrics": e.get("metrics"),
-            "metrics_source": e.get("metrics_source"), "registered_at": e.get("registered_at"),
+            "name": e["name"], "metrics": e["metrics"],
+            "metrics_source": e["metrics_source"], "registered_at": e["registered_at"],
         })
     return index, None
 
 
-def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600.0) -> dict[str, Any]:
+def compare_experiments(experiment_ids: list[str], *, stale_seconds: float) -> dict[str, Any]:
     """Side-by-side comparison of multiple experiments.
 
-    ``stale_seconds`` is the heartbeat freshness window :func:`derived_state` applies; this
-    module's own default, a caller with the configured window (``training_tools.py``'s
-    ``TCIP_HEARTBEAT_STALE_SECONDS``) passes it through rather than being pinned to this default,
-    the same knob :func:`reconstruct_run_status` and the run enumeration take.
+    ``stale_seconds`` is the heartbeat freshness window :func:`derived_state` applies.
 
-    Per experiment: ``recorded_state`` (the stored state) and ``state``, the same
-    heartbeat-derived state the run enumeration reports, via :func:`derived_state`, so a run
-    whose process died compares as ``"interrupted"`` rather than ``"running"``, but only for a
-    launched record (:func:`is_launched`): a pre-created experiment never launched reports
-    ``state`` equal to ``recorded_state`` (``"created"``), never a heartbeat-derived
-    ``"interrupted"`` implying a crash that never happened. ``log_locked``, true when
-    ``recorded_state`` is in the mutation lock's terminal set, no tamper claim, only that
-    :func:`log_metrics` refuses further rows (a cancelled run reads ``log_locked`` false: the
-    lock admits rows there, even though no production flow appends to one); ``last_logged_metrics``,
-    the run's own log's last row (not ``"final"``: an unlocked log can still take a row after it,
-    and this is not a verified result, see :func:`get_experiment`); ``rows_after_end``, the count
-    of rows whose ``timestamp`` is a later instant than the record's own ``ended`` (the one row an
-    unlocked log's own append can admit after the mark, or any row an outside writer appended
-    later), ``None`` when the record has no ``ended``, and a row whose own ``timestamp`` is
-    missing or unparseable never counted rather than raising; and ``n_epochs``/``n_rows``, always
-    present.
+    Per experiment: ``recorded_state`` (the stored state) and ``state``, the heartbeat-derived
+    state via :func:`derived_state`, but only for a record no longer pristine (:func:`is_pristine`): a
+    pre-created experiment never launched reports ``state`` equal to ``recorded_state``
+    (``"created"``). ``log_locked``, true when ``recorded_state`` is in the mutation lock's
+    terminal set, meaning only that :func:`log_metrics` refuses further rows;
+    ``last_logged_metrics``, the run's own log's last row (not a verified result, see
+    :func:`get_experiment`); ``rows_after_end``, the count of rows whose ``timestamp`` is a later
+    instant than the record's own ``ended``, ``None`` when the record has no ``ended``, and a row
+    whose own ``timestamp`` is missing or unparseable never counted; and ``n_epochs``/``n_rows``,
+    always present.
 
     Also per experiment: ``task``/``subject`` from the config already read; ``status_error``, the
     status record's own failure reason (``None`` for a run that never failed, distinct from a
     comparison entry's own top-level ``error`` when :func:`get_experiment` could not read it at
-    all); ``model``, the config's
-    builder, ``None`` when the config names none (never a fabricated ``"unknown"``); ``split``
-    (see :func:`_split_summary`), so two runs of one config on different partitions never compare
-    as the same data; and ``registry``, this experiment's own registered entries (see
+    all); ``model``, the config's builder, ``None`` when the config names none; ``split`` (see
+    :func:`_split_summary`); and ``registry``, this experiment's own registered entries (see
     :func:`_index_registry_entries`), absent, with ``registry_error`` naming why, when the
     project's registry index can't be read or matched at all (an experiment with no registered
     entry still carries ``registry: []``). ``same_dataset_fingerprint`` is ``None``, never
-    ``True``, when any compared id is an error entry: a record this call could not even read must
-    never be silently dropped from the same-data judgment.
-
-    Reading the registry costs one scan for the whole call, on top of one :func:`get_experiment`
-    and one :func:`_split_summary` per experiment compared.
+    ``True``, when any compared id is an error entry.
     """
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
 
     comparisons: list[dict[str, Any]] = []
     registry_index, registry_error = _index_registry_entries(experiment_ids)
@@ -1664,14 +1448,15 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
 
         status_doc = exp.get("status")
         status_doc = status_doc if isinstance(status_doc, dict) else {}
-        recorded_state = status_doc.get("state")
+        stored_state = recorded_state(status_doc)
         ended = status_doc.get("ended")
+        launched = not is_pristine(stored_state, metrics_logged_of(status_doc))
 
         summary: dict[str, Any] = {
             "experiment_id": eid,
-            "recorded_state": recorded_state,
-            "state": derived_state(status_doc, stale_seconds) if is_launched(status_doc) else recorded_state,
-            "log_locked": recorded_state in _TERMINAL_STATES,
+            "recorded_state": stored_state,
+            "state": derived_state(status_doc, stale_seconds) if launched else stored_state,
+            "log_locked": stored_state in _TERMINAL_STATES,
             "n_epochs": exp["n_epochs"],
             "n_rows": exp["n_rows"],
         }
@@ -1705,7 +1490,7 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
         model_source = config.get(MODEL_SOURCE_KEY, {})
         model_source = model_source if isinstance(model_source, dict) else {}
         summary["model"] = model_source.get("builder")
-        summary["task"] = model_source.get("task")
+        summary["task"] = run_task(config) if config else None
         data_cfg = config.get("data", {})
         summary["subject"] = data_cfg.get("subject") if isinstance(data_cfg, dict) else None
 
@@ -1717,23 +1502,11 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
 
         comparisons.append(summary)
 
-    # Whether every compared run trained on the same dataset content, so a caller doesn't assume
-    # apples-to-apples; an unset or formula-unrecorded fingerprint makes it unknown, not "same".
-    from tcip_mcp.pipelines.data.dataset_fingerprint import (
-        FINGERPRINT_FORMULA_VERSION, fingerprint_formula_version,
-    )
-
+    # Whether every compared run trained on the same dataset content; an unset fingerprint, or a
+    # record this call could not read, makes it unknown, not "same".
     any_error = any("error" in c for c in comparisons)
-    with_fp = [c for c in comparisons if "error" not in c]
-    for c in with_fp:
-        fp = c.get("dataset_fingerprint")
-        if fp is not None and fingerprint_formula_version(fp) != FINGERPRINT_FORMULA_VERSION:
-            c["fingerprint_formula_unrecorded"] = True
-    fps = {c.get("dataset_fingerprint") for c in with_fp}
-    any_unrecorded = any(c.get("fingerprint_formula_unrecorded") for c in with_fp)
-    # A record this call could not even read (any_error) must never be silently dropped from the
-    # judgment: the remaining columns matching each other says nothing about the missing one.
-    same_dataset = None if (any_error or not fps or None in fps or any_unrecorded) else len(fps) == 1
+    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
+    same_dataset = None if (any_error or not fps or None in fps) else len(fps) == 1
     return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}
 
 
@@ -1746,13 +1519,15 @@ def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
     if lineage is None:
         return {"error": "No lineage file found"}
 
+    from tcip_mcp.pipelines.model_build import run_task
+
     config = read_member(config_key(experiment_id))
     if isinstance(config, dict):
         data_cfg = config.get("data", {})
         lineage["data_config"] = {
             "images_dir": data_cfg.get("images_dir"),
             "labels_dir": data_cfg.get("labels_dir"),
-            "task": data_cfg.get("task"),
+            "task": run_task(config),
         }
 
     return {"experiment_id": experiment_id, "lineage": lineage}
@@ -1763,13 +1538,10 @@ def read_run_partition_checked(
 ) -> tuple[dict[str, Any], str | None]:
     """The run's persisted partition, and the decode failure behind an unreadable one.
 
-    Returns ``(manifest, decode_error)``. ``manifest`` is ``{}`` with ``decode_error`` ``None``
-    for a run that never wrote one: nothing to say. A record that exists but will not decode also
-    answers ``manifest={}``, but ``decode_error`` names why, so a caller that must not read a
-    bound run's corrupted record as an unbound one (a calibration-side mark that would otherwise
-    guess membership from a manifest that no longer exists) can tell the two apart.
-    ``root`` resolves the same project a caller's own checkpoint lookup used, so an explicit one
-    cannot pair one project's producer with another project's record.
+    Returns ``(manifest, decode_error)``. ``manifest`` is ``{}`` with ``decode_error`` ``None`` for
+    a run that never wrote one. A record that exists but will not decode also answers
+    ``manifest={}``, but ``decode_error`` names why. ``root`` resolves the same project a caller's
+    own checkpoint lookup used.
     """
     from tcip_store import DecodeError
 
@@ -1781,13 +1553,6 @@ def read_run_partition_checked(
 
 
 def read_run_partition(experiment_id: str) -> dict[str, Any]:
-    """The run's persisted partition, or ``{}`` when it was never written or could not be
-    decoded.
-
-    Folds a decode failure onto the same ``{}`` an absent record answers: every consumer here
-    already treats a corrupt manifest the way it treats a missing one, and none needs the two
-    told apart. :func:`read_run_partition_checked` is the one reader that keeps them apart, for
-    a caller that must not guess membership from a manifest that no longer exists.
-    """
+    """The run's persisted partition, or ``{}`` when it was never written or could not be decoded."""
     manifest, _ = read_run_partition_checked(experiment_id)
     return manifest

@@ -16,7 +16,7 @@ long-season for the region; treat them as not present unless the breeder confirm
 
 Growth form. Single-trunked, slow-growing deciduous tree (30–80 ft tall, 20–35 ft wide
 at maturity; managed shorter in breeding orchards / silvopasture). Distinctive thick
-dark-grey blocky "alligator" / checkerboard bark. Prone to root suckering: a mother
+dark-gray blocky "alligator" / checkerboard bark. Prone to root suckering: a mother
 tree can carry a multi-stem clonal clump, so a "plant" in imagery may be a clonal cluster,
 not one stem. Grown as an orchard / silvopasture tree, not a coppiced hedgerow shrub.
 
@@ -75,7 +75,7 @@ dates from the data in hand and must not freeze these placeholders. The two date
 
 ## Key structures + imagery appearance
 
-- Trunk / bark: thick dark grey-black bark furrowed into small square blocks
+- Trunk / bark: thick dark gray-black bark furrowed into small square blocks
   ("alligator" pattern); a strong species-ID cue and the reference for locating the DBH
   plane (4.5 ft / 1.37 m; mature trunks ~15–45 cm across). Main stem, ground to canopy.
 - Leaf: simple, alternate, broadly oblong/ovate, pointed, glossy dark green above,
@@ -152,7 +152,7 @@ Persimmon-specific traps:
   (could be an unpollinated / immature / off-year female or a monoecious tree); do not infer
   sex from fruit presence without flower-level or multi-year evidence.
 - `fruit_diameter` / `fruit_height`: valid in mm only with a real in-frame scale reference
-  and an unoccluded silhouette; raw bbox pixels are not millimetres.
+  and an unoccluded silhouette; raw bbox pixels are not millimeters.
 - `plant_height`: a pixel quantity until an in-frame scale / photogrammetric calibration
   makes it metric. Pixels are not millimeters.
 - `dbh`: a pixel trunk width is not DBH without calibration and correct localization of the

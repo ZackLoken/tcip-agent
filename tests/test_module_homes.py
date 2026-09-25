@@ -131,11 +131,11 @@ def test_get_worst_predictions_has_one_home():
 
 
 def test_run_registry_functions_have_one_home():
-    """``create_run``, ``attach_run``, ``get_run``, ``list_runs`` and ``cancel_run`` moved out of
+    """``create_run``, ``get_run``, ``list_runs`` and ``cancel_run`` moved out of
     ``generic_trainer.py`` into ``pipelines/training/run_registry.py``, as one unit with
     ``TrainRun`` (checked separately below, it is a class, not a function)."""
     _assert_one_home(
-        {"create_run", "attach_run", "get_run", "list_runs", "cancel_run"},
+        {"create_run", "get_run", "list_runs", "cancel_run"},
         _module_path("pipelines/training/generic_trainer.py"),
         _module_path("pipelines/training/run_registry.py"),
     )
@@ -219,27 +219,14 @@ def _assign_name_counts(path: Path) -> Counter:
 
 
 def test_dataset_fingerprint_functions_have_one_home():
-    """The fingerprint block (``dataset_fingerprint``, its four term helpers and
-    ``fingerprint_formula_version``) moved out of ``resolution.py`` into
-    ``pipelines/data/dataset_fingerprint.py``, the formula untouched."""
+    """The fingerprint block (``dataset_fingerprint`` and its four term helpers) lives in
+    ``pipelines/data/dataset_fingerprint.py``, not ``resolution.py``."""
     _assert_one_home(
         {"dataset_fingerprint", "_labels_term", "_images_term", "_registry_term",
-         "_confirmations_term", "fingerprint_formula_version"},
+         "_confirmations_term"},
         _module_path("pipelines/resolution.py"),
         _module_path("pipelines/data/dataset_fingerprint.py"),
     )
-
-
-def test_fingerprint_formula_version_constant_has_one_home():
-    old_path = _module_path("pipelines/resolution.py")
-    new_path = _module_path("pipelines/data/dataset_fingerprint.py")
-    assert "FINGERPRINT_FORMULA_VERSION" not in _assign_name_counts(old_path)
-    assert _assign_name_counts(new_path)["FINGERPRINT_FORMULA_VERSION"] == 1
-    for root in _package_roots():
-        for py_file in root.rglob("*.py"):
-            if py_file in (old_path, new_path):
-                continue
-            assert "FINGERPRINT_FORMULA_VERSION" not in _assign_name_counts(py_file), py_file
 
 
 def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
@@ -327,8 +314,6 @@ def test_checkpoint_marker_keys_have_one_home():
     keys = {
         "model_source": ("MODEL_SOURCE_KEY", {
             "experiments.py": _module_path("experiments.py"),
-            "pipelines/training/subprocess_worker.py":
-                _module_path("pipelines/training/subprocess_worker.py"),
             "tools/training_tools.py": _module_path("tools/training_tools.py"),
             "pipelines/training/generic_trainer.py":
                 _module_path("pipelines/training/generic_trainer.py"),

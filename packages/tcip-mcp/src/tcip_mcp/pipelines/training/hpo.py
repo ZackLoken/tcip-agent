@@ -5,8 +5,9 @@ method is welded in. The agent picks from whatever backends are installed (Ray d
 what imports on this machine) and overrides the derivable defaults when the data warrants.
 
 Facts (not a recipe, the agent chooses):
-  - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``,
-    ``nevergrad``, ``ax`` need their pip backend and are installed by default.
+  - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``
+    need their pip backend and are installed by default. Each is constructed with the sweep's
+    own seed.
   - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``; ``none``
     runs every trial to completion.
 """
@@ -29,6 +30,7 @@ from typing import Any, Callable
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, stored_number
 from tcip_store.file_backend import RootedFileLocator
 
+
 logger = logging.getLogger(__name__)
 
 # Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
@@ -47,17 +49,15 @@ _ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
 # Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
 _NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
-# The backend module each searcher imports at instantiation (probe with find_spec so discovery
-# has no side effects). All of these install by default; the probe covers an install that skipped
-# the hpo extra. Backends resting on abandoned upstreams are not offered: zoopt and hpbandster
-# (which bohb needs, for both its searcher and its scheduler) have no maintained release, and hebo
-# cannot build on Windows/Py3.12.
-_SEARCH_BACKEND_MODULE = {
-    "optuna": "optuna", "hyperopt": "hyperopt", "bayesopt": "bayes_opt",
-    "nevergrad": "nevergrad", "ax": "ax",
+_SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
+    "optuna": ("optuna", "ray.tune.search.optuna", "OptunaSearch", "seed"),
+    "hyperopt": ("hyperopt", "ray.tune.search.hyperopt", "HyperOptSearch", "random_state_seed"),
+    "bayesopt": ("bayes_opt", "ray.tune.search.bayesopt", "BayesOptSearch", "random_state"),
 }
-# Seed kwarg differs per searcher; pass it only where the constructor accepts one.
-_SEARCHER_SEED_KWARG = {"optuna": "seed", "hyperopt": "random_state_seed", "bayesopt": "random_state"}
+"""Each offered backend searcher: the backend module it needs (probed with ``find_spec``), the
+Ray wrapper class constructed directly, and that class's own seed keyword. Not offered: nevergrad
+(its wrapper takes no seed), ax (its wrapper fails to set up a real space under the installed
+Ray), and zoopt, hpbandster, hebo (abandoned upstreams)."""
 # Scheduler aliases -> Ray's create_scheduler name.
 _SCHEDULER_ALIASES = {
     "asha": "async_hyperband", "async_hyperband": "async_hyperband",
@@ -99,7 +99,7 @@ def get_default_baseline_params() -> dict:
 def available_search_algs() -> list[str]:
     """Search algorithms usable on this machine: natives + backends whose module imports."""
     algs = ["random", "grid"]
-    for name, module in _SEARCH_BACKEND_MODULE.items():
+    for name, (module, _wrapper_module, _wrapper_class, _seed_kw) in _SEARCH_BACKENDS.items():
         if find_spec(module) is not None:
             algs.append(name)
     return algs
@@ -116,11 +116,9 @@ def _to_tune_space(
     """Convert the platform param-space dict into a Ray Tune search space.
 
     ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
-    continuous axes stay sampled (a grid can't enumerate a continuous range). ``grid_keys``
-    names axes forced to ``grid_search`` regardless of ``grid`` (``run_hyperparameter_search``'s own
-    ``data.split.seed`` draw axis, paired with a ``BasicVariantGenerator(constant_grid_search=
-    True)`` so every sampled point is trained once per seed whether the sweep's own
-    ``search_alg`` is ``random`` or ``grid``).
+    continuous axes stay sampled. ``grid_keys`` names axes forced to ``grid_search`` regardless of
+    ``grid``. Raises ``ValueError`` naming an ``int`` axis whose ``low`` exceeds its ``high`` or a
+    ``categorical`` axis with no choices: neither yields a single value to train.
     """
     from ray import tune
 
@@ -134,9 +132,14 @@ def _to_tune_space(
             space[name] = tune.uniform(spec["low"], spec["high"])
         elif ptype == "int":
             vals = list(range(int(spec["low"]), int(spec["high"]) + 1))
+            if not vals:
+                raise ValueError(f"param_space axis {name!r}: int low {spec['low']} exceeds high "
+                                 f"{spec['high']}")
             space[name] = tune.grid_search(vals) if as_grid else tune.randint(spec["low"], spec["high"] + 1)
         elif ptype == "categorical":
             choices = list(spec["choices"])
+            if not choices:
+                raise ValueError(f"param_space axis {name!r}: categorical with no choices")
             space[name] = tune.grid_search(choices) if as_grid else tune.choice(choices)
         else:
             raise ValueError(f"Unknown param type: {ptype}")
@@ -144,41 +147,46 @@ def _to_tune_space(
 
 
 def build_search_alg(
-    name: str | None, *, seed: int = 42, points_to_evaluate: list[dict] | None = None,
+    name: str | None, *, seed: int, points_to_evaluate: list[dict] | None = None,
+    constant_grid_search: bool = False,
 ):
-    """Build a Ray Tune searcher, or ``None`` for the native random/grid sampler.
+    """Build the Ray Tune searcher ``name`` names, constructed with ``seed``.
 
-    ``metric``/``mode`` are set once on the Tuner (Ray forbids setting them in both places),
-    so they are not passed here. Raises a clear error if the agent picks a backend that is not
-    installed, the choice is honored, never silently swapped for another algorithm.
+    A native name (``random``/``grid``) builds Ray's ``BasicVariantGenerator`` with
+    ``random_state=seed``; ``constant_grid_search`` pairs every sampled point with each value of
+    the space's grid axes. A backend name constructs its own Ray wrapper class
+    (:data:`_SEARCH_BACKENDS`) with the seed in that class's own keyword. ``metric``/``mode`` are
+    set once on the Tuner (Ray forbids setting them in both places), so they are not passed here.
+    Raises ``ValueError`` naming the choice for a searcher not offered here, for an offered backend
+    that is not installed, and for ``constant_grid_search`` asked of a backend; the choice is
+    honored, never swapped for another algorithm.
     """
     key = (name or "random").lower()
+    points = list(points_to_evaluate) if points_to_evaluate else None
     if key in _NATIVE_SEARCH:
-        if points_to_evaluate:
-            from ray.tune.search.basic_variant import BasicVariantGenerator
-            return BasicVariantGenerator(points_to_evaluate=list(points_to_evaluate))
-        return None
+        from ray.tune.search.basic_variant import BasicVariantGenerator
 
-    module = _SEARCH_BACKEND_MODULE.get(key)
-    if module is not None and find_spec(module) is None:
+        return BasicVariantGenerator(points_to_evaluate=points, random_state=seed,
+                                     constant_grid_search=constant_grid_search)
+    if constant_grid_search:
+        raise ValueError(f"constant_grid_search is the native sampler's, and search_alg '{key}' "
+                         "is a backend searcher; choose random or grid.")
+    if key not in _SEARCH_BACKENDS:
+        raise ValueError(
+            f"search_alg '{key}' is not offered: every searcher here takes the sweep's seed, and "
+            f"this one does not or is unknown. Choose one of {available_search_algs()}."
+        )
+    module, wrapper_module, wrapper_class, seed_kw = _SEARCH_BACKENDS[key]
+    if find_spec(module) is None:
         raise ValueError(
             f"search_alg '{key}' needs the '{module}' backend, which is not installed. "
             f"Available here: {available_search_algs()}"
         )
 
-    from ray.tune.search import create_searcher
+    import importlib
 
-    kwargs: dict[str, Any] = {}
-    seed_kw = _SEARCHER_SEED_KWARG.get(key)
-    if seed_kw:
-        kwargs[seed_kw] = seed
-    if points_to_evaluate:
-        kwargs["points_to_evaluate"] = list(points_to_evaluate)
-    try:
-        return create_searcher(key, **kwargs)
-    except TypeError:
-        # Searcher rejected an optional kwarg (seed / points_to_evaluate); retry minimal.
-        return create_searcher(key)
+    wrapper = getattr(importlib.import_module(wrapper_module), wrapper_class)
+    return wrapper(points_to_evaluate=points, **{seed_kw: seed})
 
 
 def build_scheduler(
@@ -207,13 +215,8 @@ def build_scheduler(
 
 def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     """Derive a per-trial Ray resource request from the host's actual GPU count and the caller's
-    own requested concurrency, never a pinned number. ``gpu=0.0`` with no CUDA device;
-    otherwise ``device_count / max_concurrent`` capped at 1.0, so ``max_concurrent`` trials the
-    agent asked to run at once actually get non-overlapping (or fairly-shared) GPU allocations
-    instead of every trial silently defaulting to Ray's own 0-GPU request and all contending for
-    whatever `TrainContext.device` happens to resolve to. ``max_concurrent=1`` (the default)
-    yields ``gpu=1.0``, the whole device, rather than the 0-GPU request Ray makes when nothing
-    states one.
+    own requested concurrency: ``gpu=0.0`` with no CUDA device; otherwise ``device_count /
+    max_concurrent`` capped at 1.0. ``max_concurrent=1`` (the default) yields ``gpu=1.0``.
     """
     try:
         import torch
@@ -288,13 +291,8 @@ def _clear_ray_dashboard() -> None:
 def read_ray_dashboard() -> dict | None:
     """The live Ray dashboard's ``{url, pid, started_at}``, or ``None`` if none is up.
 
-    Ray's dashboard is its own OS process on a real port, so any process on the machine can
-    serve its URL once it has been written down: an agent-launched sweep initializes Ray
-    inside the MCP server, and the web backend reads the same record. A recorded URL whose
-    initiating process is gone is stale, since that process's exit takes the cluster with it.
-
-    An unreadable record is reported and then answered the way an absent one is: this record
-    describes a live process, so bytes that do not decode cannot name one either.
+    A recorded URL whose initiating process is gone is stale, since that process's exit takes the
+    cluster with it. An unreadable record is reported and then answered as absent.
     """
     import psutil
 
@@ -330,38 +328,13 @@ def _has_attached_console() -> bool:
 
 
 def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
-    """Kill every daemon and descendant this process's Ray cluster started, ahead of
-    ``ray.shutdown()``.
-
-    On Windows, ``ray.shutdown()`` ends each daemon through ``Node.kill_all_processes``,
-    which signals a graceful stop via ``ConsolePopen.terminate``'s ``CTRL_BREAK_EVENT``; that
-    raises ``OSError: [WinError 6] The handle is invalid`` when this process, the caller, has
-    no console (a server launched under ``DETACHED_PROCESS``, as the GUI capture harness does),
-    aborting the shutdown at the first daemon and leaving the rest of the cluster running.
-    ``ConsolePopen.terminate`` only takes that signalling path when fate-sharing job creation
-    succeeded and ``_use_signals`` is set (``ray/_private/services.py``); otherwise it is a
-    plain ``TerminateProcess`` call that never raises. The pre-kill below is taken whenever
-    this process has no console, whether or not ``ray.shutdown()`` would actually have
-    signalled or plain-terminated a given daemon. Killing every daemon here first, in the same
-    order ``kill_all_processes`` uses (raylet, gcs server, the rest, the reaper last; the type
-    names are Ray's own stable process-type strings, not imported), means ``ray.shutdown()``
-    then finds each one already dead (``poll()`` is not ``None``) and never signals it.
-
-    The trial workers, the dashboard agent and the runtime-env agent are spawned by the
-    raylet itself (``ray/_private/services.py``) and never appear in ``node.all_processes``,
-    so killing the table alone leaves them running until this process exits. Each table
-    process's descendants (``psutil.Process(pid).children(recursive=True)``)
-    are killed before the table process itself, all of them, then waited on together through
-    ``psutil.wait_procs`` bounded to one second, the same bound
-    ``Node._kill_process_type`` uses for its own daemons; a terminated process signals its
-    handle at once, so a longer wait only delays a lock held for the whole cluster's shutdown.
-    A process already gone (``psutil.NoSuchProcess``) or unreachable
-    (``psutil.AccessDenied``) is skipped rather than failing the sweep.
-
-    A Ray whose ``_private`` module, worker, node or process table is absent is an externally
-    started cluster: this module never shuts down a cluster it did not start
-    (``_ray_started_here`` already guards that), so there is nothing to kill and the caller's
-    plain ``ray.shutdown()`` runs unchanged.
+    """Kill every daemon (raylet, gcs server, the rest, the reaper last) and each one's descendants
+    (``psutil.Process(pid).children(recursive=True)``) that this process's Ray cluster started,
+    ahead of ``ray.shutdown()``, so a process with no console never signals one
+    (``ConsolePopen.terminate``'s ``CTRL_BREAK_EVENT`` raises ``WinError 6`` there). Waits one
+    second on them together through ``psutil.wait_procs``; skips a process already gone
+    (``psutil.NoSuchProcess``) or unreachable (``psutil.AccessDenied``). A no-op for a cluster this
+    module did not start.
     """
     import psutil
 
@@ -408,21 +381,13 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
 @contextmanager
 def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
-    """Keep Ray up for the duration of one sweep, shutting it down only when the last
-    concurrent sweep leaves and only if this module is what started it.
+    """Keep Ray up for the duration of one sweep, shutting it down only when the last concurrent
+    sweep leaves and only if this module is what started it. The lock covers both the
+    check-then-init and the decrement-then-shutdown sequences.
 
-    Two conditions, both required. The count is what makes a finishing sweep leave a
-    still-running sibling's cluster alone; the ownership flag is what keeps a sweep running
-    inside a process that initialized Ray for its own reasons (a notebook, an embedding
-    application) from tearing that cluster down. The lock covers both, so the
-    check-then-init and the decrement-then-shutdown sequences cannot interleave.
-
-    ``num_cpus`` is the CPU count the cluster is started with when this call starts it: the
-    sweep's own request, every concurrent trial's CPUs together. Left to Ray, a cluster claims
-    every core on the host and prestarts a worker process per core, so two sweeps starting
-    side by side on one machine can exhaust its memory before a trial runs. A sweep that joins
-    a cluster a sibling started runs on the sibling's size and queues behind it, which Ray
-    Tune reports itself when the trials wait on resources.
+    ``num_cpus`` is the CPU count the cluster is started with when this call starts it: the sweep's
+    own request, every concurrent trial's CPUs together. A sweep that joins a cluster a sibling
+    started runs on the sibling's size.
     """
     global _active_searches, _ray_started_here, _ray_runtime_pythonpath, _external_cluster_warned
 
@@ -471,44 +436,39 @@ def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
                 ray.shutdown()
 
 
-_TERMINAL_COLOUR_CODE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_TERMINAL_COLOR_CODE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def trial_error_text(error: BaseException) -> str:
     """One line naming a failed trial's error, fit for a durable record and a panel.
 
     Ray wraps a trial's exception in a ``RayTaskError`` whose text is the worker's whole
-    traceback, terminal colour codes and absolute paths included. The record keeps the cause's
+    traceback, terminal color codes and absolute paths included. The record keeps the cause's
     own type and message on one line instead: the last non-empty line of the cause's text
-    (a traceback's own last line is its exception line), colour codes stripped.
+    (a traceback's own last line is its exception line), color codes stripped.
     """
     cause = getattr(error, "cause", None)
     source = cause if isinstance(cause, BaseException) else error
-    lines = [line.strip() for line in _TERMINAL_COLOUR_CODE.sub("", str(source)).splitlines()]
+    lines = [line.strip() for line in _TERMINAL_COLOR_CODE.sub("", str(source)).splitlines()]
     message = next((line for line in reversed(lines) if line), "")
     name = type(source).__name__
     return message if message.startswith(f"{name}:") else f"{name}: {message}"
 
 
 def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) -> tuple[Any, Any]:
-    """A ``ray.tune.Stopper`` for cooperative-first, Ray-hard-stop-as-fallback sweep cancel,
-    paired with the ``ray.tune.Callback`` that feeds its whole-experiment decision, both built
-    here rather than at module scope so importing ``ray`` for them stays inside this call like
-    every other Ray use in this module (Ray checks ``isinstance Stopper``/``Callback``, so a
-    bare callable is not enough for either).
+    """A ``ray.tune.Stopper`` for cooperative-first, Ray-hard-stop-as-fallback sweep cancel, paired
+    with the ``ray.tune.Callback`` that feeds its whole-experiment decision.
 
     Per-trial (``Stopper.__call__``): True whenever ``stop_all_when()`` says the cancel file
     exists, so Tune ends that trial after the report it just made. Whole-experiment
-    (``Stopper.stop_all``): True once the cancel file exists and either the callback's own live
-    set (every trial id Ray has started and not yet completed or errored, kept current from
+    (``Stopper.stop_all``): True once the cancel file exists and either the callback's own live set
+    (every trial id Ray has started and not yet completed or errored, kept current from
     ``on_trial_start``/``on_trial_complete``/``on_trial_error``) is empty, or the heartbeat stale
-    window has passed since the file was written, the bounded fallback at which point Ray's own
-    stop kills whatever actor a trial that never polls ``should_cancel`` left running: a trial
-    Ray kills outright may never reach ``_run_hpo_trial``'s own ``finally``, so the driver's own
-    resolved-config record is not a signal the stopper can trust for this decision.
+    window has passed since the file was written, at which point Ray's own stop kills whatever
+    actor a trial that never polls ``should_cancel`` left running.
 
-    Returns ``(stopper, callback)``; the caller wires the stopper onto ``run_config.stop`` and
-    the callback into ``run_config.callbacks``.
+    Returns ``(stopper, callback)``; the caller wires the stopper onto ``run_config.stop`` and the
+    callback into ``run_config.callbacks``.
     """
     from ray.tune import Callback, Stopper
 
@@ -554,21 +514,20 @@ def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) ->
 def split_draw_search_space(
     param_space: dict, base_config: dict, split_draws: int, split_draw_seeds: list[int] | None,
 ) -> tuple[dict, list[int] | None]:
-    """The search space ``run_hyperparameter_search`` hands ``tune_search`` (and this module's own
-    :func:`planned_trial_count`): ``param_space`` itself, unaugmented, at ``split_draws`` of one
-    or below; above one, a copy carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis
-    over the resolved draw seeds (``split_draw_seeds`` when given, else ``base_config``'s own
-    ``data.split.seed``, or 42, plus the draw index). ``run_hyperparameter_search`` calls this in
-    place of composing the axis itself, so the space its own door counts and the space it hands
-    the search are the identical object, never two derivations that could disagree.
+    """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
+    itself, unaugmented, at ``split_draws`` of one or below; above one, a copy carrying
+    :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over the resolved draw seeds
+    (``split_draw_seeds`` when given, else ``base_config``'s own ``data.split.seed``, or
+    ``DEFAULT_SEED``, plus the draw index).
 
     Returns ``(search_param_space, resolved_draw_seeds)``: the second element is ``None`` at one
-    draw (nothing was resolved) and the list of seeds actually paired above it, the same list the
-    sweep manifest and :func:`~tcip_mcp.tools.training_tools.group_split_draws` read.
+    draw and the list of seeds paired above it.
     """
     if split_draws <= 1:
         return param_space, None
-    base_seed = int(((base_config.get("data") or {}).get("split") or {}).get("seed", 42))
+    from tcip_mcp.pipelines.data.split_construction import split_seed
+
+    base_seed = split_seed((base_config.get("data") or {}).get("split") or {})
     resolved_draw_seeds = (
         list(split_draw_seeds) if split_draw_seeds is not None
         else [base_seed + i for i in range(split_draws)]
@@ -585,12 +544,10 @@ def _search_space_and_points(
     baseline_params: dict | None,
 ) -> tuple[dict, list[dict] | None, str]:
     """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name
-    ``tune_search`` builds its own search from, and the identical derivation
-    :func:`planned_trial_count` counts over, so neither can diverge from the other. The
-    platform's own ``param_space`` (or ``get_default_space()`` for an empty or ``None`` one,
-    ``_to_tune_space``'s own substitution, carried verbatim) turned into Ray's own space, gridded
-    over every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` regardless above
-    one draw, plus the warm-start baseline filtered to the space's own keys.
+    ``tune_search`` builds its own search from: the platform's own ``param_space`` (or
+    ``get_default_space()`` for an empty or ``None`` one) turned into Ray's own space, gridded over
+    every discrete axis under ``grid`` and over :data:`SPLIT_DRAW_SEED_KEY` above one draw, plus
+    the warm-start baseline filtered to the space's own keys.
     """
     normalized_search_alg = (search_alg or "").lower()
     grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
@@ -604,66 +561,27 @@ def _search_space_and_points(
     return space, points, normalized_search_alg
 
 
-_PLANNED_TRIAL_COUNT_EXPERIMENT_NAME = "tcip_planned_trial_count"
-
-
-def _planned_trial_count_trainable(config: dict) -> None:
-    """The no-op ``run`` :func:`planned_trial_count` gives its throwaway ``Experiment``: never
-    invoked, since counting stops at ``add_configurations``'s own ``total_samples`` and no Ray
-    session ever starts for this call."""
-    return None
-
-
 def planned_trial_count(
     param_space: dict, num_samples: int, search_alg: str | None, split_draws: int,
     warm_start: bool, baseline_params: dict | None,
 ) -> int:
-    """How many trials ``tune_search`` would actually launch for this sweep: Ray's own
-    ``BasicVariantGenerator``'s variant count over the identical space
-    :func:`_search_space_and_points` builds, the same ``num_samples`` value
-    ``ray.tune.TuneConfig`` carries for every searcher alike (a backend searcher's own
-    installation is refused inside ``tune_search``'s own ``build_search_alg``, never by this
-    function). ``constant_grid_search=True`` above one draw matches ``tune_search``'s own
-    construction and does not move the count.
+    """How many trials ``tune_search`` would launch for this sweep, read off the specification
+    :func:`_search_space_and_points` prepares for the launch itself: under a native search, Ray's
+    own variant count over that space and its warm-start points (``num_samples`` times every grid
+    axis's size, a preset counting its own grid); under a backend searcher, ``num_samples``, the
+    trials ``ray.tune.TuneConfig`` asks it for. A negative ``num_samples`` counts zero. Builds no
+    searcher and draws no trial.
 
-    Counted by adding one throwaway ``ray.tune.experiment.Experiment`` to a
-    ``BasicVariantGenerator`` under a temporary ``storage_path`` (``Experiment`` creates
-    ``<storage_path>/<name>/`` and a validation marker there) and reading ``total_samples`` back;
-    no Ray session is started. ``add_configurations`` itself only tallies each grid axis's own
-    length (``ray.tune.search.variant_generator._count_spec_samples``) and never resolves a
-    domain var, so an empty grid axis or a malformed numeric range counts silently (0, or a
-    number that ignores the malformed axis entirely) with no exception at that point alone,
-    measured at Ray 2.56.1: the actual variant-resolution failure (``IndexError`` under a grid
-    axis Ray cannot pop from, ``ValueError`` evaluating a malformed random axis) only surfaces
-    once a trial is actually drawn. One draw, via the generator's own ``next_trial()``, is taken
-    here for exactly that reason, immediately discarded (the drawn ``Trial`` is never queued, no
-    training result is read back), so a space that cannot really be generated raises here rather
-    than counting a number nobody could launch. The temporary directory is discarded with the
-    context manager, so nothing lands under the project or the home directory Ray's own
-    ``storage_path`` default otherwise would.
-
-    Propagates whatever ``_to_tune_space``, ``add_configurations`` or the one drawn trial raise
-    on a space that cannot be built or generated (``ValueError``, ``KeyError``, ``TypeError``,
-    ``IndexError``, ``OverflowError``); an enormous but finite axis span can also raise
-    ``MemoryError`` while ``_to_tune_space`` materializes its ``range(...)``, left to propagate
-    uncaught here, as it does inside ``tune_search`` today.
+    Propagates whatever ``_to_tune_space`` raises on a space it cannot build (``ValueError``,
+    ``KeyError``, ``TypeError``, ``OverflowError``, or ``MemoryError`` for an enormous axis span).
     """
-    import tempfile
+    from ray.tune.search.variant_generator import _count_variants
 
-    from ray.tune.experiment import Experiment
-    from ray.tune.search.basic_variant import BasicVariantGenerator
-
-    space, points, _normalized_search_alg = _search_space_and_points(
+    space, points, normalized_search_alg = _search_space_and_points(
         param_space, search_alg, split_draws, warm_start, baseline_params)
-    generator = BasicVariantGenerator(
-        constant_grid_search=(split_draws > 1), points_to_evaluate=points)
-    with tempfile.TemporaryDirectory() as storage_path:
-        generator.add_configurations(Experiment(
-            name=_PLANNED_TRIAL_COUNT_EXPERIMENT_NAME, run=_planned_trial_count_trainable,
-            config=space, num_samples=num_samples, storage_path=storage_path,
-        ))
-        generator.next_trial()
-        return generator.total_samples
+    if normalized_search_alg not in _NATIVE_SEARCH:
+        return max(num_samples, 0)
+    return _count_variants({"config": space, "num_samples": num_samples}, points or [])
 
 
 def tune_search(
@@ -677,7 +595,7 @@ def tune_search(
     scheduler: str | None = "asha",
     grace_period: int = 5,
     reduction_factor: int = 3,
-    seed: int = 42,
+    seed: int,
     max_concurrent: int = 1,
     warm_start: bool = False,
     baseline_params: dict | None = None,
@@ -690,57 +608,39 @@ def tune_search(
     """Run an HPO sweep on Ray Tune.
 
     Args:
-        objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config``
-            and calls ``report(value)`` for each step it wants the searcher/scheduler to see
-            (report at least once; the last value is the trial's result under ``mode``).
+        objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
+            ``report(value)`` for each step it wants the searcher/scheduler to see (report at least
+            once; the last value is the trial's result under ``mode``).
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
-            actually launched is Ray's own variant count over the built space, see
-            :func:`planned_trial_count`.
+            launched is :func:`planned_trial_count`'s.
         search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
-            nothing; native ``random``/``grid`` need no searcher backend.
+        nothing; native ``random``/``grid`` need no searcher backend.
+        seed: the searcher's own seed, the sweep's stated one; required.
         max_concurrent: trials to run at once (default 1, safe for single-GPU training).
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
         storage_path: where Ray persists trial results (also the TensorBoard logdir root).
-            Required: trial results land where the caller says, never Ray's own
-            home-directory default. ``run_hyperparameter_search`` resolves it for a training sweep (the
-            project's own ``.tcip/hpo``); a bespoke search names its own directory. Accepts
-            a local path; Ray's ``storage_path`` also takes a cloud URI, the seam a
-            central store would use.
-        resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
-            a fraction for sharing). Omit to derive one from the host's real GPU count and
-            ``max_concurrent``, an explicit value always wins over the derivation. A cluster
-            this sweep starts is sized to the request, ``cpu`` times ``max_concurrent`` CPUs,
-            never to the host (:func:`_ray_session`).
+            Required. Accepts a local path; Ray's ``storage_path`` also takes a cloud URI.
+        resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as a
+            fraction for sharing). Omit to derive one from the host's real GPU count and
+            ``max_concurrent``. A cluster this sweep starts is sized to ``cpu`` times
+            ``max_concurrent`` CPUs (:func:`_ray_session`).
         stop_all_when: Cooperative-cancel signal, ``None`` (the default) runs the sweep to
-            completion with no stopper wired in. Given, a trial ends after the report it just
-            made while this returns True; the whole experiment stops once it does and no trial
-            still looks unfinished, or (the bounded fallback, for a trial that never polls) once
-            a configured staleness window has passed. See :func:`_build_sweep_stopper`.
+            completion. See :func:`_build_sweep_stopper`.
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
-            axis (``run_hyperparameter_search``'s own addition, via :func:`split_draw_search_space`;
-            raises ``ValueError`` naming the axis when it is missing, rather than pairing nothing
-            silently) and the search is built as
-            ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
-            through ``build_search_alg``, so every sampled point is trained once per seed
-            (Ray's own pairing, ``ray.tune.search.basic_variant``) whether ``search_alg`` is
-            ``random`` or ``grid``. 1 (the default) leaves search-building to
-            :func:`build_search_alg`.
+            axis (:func:`split_draw_search_space`; raises ``ValueError`` naming the axis when it is
+            missing) and :func:`build_search_alg` builds the native sampler with
+            ``constant_grid_search``, so every sampled point is trained once per seed whether
+            ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
-    ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
-    Each ``all_trials`` row is ``{"params", "value", "iterations", "state"}``, ``state`` one
-    of ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` line on any ``ERROR`` row (absent on
-    ``COMPLETE``), the cause's own type and message as :func:`trial_error_text` renders it.
-    Ray fills a trial's config into its result the moment the trial's actor answers Ray's
-    first bookkeeping call, so a trial that died after that point, an OOM or a node death
-    included, still comes back with its params; only a trial whose actor never answered
-    (it died during actor start, or never received one) comes back with no ``config``. That
-    row carries no params, value or iteration count of its own: ``params``, ``value`` and
-    ``iterations`` are all ``None``, ``state`` is ``"ERROR"``, and ``error`` names the
-    never-answered death. A sweep in which no trial reported the metric at all raises
-    ``RuntimeError`` out of ``get_best_result``, which ``run_hyperparameter_search`` records as a failed sweep.
+    ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``). Each
+    ``all_trials`` row is ``{"params", "value", "iterations", "state"}``, ``state`` one of
+    ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` line on any ``ERROR`` row, as
+    :func:`trial_error_text` renders it. A trial whose actor never answered Ray's first bookkeeping
+    call comes back with ``params``, ``value`` and ``iterations`` all ``None``. A sweep in which no
+    trial reported the metric raises ``RuntimeError`` out of ``get_best_result``.
     """
     if not storage_path:
         raise ValueError(
@@ -766,20 +666,16 @@ def tune_search(
         param_space, search_alg, split_draws, warm_start, baseline_params)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
-    if split_draws > 1:
-        from ray.tune.search.basic_variant import BasicVariantGenerator
-        searcher = BasicVariantGenerator(
-            constant_grid_search=True, random_state=seed, points_to_evaluate=points)
-    else:
-        searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points)
+    searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points,
+                                constant_grid_search=split_draws > 1)
     sched = build_scheduler(
         scheduler, grace_period=grace_period, reduction_factor=reduction_factor,
         hyperparam_mutations=space,
     )
 
     # Concurrency: a backend searcher must be wrapped (TuneConfig.max_concurrent_trials is
-    # ignored once Ray wraps a searcher). The native sampler (None / BasicVariantGenerator)
-    # honors max_concurrent_trials on the Tuner directly.
+    # ignored once Ray wraps a searcher). The native BasicVariantGenerator honors
+    # max_concurrent_trials on the Tuner directly.
     from ray.tune.search import Searcher
     from ray.tune.search.basic_variant import BasicVariantGenerator
 

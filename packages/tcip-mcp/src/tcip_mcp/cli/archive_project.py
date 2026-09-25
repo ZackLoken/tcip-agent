@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     # archive_project exports every database under the tree before it composes the bundle, so
     # every store must already be registered, not just the ones project_tools.py itself defines.
-    import tcip_mcp.store_catalogue  # noqa: F401
+    import tcip_mcp.store_catalog  # noqa: F401
     from tcip_mcp.tools.project_tools import archive_project
 
     bind_default()

@@ -8,7 +8,6 @@ export interface Sweep {
   sweep_id: string;
   status: string;
   error: string | null;
-  has_result: boolean;
   /** True for a sweep recovered from its on-disk manifest rather than launched here. */
   external?: boolean;
   n_trials?: number | null;
@@ -22,14 +21,13 @@ export interface Sweep {
   reason?: string | null;
   cancel_requested?: boolean;
   /** The sweep this one was relaunched from, or null when it was not a relaunch. */
-  relaunched_from?: string | null;
+  relaunched_from: string | null;
   /** Draws per sampled point (run_hyperparameter_search's own data.split.seed grid axis); null
-   * for a manifest predating the field (read as 1, no draws, by run_hyperparameter_search's own
-   * default) or for a recorded value that is not a draw count. */
-  split_draws?: number | null;
+   * before the sweep's first manifest. */
+  split_draws: number | null;
   /** Whether the recorded base_config redraws train/val inside a bound selection's own
    * samples, rather than sweeping seeds over a drawn split. */
-  redraws_within_selection?: boolean;
+  redraw_within_selection?: boolean;
   /** Whether run_hyperparameter_search has written this sweep's first manifest yet. False in the pre-manifest
    * window a relaunch opens (the route registers the job before it answers), so a caller keys
    * its not-yet-recorded state on this rather than on a 404 that window never produces. */
@@ -113,7 +111,7 @@ function splitSensitivityGroupOf(value: unknown): SplitSensitivityGroup {
 /**
  * A completed sweep's split_draws spread, narrowed field by field with null fallbacks (the
  * form of api/inference.ts's own refusal narrowers, extended to narrow the arrays), or null
- * when result carries no split_sensitivity array (split_draws was 1, or the result predates it).
+ * when result carries no split_sensitivity array (split_draws was 1).
  */
 export function sweepDrawsOf(result: unknown): SweepDraws | null {
   if (typeof result !== "object" || result === null) return null;

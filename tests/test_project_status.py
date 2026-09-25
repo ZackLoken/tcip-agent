@@ -64,7 +64,7 @@ def test_read_project_status_corrupt_json_is_flagged(tmp_path: Path):
 
 
 def test_read_project_status_non_dict_shape_is_flagged(tmp_path: Path):
-    # Valid JSON, but not a dict: same shape guard as dataset_layout.normalize_status_store.
+    # Valid JSON, but not a dict: same shape guard as dataset_layout.status_tokens.
     tcip_store.replace(project_status_key(tmp_path), [1, 2, 3], expect=tcip_store.Version.ABSENT)
     assert read_project_status(tmp_path) == {"_corrupt": True}
 

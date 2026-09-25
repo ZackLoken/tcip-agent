@@ -7,7 +7,7 @@ import type { PointShape } from "@/store/types";
 
 /**
  * A placed point: four short ticks converging on the coordinate, plus a filled core in the
- * subject's colour with a white keyline. The ticks are the point of the mark: they say "this exact
+ * subject's color with a white keyline. The ticks are the point of the mark: they say "this exact
  * location" the way an instrument's reticle does, and they are what separates a point from the two
  * things it could otherwise be mistaken for on this canvas: a very small box or a collapsed polygon
  * (both hollow outlines) and a polygon vertex handle (a bare filled dot). Selection uses the same

@@ -162,7 +162,7 @@ def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
     when the caller declares ``application/json``, ``b"{}"`` would decode to an empty dict, feed
     through the same body model a real ``json={}`` call satisfies, and reach the handler for its
     own outcome (404, for an unknown id, on every route this test walks) instead of failing
-    validation. The 422 asserted below is what distinguishes that reverted behaviour from the
+    validation. The 422 asserted below is what distinguishes that reverted behavior from the
     one this rail depends on; a dependency upgrade or pin change that stopped enforcing it would
     fail this assertion rather than passing silently.
     """

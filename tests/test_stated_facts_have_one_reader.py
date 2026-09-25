@@ -186,7 +186,7 @@ def test_every_reader_of_a_buckets_dataset_root_answers_what_bucket_dataset_root
     dataset root has none to either."""
     from tcip_mcp.dataset_layout import bucket_dataset_root
     from tcip_mcp.prediction_buckets import bucket_key_of
-    from tcip_mcp.subject_registry import _distinct_dataset_root
+    from tcip_mcp.subject_registry import distinct_dataset_root
 
     dataset = tmp_path / "orchard"
     bucket = dataset / "predictions" / "detector" / "2026-05-01"
@@ -197,10 +197,10 @@ def test_every_reader_of_a_buckets_dataset_root_answers_what_bucket_dataset_root
 
     assert bucket_dataset_root(detour) == bucket_dataset_root(bucket) == dataset.resolve()
     assert bucket_key_of(detour) == bucket_key_of(bucket) == "predictions/detector/2026-05-01"
-    assert _distinct_dataset_root([bucket, detour]) == dataset.resolve()
+    assert distinct_dataset_root([bucket, detour]) == dataset.resolve()
 
     loose = tmp_path / "scratch" / "run"
     loose.mkdir(parents=True)
     assert bucket_dataset_root(loose) is None
     assert bucket_key_of(loose) == loose.resolve().as_posix()
-    assert _distinct_dataset_root([loose]) is None
+    assert distinct_dataset_root([loose]) is None

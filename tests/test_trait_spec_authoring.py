@@ -14,6 +14,8 @@ exactly as a hand-authored spec always has.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import subprocess
 import sys
 from pathlib import Path
@@ -54,21 +56,16 @@ def test_a_spec_with_no_statement_is_not_a_collision_and_the_call_proceeds_as_a_
     tmp_path: Path,
 ) -> None:
     """The recorded partial-failure recovery state: a spec on record with no statement behind it
-    (here, seeded directly to stand in for a second write that failed partway) is not refused."""
-    directory = traits.trait_specs_dir(str(tmp_path))
-    key = traits.trait_spec_key(directory, "bud_opening_e2e")
-    ts.replace(
-        key,
-        {"name": "bud_opening_e2e", "delivers": ["leaf_out_05per_date"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
-        expect=ts.Version.ABSENT,
-    )
+    (the statement deleted to stand in for a second write that failed partway) is not refused."""
+    _author(tmp_path)
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    key = traits.trait_spec_statement_key(scope, "bud_opening_e2e")
+    ts.delete(key, expect=ts.read_versioned(key).version)
 
     statement = _author(tmp_path)
 
     assert statement["trait"] == "bud_opening_e2e"
     assert traits.get_trait_for("bud_opening_e2e", str(tmp_path)).delivers == ("leaf_out_05per_date",)
-    assert "replaced_values" not in statement  # the spec was already conformed, not restated
 
 
 def test_authoring_a_delivers_entry_outside_the_vocabulary_refuses(tmp_path: Path) -> None:
@@ -184,201 +181,11 @@ def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp
         traits.write_trait_spec_fields("leaf", {"schema_version": 2}, project_root=tmp_path)
 
 
-def test_a_record_stamped_1_is_refused_before_any_edit(tmp_path: Path) -> None:
-    """Coverage, not a guard: a record stamped ``1`` (seeded directly here, standing in for one
-    written before the subject-registry rename) is refused by :func:`traits.trait_spec_unconformed`
-    before the merge even runs, naming the field rename, rather than silently carrying an edit
-    over a shape the encoder no longer writes."""
-    _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
-    directory = traits.trait_specs_dir(str(tmp_path))
-    key = traits.trait_spec_key(directory, "leaf")
-    stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
-
-    with pytest.raises(ValueError, match="predates the subject-registry rename"):
-        traits.write_trait_spec_fields(
-            "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
-            rationale="the breeder raised the minimum acceptable held-out match quality",
-        )
-
-    unchanged = ts.read_versioned(key).value
-    assert unchanged["schema_version"] == 1
-    assert unchanged["holdout_match_quality_floor"] == 0.4
-
-
-def test_replaced_values_is_absent_on_first_creation(tmp_path: Path) -> None:
-    statement = _author(tmp_path)
-
-    assert "replaced_values" not in statement
-
-
-_FULL_LEAF_RESTATEMENT: dict[str, object] = dict(
-    delivers=("leaf_length",),
-    positive_value="open",
-    milestone_fractions=(0.05, 0.5),
-    milestone_on="positive_fraction",
-    majority_milestone="95per",
-    majority_provisional=True,
-    phenology_prefix="leaf",
-    majority_label="majority",
-    count_objective=traits.COUNT_UNBIASED,
-    count_bias_tolerance_frac=0.1,
-    count_error_tolerance=2.0,
-    classifier_agreement_floor=0.5,
-    ordinal_agreement_floor=0.5,
-    regression_skill_floor=0.5,
-    scale_tolerance_frac=0.1,
-    holdout_match_quality_floor=0.6,
-    notes="restated after the subject-registry rename",
-)
-"""Every ``author_trait_spec`` field, standing in for a restatement caller supplying all of them,
-never leaning on a partial merge the way ``revise_trait_spec`` does."""
-
-
-def _seed_unconformed_leaf(tmp_path: Path) -> None:
-    """Seed an unconformed ``leaf`` spec the way
-    :func:`test_a_record_stamped_1_is_refused_before_any_edit` does: author through ``_author``,
-    then a raw write standing in for the retired encoder, swapping ``positive_value`` for the
-    retired ``positive_class_name`` and dropping ``schema_version``, as a record written before
-    the subject-registry rename would read."""
-    _author(
-        tmp_path, trait="leaf", delivers=("leaf_length",), positive_value="closed",
-        holdout_match_quality_floor=0.4,
-    )
-    directory = traits.trait_specs_dir(str(tmp_path))
-    key = traits.trait_spec_key(directory, "leaf")
-    stored = ts.read_versioned(key)
-    old_value = dict(stored.value)
-    old_value["positive_class_name"] = old_value.pop("positive_value")
-    del old_value["schema_version"]
-    ts.replace(key, old_value, expect=stored.version)
-
-
-def test_restating_an_unconformed_spec_with_no_statement_writes_a_conformed_record(
-    tmp_path: Path,
-) -> None:
-    """An unconformed record (no ``schema_version`` key, ``positive_class_name`` in place of
-    ``positive_value``) with no statement behind it restates through ``author_trait_spec`` the
-    same way a first creation does, the caller supplying every field the spec carries. The
-    written record loads through ``load_trait_specs``, stamped ``2``, carrying ``positive_value``
-    and no ``positive_class_name``; the fresh statement's ``statement_fields`` carry
-    ``positive_value``; and the return names what changed under ``replaced_values``, the retired
-    ``positive_class_name`` compared against the new ``positive_value``."""
-    _seed_unconformed_leaf(tmp_path)
-    scope = traits.trait_spec_statements_scope(tmp_path)
-    statement_key = traits.trait_spec_statement_key(scope, "leaf")
-    ts.delete(statement_key, expect=ts.read_versioned(statement_key).version)
-
-    statement = traits.author_trait_spec(
-        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
-        rationale="restating after the subject-registry rename, every field supplied",
-    )
-
-    loaded = traits.load_trait_specs(project_root=str(tmp_path))
-    assert [s.name for s in loaded] == ["leaf"]
-    assert loaded[0].positive_value == "open"
-    assert loaded[0].holdout_match_quality_floor == 0.6
-
-    directory = traits.trait_specs_dir(str(tmp_path))
-    stored = ts.read_versioned(traits.trait_spec_key(directory, "leaf")).value
-    assert stored["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
-    assert stored["positive_value"] == "open"
-    assert "positive_class_name" not in stored
-
-    assert statement["confirmed_by"] is None
-    assert statement["statement_fields"]["positive_value"] == "open"
-    replaced = statement["replaced_values"]
-    assert replaced["positive_value"] == {"recorded": "closed", "authored": "open"}
-    assert replaced["holdout_match_quality_floor"] == {"recorded": 0.4, "authored": 0.6}
-
-
-def test_restating_an_unconformed_spec_with_a_statement_on_record_is_not_a_collision(
-    tmp_path: Path,
-) -> None:
-    """The same unconformed shape, but the statement the original ``_author`` call wrote is still
-    on record, the shape a conformed spec's own collision rule alone would refuse (a spec and its
-    statement both already on record). ``trait_spec_unconformed`` answering a reason for the spec
-    means the door restates instead of colliding, the statement replaced under its own version
-    rather than created fresh."""
-    _seed_unconformed_leaf(tmp_path)
-    scope = traits.trait_spec_statements_scope(tmp_path)
-    statement_key = traits.trait_spec_statement_key(scope, "leaf")
-    original_version = ts.read_versioned(statement_key).version
-
-    statement = traits.author_trait_spec(
-        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
-        rationale="restating after the subject-registry rename, every field supplied",
-    )
-
-    assert statement["replaced_values"]["positive_value"] == {
-        "recorded": "closed", "authored": "open",
-    }
-    assert ts.read_versioned(statement_key).version != original_version
-    assert traits.get_trait_for("leaf", str(tmp_path)).positive_value == "open"
-
-
-def test_restating_over_a_confirmed_statement_reports_the_withdrawn_confirmation(
-    tmp_path: Path,
-) -> None:
-    """A guard: when the statement behind an unconformed record was breeder-confirmed, the
-    restatement's response names that confirmation under ``prior_confirmation`` (who and when),
-    and the fresh statement on record is unconfirmed, so the agent learns here that the breeder's
-    earlier confirmation no longer stands."""
-    _seed_unconformed_leaf(tmp_path)
-    scope = traits.trait_spec_statements_scope(tmp_path)
-    statement_key = traits.trait_spec_statement_key(scope, "leaf")
-    stated = ts.read_versioned(statement_key).value
-    traits.confirm_trait_spec(
-        str(tmp_path), "leaf", user="user:breeder",
-        record_seen=traits.trait_spec_statement_seen_hash(stated), identity_from_request=True,
-    )
-    assert ts.read_versioned(statement_key).value["confirmed_by"] == "user:breeder"
-
-    response = traits.author_trait_spec(
-        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
-        rationale="restating after the subject-registry rename, every field supplied",
-    )
-
-    assert response["prior_confirmation"]["confirmed_by"] == "user:breeder"
-    assert response["prior_confirmation"]["confirmed_at"] is not None
-    stored = ts.read_versioned(statement_key).value
-    assert stored["confirmed_by"] is None
-
-
-def test_restatement_keys_are_the_responses_alone_never_the_stored_statements(
-    tmp_path: Path,
-) -> None:
-    """A guard: ``replaced_values`` and ``prior_confirmation`` are keys of the restatement's
-    response and never of the ``trait_spec_statements`` record, whose key set stays exactly
-    ``TRAIT_SPEC_STATEMENT_FIELDS`` plus the confirmation fields and ``trait``, the shape the
-    breeder's seen hash and the Results panel both project onto."""
-    _seed_unconformed_leaf(tmp_path)
-    scope = traits.trait_spec_statements_scope(tmp_path)
-    statement_key = traits.trait_spec_statement_key(scope, "leaf")
-
-    response = traits.author_trait_spec(
-        str(tmp_path), "leaf", **_FULL_LEAF_RESTATEMENT,
-        rationale="restating after the subject-registry rename, every field supplied",
-    )
-
-    assert "replaced_values" in response and "prior_confirmation" in response
-    assert response["prior_confirmation"] is None
-    stored = ts.read_versioned(statement_key).value
-    assert set(stored) == {
-        "trait", *traits.TRAIT_SPEC_STATEMENT_FIELDS, *traits.TRAIT_SPEC_CONFIRMATION_FIELDS,
-    }
-    fresh = traits.author_trait_spec(
-        str(tmp_path), "stem", delivers=("leaf_length",), rationale="a first creation",
-    )
-    assert "replaced_values" not in fresh and "prior_confirmation" not in fresh
-
-
 def test_a_stored_record_that_is_not_a_mapping_refuses_the_restatement_by_name(
     tmp_path: Path,
 ) -> None:
     """Coverage: a ``trait_specs`` record that decodes as something other than a mapping refuses
-    ``author_trait_spec`` naming the shape, before the unconformed reading or the collision
-    rule is consulted, rather than raising from inside the reading."""
+    ``author_trait_spec`` naming the shape, before the collision rule is consulted."""
     _author(tmp_path, trait="leaf", delivers=("leaf_length",))
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
@@ -466,7 +273,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
         milestone_on="positive_fraction",
         phenology_prefix="bud",
         majority_milestone="95per",
-        majority_provisional=True,
+        crossing_unconfirmed=True,
         majority_label="majority",
         notes=BUD_OPENING.notes,
         rationale="the breeder called open a texture change on the object itself, "
@@ -535,7 +342,7 @@ def test_repairing_an_unparseable_record_back_to_confirmed_values_with_no_ration
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 2.0}, expect=stored.version)
+    ts.replace(key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 2.0}), expect=stored.version)
 
     with pytest.raises(ValueError, match="rationale"):
         traits.write_trait_spec_fields(
@@ -555,7 +362,7 @@ def test_repairing_an_unparseable_records_name_with_no_rationale_refuses(tmp_pat
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "name": 7}, expect=stored.version)
+    ts.replace(key, complete_spec_record({**stored.value, "name": 7}), expect=stored.version)
 
     with pytest.raises(ValueError, match="rationale"):
         traits.write_trait_spec_fields("leaf", {"name": "leaf"}, project_root=tmp_path)
@@ -591,7 +398,7 @@ def test_repairing_an_unparseable_record_with_a_rationale_restates(tmp_path: Pat
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 2.0}, expect=stored.version)
+    ts.replace(key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 2.0}), expect=stored.version)
 
     revision = traits.revise_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
@@ -612,7 +419,7 @@ def test_reverting_to_the_confirmed_values_still_restates_for_re_confirmation(
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+    ts.replace(key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 0.9}), expect=stored.version)
 
     revision = traits.revise_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
@@ -642,7 +449,7 @@ def test_reverting_to_a_withdrawn_statements_values_still_restates(tmp_path: Pat
     directory = traits.trait_specs_dir(str(tmp_path))
     key = traits.trait_spec_key(directory, "leaf")
     stored = ts.read_versioned(key)
-    ts.replace(key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+    ts.replace(key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 0.9}), expect=stored.version)
 
     revision = traits.revise_trait_spec_fields(
         "leaf", {"holdout_match_quality_floor": 0.4}, project_root=tmp_path,
@@ -782,7 +589,7 @@ def test_a_localization_revision_with_no_rationale_leaves_the_statement_as_it_wa
 
     stored = ts.read_versioned(spec_key)
     ts.replace(
-        spec_key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version,
+        spec_key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 0.9}), expect=stored.version,
     )
     stale_before = ts.read_versioned(statement_key).value
     assert traits.trait_spec_statement_stale(
@@ -935,7 +742,7 @@ def test_a_concurrent_same_values_restatement_is_restated_over(
     scope = traits.trait_spec_statements_scope(tmp_path)
     statement_key = traits.trait_spec_statement_key(scope, "leaf")
     stored = ts.read_versioned(spec_key)
-    ts.replace(spec_key, {**stored.value, "holdout_match_quality_floor": 0.9}, expect=stored.version)
+    ts.replace(spec_key, complete_spec_record({**stored.value, "holdout_match_quality_floor": 0.9}), expect=stored.version)
 
     def side_effect() -> None:
         traits.revise_trait_spec_fields(
@@ -996,8 +803,8 @@ def test_a_no_rationale_race_leaves_a_stale_statement_every_surface_names(
     spec_key = traits.trait_spec_key(directory, "leaf_race")
     ts.replace(
         spec_key,
-        {"name": "leaf_race", "delivers": ["leaf_length"], "holdout_match_quality_floor": 0.4,
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": "leaf_race", "delivers": ["leaf_length"], "holdout_match_quality_floor": 0.4,
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT,
     )
     scope = traits.trait_spec_statements_scope(tmp_path)

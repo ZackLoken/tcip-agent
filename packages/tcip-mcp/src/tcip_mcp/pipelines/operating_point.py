@@ -1,15 +1,12 @@
 """Resolve the calibrated operating points (detection conf/NMS/max_dets/tile, and the classifier,
 ordinal and regression points) per dataset, at runtime.
 
-This is the single place the calibrated consumers, train-eval, test-eval, inference, export and the
-phenology delivery's classifier gate, get an operating point, so the same model + images can't yield
-different counts by entry point; the raw and
-block-calibrated-export regimes live in ``resolution.py`` and share ``resolve_tile_size_param``. The confidence threshold requires validation against an annotations
-reference: derived by a center-match count-unbiased sweep over a reference sized to the trait,
-and validated on a disjoint held-out split of that reference, GT annotations
-(``VALIDATED_HELD_OUT``) OR a breeder-confirmed sample of the model's own outputs
-(``VALIDATED_REVIEW_CONFIRMED``), the same gate either way, or carried as ``validated=false`` when
-no reference exists (never a frozen literal). See traits.py.
+The confidence threshold requires validation against an annotations reference: derived by a
+center-match count-unbiased sweep over a reference sized to the trait, and validated on a disjoint
+held-out split of that reference, GT annotations (``VALIDATED_HELD_OUT``) or a breeder-confirmed
+sample of the model's own outputs (``VALIDATED_REVIEW_CONFIRMED``), the same gate either way, or
+carried as ``validated=false`` when no reference exists. The raw and block-calibrated-export
+regimes live in ``resolution.py`` and share ``resolve_tile_size_param``.
 """
 
 from __future__ import annotations
@@ -17,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import statistics
 from typing import Any, Callable, Sequence
 
@@ -149,31 +145,14 @@ _DEFAULT_REGRESSION_SKILL_FLOOR = 0.5
 
 
 def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
-    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is actually held
-    to: the breeder-authored relative ``tolerance_frac`` scaled by that scope's own derived typical
+    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is held to: the
+    breeder-authored relative ``tolerance_frac`` scaled by that scope's own derived typical
     per-image count (:func:`training.evaluation.gt_class_typical_count` /
     :func:`training.evaluation.mean_of_present_counts`), floored at ``1 / n``, one whole miscount
     spread across the ``n`` samples this scope's own evidence rests on.
 
-    The floor is itself derived from ``n`` (the same count :func:`_bias_equivalence_ok`'s own
-    standard error already uses), never an authored or platform-invented constant, and via ``max()``
-    can only ever raise the result above what ``tolerance_frac * typical_count`` alone would give,
-    never lower it. As a function of ``n`` alone it shrinks monotonically as evidence grows and is
-    bounded: exactly ``1.0`` at ``n == 1`` (``n`` is an integer, so ``1/n`` cannot exceed 1.0), and
-    ``<= 0.5`` at every ``n >= 2``.
-
-    ``n < 2`` is exactly the range every caller's own reference-sufficiency gate independently
-    refuses on, so a floor this large is never what admits a reference: the pooled scope's
-    ``hb["n_present"] < 2`` / ``insufficient_holdout_images`` conjunct, and the per-class scope's own
-    ``s["n_present"] < 2`` / ``insufficient_holdout_images_per_class`` conjunct, the latter exists
-    because a class present on exactly one holdout image could otherwise reach a passing per-class
-    tolerance end to end (a real, ordinary, non-adversarial reference: a rare class that happens to
-    show up once, in a denser-than-typical frame). Both conjuncts count the same presence-scoped
-    evidence this function's ``n`` is, and both land in the same ``failures`` list its return value
-    feeds, independent of what this function itself computes.
-
-    ``n == 0`` returns 0.0 (an unachievable tolerance): :func:`_bias_equivalence_ok`'s own ``n == 0``
-    branch already refuses before this matters, so this is a defined-but-moot edge, not a silent pass.
+    The floor only raises the result, is exactly ``1.0`` at ``n == 1`` and ``<= 0.5`` at every ``n
+    >= 2``. ``n == 0`` returns 0.0 (an unachievable tolerance).
     """
     return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
 
@@ -181,23 +160,15 @@ def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float,
 def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: float,
                          typical_count: float) -> bool:
     """Mean-plus-SE equivalence test: is a bias measured across ``n`` per-image samples small
-    enough, relative to its own sampling uncertainty, to conclude equivalence with zero? Not a bare
-    mean check, this degrades correctly at small ``n`` (SE grows, so less evidence is harder to
-    pass, never easier). Shared by the detection path (:func:`resolve_operating_point`) and the
-    classifier path (:func:`resolve_classifier_operating_point`) so both judge count bias in the
-    same statistical shape and unit, a per-image mean, never two independently-derived criteria
-    that happen to share a name and a tolerance field.
+    enough, relative to its own sampling uncertainty, to conclude equivalence with zero? SE grows
+    at small ``n``, so less evidence is harder to pass.
 
-    The tolerance itself is computed here, in one place, via :func:`_effective_count_bias_tolerance`,
-    every caller passes the breeder-authored fraction and the scope's own derived typical count as
-    keyword-only arguments, never a raw already-converted tolerance float, so a caller cannot
-    silently pass ``trait.count_bias_tolerance_frac`` straight through as if it were already an
-    absolute count.
+    The tolerance is computed here via :func:`_effective_count_bias_tolerance` from the
+    keyword-only breeder-authored fraction and the scope's own derived typical count, never a raw
+    already-converted tolerance float.
 
     ``mean``/``std``/``n`` must all be measured over the same population the ``typical_count`` was:
-    the samples that actually carry the thing being counted. Passing a bias averaged over a wider
-    population than the density was measured on loosens the effective relative tolerance by exactly
-    the ratio of the two population sizes, silently and without any record of it.
+    the samples that actually carry the thing being counted.
     """
     if n == 0:
         return False
@@ -215,14 +186,9 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
     Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
     itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
-    A composed torchvision detector resolves under ``.detector``; a bespoke module exposing a
-    knob on itself, with no ``.detector`` to route through, resolves on the module itself,
-    independently of what a given call actually sets. Returns ``(None, None)`` when no candidate
-    exposes any of the three: nothing here can govern which boxes exist.
+    Returns ``(None, None)`` when no candidate exposes any of the three.
 
-    Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob: the
-    module itself and its ``.detector.roi_heads`` disagreeing about where the operating point lives
-    is an ambiguous module, never a case to silently resolve by picking the first match.
+    Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob.
     """
     det = getattr(model, "detector", None)
     candidates = ((model, "self"), (getattr(det, "roi_heads", None), "detector.roi_heads"),
@@ -242,15 +208,11 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
                                  nms_thresh: float | None = None,
                                  detections_per_img: int | None = None,
                                  ) -> tuple[dict, str | None]:
-    """Set the *in-model* torchvision thresholds so the operating point governs which boxes exist.
+    """Set the in-model torchvision thresholds so the operating point governs which boxes exist.
 
-    Resolves where the knobs live through :func:`detector_operating_point_holder`, so the module
-    itself, its ``.detector.roi_heads`` (two-stage detectors) or its ``.detector`` (one-stage) can
-    each hold them. Returns ``(applied, attribute_path)``: ``applied`` holds only the knobs actually
-    set (never a truthy dict for a model with nothing to set), and ``attribute_path`` is the
-    holder's own path, or ``None`` when nothing exposed any knob. (Without this, a post-hoc score
-    filter can never recover a box the model's internal ``score_thresh``/``detections_per_img`` had
-    already discarded.)
+    Resolves where the knobs live through :func:`detector_operating_point_holder`. Returns
+    ``(applied, attribute_path)``: ``applied`` holds only the knobs actually set, and
+    ``attribute_path`` is the holder's own path, or ``None`` when nothing exposed any knob.
     """
     target, path = detector_operating_point_holder(model)
     applied: dict = {}
@@ -263,32 +225,39 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
     return applied, path
 
 
-def _current_detections_cap(model: Any) -> int | None:
-    """The in-model ``detections_per_img`` a model is currently set to, or ``None`` if unset.
+STAGED_CONF_FLOOR = 0.01
+"""The conf a calibration pass stages its predictor at, so hesitant detections survive to be
+swept; the value applied is recorded as the sweep's ``staged_conf_floor``."""
 
-    Read, not derived, whatever ``set_detector_operating_point`` last applied (or the framework
-    default if nothing was ever set), through the same :func:`detector_operating_point_holder` the
-    setter itself resolves through, so the two never disagree about where the knob lives. Used only
-    to stamp the non-gating cap-saturation signal at record-generation time, when the cap is
-    actually known.
+
+def apply_operating_point(predictor: Any, conf: float, max_dets: int | None
+                          ) -> tuple[dict, str | None]:
+    """Run ``predictor`` at ``conf`` with at most ``max_dets`` detections per image, in-model and
+    in its own post-filter. ``max_dets`` ``None`` leaves the in-model cap as built and lifts the
+    full-frame cap. Returns :func:`set_detector_operating_point`'s ``(applied, attribute_path)``."""
+    applied, path = set_detector_operating_point(
+        predictor.model, score_thresh=conf, detections_per_img=max_dets)
+    predictor.score_threshold = applied.get("score_thresh", conf)
+    predictor.max_dets = max_dets
+    return applied, path
+
+
+def _current_detections_cap(model: Any) -> int | None:
+    """The in-model ``detections_per_img`` a model is currently set to (read through
+    :func:`detector_operating_point_holder`), or ``None`` if unset.
     """
     target, _path = detector_operating_point_holder(model)
     return getattr(target, "detections_per_img", None) if target is not None else None
 
 
 def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list[dict]:
-    """One unfiltered model pass -> per-image COCO records (boxes + scores) for a conf sweep.
-
-    Set the in-model score threshold low first (via ``set_detector_operating_point``) so hesitant
-    detections survive to be swept.
+    """One unfiltered model pass -> per-image COCO records (boxes + scores) for a conf sweep. Set
+    the in-model score threshold low first so hesitant detections survive to be swept.
 
     Each record's ``image_id`` is what the loader's own dataset calls that sample
-    (:func:`~tcip_mcp.pipelines.data.datasets.record_stems_of`): the bare ground-truth stem for a
-    platform loader, whichever way it indexes itself, and a bespoke dataset's own ``stems``
-    vocabulary for one the ``dataset_source`` seam admitted. The cal/holdout lock, a run's
-    recorded partition and the label-movement window all name a member by that stem, and a record
-    spelling one member as a source path or an index leaves every one of those joins matching
-    nothing.
+    (:func:`~tcip_mcp.pipelines.data.datasets.record_stems_of`): the member name for a platform
+    loader, and a bespoke dataset's own ``stems`` vocabulary for one the ``dataset_source`` seam
+    admitted.
     """
     import torch
 
@@ -321,28 +290,19 @@ def _min_dt_score(records: list[dict]) -> float | None:
 
 
 def _cap_saturated_frac(records: list[dict] | None) -> float | None:
-    """Fraction of records whose raw detection count hit the model's applied per-image cap.
-
-    Non-gating provenance only: a per-image ``cap_hit`` flag is stamped by
-    ``records_from_detector``/``records_over_loader`` when the cap was known at generation time, and
-    by ``run_full_frame_evaluation`` for its own tiled-and-reconstructed pass. Records built some
-    other way carry none and are excluded from the fraction entirely, not counted as an unsaturated
-    0, ``None`` when nothing here carries the flag.
+    """Fraction of records whose raw detection count hit the model's applied per-image cap, over
+    the records carrying a ``cap_hit`` flag; ``None`` when none does. Non-gating provenance only.
     """
     hits = [r["cap_hit"] for r in (records or []) if "cap_hit" in r]
     return (sum(hits) / len(hits)) if hits else None
 
 
 def _conf_censored(chosen_conf: float, staged_conf_floor: float | None) -> bool:
-    """True when a *stated* floor sits at or above the picked conf, so the sweep could not see
+    """True when a stated floor sits at or above the picked conf, so the sweep could not see
     whether an even-lower conf would have done better.
 
-    The count-unbiased sweep is only trustworthy when the reference includes the low-conf tail below
-    the picked conf. A conf picked strictly above the staging floor is fully supported by the
-    reference, every surviving detection with ``score >= conf`` genuinely survived the floor's own
-    filter, so the sweep saw everything it needed to. ``staged_conf_floor is None`` (the caller made
-    no assertion of what floor the reference was generated at) is a distinct failure, not this one:
-    see ``conf_floor_unstated``, gated separately so the two causes never share one name.
+    A conf picked strictly above the staging floor is fully supported by the reference.
+    ``staged_conf_floor is None`` is a distinct failure, ``conf_floor_unstated``, not this one.
     """
     return staged_conf_floor is not None and chosen_conf <= staged_conf_floor
 
@@ -363,13 +323,7 @@ def _floor_mismatch(records: list[dict] | None, staged_conf_floor: float | None)
 
 
 def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
-    """A generous cap = ~1.5x the p99 object count, so dense scenes aren't truncated.
-
-    Shared by ``_max_dets_from_density`` (per-record GT counts, over already-collected records) and
-    ``tcip calibrate-operating-point`` (raw per-stem label-line counts, known before any model
-    pass) so the record-collection cap and the eventually-resolved ``max_dets`` agree on one formula
-    rather than two independently-typed derivations that could drift apart.
-    """
+    """A generous cap = ~1.5x the p99 object count, so dense scenes aren't truncated."""
     import numpy as np
     if not counts:
         return DEFAULT_MAX_DETS
@@ -383,9 +337,7 @@ def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
 
 def _record_content_hash(rec: dict) -> str | None:
     """Content identity of one record's GT, its dimensions and :func:`gt_facts`, ignoring
-    ``image_id``. ``None`` for empty GT: a shared negative must not trip the
-    content-overlap guard (a negative is first-class per CLAUDE.md; empty-GT records hash
-    identically across cal/holdout by construction and that is expected, not leakage).
+    ``image_id``. ``None`` for empty GT.
     """
     facts = gt_facts(rec)
     if not facts:
@@ -395,19 +347,10 @@ def _record_content_hash(rec: dict) -> str | None:
 
 
 def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
-    """Whether the holdout shares any image's GT content with calibration.
+    """Whether the holdout shares any image's GT content with calibration, one record per image.
 
-    ``shared`` fires on any overlap at all, not only full containment: a holdout that shares even
-    one image's content with calibration is not independent for that image, so a holdout sharing
-    images with the calibration set is refused rather than merely flagged. Both callers compare at
-    image granularity, one record per image: the detection path's records already are one per
-    image, and the classifier path (``resolve_classifier_operating_point``) groups its per-instance
-    items back to one record per ``image_id`` before calling this, so two images sharing an
-    instance's coordinates never hash equal unless their whole classified content agrees. The cost
-    of this refusal: two genuinely independent images that happen to share both
-    dimensions and identical labelled geometry read as shared content and refuse. On the classifier
-    path the grouping key is the record's ``image_id``, which the platform's classifier door
-    (``calibrate_classifier_operating_point``) sets to the label file's own stem.
+    ``shared`` fires on any overlap at all, not only full containment. Two independent images that
+    share both dimensions and identical labeled geometry read as shared content.
     ``content_overlap_frac`` travels for provenance; ``shared`` is the boolean the gate reads.
     """
     cal_hashes = {h for h in (_record_content_hash(r) for r in cal_records) if h is not None}
@@ -455,59 +398,31 @@ def _spatial_strip_geometric_disjointness(
     }
 
 
-def is_the_same_labels_dir(recorded: str | None, stated: str | None) -> bool:
-    """Whether a recorded label directory and a caller-stated one are the same directory.
-
-    Filesystem identity when both are on disk (:func:`~tcip_mcp.pipelines.data.splits.
-    same_directory`, so a trailing separator or a relative spelling still matches), else the
-    normalized absolute paths: a recorded directory that has since moved still names the
-    directory the run's own members were recorded under, and a comparison that read it as a
-    different one would silently skip the check.
-
-    The one comparison every reader of a record's own scopes makes, so the leakage checks here and
-    ``freeze_selection``'s refusal cannot disagree about whether two spellings name one directory.
-    """
-    if not recorded or not stated:
-        return False
-    if same_directory(recorded, stated):
-        return True
-    return os.path.normcase(os.path.abspath(recorded)) == os.path.normcase(
-        os.path.abspath(stated))
-
-
 def _members_under(
     split: dict, calibration_labels_dir: str | None,
 ) -> tuple[str | None, dict | None]:
-    """``(the recorded directory, the run's own members under it)`` for
-    ``calibration_labels_dir``, or ``(None, None)`` when the record carries no per-directory
-    block or names no block for that directory.
+    """``(the recorded directory, the run's own members under it)`` for ``calibration_labels_dir``,
+    or ``(None, None)`` when the record carries no per-directory block or names no block for that
+    directory.
 
     A bare stem names one image only within one label directory, so a run whose selection spanned
-    several is compared against the one a calibration actually read from; without this narrowing
-    two dates' same-named images would read as the run leaking into itself. The directory comes
-    back beside the block because a recorded group key is scoped to it: the draw keyed each member
-    by ``member_identity(date, stem)``, so reproducing a key for a stem the block does not cover
-    needs the date that directory was admitted under. A block whose own side is empty is still a
-    block: that directory holding no training member is a fact the record states, not provenance
-    it lacks.
+    several is compared against the one a calibration read from. A block whose own side is empty is
+    still a block.
     """
     members = split.get("members")
     if not isinstance(members, dict) or calibration_labels_dir is None:
         return None, None
     for recorded, block in members.items():
-        if is_the_same_labels_dir(recorded, calibration_labels_dir) and isinstance(block, dict):
+        if same_directory(recorded, calibration_labels_dir):
             return recorded, block
     return None, None
 
 
 def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str], str] | None:
-    """The group key a draw records for a bare stem admitted out of ``date``'s directory, or
-    ``None`` when the record names no policy this reader recognizes (``explicit_map``, an
-    unrecognized string, a missing field).
-
-    One derivation with every producer of a recorded key
-    (:func:`~tcip_mcp.pipelines.data.splits.recorded_group_key_fn`), so a key this check
-    reproduces for a stem outside a recorded map is the key the draw would have written for it.
+    """The group key a draw records for a bare stem admitted out of ``date``'s directory
+    (:func:`~tcip_mcp.pipelines.data.splits.recorded_group_key_fn`), or ``None`` when the record
+    names no policy this reader recognizes (``explicit_map``, an unrecognized string, a missing
+    field).
     """
     from tcip_mcp.pipelines.data.splits import GROUP_KEY_FNS, recorded_group_key_fn
 
@@ -516,31 +431,14 @@ def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str
     return recorded_group_key_fn(group_by, date=date)
 
 
-def _recorded_side(split: dict, side: str) -> list[str]:
-    """Every member this record names on one side, across all the scopes it holds, through the
-    reader the partition's own writer states
-    (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_side`)."""
-    from tcip_mcp.pipelines.data.split_construction import recorded_side
-
-    members = split.get("members")
-    return recorded_side(members, side) if isinstance(members, dict) else []
-
-
 def _bound_side_disjointness(
     split: dict, recorded_dir: str, narrowed: dict, side: str, cal_hold_stems: Sequence[str],
 ) -> dict:
-    """The leak resolution for a run whose partition was recorded per label directory.
+    """The leak resolution for a run whose partition was recorded per label directory, narrowed to
+    ``narrowed``, the block for the directory the calibration read from.
 
-    Narrowed to ``narrowed``, the block for the directory the calibration read from, because both
-    units are scoped to it: a bare stem names one image only within one directory, and a recorded
-    group key names one parent, plant or capture within one capture date. A group key on two sides
-    cannot reach a record at all, whatever directories a selection spans:
-    :func:`~tcip_mcp.pipelines.data.selection.refuse_crossing_sides` refuses one at the write and
-    again at the read.
-
-    An empty local ``side`` is a real answer, not missing provenance: that directory simply holds
-    none of this run's members on that side, so no stem of it can leak. Shared by the training
-    check and the selection check so the two cannot drift.
+    An empty local ``side`` is a real answer: that directory holds none of this run's members on
+    that side.
     """
     from tcip_mcp.dataset_layout import annotation_date
 
@@ -562,57 +460,38 @@ def _train_disjointness(
     """Whether the cal/holdout images were also in the checkpoint's own training split.
 
     ``experiment_id is None`` -> a foreign/unregistered checkpoint with no known training
-    provenance to check against; allowed through by design, only a *known* ``experiment_id`` whose
-    provenance can't be read/reconstructed fails closed.
+    provenance; allowed through. Only a known ``experiment_id`` whose provenance can't be read
+    fails closed.
 
-    Two genuinely-unresolvable cases stay ``unresolvable: True`` (fail-closed, blocks ``passed``
-    in ``resolve_operating_point``): ``split.json`` is missing/unreadable, or it is readable but
-    records no training stems at all, there is nothing here to check against, not even the
-    stem-level fallback below.
+    Two cases stay ``unresolvable: True`` (fail-closed, blocks ``passed`` in
+    ``resolve_operating_point``): ``split.json`` is missing/unreadable, or it is readable but
+    records no training stems at all.
 
-    Otherwise (``split.json`` readable, with real training stems) this never blanket-refuses just
-    because a group policy can't be resolved, a blanket refusal would permanently block a run
-    whose recorded policy this reader does not know (a selection's own named strategy) and the
-    ``group_key_map`` route (the map was never persisted) even though both are legitimate,
-    disjoint training regimes. Instead, group-level resolution is attempted per stem:
+    Otherwise group-level resolution is attempted per stem:
 
       - a persisted ``group_key_map`` resolves whichever stems it actually covers.
-      - a named, recognized strategy (``tile_prefix``/``stem``) resolves the rest, so a stem
-        outside a finite map is still grouped rather than unresolvable, but only where the record
-        says which scope (and so which capture date) the stem belongs to: a record read against a
-        directory it names nothing under resolves no key at all, since a bare member name of the
-        union across its scopes belongs to no one date.
-      - anything else (an unrecognized string, a missing field) resolves nothing at the group
-        level beyond what the map covers.
+      - a named, recognized strategy (``tile_prefix``/``stem``) resolves the rest, but only where
+        the record says which scope (and so which capture date) the stem belongs to.
+      - anything else (an unrecognized string, a missing field) resolves nothing at the group level
+        beyond what the map covers.
 
-    Every stem the group check couldn't cover falls back to the free, policy-independent check
-    that's always available regardless of grouping: exact stem-set overlap between the training
-    run's own stems and the calibration/holdout stem set (``leaked_stems``). ``group_check``
-    records how much of the check was group-level: ``"performed"`` (every stem grouped),
-    ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group policy
-    resolved at all, wholly exact-stem), ``"spatial_strip"`` (a within-image split, checked
+    Every stem the group check couldn't cover falls back to exact stem-set overlap between the
+    training run's own stems and the calibration/holdout stem set (``leaked_stems``).
+    ``group_check`` records how much of the check was group-level: ``"performed"`` (every stem
+    grouped), ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group
+    policy resolved at all, wholly exact-stem), ``"spatial_strip"`` (a within-image split, checked
     by source stem underneath each region identity), or ``"spatial_strip_geometric"`` (see below).
-    A leak found by either mechanism blocks ``passed``. The group/stem resolution above (not the
-    spatial-strip branch) is :func:`_resolve_group_stem_disjointness`, shared verbatim with
-    :func:`_selection_disjointness`, which runs the identical check against a checkpoint's own
-    selection (val) side instead of its training side.
+    A leak found by either mechanism blocks ``passed``. The group/stem resolution is
+    :func:`_resolve_group_stem_disjointness`.
 
-    A calibration reading a directory no scope of the record answers for still gets that
-    exact-stem comparison over the union of the record's scopes, where the selection check refuses
-    such a read outright. The two differ because the answers differ in direction: this side
-    compares every recorded training member against the calibration by name whatever scope either
-    lives under, so it can name a leak that is only a shared filename, and can never miss one it
-    holds. Over-naming a leak refuses a claim that might have been fine; the selection side's
-    unscoped comparison could instead clear one that is not, which is why it requires the scope
-    and this side does not.
+    A calibration reading a directory no scope of the record answers for gets the exact-stem
+    comparison over the union of the record's scopes.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
-    stem) are optional and additive: omitting them gets exactly the
-    behavior above. When either is given and the persisted split is
-    ``group_by == "spatial_strip"``, the check becomes geometric containment against the
-    persisted ``train_region``/``val_region``/``test_region`` rects
-    (:func:`_spatial_strip_geometric_disjointness`) instead of the lexical same-source check
-    above, which this path drops entirely rather than running both.
+    stem) are optional. When either is given and the persisted split is ``group_by ==
+    "spatial_strip"``, the check becomes geometric containment against the persisted
+    ``train_region``/``val_region``/``test_region`` rects
+    (:func:`_spatial_strip_geometric_disjointness`) instead of the same-source check.
     """
     if experiment_id is None:
         return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
@@ -631,7 +510,7 @@ def _train_disjointness(
         # A spatial record's members are per-region identities, not bare stems; only a same-source
         # reference is caught here (a caller with real rects gets the geometric check above).
         train_source_stems = {stem_of_spatial_identity(s)
-                              for s in (split.get("train") or [])}
+                              for s in split["spatial"]["train_identities"]}
         if not train_source_stems:
             return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
         spatial_leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
@@ -640,7 +519,9 @@ def _train_disjointness(
             "leaked_stems": [], "group_check": "spatial_strip",
         }
 
-    train_stems = _recorded_side(split, "train")
+    from tcip_mcp.pipelines.data.split_construction import recorded_side
+
+    train_stems = recorded_side(split.get("members", {}), "train")
     if not train_stems:
         # Nothing recorded to check against at all, not even the stem-overlap fallback has
         # anything to compare, so this is unresolvable rather than merely ungrouped.
@@ -661,22 +542,13 @@ def _resolve_group_stem_disjointness(
     recorded_key_of: Callable[[str], str | None],
     named_key_fn: Callable[[str], str] | None,
 ) -> dict:
-    """The group- and stem-level leak resolution :func:`_train_disjointness` and the selection
-    check share: ``recorded_key_of`` answers for every stem the run's own map covers,
-    ``named_key_fn`` answers for the rest, and a stem neither reaches is uncovered. A run records
-    both when it has both, and a stem outside a finite map is exactly the case a named policy is
-    for: a crop of a parent image reviewed after the draw carries no recorded key, and only the
-    policy says which parent it belongs to. Every stem the group check couldn't cover falls back
-    to the free, policy-independent check: exact stem-set overlap between ``named_side_stems`` and
-    ``cal_hold_stems``. Never called for a ``spatial_strip`` record, which each caller branches on
-    before reaching here.
+    """The group- and stem-level leak resolution: ``recorded_key_of`` answers for every stem the
+    run's own map covers, ``named_key_fn`` answers for the rest, and a stem neither reaches is
+    uncovered and falls back to exact stem-set overlap between ``named_side_stems`` and
+    ``cal_hold_stems``. Never called for a ``spatial_strip`` record.
 
-    Both are the caller's own, because only the caller knows what scopes the stems it holds: the
-    recorded lookup takes a bare stem and finds it in whichever key space its own record wrote,
-    and ``named_key_fn`` (:func:`_named_group_key_fn`, the derivation every producer of a recorded
-    key shares) is ``None`` where the caller cannot say which capture date a bare stem belongs to.
-    A key reproduced in a vocabulary the recorded keys are not is worse than no key: a real leak
-    reads as none, and two dates' unrelated images read as one.
+    ``named_key_fn`` (:func:`_named_group_key_fn`) is ``None`` where the caller cannot say which
+    capture date a bare stem belongs to.
     """
     def _key_of(stem: str) -> str | None:
         recorded = recorded_key_of(stem)
@@ -731,33 +603,19 @@ def _resolve_label_movement(
 ) -> dict:
     """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's own
     ``split.json``: its scope block's ``label_digests`` (``at_split``/``at_run``), the digest of
-    the selection that run bound (``recorded_sha256``, one fact for the whole run, recorded once
-    in its binding block) and the calibration's own labels directory, when it read one.
+    the selection that run bound (``recorded_sha256``, recorded once in its binding block) and the
+    calibration's own labels directory, when it read one.
 
-    All four keys ``None`` when the run recorded no ``label_digests`` block, or recorded one with
-    an empty ``at_split`` (a run bound before that block existed, or an unbound run calibrated
-    under a caller-named selection): "not checked" must never read as "nothing moved". Otherwise
-    the two digest dictionaries share one key set (the draw's), so a stem present only in
-    ``at_run`` or added to the calibration universe after the draw is named by no key.
+    All four keys ``None`` when the run recorded no ``label_digests`` block, or one with an empty
+    ``at_split`` (an unbound run calibrated under a caller-named selection). Otherwise the two
+    digest dictionaries share one key set (the draw's).
 
-    The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's
-    own universe, rather than to every stem of ``at_run``: ``calibration_labels_dir`` may be one
-    of several already-split scopes (a classifier calibration's own GT dir, say), holding only the
-    calibration side's own ground truth, so recomputing over the run's whole bound set would read
-    a train- or val-side member's absence as a move it never made. When the scoped set is empty
-    (the named scope holds none of ``at_run``'s members), the second window is left unsealed
-    (``None``) rather than sealed empty, since nothing in it was actually checked.
+    The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's own
+    universe, and recomputed through :func:`~tcip_mcp.pipelines.resolution.members_moved_since`
+    over the path the run's own producer recorded for each member. It is left unsealed (``None``)
+    when the scoped set is empty or a record names no path for a scoped member.
 
-    Recomputed through :func:`~tcip_mcp.pipelines.resolution.members_moved_since`, the one
-    comparison against a recorded ``at_run`` digest, over the path the run's own producer recorded
-    for each member, so whatever shape that ground truth is it reads as moved only when it moved.
-    A record that names no path for a scoped member leaves the second window unsealed (``None``)
-    rather than sealed empty, the same way an empty scoped set does: nothing in it was checked.
-
-    ``selection_redrawn`` is that same convention over the digest window: it answers only when
-    both digests are in hand, and a record that carries none of its own leaves it unsealed
-    (``None``). An absent recorded digest is no evidence, and comparing the current one against
-    nothing would report every such record's unchanged selection as redrawn.
+    ``selection_redrawn`` answers only when both digests are in hand, else ``None``.
     """
     if not label_digests_block or not label_digests_block.get("at_split"):
         return {
@@ -798,39 +656,23 @@ def _selection_disjointness(
     calibration_labels_dir: str | None = None, selection_sha256: str | None = None,
 ) -> dict:
     """Whether the cal/holdout images were also on the checkpoint's own selection side (its
-    ``split.json``'s ``val``): a checkpoint chosen on a side and then calibrated over that same
-    side would clear every other gate while measuring the operating point on exactly the data
-    the shipped weights were picked to fit.
+    ``split.json``'s ``val``), the side the shipped weights were chosen on.
 
-    Unlike :func:`_train_disjointness` (checked on every calibration), this check is
-    ``applicable`` only when a selection side could plausibly be touched: the calibration names a
-    selection (``selection_dir``) or the checkpoint's own record carries a ``selection_binding``,
-    whichever is true. Not-applicable, each with a breeder-legible reason
-    (``review_calibration.py`` renders it), for: no selection named and no ``selection_binding`` on
-    the record; a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is
-    a different check, untouched here); an empty ``val``;
-    ``calibration_labels_dir is None`` (the caller named no directory to compare at all); or a
-    ``calibration_labels_dir`` none of the run's own members live under (a bare stem means the
-    same image only within one label directory). A run whose validation side came from a directory
-    the caller named is checked like any other: the record says which members that side holds and
-    which scope they live under, so a calibration reading that same directory is exactly the
-    overlap this check exists to catch.
+    ``applicable`` only when the calibration names a selection (``selection_dir``) or the
+    checkpoint's own record carries a ``selection_binding``. Not-applicable, each with a
+    breeder-legible ``reason``, for: no selection named and no ``selection_binding`` on the record;
+    a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is a different
+    check); an empty ``val``; ``calibration_labels_dir is None``; or a ``calibration_labels_dir``
+    none of the run's own members live under.
 
-    A record carrying no per-scope ``members`` block at all is unresolvable, never compared: it
-    names no scope for its members, so reading its absence as one directory would both compare
-    against a scope the record never stated and skip the one it never named. Requiring the
-    evidence is the only answer that cannot be wrong in the direction that matters.
-    Unresolvable, rather than not-applicable, when
-    the calibration names a selection but there is no experiment record to check it against
-    (``experiment_id is None``): a number whose provenance can't be checked is refused, and a
-    foreign checkpoint's train check being merely skipped is not license to skip this one
-    silently too.
+    A record carrying no per-scope ``members`` block at all is unresolvable. Unresolvable, too,
+    when the calibration names a selection but ``experiment_id is None``.
 
-    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and
-    on the applicable path the four label-movement keys plus ``calibration_labels_dir``
+    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and on
+    the applicable path the four label-movement keys plus ``calibration_labels_dir``
     (:func:`_resolve_label_movement`): the four movement keys ``null``, ``calibration_labels_dir``
     preserved from the caller, and ``reason`` naming why, when the run recorded no
-    ``label_digests`` block on its ``split.json`` or recorded one with an empty ``at_split``.
+    ``label_digests`` block on its ``split.json``.
     """
     if experiment_id is None:
         if selection_dir is not None:
@@ -869,7 +711,9 @@ def _selection_disjointness(
                           "never stated. Retrain, or calibrate under a selection drawn over the "
                           "current data, so the run's own membership is recorded per scope",
                 **_UNRESOLVABLE_SELECTION_SHAPE}
-    if not _recorded_side(split, "val"):
+    from tcip_mcp.pipelines.data.split_construction import recorded_side
+
+    if not recorded_side(split["members"], "val"):
         return {"applicable": False, "reason": "the run's split.json carries no val members",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
     if calibration_labels_dir is None:
@@ -895,24 +739,17 @@ def _selection_disjointness(
     if not label_digests_block or not label_digests_block.get("at_split"):
         reason = (
             "this run's split.json recorded no label_digests block, so a calibration label "
-            "moved since the draw cannot be named: the run was bound before that block existed, "
-            "or was calibrated with no bound run under a caller-named selection"
+            "moved since the draw cannot be named: the run was calibrated with no bound run "
+            "under a caller-named selection"
         )
     return {"applicable": True, "reason": reason, **resolved, **moved}
 
 
 def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None:
     """Copy the locked cal/holdout split's resolved policy + identity onto the conf param's gate
-    evidence, so the operating-point provenance bundle is self-contained, a caller can see why
-    particular ids ended up on which side without a separate lookup of the
-    ``.tcip/artifacts/cal_holdout_split_<hash>.json`` lock file. Also carries any
-    ``policy_divergence`` / ``unlocked_stems`` the lock resolution reported, so a declared-but-not-
-    applied policy (a lock already existed with a different seed/ratio/grouping) is visible in the
-    result, not only in a server log line.
-
-    In-place: ``ResolvedParam`` is a frozen dataclass, but the ``gate_evidence`` dict it holds is an
-    ordinary mutable dict, so mutating its contents (never reassigning the attribute) is safe. A
-    no-op when the bundle has no calibrated ``conf`` gate evidence to attach to (e.g. no GT at all).
+    evidence, plus any ``policy_divergence`` / ``unlocked_stems`` the lock resolution reported. In
+    place (the ``gate_evidence`` dict is mutated, never reassigned); a no-op when the bundle has no
+    calibrated ``conf`` gate evidence.
     """
     conf = bundle.params.get("conf")
     if conf is None or conf.gate_evidence is None:
@@ -932,13 +769,9 @@ def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None
 def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) -> None:
     """Same target and shape as :func:`attach_split_policy_provenance`, for a block-calibrated
     bundle whose reference came from a mosaic's own persisted spatial-strip split (``spatial``,
-    ``split.json``'s ``spatial`` manifest) rather than a locked cal/holdout draw over a labeled
-    image set: there is no ``locked`` dict here to read a group policy off, only the split's own
-    recorded geometry, so this writes the split-kind fact directly instead of reusing
-    ``attach_split_policy_provenance``'s ``locked``-shaped signature. A no-op when the bundle has
-    no calibrated ``conf`` gate evidence to attach to, same as its sibling. Carries no ``seed``:
-    the spatial-strip split places every side by declared order and share alone, so no seed
-    governs which partition this bundle's reference came from.
+    ``split.json``'s ``spatial`` manifest): writes the split-kind fact from the split's recorded
+    geometry. A no-op when the bundle has no calibrated ``conf`` gate evidence. Carries no
+    ``seed``: the spatial-strip split places every side by declared order and share alone.
     """
     conf = bundle.params.get("conf")
     if conf is None or conf.gate_evidence is None:
@@ -974,81 +807,49 @@ def resolve_operating_point(
     calibration_labels_dir: str | None = None,
     selection_sha256: str | None = None,
 ) -> ResolvedBundle:
-    """Resolve the operating point for (trait, dataset). Pure over records, callers pass the model
-    pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
+    """Resolve the operating point for (trait, dataset). Pure over records: callers pass the model
+    pass output (``records_over_loader`` produces it).
 
-    ``cal_rects``/``hold_rects`` are optional and additive, forwarded verbatim to
-    :func:`_train_disjointness` (see its own docstring): omitting them gets the lexical,
-    stem-based disjointness check. A block-calibration caller
-    (a mosaic's own reserved calibration/test regions) supplies them to get the geometric
-    containment check instead, the only shape that can prove disjointness for a within-mosaic
-    reference with no separate image identity of its own.
+    ``cal_rects``/``hold_rects`` are optional, forwarded verbatim to :func:`_train_disjointness`: a
+    block-calibration caller supplies them to get the geometric containment check.
 
-    ``max_dets_derived_from`` is how a caller-supplied ``max_dets`` was produced, in the caller's own
-    words, and is the only way a caller-supplied cap earns a derivation label here: a caller that
-    supplies a number without saying where it came from gets an explicit "caller override" stamp
-    rather than this function's density-formula label on a number this function did not derive. It
-    is ignored when ``max_dets`` is ``None``, since the cap is then derived here and labeled here.
+    ``max_dets_derived_from`` is how a caller-supplied ``max_dets`` was produced, in the caller's
+    own words; a caller-supplied cap without it is stamped "caller override". Ignored when
+    ``max_dets`` is ``None``, since the cap is then derived and labeled here.
 
     ``tile_size_source``/``tiled_source`` are the caller's own resolution of whether each value was
-    an explicit override, derived from the checkpoint's persisted training geometry, or a documented
-    default, not inferred here from mere truthiness. A truthy ``tile_size`` is not proof of
-    derivation: a caller with no persisted geometry and no explicit value still passes a concrete
-    fallback number that ``tile_size_source`` must distinguish from a genuinely derived one.
+    an explicit override, derived from the checkpoint's persisted training geometry, or a
+    documented default.
 
-    ``validated_reference`` is the stamp a *passing* held-out gate earns: ``VALIDATED_HELD_OUT`` when
+    ``validated_reference`` is the stamp a passing held-out gate earns: ``VALIDATED_HELD_OUT`` when
     the records came from GT annotations (default), ``VALIDATED_REVIEW_CONFIRMED`` when they were
     reconstructed from a breeder-confirmed sample of the model's own outputs
     (feedback.review_calibration), the two references ``accepted_references("annotations")``
-    recognizes. Both pass the same disjoint + count-bias gate here; the stamp only records which one
-    it was.
+    recognizes.
 
-    ``experiment_id`` is the checkpoint's own training-run id, if known, it gates the same held-out
-    pass on train-disjointness (the cal/holdout images must not also be in that run's training
-    split); ``None`` (a foreign/unregistered checkpoint) skips the check rather than failing closed,
-    since only a *known* run whose provenance can't be resolved should refuse.
+    ``experiment_id`` is the checkpoint's own training-run id, if known; it gates the held-out pass
+    on train-disjointness. ``None`` (a foreign/unregistered checkpoint) skips that check.
 
-    ``staged_conf_floor`` is the floor the reference's predictions were actually generated / filtered
-    at, a caller-supplied fact, not inferred from the reference's own scores. ``None`` (the caller
-    asserted nothing) gates as ``conf_floor_unstated``, a distinct name from ``conf_censored`` (a
-    stated floor the picked conf does not clear): see ``_conf_censored``. The GT/calibration callers
-    thread the value ``set_detector_operating_point`` actually applied; the review path threads
-    ``max(generation_conf, review_conf_threshold)`` through the same seam
-    (``feedback.review_calibration.resolve_operating_point_from_review``, computed at
-    ``routes/review.py``, which has no floor to apply through a model and so has no attribute path
-    either). ``staged_conf_floor_attribute_path`` is the module attribute the floor was applied on
-    (``set_detector_operating_point``'s own ``"attribute_path"``), or ``None`` when the floor has no
-    such producer; true for every producer of an unstated floor, never only the bespoke-module case.
+    ``staged_conf_floor`` is the floor the reference's predictions were actually generated /
+    filtered at, a caller-supplied fact. ``None`` gates as ``conf_floor_unstated``, distinct from
+    ``conf_censored`` (see ``_conf_censored``). ``staged_conf_floor_attribute_path`` is the module
+    attribute the floor was applied on (``set_detector_operating_point``'s own
+    ``"attribute_path"``), or ``None`` when the floor has no such producer.
 
-    ``tile_size_derived_from`` is forwarded to :func:`~tcip_mcp.pipelines.resolution.
-    resolve_tile_size_param` unchanged; it matters only for ``tile_size_source == "explicit"``. The
-    GT/calibration callers compose it through
-    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`; the review path
-    forwards the stored stamp's own text (it holds no predictor to compose one from).
+    ``tile_size_derived_from`` is forwarded to
+    :func:`~tcip_mcp.pipelines.resolution.resolve_tile_size_param` unchanged; it matters only for
+    ``tile_size_source == "explicit"``.
 
-    ``selection_dir``/``calibration_labels_dir`` gate ``selection_disjointness``, alongside
-    ``train_disjointness``: whether the cal/holdout images were also on the checkpoint's own
-    selection side (``split.json``'s ``val``), checked when either this calibration names a
-    selection or the checkpoint's own record carries a ``selection_binding``, not-applicable
-    otherwise (see :func:`_selection_disjointness`). A leak or an unresolvable check blocks
-    ``passed`` the same way a train-disjointness one does. ``calibration_labels_dir`` is the
-    directory this calibration read its own records from, both the side the check narrows to and
-    the copy a label rewritten since the run bound is named against; ``selection_sha256`` is the
-    digest of the selection this calibration read, when it named one, so a selection drawn again
-    since the run bound is visible. Both feed :func:`_selection_disjointness` unchanged and open
-    nothing themselves when omitted.
+    ``selection_dir``/``calibration_labels_dir``/``selection_sha256`` feed
+    :func:`_selection_disjointness`, alongside ``train_disjointness``; a leak or an unresolvable
+    check blocks ``passed``. ``calibration_labels_dir`` is the directory this calibration read its
+    own records from; ``selection_sha256`` is the digest of the selection this calibration read,
+    when it named one.
 
-    ``adjudication_covered``: an optional per-record predicate, when given, it is a gate, not a
-    filter: every calibration and holdout record must satisfy it, or the whole reference is refused
-    (``insufficient_adjudication_coverage``), before any bias/dispersion statistic is computed.
-    Records are never silently dropped and re-measured on the survivors, a per-record filter here is
-    a fail-open: the excluded set is correlated with the very quantity being measured (an image
-    survives only if a miss was attested), so a biased population could earn a clean stamp on a
-    favorable subsample while the full reviewed population was off by several times the trait
-    tolerance. ``None`` (the default; every GT-path caller) applies no requirement, correct there,
-    since a labeled record is inherently adjudication-covered.
-    ``feedback.review_calibration.resolve_operating_point_from_review`` passes the per-image
-    FN-adjudication coverage predicate.
+    ``adjudication_covered``: an optional per-record predicate and a gate, not a filter: every
+        calibration and holdout record must satisfy it, or the whole reference is refused
+        (``insufficient_adjudication_coverage``), before any bias/dispersion statistic is computed.
+        ``None`` (the default) applies no requirement.
     """
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
@@ -1437,16 +1238,12 @@ def resolve_operating_point(
 
 
 def _classification_kappa(items: list[dict]) -> float | None:
-    """Cohen's kappa between true and predicted positive/negative class over classification items.
-
-    A derived-at-runtime compensating-error floor: a mean count-bias check alone is blind to a
-    classifier that flips k true positives to negative and k true negatives to positive (net bias
-    ~0), and the detection path's own localization-quality floor (``recall > 0 and precision > 0``)
-    admits any single true positive regardless of how corrupted the rest of the population is, the
-    same gap applies here. Kappa corrects for chance agreement from the reference's own observed base
-    rates (never an authored constant), so a classifier no better than always-guessing-the-majority-
-    class scores ~0, and a classifier that inverts the call scores negative. ``None`` when there are
-    too few items or only one class present to define a base rate (kappa undefined).
+    """Cohen's kappa between true and predicted positive/negative class over classification items:
+    a derived compensating-error floor, since a mean count-bias check alone is blind to a
+    classifier that flips k true positives to negative and k true negatives to positive.
+    Chance-corrected from the reference's own observed base rates, so a majority-class guesser
+    scores ~0 and an inverted call scores negative. ``None`` when there are too few items or only
+    one class present.
     """
     n = len(items)
     if n == 0:
@@ -1472,43 +1269,28 @@ def resolve_classifier_operating_point(
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
     adjudication_covered: Callable[[dict], bool] | None = None,
-    selection_dir: str | None = None,
     calibration_labels_dir: str | None = None,
-    selection_sha256: str | None = None,
 ) -> dict:
-    """Classification-mode calibration gate for a trait's positive-class call.
-
-    Mirrors :func:`resolve_operating_point`'s rigor for a classifier's call, not a detector's
-    box-finding, calls the same shared primitives (:func:`_content_overlap`,
-    :func:`_train_disjointness`) rather than reimplementing them, replacing the detection path's
-    localization-quality floor with a derived compensating-error floor (:func:`_classification_kappa`)
-    since there is no bbox-match concept here.
+    """Classification-mode calibration gate for a trait's positive-class call:
+    :func:`_content_overlap` and :func:`_train_disjointness` as the detection path runs them, with
+    a derived compensating-error floor (:func:`_classification_kappa`) in place of the
+    localization-quality floor.
 
     Each item in ``calibration_items``/``holdout_items`` is one classified, already-localized
-    instance: ``{"image_id": str, "is_true_positive": bool, "is_pred_positive": bool,
-    "bbox": [x1, y1, x2, y2]}``, whether the GT/reviewer-confirmed label and the classifier's own
-    call are the trait's positive state, plus the instance's own GT geometry (required, see
-    ``_grouped_records`` below for why a placeholder box cannot substitute for it).
+    instance: ``{"image_id": str, "is_true_positive": bool, "is_pred_positive": bool, "bbox": [x1,
+    y1, x2, y2]}``, whether the GT/reviewer-confirmed label and the classifier's own call are the
+    trait's positive state, plus the instance's own GT geometry (required).
 
-    Returns a dict structurally distinct from a ``ResolvedParam``/``ResolvedBundle``, never a
-    shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
-    into the wrong sidecar:
-    ``{"validated_against", "passed", "failures", "gate_evidence"}``. Callers write this into a
-    classifier-scoped sidecar (``classifier_operating_point.json``, never ``operating_point.json``'s
-    own fields) via :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`.
+    Returns ``{"validated_against", "passed", "failures", "gate_evidence"}``, a shape distinct from
+    a ``ResolvedParam``/``ResolvedBundle``, for a classifier-scoped sidecar
+    (``classifier_operating_point.json``, through
+    :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`).
 
-    ``experiment_id is None`` (a foreign/unregistered checkpoint) skips the train-disjointness check
-    rather than failing closed, matching :func:`resolve_operating_point`'s own handling of the same
-    case; the classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
-    otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
+    ``experiment_id is None`` (a foreign/unregistered checkpoint) skips the train-disjointness
+    check. No calibration/holdout items returns ``no_calibration_or_holdout``.
 
-    ``selection_dir``/``calibration_labels_dir`` gate ``selection_disjointness`` the same way
-    :func:`resolve_operating_point` does; the classifier door reads no selection, so
-    ``selection_dir`` is never populated.
-    ``calibration_labels_dir`` is its caller's ``calibration_gt_dir``, forwarded unchanged: it is
-    both the directory the check narrows the run's own val members to and the copy a label
-    rewritten since the run bound is named against; ``selection_sha256`` stays ``None``
-    here, the same way ``selection_dir`` does, since this door reads no manifest.
+    ``calibration_labels_dir`` gates ``selection_disjointness`` as :func:`resolve_operating_point`
+    does.
     """
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
@@ -1552,9 +1334,7 @@ def resolve_classifier_operating_point(
     td = _train_disjointness(experiment_id, cal_ids, hold_ids,
                              calibration_labels_dir=calibration_labels_dir)
     sd = _selection_disjointness(
-        experiment_id, cal_ids, hold_ids, selection_dir=selection_dir,
-        calibration_labels_dir=calibration_labels_dir,
-        selection_sha256=selection_sha256)
+        experiment_id, cal_ids, hold_ids, calibration_labels_dir=calibration_labels_dir)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
@@ -1674,27 +1454,19 @@ def _resolve_scalar_operating_point(
     holdout_items: list[dict] | None,
     experiment_id: str | None,
     validated_reference: str,
-    selection_dir: str | None = None,
     calibration_labels_dir: str | None = None,
 ) -> dict:
     """Shared calibration-gate mechanics for :func:`resolve_ordinal_operating_point` and
     :func:`resolve_regression_operating_point`.
 
-    Both validate a per-*image* scalar prediction (one rank or one continuous value per image,
-    unlike the classifier path's per-instance, bbox-matched items: ``OrdinalDataset``/
-    ``RegressionDataset`` are one CSV row per image stem, no bbox/geometry concept applies here)
-    against a locked cal/holdout split the same way, disjointness, train-disjointness, then a
-    derived compensating-error floor on the *holdout-only* criterion score, differing only in which
-    criterion toolkit (``criteria``, ``ORDINAL_CRITERIA`` or ``REGRESSION_CRITERIA``) and which
-    ``TraitSpec`` floor field apply. ``criterion`` is validated by both public callers before this is
-    reached, this function trusts it is already a real key of ``criteria``.
+    Both validate a per-image scalar prediction (one rank or one continuous value per image, one
+    CSV row per image stem) against a locked cal/holdout split: disjointness, train-disjointness,
+    then a derived compensating-error floor on the holdout-only criterion score, differing only in
+    which criterion toolkit (``criteria``, ``ORDINAL_CRITERIA`` or ``REGRESSION_CRITERIA``) and
+    which ``TraitSpec`` floor field apply. ``criterion`` must already be a key of ``criteria``.
 
-    The criterion score is computed on holdout only, never calibration, which would be evaluating a
-    criterion on the very data it was picked to look good on, not a validation of anything. A thin
-    holdout (fewer than 2 items) still gets a real, non-fabricated score attempt (some criteria are
-    defined, if noisy, on very few items; others return ``None``), it fails closed via the separate
-    ``insufficient_holdout_items``/``criterion_undefined`` failures below rather than by silently
-    substituting the calibration set.
+    The criterion score is computed on holdout only. A holdout of fewer than 2 items still gets a
+    score attempt and fails through ``insufficient_holdout_items``/``criterion_undefined``.
     """
     trait = get_trait(trait_name)
     if not calibration_items or not holdout_items:
@@ -1713,8 +1485,7 @@ def _resolve_scalar_operating_point(
     td = _train_disjointness(experiment_id, cal_ids, hold_ids,
                              calibration_labels_dir=calibration_labels_dir)
     sd = _selection_disjointness(
-        experiment_id, cal_ids, hold_ids, selection_dir=selection_dir,
-        calibration_labels_dir=calibration_labels_dir)
+        experiment_id, cal_ids, hold_ids, calibration_labels_dir=calibration_labels_dir)
 
     import torch
 
@@ -1773,31 +1544,22 @@ def resolve_ordinal_operating_point(
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
-    selection_dir: str | None = None,
     calibration_labels_dir: str | None = None,
 ) -> dict:
     """Ordinal-mode calibration gate for a trait's rank prediction.
 
-    ``criterion`` is required, no default: which compensating-error statistic is scientifically
-    appropriate for a given trait's calibration is a CV-scientist judgment call the caller makes
-    explicitly (see ``ORDINAL_CRITERIA`` for the registered toolkit), never a platform-prescribed
-    "the" statistic. Raises ``ValueError`` immediately, before any other work, when ``criterion``
-    names no registered ordinal criterion.
+    ``criterion`` is required (see ``ORDINAL_CRITERIA`` for the registered toolkit); a name no
+    registered ordinal criterion carries raises ``ValueError`` before any other work.
 
     Each item in ``calibration_items``/``holdout_items`` is one image's rank prediction:
-    ``{"image_id": str, "true_rank": int, "predicted_rank": int}`` (``OrdinalDataset`` is one CSV
-    row per image stem, no bbox/geometry concept applies). Returns the same structurally-distinct
-    shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
-    "failures", "gate_evidence"}``, never a shape a generic writer could mistake for the count
-    operating point's ``conf`` param. Callers write this into ``ordinal_operating_point.json`` via
-    :func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`.
+    ``{"image_id": str, "true_rank": int, "predicted_rank": int}``. Returns the shape
+    :func:`resolve_classifier_operating_point` does, for ``ordinal_operating_point.json``
+    (:func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`).
 
-    ``selection_dir``/``calibration_labels_dir`` gate ``selection_disjointness`` the same way
-    :func:`resolve_operating_point` does; the caller's own CSV directory is the directory to
-    state, ``None`` when it holds none, never a bare guess.
+    ``calibration_labels_dir`` gates ``selection_disjointness`` as :func:`resolve_operating_point`
+    does; ``None`` when the caller's CSV directory holds no labels directory to state.
 
-    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics (disjointness,
-    train-disjointness, the holdout-only criterion score, the compensating-error floor).
+    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
     """
     if criterion not in ORDINAL_CRITERIA:
         raise ValueError(
@@ -1813,7 +1575,7 @@ def resolve_ordinal_operating_point(
         default_floor=_DEFAULT_ORDINAL_AGREEMENT_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
-        selection_dir=selection_dir, calibration_labels_dir=calibration_labels_dir,
+        calibration_labels_dir=calibration_labels_dir,
     )
 
 
@@ -1825,27 +1587,22 @@ def resolve_regression_operating_point(
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
-    selection_dir: str | None = None,
     calibration_labels_dir: str | None = None,
 ) -> dict:
     """Regression-mode calibration gate for a trait's continuous-value prediction.
 
-    ``criterion`` is required, no default: ``r_squared`` and ``concordance_correlation_coefficient``
-    (see ``REGRESSION_CRITERIA``) measure genuinely different things at different scales/conventions
-    (R²: overall predictive skill vs. a trivial mean baseline, unbounded below; CCC: a bounded
-    precision/accuracy decomposition, the standard measurement-agreement lens), so the caller states
-    which one this calibration is judged against, never a platform default. Raises ``ValueError``
-    immediately, before any other work, when ``criterion`` names no registered regression criterion.
+    ``criterion`` is required: ``r_squared`` and ``concordance_correlation_coefficient`` (see
+    ``REGRESSION_CRITERIA``) measure different things (R²: overall predictive skill vs. a trivial
+    mean baseline, unbounded below; CCC: a bounded precision/accuracy decomposition). A name no
+    registered regression criterion carries raises ``ValueError`` before any other work.
 
     Each item in ``calibration_items``/``holdout_items`` is one image's value prediction:
-    ``{"image_id": str, "true_value": float, "predicted_value": float}`` (``RegressionDataset`` is
-    one CSV row per image stem, no bbox/geometry concept applies). Returns the same structurally-
-    distinct shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
-    "failures", "gate_evidence"}``. Callers write this into ``regression_operating_point.json`` via
-    :func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`.
+    ``{"image_id": str, "true_value": float, "predicted_value": float}``. Returns the shape
+    :func:`resolve_classifier_operating_point` does, for ``regression_operating_point.json``
+    (:func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`).
 
-    ``selection_dir``/``calibration_labels_dir`` gate ``selection_disjointness`` the same way
-    :func:`resolve_ordinal_operating_point` states it.
+    ``calibration_labels_dir`` gates ``selection_disjointness`` as
+    :func:`resolve_ordinal_operating_point` states.
 
     See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
     """
@@ -1863,5 +1620,5 @@ def resolve_regression_operating_point(
         default_floor=_DEFAULT_REGRESSION_SKILL_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
-        selection_dir=selection_dir, calibration_labels_dir=calibration_labels_dir,
+        calibration_labels_dir=calibration_labels_dir,
     )

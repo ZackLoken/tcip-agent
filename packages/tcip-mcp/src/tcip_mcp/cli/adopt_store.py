@@ -1,10 +1,8 @@
 """Move a root's existing record and log files into a store database.
 
-A root that has been written by the file backend holds state no database beside it could see,
-so the database backend refuses such a root until this has run. It reads every record and log
-file the root's stores own, decodes all of them, and publishes a database holding exactly
-those entries, stamped as already exported. Blob files (imagery, labels, predictions,
-checkpoints, hand-authored documents) stay exactly where they are under every backend.
+Reads every record and log file the root's stores own, decodes all of them, and publishes a
+database holding exactly those entries, stamped as already exported. Blob files (imagery, labels,
+predictions, checkpoints, hand-authored documents) stay exactly where they are under every backend.
 
 A root that already holds a database is planned too: a store whose files arrived after that
 database was built is one the database has never held, and this takes exactly those in.
@@ -12,8 +10,7 @@ database was built is one the database has never held, and this takes exactly th
     tcip adopt-store --project <project_root>
     tcip adopt-store --layout <layout> <root> [<root> ...]
 
-The layout names what kind of directory a root is, because a store's file layout is only
-meaningful under the kind of root it was written for. ``--project`` supplies them for a whole
+The layout names what kind of directory a root is. ``--project`` supplies them for a whole
 project's roots. ``--plan`` shows what would be adopted and writes nothing.
 
 Exit codes: 0 adopted, 2 refused (nothing written).
@@ -25,7 +22,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from tcip_mcp.store_catalogue import project_roots
+from tcip_mcp.store_catalog import project_roots
 
 from tcip_store.adoption import AdoptionPlan, adopt_root, plan_root, unaccounted_files
 from tcip_store.errors import StoreError

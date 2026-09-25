@@ -18,17 +18,17 @@ def _review_state():
     # Keys match tcip_annotation.review_engine.record_detection_action entries.
     return {"image": {
         "imgA.png": {"img_status": "completed", "detections": [
-            {"action": "accepted", "match_type": "TP", "class_name": "bud",
+            {"action": "accepted", "class_name": "bud",
              "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": [0.5, 0.5, 0.2, 0.2]},
-            {"action": "rejected", "match_type": "FP", "class_name": "bud",
+            {"action": "rejected", "class_name": "bud",
              "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]},
         ]},
         "imgB.png": {"img_status": "completed", "detections": [
-            {"action": "rejected", "match_type": "FP", "class_name": "bud",
+            {"action": "rejected", "class_name": "bud",
              "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.3, 0.3, 0.1, 0.1]},
         ]},
         "imgC.png": {"img_status": "started", "detections": [
-            {"action": "accepted", "match_type": "FN", "class_name": "leaf",
+            {"action": "accepted", "class_name": "leaf",
              "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.4, 0.4, 0.3, 0.3], "pred_bbox_norm": None},
         ]},
     }}
@@ -44,7 +44,7 @@ def test_partition_positives_rejections_and_hard_negatives():
 
 def test_partition_fp_accept_uses_pred_box():
     state = {"image": {"x.png": {"img_status": "completed", "detections": [
-        {"action": "accepted", "match_type": "FP", "class_name": "bud",
+        {"action": "accepted", "class_name": "bud",
          "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.6, 0.6, 0.2, 0.2]},
     ]}}}
     pos = partition_review_verdicts(state)["x.png"]["positives"]

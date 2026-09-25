@@ -111,7 +111,7 @@ export interface CompareSplit {
   error?: string;
 }
 
-/** One marked experiment's own column in the comparison, every value labelled by which record
+/** One marked experiment's own column in the comparison, every value labeled by which record
  * it came from. `error` alone (no other field) marks an id compare_experiments could not even
  * read; every other field is absent only on that entry. */
 export interface CompareExperiment {
@@ -132,7 +132,6 @@ export interface CompareExperiment {
   subject?: string | null;
   dataset_id?: string | null;
   dataset_fingerprint?: string | null;
-  fingerprint_formula_unrecorded?: boolean;
   split?: CompareSplit;
   /** This experiment's own registered entries; absent, with registry_error naming why, when
    * the project's registry index can't be read or matched at all. */

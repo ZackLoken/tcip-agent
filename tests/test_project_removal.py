@@ -696,30 +696,6 @@ def test_an_unreadable_dependent_gets_no_dependency_line(client, tmp_path):
     assert not any(l["tool"] == "dependency_pending_removal" for l in damaged_lines)
 
 
-def test_an_entry_with_a_path_but_no_id_is_listed_as_unreadable_with_no_line(client, tmp_path):
-    from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
-
-    ws = tmp_path.parent
-    open_project, target = _seed(ws)
-    malformed = _init(ws, "sample_plot_malformed")
-    upsert_dataset(
-        malformed, {"path": registry_path_for(target, malformed), "crop": "black locust"},
-    )
-
-    preview = client.get("/api/projects/sample_plot_target/removal-preview").json()
-    entry = next(d for d in preview["dependent_projects"] if d["project"] == "sample_plot_malformed")
-    assert entry.get("unreadable") is not None
-    assert "no id" in entry["unreadable"]
-
-    resp = client.post(
-        "/api/projects/remove",
-        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
-    )
-    assert resp.status_code == 200, resp.text
-    malformed_lines = _audit_lines(malformed)
-    assert not any(l["tool"] == "dependency_pending_removal" for l in malformed_lines)
-
-
 def test_a_dependents_line_refused_by_a_raising_append_names_it_and_leaves_the_others(
     client, tmp_path, monkeypatch,
 ):
@@ -953,40 +929,6 @@ def test_dependency_problem_named_for_a_damaged_registry(tmp_path):
     warnings, problem = dependency_warnings(project)
     assert warnings == []
     assert problem is not None
-
-
-def test_dependency_warnings_names_a_no_id_entry_as_a_problem_not_a_null_id_warning(
-    client, tmp_path,
-):
-    """coverage: a no-id entry already routes to the registry problem. The entry names a target
-    already pending removal, the one state a no-id entry would otherwise reach the warning
-    branch through, so this exercises the malformed-entry rule rather than a state (a live
-    target) that never turns into a warning."""
-    from tcip_mcp.project_removal import dependency_warnings
-    from tcip_mcp.tools.project_tools import registry_path_for, upsert_dataset
-
-    ws = tmp_path.parent
-    open_project, target = _seed(ws)
-    dependent = _init(ws, "sample_plot_no-id")
-    upsert_dataset(
-        dependent, {"path": registry_path_for(target, dependent), "crop": "black locust"},
-    )
-
-    resp = client.post(
-        "/api/projects/remove",
-        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
-    )
-    assert resp.status_code == 200, resp.text
-
-    warnings, problem = dependency_warnings(dependent)
-    assert warnings == []
-    assert problem is not None
-    assert "no id" in problem
-
-    listing = client.get("/api/projects").json()
-    entry = next(p for p in listing["projects"] if p["name"] == "sample_plot_no-id")
-    assert entry["dependency_warnings"] == []
-    assert entry["dependency_problem"] == problem
 
 
 def test_a_canvas_binding_with_no_project_name_is_read_as_no_binding(client, tmp_path):
@@ -1544,27 +1486,6 @@ def test_refuses_a_non_terminal_review_priority_queue_job_then_admits_once_termi
     finally:
         with _pq_registry.lock:
             _pq_registry.jobs.pop("pq1", None)
-
-
-def test_job_conflict_skips_a_rehydrated_job_with_an_empty_platform_root(client, tmp_path):
-    """A rehydrated ``HPOJob`` can carry an empty ``platform_root``; the scan must never compose
-    a sweep directory from it (``training_tools.sweep_dir`` on an empty root)."""
-    from tcip_web.routes.tuning import HPOJob, _registry
-
-    ws = tmp_path.parent
-    open_project, target = _seed(ws)
-    job = HPOJob(sweep_id="sw-empty", status="running", platform_root="")
-    with _registry.lock:
-        _registry.jobs["sw-empty"] = job
-    try:
-        resp = client.post(
-            "/api/projects/remove",
-            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
-        )
-        assert resp.status_code == 200
-    finally:
-        with _registry.lock:
-            _registry.jobs.pop("sw-empty", None)
 
 
 def test_refuses_a_case_variant_spelling_of_the_open_project(client, tmp_path):

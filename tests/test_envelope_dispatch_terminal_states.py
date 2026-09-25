@@ -1,7 +1,7 @@
 """Dispatch, terminal state, and deliverable selection around a bespoke ``train(ctx)`` body.
 
 The envelope decides the run's terminal state and its deliverable from what the body actually
-did, never from the fact that a ``.pt`` exists: a cancelled body, a body that recorded its own
+did, never from the fact that a ``.pt`` exists: a canceled body, a body that recorded its own
 failure, and a body that raised all leave a checkpoint on disk and none of them may register a
 model. When the run is genuinely complete, an explicit ``set_final_weights`` outranks the
 filename convention and the convention itself prefers the best checkpoint over the last one.
@@ -19,7 +19,7 @@ import tcip_store as ts
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
-from tcip_mcp.experiments import env_key, status_key  # noqa: E402
+from tcip_mcp.experiments import status_key  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
@@ -108,21 +108,21 @@ def test_registered_metrics_source_is_training_source_for_a_bespoke_loop(tmp_pat
 
 
 def _train_stops_on_cancel(ctx):
-    """A loop that checkpoints, then honours a cancellation request and returns."""
+    """A loop that checkpoints, then honors a cancellation request and returns."""
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_final")
     ctx.run.cancel_event.set()
 
 
-def test_a_cancelled_run_registers_no_model_despite_its_checkpoint(tmp_path):
+def test_a_canceled_run_registers_no_model_despite_its_checkpoint(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
 
-    ctx = _start(tmp_path, "expCancelled", "_train_stops_on_cancel")
+    ctx = _start(tmp_path, "expCanceled", "_train_stops_on_cancel")
 
-    assert ctx.run.status == "cancelled"
+    assert ctx.run.status == "canceled"
     assert (tmp_path / "out" / "model_final.pt").is_file()
-    assert ModelRegistry(str(tmp_path)).get_model("expCancelled") is None
-    assert _experiment_state(tmp_path, "expCancelled") == "cancelled"
-    assert _audit_statuses(tmp_path) == ["running", "cancelled"]
+    assert ModelRegistry(str(tmp_path)).get_model("expCanceled") is None
+    assert _experiment_state(tmp_path, "expCanceled") == "canceled"
+    assert _audit_statuses(tmp_path) == ["running", "canceled"]
 
 
 def _train_records_its_own_failure(ctx):
@@ -163,22 +163,6 @@ def test_a_raised_failure_closes_the_run_failed_and_registers_nothing(tmp_path):
     assert ModelRegistry(str(tmp_path)).get_model("expRaised") is None
     assert _experiment_state(tmp_path, "expRaised") == "failed"
     assert _audit_statuses(tmp_path) == ["running", "failed"]
-
-
-def _train_restores_rng_state(ctx):
-    """A loop reporting, as the stock trainer does, that it restored the checkpoint's RNG state."""
-    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_best")
-    ctx.run.rng_state_restored = True
-
-
-def test_env_provenance_carries_an_outcome_only_known_after_the_body_ran(tmp_path):
-    ctx = _start(tmp_path, "expRng", "_train_restores_rng_state")
-
-    assert ctx.run.status == "completed"
-    env = ts.read(env_key("expRng"))
-    assert env["rng_state_restored"] is True
-    assert "run_id" not in env  # dropped: nothing reads it back
-    assert env["seed"] == ctx.run.config["seed"]
 
 
 def _train_races_the_wall_clock_watchdog(ctx):

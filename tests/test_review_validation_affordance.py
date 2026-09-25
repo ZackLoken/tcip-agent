@@ -197,7 +197,7 @@ _OTHER_IDENTITY = {"checkpoint_sha256": "sha-model-b", "experiment_id": None}
 
 
 def _entry(action, cid, gt, pred, conf, *, producer_identity=_IDENTITY, conf_threshold=None):
-    return {"match_type": "TP", "action": action, "class_id": cid,
+    return {"action": action, "class_id": cid,
             "iscrowd": False, "reviewed_by": "", "class_name": "", "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
             "producer_identity": producer_identity, "conf_threshold": conf_threshold}
 
@@ -375,7 +375,7 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert "not checked against that run's training split" in body["reason"]
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
-    assert sc["validated_reference"] == "reviewer_confirmed_annotations"
+    assert sc["operating_point"]["conf"]["validated_against"] == "reviewer_confirmed_annotations"
     # The claim is earned: a record outside the bucket answers for it, under the trait it names.
     assert sc["trait"] == "bud_opening"
     from tcip_mcp.experiments import find_validation
@@ -712,8 +712,8 @@ def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(cli
 
 def test_route_refuses_an_explicit_tile_edge_with_no_derived_from_text(client, tmp_path: Path):
     """A bucket stamped ``explicit_caller_stated_geometry`` but carrying no ``derived_from`` text
-    (an older stamp, or a stamp this route cannot resolve one text for) must not reach the
-    resolver's own bare ``ValueError``: the route refuses first, naming the bucket."""
+    must not reach the resolver's own bare ``ValueError``: the route refuses first, naming the
+    bucket."""
     from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY
 
     proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
@@ -724,8 +724,7 @@ def test_route_refuses_an_explicit_tile_edge_with_no_derived_from_text(client, t
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "bud_opening", "pred_dir": pred_dir, "subject": "bud"})
     assert resp.status_code == 400, resp.text
-    # The bucket path travels inside a dict's repr(), which doubles its own backslashes.
-    assert repr(pred_dir).strip("'") in resp.json()["detail"]
+    assert pred_dir in resp.json()["detail"]
 
 
 def test_route_promotes_an_explicit_tile_edge_carrying_its_stamps_own_text(client, tmp_path: Path):
@@ -808,7 +807,7 @@ def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_p
     assert "confidence" in body["reason"].lower()
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is False
-    assert sc["validated_reference"] == VALIDATED_FALSE
+    assert sc["operating_point"]["conf"]["validated_against"] == VALIDATED_FALSE
 
 
 def test_route_no_completed_reviews(client, tmp_path: Path):
@@ -861,7 +860,7 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
     # is untouched, never silently upgraded to VALIDATED_REVIEW_CONFIRMED on bad data.
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is False
-    assert "validated_reference" not in sc
+    assert "validated_by" not in sc
 
 
 def test_route_does_not_downgrade_a_validation_a_record_answers_for(client, tmp_path: Path):
@@ -894,7 +893,6 @@ def test_route_promotes_over_a_validated_stamp_no_record_answers_for(client, tmp
     stored = tcip_store.read_versioned(sidecar_key(pred_dir, "operating_point"))
     asserted = stored.value
     asserted["validated"] = True
-    asserted["validated_reference"] = "held_out_annotations"
     asserted["operating_point"]["conf"] = {"validated_against": "held_out_annotations", "value": 0.31}
     tcip_store.replace(sidecar_key(pred_dir, "operating_point"), asserted, expect=stored.version)
 
@@ -906,7 +904,7 @@ def test_route_promotes_over_a_validated_stamp_no_record_answers_for(client, tmp
     assert body["reference"] == "reviewer_confirmed_annotations"  # earned here, not the claim found
     assert body["buckets_stamped"] == [pred_dir]
     sc = _read_sidecar(pred_dir)
-    assert sc["validated_reference"] == "reviewer_confirmed_annotations"
+    assert sc["operating_point"]["conf"]["validated_against"] == "reviewer_confirmed_annotations"
     assert sc["validated_by"]["record_digest"]
 
 

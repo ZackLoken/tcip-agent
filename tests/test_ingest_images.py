@@ -62,7 +62,7 @@ def _make_tagged_tiff(path: Path, datetime_tag: str) -> None:
 # ── workspace resolver ──────────────────────────────────────────────────
 
 
-def test_workspace_root_honours_env(_isolate_workspace):
+def test_workspace_root_honors_env(_isolate_workspace):
     assert workspace.workspace_root() == _isolate_workspace.resolve()
 
 

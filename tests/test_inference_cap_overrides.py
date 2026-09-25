@@ -9,6 +9,7 @@ thing that derives an unstated cap.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -93,7 +94,7 @@ def inference_call(tmp_path, monkeypatch):
 
     def _call(**kwargs):
         result = run_inference_verified(
-            str(checkpoint), image_paths=[str(image_path)], device="cpu",
+            str(checkpoint), images_dir=str(Path(str(image_path)).parent), device="cpu",
             experiment_id="run-1", **kwargs)
         assert "error" not in result, result
         return result

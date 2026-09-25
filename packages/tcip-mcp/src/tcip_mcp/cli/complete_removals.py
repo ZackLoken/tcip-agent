@@ -1,14 +1,12 @@
-"""Move every workspace project carrying a pending-removal marker onto its own holding
-directory: the operator/agent entry point for
-``tcip_mcp.project_removal.complete_pending_removals``, the same walk a served backend runs
-once at its own startup, run by hand or on a schedule with no backend running.
+"""Move every workspace project carrying a pending-removal marker onto its own holding directory,
+through ``tcip_mcp.project_removal.complete_pending_removals``, with no backend running.
 
     tcip complete-removals [--workspace PATH]
 
 ``--workspace`` defaults to ``$TCIP_WORKSPACE`` (``tcip_mcp.workspace.workspace_root``'s own
-default, ``~/tcip-projects``, when neither is set). Prints one line per outcome and exits 1
-when any removal was blocked, 0 otherwise (a skipped project, its own marker unreadable, is
-printed but does not fail the exit code: the walk still moved every other pending project).
+default, ``~/tcip-projects``, when neither is set). Prints one line per outcome and exits 1 when
+any removal was blocked, 0 otherwise (a skipped project, its own marker unreadable, is printed but
+does not fail the exit code).
 """
 
 from __future__ import annotations

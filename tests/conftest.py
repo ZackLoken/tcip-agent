@@ -291,7 +291,7 @@ def data_dir(tmp_path: Path) -> Path:
     preds_dir = tmp_path / "predictions" / "live" / date
     preds_dir.mkdir(parents=True)
 
-    # One nested registry travelling with the labels: a single detection subject, no attributes.
+    # One nested registry traveling with the labels: a single detection subject, no attributes.
     subject_registry.write_registry(
         tmp_path / "subjects.json",
         SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)),

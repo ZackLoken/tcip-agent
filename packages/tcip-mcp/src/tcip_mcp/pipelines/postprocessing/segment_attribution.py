@@ -1,19 +1,14 @@
-"""Per-plant attribution by canopy segment: a detection attributed to a plant by containment in
-a canopy boundary a person accepted, the segment itself tied to a registry plant by containment
-of the plant's own projected position.
+"""Per-plant attribution by canopy segment: a detection attributed to a plant by containment in a
+canopy boundary a person accepted, the segment itself tied to a registry plant by containment of
+the plant's own projected position.
 
 A canopy boundary here is whatever the breeder accepted into a per-image label document: a hand
 trace, a SAM proposal a reviewer accepted, or an instance-segmentation model's own output once a
-reviewer has accepted it. What produced it is not this module's concern; what makes it usable is
-that a person positively stands behind it (:func:`load_canopy_segments`). The tie from a segment
-to a plant identity rests on the registry position's own accuracy: a position displaced by more
-than its disclosed clearance places the plant in a neighbour's canopy with every check here
-passing, since no breeder-confirmed tie or validated position-error bound exists yet.
-
-Composes :mod:`tcip_mcp.pipelines.postprocessing.orthomosaic_mapping` (the pixel <-> real-world
-mapping and the shared in-frame partition) and
-:mod:`tcip_mcp.pipelines.postprocessing.plant_mapping` (the registry's own ``PlantRecord`` and
-attribution rule), so nothing here reimplements either.
+reviewer has accepted it; a person must positively stand behind it (:func:`load_canopy_segments`).
+The tie from a segment to a plant identity rests on the registry position's own accuracy: a
+position displaced by more than its disclosed clearance places the plant in a neighbor's canopy
+with every check here passing, since no breeder-confirmed tie or validated position-error bound
+exists yet.
 """
 
 from __future__ import annotations
@@ -53,9 +48,7 @@ class CanopySegmentRefusal(ValueError):
 
 
 class _SegmentAssignmentSources(NamedTuple):
-    """The four values :class:`SegmentAssignment`'s own ``source`` field takes, named once so
-    :func:`assign_detections_to_segments` builds each assignment against a name rather than
-    repeating the vocabulary as a bare literal per branch."""
+    """The four values :class:`SegmentAssignment`'s own ``source`` field takes."""
 
     containment: str = "segment_containment"
     outside: str = "outside_segments"
@@ -70,11 +63,9 @@ SEGMENT_ASSIGNMENT_SOURCES = _SegmentAssignmentSources()
 class CanopySegment:
     """One canopy boundary a person accepted, in the raster's own full-mosaic pixel space.
 
-    ``segment_index`` is the boundary's position among the document's own annotations of the
-    stated subject (stable within one load, so a later reader joins a tie or an assignment back
-    to the boundary it names); ``polygon`` is the boundary itself, a box admitted as the rectangle
-    it is through :func:`tcip_annotation.matching.box_ring`, the one ring construction a box
-    turns into everywhere it does.
+    ``segment_index`` is the boundary's position among the document's own annotations of the stated
+    subject (stable within one load); ``polygon`` is the boundary itself, a box admitted as its
+    rectangle through :func:`tcip_annotation.matching.box_ring`.
     """
 
     segment_index: int
@@ -83,9 +74,8 @@ class CanopySegment:
 
 def _polygon_of(geometry: BBox | Polygon) -> Polygon:
     """``geometry`` as a :class:`Polygon`: itself, or a box's own rectangle built through
-    :func:`tcip_annotation.matching.box_ring`, the one ring construction
-    ``tcip_annotation.matching._to_shapely`` uses too, so the two conversions cannot
-    independently drift on which corner comes first."""
+    :func:`tcip_annotation.matching.box_ring`.
+    """
     if polygonal(geometry):
         return geometry
     return Polygon(rings=[box_ring(cast(BBox, geometry))])
@@ -99,19 +89,14 @@ def load_canopy_segments(
 
     Parses ``document_bytes`` (a byte snapshot the caller already read and hashed once) and keeps
     the annotations whose ``subject`` is the stated one. Refuses by name: when the document's own
-    ``image`` is not ``raster_stem`` or its ``width``/``height`` differ from ``raster_identity``'s
-    (the document at this position does not describe this raster); when no annotation of
-    ``subject`` exists (a stated subject is a claim the data must positively carry); when an
-    annotation of ``subject`` carries no geometry at all (an image-level label) or is a
-    :class:`~tcip_annotation.state.Point` (either way it names no region, refused naming the
-    record so the breeder can delete it, rather than skipped silently or the whole document
-    refused by implication); and when any annotation of ``subject`` is not
-    positively a person's: a scored record (the model's own unreviewed output), a record with no
-    ``created_by`` at all (the reference rule's own pre-provenance exception does not apply here),
-    or a record whose ``created_by`` is not a person's unless its ``accepted_by`` is a person's,
-    each refused naming the record. A person's own hand trace, and a machine-authored (SAM or a
-    bespoke model's) proposal a reviewer has accepted, both admit; the refusal text never asserts
-    that a record naming a reviewer was unreviewed.
+    ``image`` is not ``raster_stem`` or its ``width``/``height`` differ from ``raster_identity``'s;
+    when no annotation of ``subject`` exists; when an annotation of ``subject`` carries no geometry
+    at all (an image-level label) or is a :class:`~tcip_annotation.state.Point`, naming the record;
+    and when any annotation of ``subject`` is not positively a person's: a scored record (the
+    model's own unreviewed output), a record with no ``created_by`` at all, or a record whose
+    ``created_by`` is not a person's unless its ``accepted_by`` is a person's, each refused naming
+    the record. A person's own hand trace, and a machine-authored proposal a reviewer has accepted,
+    both admit.
     """
     try:
         text = document_bytes.decode("utf-8-sig")
@@ -194,9 +179,8 @@ class TiedSegment:
     """A canopy segment tied to exactly one registry plant.
 
     ``clearance_m`` is the distance from the plant's own projected position to this segment's
-    boundary, in the raster's native CRS units: the derived margin a displaced registry position
-    would have to exceed to leave this segment (this platform's own honest residual for the tie;
-    see this module's own docstring for what it does not establish).
+    boundary, in the raster's native CRS units: the margin a displaced registry position would have
+    to exceed to leave this segment.
     """
 
     segment_index: int
@@ -256,12 +240,12 @@ def tie_segments_to_plants(
     position it contains.
 
     Refuses by name: a registry with a blank or duplicate ``plot_name``
-    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`, the same check
-    the nearest-neighbour regime runs over its own registry); a plant inside more than one segment;
-    a segment containing more than one plant; no in-frame plant in the registry at all. Plants are
-    partitioned first through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.
-    plants_in_frame`, so a plant outside the raster is never tested for containment and is instead
-    disclosed by name on the returned :class:`SegmentTie`.
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`); a plant inside
+    more than one segment; a segment containing more than one plant; no in-frame plant in the
+    registry at all. Plants are partitioned first through
+    :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`, so a plant
+    outside the raster is never tested for containment and is disclosed by name on the returned
+    :class:`SegmentTie`.
     """
     require_named_plants(plants)
 

@@ -29,7 +29,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines import resolution  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
-from tcip_mcp.pipelines.resolution import Acknowledgement  # noqa: E402
+from tcip_mcp.pipelines.resolution import Acknowledgment  # noqa: E402
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
 from tests._operationalization_fixtures import schema_basis  # noqa: E402
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
@@ -38,7 +38,7 @@ from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 # so it carries every key the writer's cells read even as that shape grows.
 _NO_MAPPING = MappingBuild(
     name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
-    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "fallback"},
+    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "stated"},
     plant_registry={"name": "unregistered", "digest": "0" * 64},
     capture_identity={}, capture_digests={}, unreadable={}, assignments={},
     record_sha256="0" * 16,
@@ -256,7 +256,7 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
     )
     id_map = {"closed": 0, "open": 1}
     scope = resolution.BucketScope(subject="bud", attribute="opening")
-    with pytest.raises(ClassifiedRecordRefused, match="repair-classified-predictions"):
+    with pytest.raises(ClassifiedRecordRefused, match="carries no value under attribute"):
         phenology.count_by_class(p, id_map, "open", scope=scope)
 
 
@@ -442,7 +442,7 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
     with pytest.raises(ValueError, match="unvalidated dimension"):
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", BUD_OPENING,
-            flags={"classifier": None, "operating_point": None}, acknowledgement=None,
+            flags={"classifier": None, "operating_point": None}, acknowledgment=None,
             basis=schema_basis(), document_reconciliations={}, producer={},
             dimension_reconciliations={}, predictions_by_date={},
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -459,7 +459,7 @@ def test_write_phenology_csv_refuses_a_count_only_reconciliation_with_nothing_on
 
     with pytest.raises(ValueError, match="classifier_operating_point"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
             basis=schema_basis(), document_reconciliations=count_only, producer={},
             dimension_reconciliations=dimension_reconciliations,
             predictions_by_date=predictions_by_date, project_root=tmp_path,
@@ -476,7 +476,7 @@ def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date
     cells = phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", BUD_OPENING,
         flags={"classifier": None, "operating_point": None},
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="nothing to reconcile"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="nothing to reconcile"),
         basis=schema_basis(), document_reconciliations={}, producer={},
         dimension_reconciliations={}, predictions_by_date={},
         project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -520,7 +520,7 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
 
     cells = phenology.write_phenology_csv(
         "test.missing_stamp", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="missing sidecar"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="missing sidecar"),
         basis=schema_basis(),
         document_reconciliations={
             "operating_point": recon,
@@ -553,7 +553,7 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
 
     with pytest.raises(ValueError, match="classifier"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=incomplete, acknowledgement=None,
+            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=incomplete, acknowledgment=None,
             basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
             dimension_reconciliations=dimension_reconciliations,
             predictions_by_date=predictions_by_date, project_root=tmp_path,
@@ -561,7 +561,7 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
     assert not (tmp_path / "out.csv").exists()
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -607,7 +607,7 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
 
     cells = phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"),
         basis=schema_basis(),
         document_reconciliations={
             "operating_point": recon,
@@ -632,7 +632,7 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     phenology.write_phenology_csv(
-        "test.direct_writer_call", [], out_csv, BUD_OPENING, flags=flags, acknowledgement=None,
+        "test.direct_writer_call", [], out_csv, BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -645,13 +645,13 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     assert records[0]["trait"] == "bud_opening"
 
 
-def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and_event_agreeing(
+def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_event_agreeing(
     tmp_path,
 ):
-    """A caller that passes an ``Acknowledgement`` on a delivery every dimension actually clears
+    """A caller that passes an ``Acknowledgment`` on a delivery every dimension actually clears
     gets a gate that discards it (nothing needed acknowledging); the writer records that discarded
     outcome on the event too, rather than the caller's original object verbatim, so the CSV tail's
-    blank ``acknowledged_by``/``acknowledgement_reason`` and the event's own fields can never
+    blank ``acknowledged_by``/``acknowledgment_reason`` and the event's own fields can never
     disagree about whether this delivery rested on one."""
     import tcip_store as ts
     from tcip_mcp.pipelines import resolution
@@ -662,20 +662,20 @@ def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and
 
     cells = phenology.write_phenology_csv(
         "test.fully_validated_ack", [], out_csv, BUD_OPENING, flags=flags,
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="just in case"),
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="just in case"),
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert cells["acknowledged_by"] is None
-    assert cells["acknowledgement_reason"] is None
+    assert cells["acknowledgment_reason"] is None
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.fully_validated_ack"]
     assert len(records) == 1, records
     assert records[0]["acknowledged_by"] is None
-    assert records[0]["acknowledgement_reason"] is None
+    assert records[0]["acknowledgment_reason"] is None
 
 
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
@@ -687,7 +687,7 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
         _real_delivery_flags(tmp_path))
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -707,7 +707,7 @@ def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
           "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
 
     phenology.write_phenology_curve_csv(
-        "test", [row], tmp_path / "curve.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "curve.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -731,7 +731,7 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -792,7 +792,7 @@ _MAJORITY_ALIAS_SPEC = TraitSpec(
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
-    majority_provisional=True,
+    crossing_unconfirmed=True,
     phenology_prefix="unit",
     majority_label="peak",
 )
@@ -863,7 +863,7 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     series = per_plant["P1"]["series"]
     (_date, total, positive, unclassified, missing, n_images) = series[0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
-    # 4 images named for this (plant, date), the coverage the entry summarises, of which one is
+    # 4 images named for this (plant, date), the coverage the entry summarizes, of which one is
     # missing, not 3 (the files that happened to exist).
     assert n_images == 4
 
@@ -910,7 +910,7 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)

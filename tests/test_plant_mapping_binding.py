@@ -119,7 +119,7 @@ def _validate_buckets(
     preds_by_date: dict[str, str], dataset_root: Path, *, trait: str = "currant_bloom",
 ) -> None:
     """Earn a genuine record for every bucket in ``preds_by_date``, under whichever platform
-    root is active now: ``deliver_phenology_milestones`` takes no acknowledgement at all, so a
+    root is active now: ``deliver_phenology_milestones`` takes no acknowledgment at all, so a
     delivery this file needs to actually complete (as opposed to refuse on a mapping-binding
     rail) needs a real validation record behind its buckets, not a caller string.
     """
@@ -153,13 +153,6 @@ def _validate_buckets(
 
 # ── rail 6: no project record ────────────────────────────────────────────
 
-
-def test_build_plant_mapping_under_no_project_record_names_initialize_project(tmp_path: Path) -> None:
-    images_root = tmp_path / "images"
-    (images_root / DATES[0]).mkdir(parents=True)
-    res = build_plant_mapping(name="valley", images_root=str(images_root), plant_registry="unregistered")
-    assert "error" in res
-    assert "initialize_project" in res["error"]
 
 
 # ── rail 4: dataset identity, NAME_SEGMENT, variously-spelled roots, dataset mismatch ────
@@ -328,7 +321,7 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
         "name": "forged", "project_root": str(tmp_path), "dataset_root": str(dataset_root),
         "dataset_id": "whatever-id", "built_by": "build_plant_mapping",
         "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
-        "nn_tolerance_m": {"value": 10.0, "source": "fallback"},
+        "nn_tolerance_m": {"value": 10.0, "source": "stated"},
         "plant_registry": {"name": "unregistered", "digest": "0" * 64},
         "capture_identity": {d: "0" * 16 for d in DATES},
         "capture_digests": {d: {} for d in DATES}, "unreadable": {d: [] for d in DATES},
@@ -830,7 +823,7 @@ def _cite_mapping(tmp_path: Path, name: str) -> None:
     record_delivery_binding_event(
         "test_delivery_door", None, None,
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=[], scale_document=None, acknowledgement=None,
+        measurement_documents=[], acknowledgment=None,
         plant_mapping=disclosure, project_root=tmp_path,
     )
 

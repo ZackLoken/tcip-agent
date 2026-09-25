@@ -68,8 +68,7 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"],
-        scale_document=None, acknowledgement=None, trait="astringency",
+        measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=None,
     )
     event = _one_event(tmp_path, door="test_door")
@@ -191,33 +190,7 @@ def test_supersede_delivery_refuses_a_second_supersession_of_the_same_event(
     assert "already carries a supersession" in res["error"]
 
 
-def test_supersede_delivery_refuses_an_event_missing_the_acknowledgement_keys(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A record stored before ``acknowledged_by``/``acknowledgement_reason`` existed does not
-    validate against ``DeliveryEventRecord``, the same shape the Results tab's panel route
-    refuses to list; ``supersede_delivery`` reads the event it supersedes through the identical
-    check, so it refuses too rather than quietly superseding a record the panel would reject."""
-    scope = resolution.delivery_events_scope(tmp_path)
-    event_id = "pre-acknowledgement-event"
-    ts.replace(resolution.delivery_event_key(scope, event_id), {
-        "event_id": event_id, "trait": "currant_bloom", "delivery_kind": "state_crossing_dates",
-        "door": "deliver_phenology_milestones", "output_path": str(tmp_path / "out.csv"),
-        "output_sha256": "0" * 64, "measurement_documents": ["operating_point"],
-        "scale_document": None, "plant_mapping": None, "documents": {},
-        "produced_at": "2026-02-11T00:00:00+00:00",
-    })
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    res = supersede_delivery(event_id, "some reason")
-
-    assert "error" in res
-    assert "does not validate" in res["error"]
-    assert "no operator door rewrites an existing delivery_events record" in res["error"]
-    assert not ts.exists(resolution.delivery_supersession_key(scope, event_id))
-
-
-def test_supersede_delivery_refuses_a_replacement_event_missing_the_acknowledgement_keys(
+def test_supersede_delivery_refuses_a_replacement_event_missing_a_recorded_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The replacement event is read through the identical validating check as the superseded
@@ -230,12 +203,11 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_the_acknowledgem
     event = _one_event(tmp_path)
 
     scope = resolution.delivery_events_scope(tmp_path)
-    replacement_id = "pre-acknowledgement-replacement"
+    replacement_id = "malformed-replacement"
     ts.replace(resolution.delivery_event_key(scope, replacement_id), {
         "event_id": replacement_id, "trait": "currant_bloom",
         "delivery_kind": "state_crossing_dates", "door": "deliver_phenology_milestones",
         "output_path": str(tmp_path / "out2.csv"), "output_sha256": "1" * 64,
-        "measurement_documents": ["operating_point"], "scale_document": None,
         "plant_mapping": None, "documents": {}, "produced_at": "2026-02-11T00:00:00+00:00",
     })
 
@@ -245,6 +217,7 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_the_acknowledgem
 
     assert "error" in res
     assert "does not validate" in res["error"]
+    assert "acknowledged_by" in res["error"]
     assert not ts.exists(resolution.delivery_supersession_key(scope, event["event_id"]))
 
 

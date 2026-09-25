@@ -14,11 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.pipelines.postprocessing.aggregation import (
-    _resolve_units,
-    _unit_from_value_key,
-    export_aggregated_csv,
-)
+from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
+from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units, export_aggregated_csv
 from tcip_mcp.traits import crops_units
 from tests import _operationalization_fixtures as fx
 
@@ -101,10 +98,10 @@ def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
     """A count is not a physical unit, so a value_key ending in it implies none. The recognized
     tokens are exactly crops.yml's declared units and their squared forms, so a trailing token that
     entered the vocabulary through an undeclared trait would start labeling counts as measured."""
-    assert _unit_from_value_key(value_key) is None
+    assert unit_from_value_key(value_key) is None
     # the same key shape with a real declared unit is still recognized, so this is exactness, not
     # a blanket refusal of the pattern
-    assert _unit_from_value_key("detections_mm") == ("mm", "mm")
+    assert unit_from_value_key("detections_mm") == ("mm", "mm")
 
 
 def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path):

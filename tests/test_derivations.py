@@ -250,8 +250,8 @@ def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
 
 
 def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_path):
-    """A raster in US survey feet (EPSG 2264) converts the plant-pitch metres through the CRS's
-    own unit conversion factor, not a naive metre-blind pixel-scale division."""
+    """A raster in US survey feet (EPSG 2264) converts the plant-pitch meters through the CRS's
+    own unit conversion factor, not a naive meter-blind pixel-scale division."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
@@ -267,7 +267,7 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_p
         raster_path=str(raster_path))
     assert "plant grid pitch" in source
     assert "EPSG:2264" in source
-    assert px == 328  # 99.96m / 0.3048006 ft-per-m factor; a metre-blind read would give 100
+    assert px == 328  # 99.96m / 0.3048006 ft-per-m factor; a meter-blind read would give 100
 
 
 def test_derive_block_scale_px_photographic_raster_path_refuses_named(tmp_path):

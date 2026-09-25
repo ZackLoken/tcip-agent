@@ -26,16 +26,16 @@ Columns, in the order `export_aggregated_csv` writes them (its `fieldnames` is t
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
-| plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbour per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
-| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
+| plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbor per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
+| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in meters, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
 | producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
 | producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
 | produced_at | string | Timestamp this CSV was written, stamped by the shared tail composition; never the producing run's own timestamp |
 | operating_point_validated | string | The named dimension's cleared reference (paired with `measurement_document`, e.g. `measurement_document=ordinal_operating_point` beside this column naming which document it answers for), floored false whenever any other gated dimension with no column of its own (tile_size, scale, claim_scope) is unvalidated |
 | unvalidated_dimensions | string | Every gated dimension that did not validate, `;`-joined; blank when everything cleared |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
-| acknowledged_by | string | Who shipped this delivery unvalidated, from the gate's own `Acknowledgement`; blank on a fully validated delivery, even one posted with one (the gate discards an acknowledgement that cleared nothing) |
-| acknowledgement_reason | string | Why, from the same `Acknowledgement`; blank together with `acknowledged_by` |
+| acknowledged_by | string | Who shipped this delivery unvalidated, from the gate's own `Acknowledgment`; blank on a fully validated delivery, even one posted with one (the gate discards an acknowledgment that cleared nothing) |
+| acknowledgment_reason | string | Why, from the same `Acknowledgment`; blank together with `acknowledged_by` |
 
 ## Aggregation Rules
 
@@ -64,8 +64,8 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `clear_prediction_bucket` | Move a terminal (`completed` or `failed`) experiment's own recorded prediction bucket into a dated archive under `predictions/.cleared/`, so the path re-publishes; takes a required, non-empty `reason` naming the confirmation with the person this destructive act requires. Refuses a bespoke bucket (outside a dataset's `predictions/<model>[/<date>]` layout), a bucket already archived, one carrying no stamp naming a terminal experiment whose recorded pointer is this path, a whole-raster bucket, or one carrying any review state (a detection verdict or a bulk-accepted image alike); resumes an interrupted clear by name (`cleared_bucket`) rather than starting a second one |
 | `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
-| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbour by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime). This tool builds no acknowledgement, so an unvalidated dimension always refuses here; the Results tab's count export (`/api/results/export_count_csv`) is the one surface that can acknowledge and ship this kind unvalidated |
-| `deliver_per_image_counts` | Per-image detection-count CSV; see the Per-Image CSV Schema above. Builds no acknowledgement either, so its bucket regime's unvalidated dimension always refuses here too; the same Results tab count export serves it |
+| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime). This tool builds no acknowledgment, so an unvalidated dimension always refuses here; the Results tab's count export (`/api/results/export_count_csv`) is the one surface that can acknowledge and ship this kind unvalidated |
+| `deliver_per_image_counts` | Per-image detection-count CSV; see the Per-Image CSV Schema above. Builds no acknowledgment either, so its bucket regime's unvalidated dimension always refuses here too; the same Results tab count export serves it |
 | `deliver_per_plant_csv` | The general per-plant CSV door: takes `aggregate_per_plant`'s own output (a caller's own composition of buckets plus a plant mapping) and calls `export_aggregated_csv` directly, for the case neither specialist door's own composition covers; `predictions_by_date` names the buckets a delivery reads, whether or not a mapping is named; a named `plant_mapping` requires it in the same call and is resolved, refused by name when unknown, when it does not cover a delivered date, when it was built over a different dataset than the buckets belong to, or when its own recorded inputs no longer verify, through the same preamble the phenology doors share; every delivered `plant_id` must also appear among a plot the mapping actually assigned on the delivered dates; a delivery either fully verifies the mapping it names or names none |
 | `supersede_delivery` | Records that an already-shipped delivery's number is withdrawn or replaced (`delivery_supersessions`, keyed by the superseded event's id, naming its `output_sha256`, the replacement event when one exists, and the reason); never deletes or rewrites the file or the event |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
@@ -102,7 +102,7 @@ Columns, in the order `export_detection_csv` writes them (its `fieldnames` is th
 | unvalidated_dimensions | string | Every gated dimension that did not validate, `;`-joined; blank when everything cleared |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
 | acknowledged_by | string | Who shipped this delivery unvalidated; blank on a fully validated delivery |
-| acknowledgement_reason | string | Why, from the same `Acknowledgement`; blank together with `acknowledged_by` |
+| acknowledgment_reason | string | Why, from the same `Acknowledgment`; blank together with `acknowledged_by` |
 
 ## The meaning door (what the number is)
 
@@ -111,7 +111,7 @@ what the delivered number means, recorded per project and confirmed by the breed
 gives a field criterion, which is not something a model can realize on its own, so the record says
 what the number means, what decides it in the imagery, and which subject it is about. No record, or
 one nobody confirmed, or one whose spec fields moved since, and the door refuses and names the
-primitive that fixes it. An acknowledgement does not reach this: it says a number's error is
+primitive that fixes it. An acknowledgment does not reach this: it says a number's error is
 uncharacterized, which is a claim about a quantity that has been defined.
 
 - `export_detection_csv` and `deliver_per_image_counts` take a required, keyword-only `trait` and rest on
@@ -143,7 +143,7 @@ uncharacterized, which is a claim about a quantity that has been defined.
 ## The delivery gate (measurement integrity)
 
 Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
-acknowledgement. The count/date/value is the phenotype, so each door reconciles every dimension
+acknowledgment. The count/date/value is the phenotype, so each door reconciles every dimension
 the deliverable rests on against a reference of that dimension's own kind (for the
 operating_point/classifier dimensions, held-out GT or a breeder-confirmed output sample, see the
 `evaluation` and `cv-research` skills; a tile scale needs a geometry basis, a physical scale a
@@ -153,7 +153,7 @@ one of the five measurement-document kinds a bucket can carry (`operating_point.
 `resolve_scale.json`), then hands the resolved states to one shared
 `check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict and ships
 only when every dimension it was handed clears, or two independent escapes cover what didn't. An
-`Acknowledgement` (a real name and a non-empty reason, built only by a web delivering route)
+`Acknowledgment` (a real name and a non-empty reason, built only by a web delivering route)
 clears any dimension, stamped false. The
 phenology writer, `export_detection_csv` and `export_aggregated_csv` all take one now, each from
 the web results route that composes it for its own delivery kind (`/export_csv` for phenology,
@@ -195,7 +195,7 @@ unaffected by a caller's project root.
   `plant_mapping` names the registry it read (byte-verified against what `register_plant_registry`
   recorded, refusing a rewritten file by name before any plant or prediction is read), the raster
   identity every count is attributed through, and `detections_unattributed` scoped to the
-  delivered raster, the raster-frame counterpart of `images_unattributed`. The nearest-neighbour
+  delivered raster, the raster-frame counterpart of `images_unattributed`. The nearest-neighbor
   regime's disclosure adds the matched tolerance and its source, and every registry plant outside
   the raster's own frame, by name (`plants_outside_raster`; "outside the raster" is the registry's
   own point, never the tree's real canopy extent). The canopy-segment regime's disclosure instead
@@ -216,7 +216,7 @@ unaffected by a caller's project root.
   document refusal returns before the checkpoint is loaded. The CSV's own delivery gate
   then runs exactly once, inside the writer, never a second time at the door. Without a
   `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
-  no-`pred_dirs` floor always refuses: an acknowledgement clears an unvalidated dimension, never
+  no-`pred_dirs` floor always refuses: an acknowledgment clears an unvalidated dimension, never
   the absence of a bucket to reconcile one from at all. The door's own
   response then reports the live run's own narrowed conf reference under
   `run_conf_validated_against` (accepted-or-false), a different fact from
@@ -253,9 +253,9 @@ unaffected by a caller's project root.
   tier present. An untiled run is never gated on it.
 - To ship a provisional result, the web `/export_csv` route (phenology) or `/export_count_csv`
   route (the per-image bucket regime and the per-plant orthomosaic composition) builds a real
-  `Acknowledgement` from the breeder's own reason and identity; the door writes but stamps
+  `Acknowledgment` from the breeder's own reason and identity; the door writes but stamps
   `operating_point_validated=false` (and every other unvalidated dimension the same way). No MCP
-  tool builds an `Acknowledgement` itself; the ordinal and regression aggregates have no
+  tool builds an `Acknowledgment` itself; the ordinal and regression aggregates have no
   acknowledged route since their per-plant strategy is the agent's own choice, reached only
   through `deliver_per_plant_csv`, which accepts a caller-composed table the principle above
   refuses a web route for; nor does a per-plant count aggregate over walked captures, since no

@@ -57,6 +57,24 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
     return root
 
 
+def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_path: Path):
+    """On a dated tree the ``stem`` policy's group key names the capture date, so a member
+    standing alone in its group carries the key a draw would record for it, never the bare name
+    another date's same-named image shares."""
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    admitted = admit(root / "images" / DATES[0], root / "annotations" / DATES[0],
+                     subject=SUBJECT)
+    key = recorded_group_key_fn("stem", date=admitted.date)
+    samples = admitted.every_sample()
+
+    assert admitted.date == DATES[0] and samples
+    assert {s.member: s.group for s in samples} == {s.member: key(s.member) for s in samples}
+    assert all(s.group != s.member for s in samples)
+
+
 def _attribute_scoped_dataset(root: Path) -> Path:
     """One date, five stems: four have their instance assessed for ``condition`` (clearing an
     attribute-scoped draw's floor), the fifth carries an instance never assessed for it."""
@@ -174,7 +192,7 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
 
     binding = data_cfg["split"]["selection_binding"]
     assert binding["selection_dir"] == str(out)
-    assert binding["calibration_bound"] == len(held_out)
+    assert binding["redraw"] is False
     assert "date" not in binding
     # The class space is the run's own, recorded once on the data config, never restated here.
     assert data_cfg["subject"] == SUBJECT
@@ -426,9 +444,10 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
 
     out = tmp_path / "m"
     write_selection(out, Selection(samples=(Sample(
-        source=str(images_dir / "photo.jpg"), ground_truth=str(labels_dir / "reviewed.json"),
+        member="reviewed", source=str(images_dir / "photo.jpg"),
+        ground_truth=str(labels_dir / "reviewed.json"),
         group="g", side="train", confirmation_bucket=bucket),
-    ), subject=SUBJECT, id_map={SUBJECT: 0}))
+    ), subject=SUBJECT, id_map={SUBJECT: 0}, seed=0, group_by="stem"))
 
     selection = read_selection(out)
     refuse_inadmissible_samples(selection.samples, selection.scope)
@@ -465,10 +484,11 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     def _selection(row_key: str | None) -> Selection:
         out = tmp_path / ("rows" if row_key else "whole")
         write_selection(out, Selection(samples=(Sample(
-            source=str(images_dir / "a.jpg"), ground_truth=str(labels_dir / "a.json"),
+            member=row_key or "a", source=str(images_dir / "a.jpg"),
+            ground_truth=str(labels_dir / "a.json"),
             group="g", side="train", confirmation_bucket=status_bucket(SUBJECT, DATES[0]),
             row_key=row_key),
-        ), subject=SUBJECT, id_map={SUBJECT: 0}))
+        ), subject=SUBJECT, id_map={SUBJECT: 0}, seed=0, group_by="stem"))
         return read_selection(out)
 
     scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
@@ -632,7 +652,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
         for dataset in datasets:
             for sample in dataset.seen_samples:
                 seen.append((sample.source, sample.ground_truth, sample.row_key, sample.rect,
-                             sample.group, sample.confirmation_bucket, sample.member_stem))
+                             sample.group, sample.confirmation_bucket, sample.member))
         return sorted(seen)
 
     # Comparable universes: the unbound run admits one date, so the bound run's members from the
@@ -698,13 +718,15 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
 
 
 def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
-    from tcip_mcp.pipelines.data.selection import Selection, write_selection
+    import dataclasses
+
+    from tcip_mcp.pipelines.data.selection import write_selection
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
-    write_selection(out, Selection(samples=drawn.samples, subject=None, id_map=drawn.id_map))
+    write_selection(out, dataclasses.replace(drawn, subject=None))
 
     with pytest.raises(ValueError, match="no subject"):
         auto_train_val("detection", _run_data_cfg(root, out), None)
@@ -778,7 +800,7 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
 
     assert set(train_ds.stems) | set(val_ds.stems) == pool
     assert not (set(train_ds.stems) | set(val_ds.stems)) & held_out
-    assert data_cfg["split"]["selection_binding"]["redraw"]["seed"] == 1
+    assert data_cfg["split"]["selection_binding"]["redraw"] is True
     assert data_cfg["split"]["resolved_seed"] == 1
 
 
@@ -830,16 +852,16 @@ def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts(tmp_p
     empty, named with the selection, the seed and both group counts rather than a bare failure.
     A selection whose members do hold two is admitted."""
     from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.data.splits import redraw_starved_issue
+    from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
 
     drawn_dir = tmp_path / "drawn"
     _draw(_two_subject_two_date_dataset(tmp_path / "ds"), drawn_dir)
     assert redraw_starved_issue(
-        read_selection(drawn_dir), selection_dir=str(drawn_dir), seed=3) is None
+        *redraw_pool(read_selection(drawn_dir)), selection_dir=str(drawn_dir), seed=3) is None
 
     _root, one_group = one_foreground_group_selection(tmp_path / "one")
     starved = redraw_starved_issue(
-        read_selection(one_group), selection_dir=str(one_group), seed=3)
+        *redraw_pool(read_selection(one_group)), selection_dir=str(one_group), seed=3)
     assert starved is not None
     assert f"{str(one_group)!r}" in starved and "seed 3" in starved
     assert "1 foreground group" in starved and "2 distinct group" in starved
@@ -862,7 +884,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
                           recorded_by="user:tester")
 
     def _sample(stem: str, side: str) -> Sample:
-        return Sample(source=str(images_dir / f"{stem}.jpg"),
+        return Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
                       ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                       confirmation_bucket=status_bucket(SUBJECT, DATES[0]))
 
@@ -916,13 +938,15 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path
 
 
 def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
-    from tcip_mcp.pipelines.data.selection import Selection, write_selection
+    import dataclasses
+
+    from tcip_mcp.pipelines.data.selection import write_selection
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
-    write_selection(out, Selection(samples=drawn.samples, subject=None, id_map=drawn.id_map))
+    write_selection(out, dataclasses.replace(drawn, subject=None))
 
     result = preflight_config(_preflight_config(root, out))
 
@@ -976,7 +1000,6 @@ def test_persist_run_partition_carries_the_selection_binding(tmp_path: Path):
     for block in record["members"].values():
         assert block["group_key_map"]
         assert block["label_digests"]["at_split"]
-    assert "redrawn_within_selection" not in record
 
 
 def test_persist_run_partition_carries_no_stale_binding_when_this_run_did_not_bind(tmp_path: Path):

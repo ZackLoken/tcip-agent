@@ -65,10 +65,11 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     manifest = data_cfg["split"]["spatial_manifest"]
 
     assert split["group_by"] == "spatial_strip"
-    assert split["train"] and split["val"]
-    assert set(split["train"]).isdisjoint(split["val"])
-    assert split["val"] == manifest["val_identities"]
-    assert split["train"] == manifest["train_identities"]
+    train, val = split["spatial"]["train_identities"], split["spatial"]["val_identities"]
+    assert train and val
+    assert set(train).isdisjoint(val)
+    assert val == manifest["val_identities"]
+    assert train == manifest["train_identities"]
 
     # The two sides are not interchangeable: 0.65 of the axis trains against 0.25 validating, so
     # the recorded regions differ in width as well as in membership.

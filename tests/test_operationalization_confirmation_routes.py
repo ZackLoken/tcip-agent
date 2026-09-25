@@ -10,6 +10,8 @@ the writer behind any of it.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import subprocess
 import sys
 from pathlib import Path
@@ -645,8 +647,8 @@ def test_the_statement_read_route_answers_for_a_trait_nothing_is_stated_for(
     key = traits.trait_spec_key(directory, "unstated_trait")
     ts.replace(
         key,
-        {"name": "unstated_trait", "delivers": ["astringency"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": "unstated_trait", "delivers": ["astringency"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT,
     )
 
@@ -693,8 +695,8 @@ def test_confirm_statement_route_refuses_when_a_registered_spec_has_no_statement
     key = traits.trait_spec_key(directory, "unstated_trait")
     ts.replace(
         key,
-        {"name": "unstated_trait", "delivers": ["astringency"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": "unstated_trait", "delivers": ["astringency"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT,
     )
 
@@ -885,8 +887,7 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
 
     record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"],
-        scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
+        measurement_documents=["operating_point"], acknowledgment=None, trait=STATEMENT_TRAIT,
         delivery_kind=PER_IMAGE_COUNT, project_root=tmp_path,
     )
 
@@ -914,16 +915,15 @@ def test_delivery_events_route_confines_project_root_to_allowed_roots(
     assert resp.status_code == 403
 
 
-def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predates_the_disclosure(
+def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_the_disclosure(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """A record written before ``plant_mapping`` carried ``dates_delivered``,
-    ``images_unattributed`` and ``plant_attribution`` cannot be read back as if those keys meant
-    nothing: none of the three is reconstructable from the rest of the record, so the route
-    refuses the whole listing by event_id rather than serving it with the gap silently absent."""
+    """A record whose ``plant_mapping`` lacks ``dates_delivered``, ``images_unattributed`` and
+    ``plant_attribution`` refuses the whole listing by event_id rather than being served with
+    the gap silently absent."""
     from tcip_mcp.pipelines import resolution
 
-    event_id = "old-shaped"
+    event_id = "lacking-disclosure"
     key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), event_id)
     ts.replace(
         key,
@@ -931,10 +931,8 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predat
             "event_id": event_id,
             "trait": STATEMENT_TRAIT,
             "delivery_kind": "state_crossing_dates",
-            "door": "compute_phenology",  # a stored value written before the rename
+            "door": "deliver_phenology_milestones",
             "output_path": None,
-            "measurement_documents": ["operating_point"],
-            "scale_document": None,
             "plant_mapping": {
                 "name": "valley",
                 "project_root": str(tmp_path),
@@ -959,7 +957,8 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predat
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert event_id in detail
-    assert "no operator door rewrites an existing delivery_events record" in detail
+    assert "does not validate as a DeliveryEventRecord" in detail
+    assert "dates_delivered" in detail
 
 
 def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_three_keys(
@@ -989,8 +988,7 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
 
     record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"],
-        scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
+        measurement_documents=["operating_point"], acknowledgment=None, trait=STATEMENT_TRAIT,
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=disclosure,
     )
 

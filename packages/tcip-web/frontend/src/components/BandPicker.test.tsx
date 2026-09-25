@@ -94,7 +94,7 @@ describe("BandPicker", () => {
     expect(screen.getByText("stats from a 0.01% pixel sample")).toBeInTheDocument();
   });
 
-  it("names a transparency band as one, so it is not offered as a colour to look at", () => {
+  it("names a transparency band as one, so it is not offered as a color to look at", () => {
     const bands = [
       ...FOUR_BANDS.slice(0, 3),
       { name: "3", wavelength_nm: null, dtype: "uint8", min: 0, max: 255, interpretation: "alpha" },

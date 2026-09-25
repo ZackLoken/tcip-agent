@@ -1,16 +1,10 @@
-"""Annotation tools: load, save, and evaluate name-based annotations via MCP.
-
-The GUI-driving tools (push_panel_event, focus_human_attention) live in gui_tools.py; the
-proposal-workflow tools (segment_prompt, stage_proposals, propose_annotations) all live in
-proposal_tools.py. This module keeps label I/O and scoring.
-"""
+"""Annotation tools: load, save and score name-based annotations."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from tcip_annotation import Annotation, compute_matches
-from tcip_annotation.state import box_derivable
 from tcip_annotation.json_io import (
     UnreadableLabelDocument, annotation_from_payload, client_annotation, write_annotations,
 )
@@ -30,11 +24,7 @@ from tcip_mcp.audit import audited
 
 
 def _dims_for(image_path: str) -> tuple[int, int]:
-    """``(width, height)`` for ``image_path``, channel-aware, resolves through the same
-    enumeration/resolution primitive every other reader now shares (``resolve_image_source``),
-    so a ``.bandgroup``-grouped capture measures its real stacked frame instead of ``PIL``
-    misreading a manifest file (or a genuinely multi-band raster) as a photograph.
-    """
+    """``(width, height)`` for ``image_path``, channel-aware, through ``resolve_image_source``."""
     img = Path(image_path)
     source = resolve_image_source(img.parent, img.stem)
     return image_dimensions(source)
@@ -44,11 +34,8 @@ def _dims_for(image_path: str) -> tuple[int, int]:
 def read_annotations(image_path: str) -> dict:
     """Load the ground-truth labels and predictions for a single image.
 
-    Not an MCP tool: no script wraps it, per the admission standard (packages/tcip-mcp/CLAUDE.md);
-    an agent reads a label file through this function directly.
-
     Both are the name-based per-image schema, one file per image, all subjects. A present document
-    this schema cannot read returns an ``error`` rather than a guess.
+    this schema cannot read returns an ``error``.
 
     Args:
         image_path: Absolute path to the image file.
@@ -101,12 +88,11 @@ def save_annotations(
     The label goes to ``<dataset_root>/annotations/<date>/<stem>.json`` (see
     :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path when not given. Pass
     ``path`` to write to an explicit location instead. Each annotation is a dict carrying a
-    ``subject`` (required, refused when absent, since a name-based label is undecodable without it),
-    an optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring polygon
-    contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon (an occlusion-split mask,
-    e.g. ``segment_prompt``'s own output, whose ring vertices are ``{x,y}`` dicts and are accepted
-    the same as ``[x,y]`` pairs), ``point`` = [x,y] for a single prompt/keypoint location, or none of
-    them for an image-level label), and optional ``attributes`` (attribute name -> value name).
+    ``subject`` (required, refused when absent), an optional geometry (``bbox`` = [x1,y1,x2,y2],
+    ``points`` = [[x,y],...] for a single-ring polygon contour, ``rings`` = [[[x,y],...], ...] for
+    a multi-ring polygon, whose ring vertices may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point``
+    = [x,y] for a single prompt/keypoint location, or none of them for an image-level label), and
+    optional ``attributes`` (attribute name -> value name).
 
     Args:
         image_path: Absolute path to the image file.
@@ -161,12 +147,9 @@ def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None
 
     Returns ``(iou_type, record, (gt, preds), width, height)`` where ``gt`` / ``preds`` are
     :class:`Annotation` lists; ``None`` if unreadable. When a prediction file is found, its
-    bucket's own recorded scope is read (never trusted implicitly): a neither-key or undecodable
-    stamp propagates by name (``StampScopeUnstated``, the seam's ``StoreError``) rather than
-    letting a pre-conform classified bucket's value-keyed records score as object classes; a bare
-    directory or any readable scope scores by ``subject`` as it does today. ``_checked_bucket_dirs``
-    (a folder-scan caller's own set, threaded across its calls) skips a directory already read
-    this pass, since many images share one prediction bucket and the read is for its raise alone.
+    bucket's own recorded scope is read; an undecodable stamp propagates the seam's own
+    ``StoreError``, and a bare directory or any readable scope scores by ``subject``.
+    ``_checked_bucket_dirs`` skips a directory already read this pass.
     """
     from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -196,16 +179,15 @@ def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None
 
 def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annotation]) -> list[dict]:
     """Per-detection TP/FP/FN records from a match result: the annotation each names, projected
-    as every read door projects one (:func:`~tcip_annotation.json_io.client_annotation`), with
-    its tag, IoU, confidence and class name."""
+    as every read door projects one (:func:`~tcip_annotation.json_io.client_annotation`, which
+    carries its ``subject`` and ``score``), with its tag, IoU and indices."""
     return (
-        [{**client_annotation(preds[m["pred_idx"]]), "tag": "tp", "class_name": m["class_name"],
-          "iou": m["iou"], "confidence": m["conf"], "gt_idx": m["gt_idx"],
-          "pred_idx": m["pred_idx"]} for m in matches["tp"]]
-        + [{**client_annotation(preds[m["pred_idx"]]), "tag": "fp", "class_name": m["class_name"],
-            "confidence": m["conf"], "pred_idx": m["pred_idx"]} for m in matches["fp"]]
-        + [{**client_annotation(gt[m["gt_idx"]]), "tag": "fn", "class_name": m["class_name"],
-            "confidence": 0, "gt_idx": m["gt_idx"]} for m in matches["fn"]])
+        [{**client_annotation(preds[m["pred_idx"]]), "tag": "tp", "iou": m["iou"],
+          "gt_idx": m["gt_idx"], "pred_idx": m["pred_idx"]} for m in matches["tp"]]
+        + [{**client_annotation(preds[m["pred_idx"]]), "tag": "fp", "pred_idx": m["pred_idx"]}
+           for m in matches["fp"]]
+        + [{**client_annotation(gt[m["gt_idx"]]), "tag": "fn", "gt_idx": m["gt_idx"]}
+           for m in matches["fn"]])
 
 
 def _apply_governing_criterion(out: dict, records: list, *, trait: str | None,
@@ -241,9 +223,8 @@ def _evaluate_image(
     """Match predictions against ground truth for a single image (COCOeval).
 
     mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a per-box overlay the agent
-    can render for review (``compute_matches``); the Review tab's own GUI route reads
-    ``compute_matches`` directly rather than through this tool. With a count ``trait`` the
-    reported count is governed by the trait's derived criterion, map50 kept as comparability.
+    can render for review (``compute_matches``). With a count ``trait`` the reported count is
+    governed by the trait's derived criterion, map50 kept as comparability.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -283,13 +264,11 @@ def _evaluate_folder(
 ) -> dict:
     """Aggregate detection metrics across all images in a dataset.
 
-    Scores the logical images directly under ``images_dir`` plus those in each of its direct
-    bucket subdirectories (``images/<bucket>/``, the dataset layout), one level: a loose image
-    beside a dated bucket still scores, a ``.bandgroup``-grouped capture scores as one logical
-    image, and a folder nested inside a bucket is not itself a bucket, so it is not descended.
-    Two raw images sharing a case-folded stem in one bucket (different extensions, or a case
-    variant) are not two identities collapsed to one: ``list_logical_images`` refuses the whole
-    bucket for it, since one label document holds one record per stem and cannot represent two.
+    Scores the logical images directly under ``images_dir`` plus those in each of its direct bucket
+    subdirectories (``images/<bucket>/``, the dataset layout), one level: a loose image beside a
+    dated bucket still scores, a ``.bandgroup``-grouped capture scores as one logical image, and a
+    folder nested inside a bucket is not descended. A bucket holding two raw images under one
+    case-folded stem is refused by ``list_logical_images``.
     """
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 
@@ -308,7 +287,9 @@ def _evaluate_folder(
             images.extend(_logical_paths(bucket))
     images.sort()
 
-    from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
+    from tcip_mcp.pipelines.training.evaluation import (
+        coco_detection_metrics, records_from_annotation, subject_category_ids,
+    )
 
     collected = []  # (iou_type, record, (gt, preds), w, h, img)
     checked_bucket_dirs: set = set()
@@ -325,17 +306,8 @@ def _evaluate_folder(
     # per-image record into a single eval, so a subject must carry the same category id in every
     # image. Rebuild all records with it (the per-image records built by _load_image_annotations
     # used a per-image-local map, which would pool distinct subjects into one class across images).
-    global_names: list[str] = []
-    for (_it, _rec, (gt, preds), _w, _h, _img) in collected:
-        for a in (*gt, *preds):
-            # Same membership records_from_annotation applies when it builds the records this map
-            # keys: a geometry-less label and a Point produce no scorable box, so neither may mint a
-            # COCO category that no annotation ever lands in.
-            if not box_derivable(a.geometry):
-                continue
-            if a.subject not in global_names:
-                global_names.append(a.subject)
-    name_id = {n: i + 1 for i, n in enumerate(global_names)}
+    name_id = subject_category_ids(
+        a for (_it, _rec, (gt, preds), _w, _h, _img) in collected for a in (*gt, *preds))
     records = [records_from_annotation(gt, preds, width=w, height=h,
                                        force_segm=any_segm, name_id=name_id)[1]
                for (_it, _rec, (gt, preds), w, h, _img) in collected]
@@ -392,35 +364,28 @@ def score_predictions(
 ) -> dict:
     """Score on-disk predictions against on-disk ground truth (COCOeval).
 
-    Not an MCP tool: run through ``tcip score-predictions``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
-
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
-    per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``) for the
-    agent to render for review; a dataset directory returns aggregate metrics plus ``per_image``
-    TP/FP/FN. Both regimes share ``coco_detection_metrics``; no GUI route calls this function,
-    since the Review tab's own backend route reads ``compute_matches`` directly.
+    per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``); a
+    dataset directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes share
+    ``coco_detection_metrics``.
 
-    A classified bucket's predictions now carry the object class in ``subject`` (the same shape
-    ground truth carries), so this scores the localization of the object class, never the
-    classifier's own call: a valid number about finding the object, not about its confirmed state.
-    A prediction bucket whose own recorded stamp will not decode, or decodes with no
-    ``(subject, attribute)`` pair at all (a pre-conform classified bucket), refuses by name rather
-    than silently scoring its value-keyed records as if they were object classes.
+    A classified bucket's predictions carry the object class in ``subject``, so this scores the
+    localization of the object class, never the classifier's own call. A prediction bucket whose
+    own recorded stamp will not decode, or decodes with no ``(subject, attribute)`` pair at all,
+    refuses by name.
 
     Args:
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
         conf_threshold: Minimum confidence to consider a prediction.
         detail: Single-image only, also return the per-detection ``detections`` breakdown: each
-            entry the annotation it names in the one client projection every read door returns
-            (``client_annotation``: corner ``bbox``, ``rings`` or ``point``, ``subject``,
-            ``attributes``, ``iscrowd``, ``score`` and the provenance it holds) beside its
-            ``tag``, ``class_name``, ``confidence``, ``iou`` and indices.
+            entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,
+            ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and the
+            provenance it holds) beside its ``tag``, ``iou`` and indices.
         trait: When set, the trait's derived localization criterion governs the reported TP/FP/FN
-            count; map50 stays a labeled comparability metric. Absent -> the IoU convention governs.
+            count; map50 stays a labeled comparability metric. Absent -> the IoU convention
+            governs.
     """
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated
     from tcip_store import StoreError
 
     p = Path(path)
@@ -429,7 +394,7 @@ def score_predictions(
             return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
         if p.is_dir():
             return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
-    except (UnreadableLabelDocument, StampScopeUnstated, StoreError) as exc:
+    except (UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
     return {"error": f"Path not found: {path}"}
 
@@ -443,46 +408,35 @@ def write_subject_registry(
     """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
 
     ``subjects`` is the nested registry mapping the expert defines, subjects to their
-    ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` | ``ordinal``
-    with ordered ``values``). It is validated through :func:`subject_registry.registry_from_dict` (a
-    malformed shape refuses loudly) and written to ``<dataset_root>/subjects.json`` via
-    :func:`subject_registry.replace_registry`, which reads the current version and passes it straight
-    back in as that same call's own ``expect``. This call holds no version of its own to carry, the
-    way the GUI holds the one its last load returned: the read and the put happen back to back
-    inside this one call, so it guards only the store's own window between them, never a window
-    open before this call was made. A GUI edit landing in that earlier window that drops no
-    declared name is not caught by the by-name refusal and is silently overwritten by this write;
-    only a dropped name, an empty registry, or undecodable stored bytes are ever refused. No
-    numeric class ids, no colors, no id enumeration: a label-scan cannot infer an attribute's type
-    or rank, the expert's fact is the input here.
+    ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` |
+    ``ordinal`` with ordered ``values``). It is validated through
+    :func:`subject_registry.registry_from_dict` (a malformed shape refuses) and written to
+    ``<dataset_root>/subjects.json`` via :func:`subject_registry.replace_registry`, which reads the
+    current version and passes it back in as that same call's own ``expect``, so it guards only the
+    store's own window between the read and the put. No numeric class ids, no colors, no id
+    enumeration.
 
-    A write that would drop a subject, attribute or attribute value the stored registry declares
-    is refused (labels or confirmations may still reference the dropped name) unless
-    ``allow_removals`` is set, which states the removal as deliberate; the same flag also allows
-    replacing a stored registry whose bytes will not decode, since that is this tool's own repair
-    door. A write that keeps an attribute's name and values but changes its ``type`` (categorical
-    to ordinal or back) is refused independently of ``allow_removals`` (a type flip drops no
-    name) unless ``allow_type_changes`` is set: the flip reinterprets every recorded value of that
-    attribute, on confirmed and unconfirmed images alike, without a single record changing, and
-    landing it quarantines the finished statuses under the subject the same way a value change
-    does.
+    A write that would drop a subject, attribute or attribute value the stored registry declares is
+    refused unless ``allow_removals`` is set; the same flag also allows replacing a stored registry
+    whose bytes will not decode. A write that keeps an attribute's name and values but changes its
+    ``type`` (categorical to ordinal or back) is refused independently of ``allow_removals`` unless
+    ``allow_type_changes`` is set; landing it quarantines the finished statuses under the subject
+    the same way a value change does.
 
-    Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
-    so once the new registry lands, the outgoing digest is recorded onto that subject's still-
-    unstamped confirmations; they then read as predating the change rather than as made under the
-    new vocabulary. What was stamped, and any warning if the sweep could not complete, comes back
-    under ``schema_change_sweep``.
+    Once a new registry that changes a subject's attribute vocabulary lands, the outgoing digest is
+    recorded onto that subject's still-unstamped confirmations. What was stamped, and any warning
+    if the sweep could not complete, comes back under ``schema_change_sweep``.
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
         output_path: Optional explicit path whose directory, not its file name, is what the write
-            is keyed by (``_registry_key``); the write always lands at ``<directory>/subjects.json``
-            regardless of what file name is given here.
+            is keyed by (``_registry_key``); the write always lands at
+            ``<directory>/subjects.json``.
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
-            deliberate removal/repair rather than refusing it.
+            deliberate removal/repair.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
-            back) as deliberate rather than refusing it.
+            back) as deliberate.
     """
     from tcip_store import VersionConflict
 

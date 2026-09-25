@@ -174,7 +174,7 @@ def _persist_synthetic_mapping(
         name=name, project_root=str(project_root), dataset_root=str(dataset_root),
         dataset_id=dataset_id, built_by="build_plant_mapping",
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
-        dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": registry_name, "digest": registry_digest},
         capture_identity={d: "0" * 16 for d in assignments},
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
@@ -315,7 +315,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     build = MappingBuild(
         name="m", project_root="/p", dataset_root="/p/ds", dataset_id="ds-1",
         built_by="test", built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
-        dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={DATE: "0" * 16}, capture_digests={DATE: {}}, unreadable={DATE: []},
         assignments={DATE: [blank, named]},
@@ -332,7 +332,7 @@ def _validate_delivery_buckets(
 ) -> list[str]:
     """Bind a genuinely validated operating_point and classifier_operating_point sidecar onto
     every bucket a delivery names, all naming one shared producing run, so a delivery earns its
-    result the way the door requires rather than through the acknowledgement it no longer takes.
+    result the way the door requires rather than through the acknowledgment it no longer takes.
     Mirrors ``test_second_trait_acceptance._currant_bloom_fixture``'s own validated branch, over
     buckets this module's own ``_write_scene`` already wrote. Returns the bucket paths, so a
     caller can pass them straight through as ``classifier_pred_dirs``.
@@ -548,6 +548,6 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
 
     registry = register_plant_registry_for([plant_csv])
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        name="valley", images_root=str(images_root), plant_registry=registry, nn_tolerance_m=10.0)
     assert "error" not in res, res
     assert res["n_mapped"] == 1

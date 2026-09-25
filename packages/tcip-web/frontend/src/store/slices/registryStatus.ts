@@ -7,7 +7,7 @@ import type { ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 
 interface RegistryState {
   /** The dataset's nested subject registry (subject -> {description?, attributes?}). No integer
-   *  ids, no colours: colour is GUI-local (see subjectColor). Source of truth for the subject
+   *  ids, no colors: color is GUI-local (see subjectColor). Source of truth for the subject
    *  picker and per-instance attribute editing. */
   subjects: Registry;
   /** Set after the first successful load for the current dataset. */

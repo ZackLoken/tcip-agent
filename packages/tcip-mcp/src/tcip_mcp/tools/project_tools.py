@@ -62,44 +62,12 @@ def dataset_registry_key(project_root: str | Path) -> Key:
     return Key(DATASET_REGISTRY_STORE, str(Path(project_root).absolute()), _DATASET_REGISTRY_PARTS)
 
 
-def _registry_entries(document: object) -> list[dict]:
-    """The registry's entries, from a document that decoded: the one normalization both the
-    reader and the upsert share, so they cannot disagree about what a non-list document means."""
-    return document if isinstance(document, list) else []
-
-
 def read_datasets(project_root: str | Path) -> list[dict]:
     """The project's dataset registry (``[{id, path, crop, fingerprint}]``), or [] when absent.
 
-    A registry present but undecodable raises rather than reading as empty: an empty answer
-    here would make the next :func:`upsert_dataset` write a list holding one entry and drop
-    every other dataset identity the project had recorded. An entry carrying a non-null
-    ``fingerprint`` that names no formula version (a bare value from before the ``v<n>:`` prefix
-    existed) refuses by id, naming re-registration through ``register_dataset`` as the remedy,
-    rather than serving it as that dataset's current identity.
+    A registry present but undecodable raises rather than reading as empty.
     """
-    from tcip_mcp.pipelines.data.dataset_fingerprint import fingerprint_formula_version
-
-    entries = _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
-    for entry in entries:
-        fingerprint = entry.get("fingerprint")
-        if fingerprint is not None and fingerprint_formula_version(fingerprint) is None:
-            raise ValueError(
-                f"dataset registry entry {entry.get('id')!r} under {project_root} carries a "
-                f"fingerprint {fingerprint!r} that names no formula version; re-register it "
-                "through register_dataset to bring it to the current shape")
-    return entries
-
-
-def read_datasets_raw(project_root: str | Path) -> list[dict]:
-    """The project's dataset registry entries, whatever fingerprint each one states, never
-    refusing on a bare pre-prefix value the way :func:`read_datasets` does.
-
-    For a caller whose job is fixing or diagnosing that very value (re-registering through
-    ``register_dataset``, or ``tcip check-dataset-identity``) rather than serving it as a
-    dataset's current identity.
-    """
-    return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
+    return tcip_store.read(dataset_registry_key(project_root), default=[])
 
 
 def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str:
@@ -107,16 +75,10 @@ def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str
     ``dataset_root`` is that root or sits under it, the project's own tree becoming ``"."``;
     absolute otherwise, and a ``".."`` form is never produced.
 
-    Containment is decided by filesystem identity (``os.path.samefile`` over the resolved
-    dataset root's own ancestors), never a string or ``Path.relative_to`` comparison on the
-    caller's own spellings, so a case variant, an alias or a junction of either root reads
-    exactly as the filesystem sees it. One implementation, called only by
-    :func:`register_dataset`, so a registered project's stored path can never disagree with what
-    registration itself would produce. Absolute (unchanged) whenever either side is not
-    an existing directory: there is nothing to compare a missing path against. A relative form
-    is stored with POSIX separators (``as_posix()``), so a nested dataset's entry (a deeper
-    relative form than the project's own ``"."``) reads the same after a cross-machine move;
-    :func:`dataset_entry_path` resolves it back by posix parts.
+    Containment is decided by filesystem identity (``os.path.samefile`` over the resolved dataset
+    root's own ancestors), so a case variant, an alias or a junction of either root reads exactly
+    as the filesystem sees it. Absolute (unchanged) whenever either side is not an existing
+    directory. A relative form is stored with POSIX separators (``as_posix()``).
     """
     from tcip_mcp.registry_paths import nearest_containing_ancestor
 
@@ -134,36 +96,25 @@ def entry_is_external(entry: dict) -> bool:
     """Whether this registry entry names a dataset outside the project's own tree.
 
     An external dataset is the one kind :func:`registry_path_for` stores absolute; every other
-    entry is the project's own tree or a directory under it, stored relative. The one spelling
-    of this test, so a caller asking "is this dataset external" agrees with the writer's own
-    rule rather than re-deriving it. Grammar-aware (:func:`~tcip_mcp.registry_paths.is_external_form`)
-    rather than ``Path.is_absolute()`` alone, so a Windows drive or UNC spelling reads as
-    external whichever platform reads it.
+    entry is the project's own tree or a directory under it, stored relative. Grammar-aware
+    (:func:`~tcip_mcp.registry_paths.is_external_form`), so a Windows drive or UNC spelling reads
+    as external whichever platform reads it.
     """
-    path = entry.get("path")
-    if not path:
-        return False
     from tcip_mcp.registry_paths import is_external_form
 
-    return is_external_form(str(path))
+    return is_external_form(str(entry["path"]))
 
 
 def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
-    """The absolute path a dataset registry ``entry`` names, resolving a relative ``path``
-    (the project's own tree, stored ``"."`` or a deeper relative form by
-    :func:`registry_path_for`) against ``project_root``; an already-absolute ``path`` (an
-    external dataset) is returned unchanged.
+    """The absolute path a dataset registry ``entry`` names, resolving a relative ``path`` (the
+    project's own tree, stored ``"."`` or a deeper relative form by :func:`registry_path_for`)
+    against ``project_root``; an already-absolute ``path`` (an external dataset) is returned
+    unchanged.
 
-    The one place a registry entry's location becomes a path: every reader of
-    :func:`read_datasets` calls this rather than re-deriving the resolution, so a project's own
-    relative entry and an external dataset's absolute one are handled identically wherever the
-    registry is read. A relative ``path`` is joined by its POSIX parts (``registry_path_for``'s
-    own storage form) rather than as a native path string, so a nested entry resolves the same
-    whichever platform wrote or reads it.
+    A relative ``path`` is joined by its POSIX parts, so a nested entry resolves the same whichever
+    platform wrote or reads it.
     """
-    path = entry.get("path")
-    if not path:
-        raise ValueError(f"dataset registry entry {entry!r} carries no path")
+    path = entry["path"]
     if entry_is_external(entry):
         return Path(path)
     return Path(project_root).joinpath(*PurePosixPath(path).parts)
@@ -178,7 +129,7 @@ def upsert_dataset(project_root: str | Path, entry: dict) -> None:
     """
     key = dataset_registry_key(project_root)
     with tcip_store.transaction(key) as txn:
-        regs = [r for r in _registry_entries(txn.read(key, default=[]))
+        regs = [r for r in txn.read(key, default=[])
                 if r.get("id") != entry.get("id")]
         regs.append(entry)
         txn.write(key, sorted(regs, key=lambda r: str(r.get("id", ""))))
@@ -189,45 +140,39 @@ def upsert_dataset(project_root: str | Path, entry: dict) -> None:
 def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> dict:
     """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
 
-    Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the data)
-    and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the human's fact and
-    is required, never inferred from a path or slug. ``id`` is minted once and preserved across
-    re-runs and path moves; ``fingerprint`` is the whole-dataset content digest (labels + image pixels
-    + registry + confirmed negatives), recomputed here, but the stored value is a cache, and
-    recompute-on-read (``dataset_fingerprint.dataset_fingerprint``) is the authority.
+    Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the
+    data) and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the
+    human's fact and is required, never inferred from a path or slug. ``id`` is minted once and
+    preserved across re-runs and path moves; ``fingerprint`` is the whole-dataset content digest
+    (labels + image pixels + registry + confirmed negatives), recomputed here, but the stored value
+    is a cache, and recompute-on-read (``dataset_fingerprint.dataset_fingerprint``) is the
+    authority.
 
-    The identity write is compare-and-set against the version this call read, so two first-time
-    registrations cannot each mint an id and leave the loser's id cited by records the winner's
-    document no longer names. A conflict re-reads what committed and keeps the id it carries, and
-    the project registry is reconciled against that committed id rather than the one this call
-    proposed.
+    The identity write is compare-and-set against the version this call read. A conflict re-reads
+    what committed and keeps the id it carries, and the project registry is reconciled against that
+    committed id rather than the one this call proposed.
 
-    The registry's stored ``path`` (see :func:`registry_path_for`) is relative to
-    ``project_root`` whenever the dataset sits under it, the project's own tree becoming
-    ``"."``; a genuinely external dataset stays absolute. A relative entry resolves at whatever
-    path the project itself is opened from, so a project archived and imported elsewhere, or
-    renamed in place, needs no operator rewrite of its own registry.
+    The registry's stored ``path`` (see :func:`registry_path_for`) is relative to ``project_root``
+    whenever the dataset sits under it, the project's own tree becoming ``"."``; a genuinely
+    external dataset stays absolute. A relative entry resolves at whatever path the project itself
+    is opened from.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``subjects.json``).
-        crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
+        crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
+            expert's fact.
         project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
     """
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import decode_dataset_identity_document, dataset_identity_key
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.subject_registry import retired_document
 
     root = Path(dataset_root)
     if not root.is_dir():
         return {"error": f"dataset_root not found: {dataset_root}"}
     if not crop:
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
-    stale = retired_document(root)
-    if stale is not None:
-        return {"error": f"{root} still carries the retired registry at {stale}; rename it to "
-                          "subjects.json by hand before registering this dataset"}
 
     ident_key = dataset_identity_key(root)
     try:
@@ -272,15 +217,12 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
 def _scaffold_project(project_path: str, site: str) -> dict:
     """Create ``.tcip/`` with its artifacts and models directories, and record the project's site.
 
-    The internals of :func:`initialize_project`, factored out so other tools that
-    stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
-    instead of re-implementing it. The directories are idempotent: re-running only re-mkdirs.
+    The directories are idempotent: re-running only re-mkdirs.
 
-    ``site`` is validated before anything is created, so a refused site leaves nothing on disk,
-    the same as the name-scheme refusal each door already holds to. The site is then written
-    last, by :func:`tcip_mcp.project_record.record_site`, a create-only write: an absent record
-    is written, a present record with the same site is left as is, and a present record with a
-    different or unreadable site raises (``ValueError`` or ``StoreError``, per
+    ``site`` is validated before anything is created, so a refused site leaves nothing on disk. The
+    site is then written last, by :func:`tcip_mcp.project_record.record_site`, a create-only write:
+    an absent record is written, a present record with the same site is left as is, and a present
+    record with a different or unreadable site raises (``ValueError`` or ``StoreError``, per
     :func:`~tcip_mcp.project_record.record_site`'s own contract).
     """
     from tcip_mcp.project_record import record_site, validate_site
@@ -302,7 +244,7 @@ def _scaffold_project(project_path: str, site: str) -> dict:
 @mcp.tool()
 @audited
 def initialize_project(project_path: str, site: str) -> dict:
-    """Initialise a TCIP project directory.
+    """Initialize a TCIP project directory.
 
     Creates ``.tcip/`` with its artifacts and models directories and records the project's
     site. When ``project_path`` is directly under the workspace, its basename must fit
@@ -338,17 +280,15 @@ def initialize_project(project_path: str, site: str) -> dict:
 def activate_project(name: str) -> dict:
     """Set the workspace's active project so the GUI opens it.
 
-    Writes the workspace active-project marker (``<workspace>/.active``) and notifies a
-    running GUI to open the project: the loop-closer for the breeder flow ("I structured
-    your images into ``<crop>_<subject>_<phenotype>``, opening it now"). ``name`` is an
-    existing workspace project's directory name; adoption opens what is there rather than
-    creating anything, so any safely-named project is adoptable, conforming or not.
+    Writes the workspace active-project marker (``<workspace>/.active``) and notifies a running GUI
+    to open the project. ``name`` is an existing workspace project's directory name; adoption opens
+    what is there rather than creating anything, so any safely-named project is adoptable,
+    conforming or not.
 
-    The notification also carries whether the web backend repinned its own platform-state
-    root on it (``backend_repinned``, a bool), the root it repinned to (``backend_platform_root``),
-    or why it could not (``backend_root_problem``): when the backend is down or the delivery
-    fails, ``backend_repinned`` is ``False`` and the other two are ``None``, since it will bind
-    from the marker at its own next start regardless.
+    The notification also carries whether the web backend repinned its own platform-state root on
+    it (``backend_repinned``, a bool), the root it repinned to (``backend_platform_root``), or why
+    it could not (``backend_root_problem``): when the backend is down or the delivery fails,
+    ``backend_repinned`` is ``False`` and the other two are ``None``.
 
     Args:
         name: The workspace project to make active.
@@ -385,21 +325,15 @@ def _resolve_project_path(project_path: str) -> str:
 
 
 def _root_divergence_report() -> dict[str, str] | None:
-    """Whether this process's platform-state root disagrees with the workspace's
-    active-project marker.
+    """Whether this process's platform-state root disagrees with the workspace's active-project
+    marker.
 
-    Adopting a project repins the *adopting process's own* ``TCIP_STATE_ROOT`` at once
-    (``workspace.activate_project``); a separate process converges only when it itself binds
-    from the marker, at its own startup or (the web backend) on the agent's adopt signal, so
-    this process's root can keep naming a stale or different project until then.
-    ``None`` when there is no marker, the marker names an adoptable project this process's
-    root already matches, or the two agree. Carries ``marker_problem`` when the marker could
-    not be used at all: a store refusal, a lock timeout, or a name
-    :func:`tcip_mcp.workspace.adoptable_project_root` refuses to open, reported here rather
-    than raised out of ``inspect_project``.
+    ``None`` when there is no marker, the marker names an adoptable project this process's root
+    already matches, or the two agree. Carries ``marker_problem`` when the marker could not be used
+    at all: a store refusal, a lock timeout, or a name
+    :func:`tcip_mcp.workspace.adoptable_project_root` refuses to open.
 
-    Reads with ``create=False`` so this check, run on every ``inspect_project`` call, cannot
-    bring the workspace directory into existence as a side effect.
+    Reads with ``create=False``, so it never brings the workspace directory into existence.
     """
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import platform_state_root
@@ -473,23 +407,20 @@ def inspect_project(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 
     Carries ``platform_root_diverges_from_marker`` when this process's platform-state root
-    (``$TCIP_STATE_ROOT``) names a different project than the workspace's active-project
-    marker: adoption repins only the adopting process, so the GUI and this process can end
-    up naming different projects until both explicitly adopt. Carries
-    ``platform_root_binding``, this process's own :class:`tcip_mcp.project_paths.RootBinding`
-    as a dict, when either :func:`tcip_mcp.project_paths.pin_platform_root` or
-    :func:`tcip_mcp.project_paths.repin_platform_root` has run: absent under pytest until a
-    ``activate_project`` call repins, and absent for any other standalone use, since none of
-    those call either.
+    (``$TCIP_STATE_ROOT``) names a different project than the workspace's active-project marker.
+    Carries ``platform_root_binding``, this process's own
+    :class:`tcip_mcp.project_paths.RootBinding` as a dict, when either
+    :func:`tcip_mcp.project_paths.pin_platform_root` or
+    :func:`tcip_mcp.project_paths.repin_platform_root` has run.
 
     For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
     ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why
-    there is no site (no record yet, a damaged one, or a root the store refuses to read). ``plant_
-    mappings`` carries every mapping name persisted under the project, the same shape:
+    there is no site (no record yet, a damaged one, or a root the store refuses to read).
+    ``plant_mappings`` carries every mapping name persisted under the project, the same shape:
     ``plant_mappings_problem`` names why the listing came back empty when the root's state is a
     store the bound backend refuses to read (a root still in the loose-file layout under the
-    database default), rather than raising and taking the whole overview down with it. A path
-    with no ``.tcip`` carries neither, the same as it carries no other live-computed field.
+    database default). A path with no ``.tcip`` carries neither, the same as it carries no other
+    live-computed field.
 
     Args:
         project_path: Root directory of the project. Empty defaults to the active project.
@@ -558,10 +489,8 @@ def inspect_project(project_path: str = "") -> dict:
 
 
 def _recent_activity(project_path: str) -> dict:
-    """The project's persisted status summary (recent report/retrospective/distillation
-    activity), namespaced separately from the live-computed fields above it so a caller can tell
-    freshly-computed-this-call fields from read-from-the-status-store ones, which may be stale or
-    corrupt.
+    """The project's persisted status summary (recent report/retrospective/distillation activity),
+    namespaced separately from the live-computed fields above it; it may be stale or corrupt.
     """
     from tcip_mcp.project_status import read_project_status
 
@@ -582,13 +511,8 @@ def _store_databases(root: Path) -> list[Path]:
 
 
 def _export_stores(root: Path) -> None:
-    """Write every database under this tree back out as files, the way an archive bundles state.
-
-    Every record and log store of every database under the tree, not only the ones the doctor
-    reads: an archive ships audit logs, experiment members and registry state too, and a bundle
-    whose confirmed negatives restore as absent is the failure this exists to prevent. So the
-    doors that create a project (which write the project record through a database) archive
-    without an operator having run ``tcip export-store`` first.
+    """Write every record and log store of every database under this tree back out as files, the
+    way an archive bundles state.
     """
     from tcip_store.export import export_root
 
@@ -610,8 +534,7 @@ def _database_counters(root: Path) -> dict[tuple[str, str], int]:
 def _write_bundle_zip(out: Path, root: Path, members: list[Path]) -> int:
     """Write ``members`` (each an absolute path under ``root``) into ``out`` as a ZIP.
 
-    Removes ``out`` on any failure, since a partial ZIP is worse than none: a caller reading it
-    back would see a subset of the bundle with no signal that it is incomplete.
+    Removes ``out`` on any failure.
     """
     files_added = 0
     try:
@@ -627,10 +550,10 @@ def _write_bundle_zip(out: Path, root: Path, members: list[Path]) -> int:
 
 def _write_bundle_directory(out_dir: Path, root: Path, members: list[Path]) -> tuple[int, int]:
     """Write ``members`` (each an absolute path under ``root``) into ``out_dir`` as the identical
-    tree, preserving each member's path relative to ``root``. Returns ``(files_added, size_bytes)``.
+    tree, preserving each member's path relative to ``root``. Returns ``(files_added,
+    size_bytes)``.
 
-    Removes ``out_dir`` on any failure, the directory-tree counterpart of ``_write_bundle_zip``'s
-    own cleanup: a caller must never read a partial bundle as if it were whole.
+    Removes ``out_dir`` on any failure.
     """
     files_added = 0
     size_bytes = 0
@@ -655,52 +578,42 @@ def archive_project(
     """Export an annotation project as a portable bundle: a ZIP file, or, given ``output_dir``
     instead of ``output_path``, the identical bundle written as a directory tree.
 
-    Not an MCP tool: run through ``tcip archive-project``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
-
     Composes the bundle from the shared membership accounting
-    (:func:`tcip_mcp.tools.bundle.account_for`), the same one ``import_project`` judges by: every
-    record or log a derived root of this tree claims (images under ``<root>/images/<date>/``,
-    ground truth under ``<root>/annotations/<date>/<stem>.json``, the nested registry
-    ``<root>/subjects.json``, ``.tcip`` state, experiments, sweeps and their claimed manifests),
-    plus every recognized blob home. ``include_models`` narrows checkpoint blobs wherever
-    :func:`~tcip_mcp.tools.bundle.blob_home` recognizes one (a registry-named path, ``.tcip/models``,
-    or a ``.pt`` file shaped as a run's own under ``.tcip/experiments``); a bespoke run's
-    ``model_src/`` snapshot travels regardless, since ``blob_home`` classifies it before either
-    checkpoint clause, one membership statement with one producer-side option, not two.
+    (:func:`tcip_mcp.tools.bundle.account_for`): every record or log a derived root of this tree
+    claims (images under ``<root>/images/<date>/``, ground truth under
+    ``<root>/annotations/<date>/<stem>.json``, the nested registry ``<root>/subjects.json``,
+    ``.tcip`` state, experiments, sweeps and their claimed manifests), plus every recognized blob
+    home. ``include_models`` narrows checkpoint blobs wherever
+    :func:`~tcip_mcp.tools.bundle.blob_home` recognizes one (a registry-named path,
+    ``.tcip/models``, or a ``.pt`` file shaped as a run's own under ``.tcip/experiments``); a
+    bespoke run's ``model_src/`` snapshot travels regardless.
 
-    Exactly one of ``output_path``/``output_dir`` must be given, since each names a different
-    container for the one bundle this door composes: neither is a documented default the door
-    would otherwise guess. ``output_dir`` refuses a destination inside ``project_path`` (a bundle
-    cannot contain the tree it was drawn from) and a destination that already holds anything, the
-    same non-merge rule ``import_project`` holds its own ``destination`` to.
+    Exactly one of ``output_path``/``output_dir`` must be given. ``output_dir`` refuses a
+    destination inside ``project_path`` (a bundle cannot contain the tree it was drawn from) and a
+    destination that already holds anything.
 
-    Every database under the tree is exported to its loose files first, through the same
-    :func:`tcip_store.export.export_root` ``tcip export-store`` uses, so a project either
-    creating door stood up (which writes the project record through a database) archives without
-    an operator having run that command by hand. The archive refuses only when that export fails,
-    a store becomes unreadable, or a split/curated manifest sits somewhere the derivation
-    constraints exclude, never merely because a database was behind.
+    Every database under the tree is exported to its loose files first, through
+    :func:`tcip_store.export.export_root`. The archive refuses only when that export fails, a store
+    becomes unreadable, or a split/curated manifest sits somewhere the derivation constraints
+    exclude.
 
-    ``left_behind`` names what this door declined to bundle, per class: ``unaccounted`` (a
-    render cache, Ray's own experiment store, tensorboard events, any other stray no store or
-    blob home claims), ``bookkeeping`` (a live tree's own transient bookkeeping, e.g. a lock
-    file mid-write), and ``checkpoints_excluded`` (every checkpoint blob ``blob_home`` recognizes,
-    dropped by ``include_models=False``), so the narrowing is disclosed rather than silent.
+    ``left_behind`` names what this door declined to bundle, per class: ``unaccounted`` (a render
+    cache, Ray's own experiment store, tensorboard events, any other stray no store or blob home
+    claims), ``bookkeeping`` (a live tree's own transient bookkeeping, e.g. a lock file mid-write),
+    and ``checkpoints_excluded`` (every checkpoint blob ``blob_home`` recognizes, dropped by
+    ``include_models=False``).
 
     ``size_bytes`` in the response means one thing under ``output_path`` (the written ZIP's own
     compressed byte count, ``stat().st_size`` on the archive) and a different thing under
-    ``output_dir`` (the sum of the copied members' own uncompressed byte counts, since a
-    directory tree has no single file to size); which one the caller is reading is decided by
-    which of ``output_dir``/``output_path`` the response carries.
+    ``output_dir`` (the sum of the copied members' own uncompressed byte counts); which one the
+    caller is reading is decided by which of ``output_dir``/``output_path`` the response carries.
 
     Args:
         project_path: Root directory of the project.
         output_path: Destination path for the ZIP file. A relative path resolves against the
-            platform state root, which is not necessarily ``project_path``, never the server
-            process's cwd.
-        output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP;
-            the same path-resolution rule as ``output_path``.
+            platform state root, which is not necessarily ``project_path``.
+        output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP; the
+            same path-resolution rule as ``output_path``.
         include_models: Whether to include model checkpoints (can be large).
     """
     if output_path and output_dir:
@@ -747,20 +660,12 @@ def archive_project(
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.model_registry import RegistryVersionRefused
-    from tcip_mcp.tools.bundle import (
-        BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home, retired_registry_document,
-    )
+    from tcip_mcp.tools.bundle import BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home
 
     try:
         accounting = account_for(root)
     except (AnchorMisplaced, RegistryVersionRefused, SchemaVersionRefused) as exc:
         return {"error": str(exc)}
-
-    stale = retired_registry_document(accounting)
-    if stale is not None:
-        return {"error": f"{root} still carries the retired registry at {stale}; rename it to "
-                          "subjects.json by hand so the archive carries the document that "
-                          "decodes its labels"}
 
     # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
     is_checkpoint = {
@@ -835,12 +740,9 @@ _IMPORTS_DIRNAME = ".imports"
 def _extract_zip(zp: Path, staging: Path) -> int:
     """Extract every member of ``zp`` into ``staging``, refusing a path that would escape it.
 
-    ``staging`` is this run's own private directory (a fresh uuid under ``.imports``), so a
-    zip-slip refusal here still leaves the destination untouched: nothing has been written there.
-    Escape is decided by containment (``Path.relative_to``), never a string prefix: a member
-    resolving to a sibling directory that merely shares ``staging``'s name as a prefix (e.g. an
-    entry naming ``../<staging.name>extra/evil.txt``) is outside ``staging`` and refuses, where a
-    prefix comparison would have read it as contained.
+    ``staging`` is this run's own private directory (a fresh uuid under ``.imports``), so a refusal
+    here leaves the destination untouched. Escape is decided by containment (``Path.relative_to``),
+    never a string prefix.
     """
     files_extracted = 0
     with zipfile.ZipFile(str(zp), "r") as zf:
@@ -867,12 +769,10 @@ def _extract_zip(zp: Path, staging: Path) -> int:
 def _stage_bundle(source: Path, staging: Path) -> int:
     """Stage ``source`` into ``staging``, whichever container it arrived in.
 
-    One bundle layout, two containers: a directory bundle's whole tree is copied, member by
-    member, into a ZIP written to the system temp directory (``tempfile.TemporaryDirectory``,
-    removed once this call returns), then handed to :func:`_extract_zip`, the same walker (and
-    the same zip-slip containment check) a ZIP bundle goes through, rather than a second
-    tree-copying implementation that could drift from it. A directory's own empty subdirectories
-    carry no member either way, matching a ZIP archive built with no directory entries.
+    A directory bundle's whole tree is copied, member by member, into a ZIP written to the system
+    temp directory (``tempfile.TemporaryDirectory``, removed once this call returns), then handed
+    to :func:`_extract_zip`. A directory's own empty subdirectories carry no member either way,
+    matching a ZIP archive built with no directory entries.
     """
     if not source.is_dir():
         return _extract_zip(source, staging)
@@ -908,12 +808,8 @@ def _sweep_free_locked_leftovers(imports_root: Path) -> None:
 
 
 def _remove_staged_bookkeeping(staged: Path) -> None:
-    """Remove adoption's own transition-lock files left inside the staged tree.
-
-    Only the ``.lock`` sidecars: they linger only on POSIX (``filelock`` deletes its file on
-    release under Windows), and are bookkeeping the membership accounting would never bundle, but
-    the database file itself (``store.db``, just built) must ride the rename into the
-    destination, not be swept away as bookkeeping alongside its own lock.
+    """Remove adoption's own transition-lock files (the ``.lock`` sidecars) left inside the staged
+    tree; the database file itself stays.
     """
     for path in staged.rglob("*.lock"):
         if path.is_file():
@@ -923,9 +819,7 @@ def _remove_staged_bookkeeping(staged: Path) -> None:
 def _adopt_accounted_roots(accounting) -> dict[str, int]:
     """Adopt every derived root whose plan has at least one entry; skip an empty one.
 
-    ``adopt_root`` has no empty-plan guard of its own and would install an empty database that
-    permanently refuses file-backend writes at that root, so the guard lives here. Returns the
-    adopted-entry count per root path, for the response.
+    Returns the adopted-entry count per root path, for the response.
     """
     from tcip_store.adoption import adopt_root
 
@@ -941,10 +835,8 @@ def _adopt_accounted_roots(accounting) -> dict[str, int]:
 def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float) -> None:
     """Rename the staged tree onto ``dest``, re-checking emptiness immediately before the rename.
 
-    Reuses the repo's own denial-retry helper (``tcip_store.file_backend.retry_while_denied``):
-    on Windows a transient handle from a scanner or indexer denies a bare ``os.rename``. Both the
-    empty-destination removal and the rename itself run under its budget, so a retry that lands
-    after another process's own removal does not try to remove an already-absent directory.
+    Both the empty-destination removal and the rename itself run under
+    ``tcip_store.file_backend.retry_while_denied``'s budget.
     """
     from tcip_store.file_backend import retry_while_denied
 
@@ -959,8 +851,7 @@ def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float
 
 
 class StoreErrorRuntime(RuntimeError):
-    """Raised inside the retried move body; caught once, outside the retry, as an ordinary
-    tool refusal rather than a second bespoke exception type callers must know about."""
+    """Raised inside the retried move body; caught outside the retry as a tool refusal."""
 
 
 @audited
@@ -968,57 +859,37 @@ def import_project(bundle_path: str, destination: str) -> dict:
     """Import an annotation project from a bundle ``archive_project`` wrote: a ZIP archive, or a
     directory tree written by its ``output_dir`` mode.
 
-    Not an MCP tool: run through ``tcip import-project``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+    A directory bundle is staged through the identical walker a ZIP bundle is
+    (:func:`_stage_bundle`), so the two are read back exactly alike below this point.
 
-    One bundle layout, two containers: a directory bundle is staged through the identical walker
-    a ZIP bundle is (:func:`_stage_bundle`), so the two are read back exactly alike below this
-    point, member-classification, registry conform, and adoption included.
+    The door extracts into a private staging directory, classifies every member through the shared
+    bundle accounting (:func:`tcip_mcp.tools.bundle.account_for`), refuses the whole import naming
+    each bookkeeping, cross-root-collided, undecodable or unaccounted member, then adopts what is
+    left into a database when this process is bound to the database backend (skipping any derived
+    root whose plan is empty) or leaves the loose layout as is under the file backend, and only
+    then renames the staged tree onto ``destination``.
 
-    Not a writer of any format but one, the model registry index's own on-disk conform below:
-    the door extracts into a private staging directory, classifies every member through the
-    shared bundle accounting
-    (:func:`tcip_mcp.tools.bundle.account_for`), refuses the whole import naming each bookkeeping,
-    cross-root-collided, undecodable or unaccounted member, then adopts what is left into a
-    database when this process is bound to the database backend (skipping any derived root whose
-    plan is empty) or leaves the loose layout as is under the file backend, and only then renames
-    the staged tree onto ``destination``. A root imported under the default backend is therefore
-    usable at once, with no operator ``tcip adopt-store`` run; a root imported under the
-    file backend meets that command's own conform rail the same as any other unconformed layout.
-
-    ``destination`` must not already exist, or must be an empty directory: this door merges
-    nothing into a live project, since even adoption's supplement path would merge
-    archive-authored stores into state that never came from this archive. When ``destination`` is
-    directly under the workspace, its basename must fit ``crop_subject_phenotype``
-    (``workspace.format_project_name``/``parse_project_name``); a destination outside the
-    workspace is not a workspace project and is not held to the scheme.
+    ``destination`` must not already exist, or must be an empty directory: this door merges nothing
+    into a live project. When ``destination`` is directly under the workspace, its basename must
+    fit ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``); a
+    destination outside the workspace is not held to the scheme.
 
     A refusal at any step leaves the destination exactly as it was (absent, or its original empty
     state); the staging tree this run made is removed whether the run refused, raised, or
-    succeeded (a success has already moved it onto ``destination``, so removal there is a no-op).
+    succeeded.
 
-    Before accounting for the extracted tree, the model registry index is conformed in place,
-    directly against the extracted files
-    (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`; the extracted tree is
-    always loose files at this point regardless of which backend the process is bound to, since
-    adoption has not run yet): a bare top-level array wraps into the entries mapping and every
-    entry's ``checkpoint_path`` is respelled relative to the staging tree, so an archive carrying
-    absolute paths still lands with its weights loadable at the new location. Reading the raw
-    bytes directly, bypassing the seam's own schema_version ceiling check, this same conform also
-    accepts an index carrying a stray ``schema_version: 2``, which the seam's own entry point
-    refuses outright: this import door is the one place an archive carrying that stray value
-    still lands readable. A
-    conform refusal (an index this reader does not recognize at all) refuses the whole import
-    before anything is accounted for or moved, leaving the destination untouched.
+    Before accounting for the extracted tree, every model registry entry's ``checkpoint_path`` is
+    respelled relative to the staging tree
+    (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`). A registry that is not the
+    entries mapping refuses the whole import before anything is moved.
 
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
     registered datasets whose absolute path stayed verbatim because they are outside the imported
     tree), ``checkpoint_paths_unresolved`` (registered checkpoint paths that are supposed to
-    resolve under the destination and do not, since the model registry entry itself is never
-    rewritten by this door beyond the conform above), ``external_checkpoints`` (registered
-    checkpoints whose path is a designed-external claim, each with whether it currently exists),
-    and ``files_extracted``.
+    resolve under the destination and do not), ``external_checkpoints`` (registered checkpoints
+    whose path is a designed-external claim, each with whether it currently exists), and
+    ``files_extracted``.
 
     Args:
         bundle_path: Path to the ``.tcip.zip`` archive, or the directory tree written by
@@ -1085,7 +956,7 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     from tcip_mcp.model_registry import RegistryVersionRefused, conform_registry_paths_on_disk
     from tcip_mcp.tools.bundle import (
         AnchorMisplaced, account_for, blob_home, external_registered_checkpoints,
-        retired_registry_document, unresolved_registered_checkpoints,
+        unresolved_registered_checkpoints,
     )
 
     try:
@@ -1112,13 +983,6 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
         named = ", ".join(str(p.relative_to(tree)) for p in accounting.collisions)
         return {"error": f"{named} would be claimed by more than one derived root of this "
                          "project at once; refusing rather than guessing which one owns it"}
-    stale = retired_registry_document(accounting)
-    if stale is not None:
-        return {"error": f"{stale} is the retired registry, carried into the archive from "
-                         "before the subject-registry rename; rename it to subjects.json by "
-                         "hand at the extracted bundle's root and import the directory, or "
-                         "archive the source project again after renaming its own retired "
-                         "registry to subjects.json by hand"}
     if accounting.unaccounted:
         named = ", ".join(str(p.relative_to(tree)) for p in accounting.unaccounted)
         return {"error": f"the archive carries member(s) no store or blob home claims ({named}); "
@@ -1172,17 +1036,8 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
 
 
 def _external_dataset_paths(project_root: Path) -> list[str]:
-    """The imported project's own registered dataset entries that stay absolute (external),
-    disclosed rather than silently kept: the door never rewrites a dataset registry entry, only
-    the model registry's own checkpoint paths get a conform step (see :func:`import_project`).
-
-    Reads through :func:`read_datasets_raw`, never :func:`read_datasets`: this only needs each
-    entry's own path, not its current fingerprint identity, and a bare pre-prefix fingerprint
-    elsewhere in the extracted registry must not make the import door raise after extraction has
-    already run.
-    """
-    entries = read_datasets_raw(project_root)
-    return sorted(str(e["path"]) for e in entries if entry_is_external(e))
+    """The imported project's own registered dataset entries that stay absolute (external)."""
+    return sorted(str(e["path"]) for e in read_datasets(project_root) if entry_is_external(e))
 
 
 @mcp.tool()
@@ -1192,20 +1047,18 @@ def delete_stray_state_file(project_root: str, relative_path: str, reason: str) 
     ``stray_state.stray_state_files`` lists, and the doctor's own finding names, that no store
     claims, no blob home claims, and that is not the storage backend's own bookkeeping.
 
-    ``reason`` is required and non-empty: the confirmation with the person this destructive act
-    requires, recorded on this door's own audit line, in ``clear_prediction_bucket``'s own words.
+    ``reason`` is required and non-empty, recorded on this door's own audit line.
 
     Refuses, before any write, naming why: an empty ``reason``; a ``project_root`` whose ``.tcip``
     is not a directory; ``relative_path`` empty, absolute, carrying a ``..`` segment, or resolving
     outside the state root; a path under the state root's own database home; a path that does not
     exist; a directory; a link or junction; a path the accounting classifies as the storage
-    backend's own bookkeeping, as a claimed store's own file (naming the store), or as a
-    recognized blob; and a state root whose own accounting refuses (a misplaced split or curated
-    manifest anchor, or two stores claiming one file equally).
+    backend's own bookkeeping, as a claimed store's own file (naming the store), or as a recognized
+    blob; and a state root whose own accounting refuses (a misplaced split or curated manifest
+    anchor, or two stores claiming one file equally).
 
     Only the named file is removed (``os.remove``); an emptied parent directory is left exactly as
-    it stands, since a directory is not a store's own entry and clearing one is a second, separate
-    call.
+    it stands.
     """
     if not (reason or "").strip():
         return {"error": "delete_stray_state_file needs a non-empty reason: the confirmation "

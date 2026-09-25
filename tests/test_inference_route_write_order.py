@@ -35,13 +35,14 @@ class _FakePredictor:
 
 
 def _job(job_id, images_dir, out_dir, ckpt, platform_root):
+    from tcip_mcp.dataset_layout import bucket_dataset_root
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
         job_id=job_id, checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
         overlap=0.2, postprocess="nms",
-        platform_root=str(platform_root),
+        platform_root=str(platform_root), dataset_root=bucket_dataset_root(out_dir),
     )
 
 
@@ -178,7 +179,7 @@ def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_writt
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
     exp_id = "exp-published-once"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    create_experiment(exp_id, {"model_source": {"builder": "x:y", "task": "detection"}})
     update_status(exp_id, "running")
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path,
                                  stamp={"experiment_id": exp_id})
@@ -202,11 +203,11 @@ def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_writt
     assert _dataset_rows(dataset) == []
 
 
-def test_a_cancelled_gui_pass_publishes_what_it_wrote_through_the_one_publisher(
+def test_a_canceled_gui_pass_publishes_what_it_wrote_through_the_one_publisher(
     tmp_path, monkeypatch,
 ):
     """A cancel stops the stream at the next image boundary: the documents already written are
-    stamped and published, the stamp names exactly those, and the job ends cancelled."""
+    stamped and published, the stamp names exactly those, and the job ends canceled."""
     pytest.importorskip("fastapi")
     import tcip_store as ts
 
@@ -220,7 +221,7 @@ def test_a_cancelled_gui_pass_publishes_what_it_wrote_through_the_one_publisher(
     images_dir = _two_images(image_dir(dataset, DATE))
     out = prediction_dir(dataset, "run", DATE)
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    job = _job("cancelled-after-one", images_dir, out, ckpt, tmp_path)
+    job = _job("canceled-after-one", images_dir, out, ckpt, tmp_path)
 
     class CancelAfterFirstImage(_FakePredictor):
         def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
@@ -232,13 +233,12 @@ def test_a_cancelled_gui_pass_publishes_what_it_wrote_through_the_one_publisher(
 
     _worker(job)
 
-    assert (job.status, job.done, job.total, job.error) == ("cancelled", 1, 2, None)
+    assert (job.status, job.done, job.total, job.error) == ("canceled", 1, 2, None)
     assert _documents(out) == ["a"]
     assert ts.read(sidecar_key(out))["image_filenames"] == {"a": "a.jpg"}
     rows = ts.read_log(audit_log_key(dataset)).records
     assert [(r["tool"], r["status"]) for r in rows] == [
         ("stamp_written", "ok"), ("prediction_bucket_published", "ok")]
-    assert rows[1]["arguments"]["written"] == [str(out / "a.json")]
 
 
 def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_path, monkeypatch):
@@ -312,7 +312,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, m
     rows: dict[str, list[dict]] = {}
     for door in ("gui", "mcp"):
         exp_id = f"exp-{door}"
-        create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+        create_experiment(exp_id, {"model_source": {"builder": "x:y", "task": "detection"}})
         update_status(exp_id, "running")
         ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name=f"model-{door}",
                                      filename=f"{door}.pt", stamp={"experiment_id": exp_id})
@@ -327,11 +327,9 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, m
         assert get_experiment_lineage(exp_id)["lineage"]["predictions"] == str(out)
 
     def shape(records: list[dict]) -> list[tuple]:
-        return [(r["tool"], sorted(r["arguments"]), r["arguments"].get("lineage_linked"),
-                 [Path(p).name for p in r["arguments"].get("written", [])])
+        return [(r["tool"], sorted(r["arguments"]), r["arguments"].get("lineage_linked"))
                 for r in records]
 
     assert shape(rows["gui"]) == shape(rows["mcp"])
     assert shape(rows["gui"])[-1] == (
-        "prediction_bucket_published", ["lineage_linked", "predictions_dir", "written"], True,
-        ["a.json", "b.json"])
+        "prediction_bucket_published", ["lineage_linked", "predictions_dir"], True)

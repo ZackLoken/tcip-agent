@@ -21,6 +21,21 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
 )
 
 
+def test_a_recorded_identity_lacking_its_trait_differs_from_one_recording_no_trait():
+    from tcip_mcp.tools.inference_tools import (
+        _raster_pass_identity_body, _raster_pass_identity_mismatches,
+    )
+
+    current = _raster_pass_identity_body(
+        raster_identity={"digest": "d"}, checkpoint_sha256="c" * 64, trait=None,
+        experiment_id=None, tile_batch_size=1, conf=0.5, cross_tile_nms=None, max_dets=None,
+        tile_size=TILE, overlap=0.0, tile_resize=None, postprocess="nms", require_masks=False)
+    recorded = {key: value for key, value in current.items() if key != "trait"}
+
+    assert _raster_pass_identity_mismatches(current, current) == []
+    assert _raster_pass_identity_mismatches(recorded, current) == ["trait"]
+
+
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.tools.model_tools import register_model

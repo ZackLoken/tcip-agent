@@ -38,7 +38,6 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     rows = _rows(out_csv)
     assert [r["plant_id"] for r in rows] == ["PLANT_A", "PLANT_UNMAPPED"]
     assert res["n_plants"] == 2
-    assert res["plants"] == ["PLANT_A", "PLANT_UNMAPPED"]
     by_plant = {r["plant_id"]: r for r in rows}
     assert by_plant["PLANT_A"]["n_dates"] == "4"
     assert by_plant["PLANT_UNMAPPED"]["n_dates"] == "0"
@@ -78,12 +77,12 @@ def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path) -> N
 def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     """Two validated dates whose sidecars name different checkpoints are two producers; the
     tool refuses naming each date's producer and writes nothing, never a placeholder cell."""
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-    from tcip_mcp.tools.phenology_tools import (
-        ProducerDiffersAcrossDates,
-        _resolve_producer_identity,
-        deliver_phenology_milestones,
+    from tcip_mcp.pipelines.resolution import (
+        ProducerDiffers,
+        read_operating_point_sidecar,
+        stamped_producer,
     )
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0))
     dates = list(body["predictions_by_date"])
@@ -105,8 +104,8 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
                         dataset_root=tmp_path / "ds", experiment_id="exp-op-other",
                         producing_experiment_id="exp-other", trait="bud_opening")
 
-    with pytest.raises(ProducerDiffersAcrossDates, match=dates[1]):
-        _resolve_producer_identity(body["predictions_by_date"])
+    with pytest.raises(ProducerDiffers, match=dates[1]):
+        stamped_producer(body["predictions_by_date"])
     out_csv = tmp_path / "out" / "two_producers.csv"
     res = deliver_phenology_milestones(
         trait=body["trait"], mapping_name=body["mapping_name"],

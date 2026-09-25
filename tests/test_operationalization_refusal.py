@@ -8,6 +8,8 @@ that has not been shown to admit valid work.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import dataclasses
 from pathlib import Path
 
@@ -21,14 +23,14 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
 from tcip_mcp.traits import TraitUnknownError
 from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
-from tests._binding_fixtures import producer_checkpoint_sha256
+from tests._binding_fixtures import complete_stamp, producer_checkpoint_sha256
 from tests.test_tcip_web_results_routes import _expected_validation_record, _phenology_fixture
 
 # A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
 # so it carries every key the writer's cells read even as that shape grows.
 _NO_MAPPING = MappingBuild(
     name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
-    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "fallback"},
+    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "stated"},
     plant_registry={"name": "unregistered", "digest": "0" * 64},
     capture_identity={}, capture_digests={}, unreadable={}, assignments={},
     record_sha256="0" * 16,
@@ -496,7 +498,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
         b"dates_delivered,images_unattributed,"
-        b"plant_attribution,acknowledged_by,acknowledgement_reason\r\n"
+        b"plant_attribution,acknowledged_by,acknowledgment_reason\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row
     )
@@ -559,7 +561,7 @@ def _hand_edit_spec(project_root: Path, trait: str, **fields) -> None:
     stored = ts.read_versioned(key)
     data = dict(stored.value)
     data.update(fields)
-    ts.replace(key, data, expect=stored.version)
+    ts.replace(key, complete_spec_record(data), expect=stored.version)
 
 
 def _web_refusal(client: TestClient, body: dict, route: str) -> dict:
@@ -653,7 +655,7 @@ def test_acknowledge_does_not_clear_the_precondition_at_every_door(
 ):
     """Acknowledging an unvalidated measurement says nothing about whether one was defined.
 
-    The MCP tool door takes no acknowledgement at all, so there is no escape left to try there;
+    The MCP tool door takes no acknowledgment at all, so there is no escape left to try there;
     both web routes run the same precondition before either reaches its own gate, so an
     acknowledged number whose meaning is unstated is refused there too.
     """
@@ -674,15 +676,15 @@ def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(
 ):
     """The two rules are separate, and this is the direction that proves it rather than assumes it.
 
-    Same call, same acknowledgement: with the meaning confirmed, the unvalidated evidence ships
-    stamped false. The MCP tool takes no acknowledgement, so this runs through the web
+    Same call, same acknowledgment: with the meaning confirmed, the unvalidated evidence ships
+    stamped false. The MCP tool takes no acknowledgment, so this runs through the web
     export route, the one surface that builds a real one.
     """
     body = _delivery(tmp_path, validated=False)
 
     resp = client.post("/api/results/export_csv", json={
         **body, "payload": "milestones", "filename": "x.csv", "user": "user:tester",
-        "acknowledgement": {"reason": "test acknowledgement"},
+        "acknowledgment": {"reason": "test acknowledgment"},
     })
 
     assert resp.status_code == 200, resp.text
@@ -782,7 +784,7 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
 
     with pytest.raises(ValueError) as excinfo:
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING, flags={}, acknowledgement=None,
+            "test", [], tmp_path / "out.csv", BUD_OPENING, flags={}, acknowledgment=None,
             basis=None, document_reconciliations={}, producer={}, dimension_reconciliations={},
             predictions_by_date={}, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -845,7 +847,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
         basis=check.basis,
         document_reconciliations={
             "operating_point": recon,
@@ -874,7 +876,7 @@ def test_a_crossing_unconfirmed_majority_reading_delivers_and_flipping_it_invali
     out_csv = tmp_path / "delivered.csv"
     assert "error" not in _compute(body, out_csv, **_validated_call(body))
 
-    _hand_edit_spec(tmp_path, "bud_opening", majority_provisional=False)
+    _hand_edit_spec(tmp_path, "bud_opening", crossing_unconfirmed=False)
     flipped = tmp_path / "flipped.csv"
 
     res = _compute(body, flipped, **_validated_call(body))
@@ -890,7 +892,7 @@ def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
 
     The precondition is about meaning and must not have absorbed the evidence gate's job, which is
     what would strand a breeder who has nothing to look at. ``show_unvalidated`` is a display
-    choice, never an acknowledgement, and it is the mechanism this screen door actually honors.
+    choice, never an acknowledgment, and it is the mechanism this screen door actually honors.
     """
     body = _delivery(tmp_path, validated=False)
 
@@ -972,8 +974,9 @@ def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
     bucket = tmp_path / "ds" / "predictions" / "run"
     bucket.mkdir(parents=True)
     subject = next(iter(id_map)) if len(id_map) == 1 else None
-    write_sidecar(bucket, {"validated": False, "id_map": id_map,
-                          "subject": subject, "attribute": None}, "operating_point")
+    write_sidecar(bucket, complete_stamp({"validated": False, "id_map": id_map,
+                                         "subject": subject, "attribute": None}),
+                  "operating_point")
     return str(bucket)
 
 
@@ -983,7 +986,7 @@ def _validated_bucket(
 ) -> str:
     """A prediction bucket genuinely bound to a validation record.
 
-    None of these doors take an acknowledgement, so a call that must actually deliver
+    None of these doors take an acknowledgment, so a call that must actually deliver
     needs real evidence behind it rather than a caller-asserted escape.
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

@@ -1,6 +1,6 @@
 """The delivered majority-crossing marker answers a different question from the delivery gate.
 
-A trait's ``majority_provisional`` records whether the breeders have confirmed that the trait's
+A trait's ``crossing_unconfirmed`` records whether the breeders have confirmed that the trait's
 "most objects in state" phrase maps to the crossing key its spec names. The delivery gate records
 whether the measurement dimensions behind the numbers were validated against a reference. Both reach
 the breeder in one CSV, so the web export door must fill the marker column from the trait's own spec
@@ -52,7 +52,7 @@ def test_the_majority_marker_reports_the_specs_reading_not_the_gates_verdict(
     gate. The marker column must say the reading is unconfirmed even though nothing about this
     delivery is provisional in the gate's sense."""
     spec = get_trait("bud_opening")
-    assert spec.majority_provisional is True
+    assert spec.crossing_unconfirmed is True
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
 
     disclosure = client.post("/api/results/phenology_measurement", json=body).json()
@@ -64,7 +64,7 @@ def test_the_majority_marker_reports_the_specs_reading_not_the_gates_verdict(
     marker = phenology.majority_crossing_unconfirmed_column(spec)
     assert marker in row
     assert row[marker] == "true"
-    assert row[marker] == str(spec.majority_provisional).lower()
+    assert row[marker] == str(spec.crossing_unconfirmed).lower()
     assert row["operating_point_validated"] == VALIDATED_HELD_OUT
     assert row["positive_state_classifier_validated"] == VALIDATED_HELD_OUT
 

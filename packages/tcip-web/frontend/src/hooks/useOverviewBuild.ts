@@ -57,7 +57,7 @@ export function useOverviewBuild(
     if (attempted.current === imageUrl) return;
     attempted.current = imageUrl;
 
-    let cancelled = false;
+    let canceled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let lastProgress = -1;
     let lastMoved = Date.now();
@@ -66,7 +66,7 @@ export function useOverviewBuild(
       timer = setTimeout(() => {
         void api.images.overviewJob(jobId).then(
           (job) => {
-            if (cancelled) return;
+            if (canceled) return;
             if (job.status === "completed") {
               setState((s) => ({
                 building: false,
@@ -97,7 +97,7 @@ export function useOverviewBuild(
             poll(jobId);
           },
           (e: unknown) => {
-            if (!cancelled) {
+            if (!canceled) {
               setState((s) => ({
                 ...s,
                 building: false,
@@ -113,7 +113,7 @@ export function useOverviewBuild(
     void (async () => {
       try {
         const job = await api.images.buildOverviews(imagePath);
-        if (cancelled) return;
+        if (canceled) return;
         if (job.status === "completed") {
           setState((s) => ({
             building: false,
@@ -125,7 +125,7 @@ export function useOverviewBuild(
         }
         poll(job.job_id);
       } catch (e) {
-        if (!cancelled) {
+        if (!canceled) {
           setState((s) => ({
             ...s,
             building: false,
@@ -136,7 +136,7 @@ export function useOverviewBuild(
     })();
 
     return () => {
-      cancelled = true;
+      canceled = true;
       if (timer != null) clearTimeout(timer);
     };
   }, [imageError, imageUrl, imagePath]);

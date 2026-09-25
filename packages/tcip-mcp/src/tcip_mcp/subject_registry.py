@@ -1,35 +1,31 @@
-"""The dataset's subject registry, subjects, their attributes, and the deterministic
-name→id assignment a training run uses (and records, so predictions stay decodable).
+"""The dataset's subject registry, subjects, their attributes, and the deterministic name→id
+assignment a training run uses (and records, so predictions stay decodable).
 
-The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and name-based::
+The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and name-based; for
+example, with ``tree`` and ``fruit`` as the subjects::
 
     {
-      "bush": {"description": "one bush crown", "defined_by": "...", "defined_at": "..."},
-      "leaf": {"description": "one leaf", "defined_by": "...", "defined_at": "...",
-               "attributes": {
-                 "condition": {"type": "categorical", "values": ["healthy", "diseased"]}
-               }}
+      "tree": {"description": "one tree crown", "defined_by": "...", "defined_at": "..."},
+      "fruit": {"description": "one fruit", "defined_by": "...", "defined_at": "...",
+                "attributes": {
+                  "condition": {"type": "categorical", "values": ["healthy", "diseased"]}
+                }}
     }
 
-A *subject* is the object a label set is about (leaf, bush, efb). A subject with no
-``attributes`` is simply detected. An *attribute* is an independent axis a subject's instances
-carry, ``categorical`` (unordered) or ``ordinal`` (ordered; the ``values`` order is the rank).
-Numeric is not an attribute type; measured/field values live in the plant-keyed field CSVs.
+A subject is the object a label set is about. A subject with no ``attributes`` is simply detected.
+An attribute is an independent axis a subject's instances carry, ``categorical`` (unordered) or
+``ordinal`` (ordered; the ``values`` order is the rank). Numeric is not an attribute type;
+measured/field values live in the plant-keyed field CSVs.
 
 Labels reference these names, never integer ids. Integer class ids exist only inside a training
 run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0-indexed ids in
-their *declared order*, deterministically and re-derivably, so the loader that builds targets,
-the model that predicts, and the code that later decodes a prediction all agree by construction.
-Ordering is the declared ``values`` order and never sorted: ordinal values carry rank, which
-sorting would corrupt. The registry file's order could change between training and decode, so a run
-*records* the map it used: the producer that admitted its samples states the scope on the run's own
-data config, which travels onto the checkpoint via the run's own config object and, best-effort,
-onto the durable experiment record. Decode reads that
-recorded map first (``inference_tools.resolve_decode_id_map``, the one resolution both writers
-that persist predictions to disk, ``inference_tools.run_inference`` and the web GUI's inference worker,
-call), falling back to a fresh derivation from the inference dataset's registry only for a
-checkpoint with no recorded map, a run whose ground truth carries its own classes and which no
-registry scopes.
+their declared order, deterministically and re-derivably. Ordering is the declared ``values`` order
+and never sorted. A run records the map it used: the producer that admitted its samples states the
+scope on the run's own data config, which travels onto the checkpoint via the run's own config
+object and, best-effort, onto the durable experiment record. Decode reads that recorded map first
+(``inference_tools.resolve_decode_id_map``), falling back to a fresh derivation from the inference
+dataset's registry only for a checkpoint with no recorded map, a run whose ground truth carries its
+own classes and which no registry scopes.
 """
 
 from __future__ import annotations
@@ -51,9 +47,9 @@ ATTR_TYPES = ("categorical", "ordinal")
 @dataclass(frozen=True)
 class Attribute:
     """One classification axis of a subject's instances. ``values`` are ordered; for an ``ordinal``
-    attribute that order is the rank (severity 0 < 1 < 2). The value invariant, a known ``type`` and a
-    non-empty list of distinct names, is enforced here, so no ``Attribute``, however it is built, can
-    hold values that would silently collapse the name→id map in :func:`assign_class_ids`."""
+    attribute that order is the rank (severity 0 < 1 < 2). A known ``type`` and a non-empty list of
+    distinct names are enforced here.
+    """
 
     name: str
     type: str
@@ -102,45 +98,12 @@ class RegistryError(ValueError):
     """A registry that cannot be read as a valid subject registry, or a scope it does not contain."""
 
 
-class SubjectRegistryUnconformed(RegistryError):
-    """A dataset root still carries the retired ``classes.json`` and no registry write may land
-    beside it: rename it to ``subjects.json`` by hand first. A root carrying both files is
-    refused until one of them is removed by hand, since which registry is meant is not the
-    platform's to choose."""
-
-
-def retired_document(dataset_root: str | Path) -> Path | None:
-    """The path of ``<dataset_root>/classes.json`` when it exists and decodes as a registry
-    through :func:`registry_from_dict`, else ``None``.
-
-    Whether or not ``subjects.json`` exists beside it: a fresh write to ``subjects.json`` next to
-    a still-present retired copy would manufacture the divergent pair the registry writers refuse
-    (:class:`SubjectRegistryUnconformed`), so this answers present regardless. Decoding is what
-    makes the file evidence the platform
-    wrote a registry there; a third-party file named ``classes.json`` that is not a registry is no
-    claim at all, and is never mistaken for the retired document here (the doctor reports it
-    separately, as a stray file).
-    """
-    import tcip_store
-
-    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
-
-    candidate = Path(dataset_root) / RETIRED_SUBJECTS_FILENAME
-    if not candidate.is_file():
-        return None
-    try:
-        registry_from_dict(tcip_store.RECORD_JSON.decode(candidate.read_bytes()))
-    except ValueError:
-        return None
-    return candidate
-
-
 def registry_from_dict(data: object) -> SubjectRegistry:
-    """Parse the nested registry mapping into a :class:`SubjectRegistry`, preserving declared order.
+    """Parse the nested registry mapping into a :class:`SubjectRegistry`, preserving declared
+    order.
 
-    Refuses a malformed shape rather than guessing (an attribute whose ``type`` is unknown, or whose
-    ``values`` are absent/empty/non-string/duplicated), so a bad registry fails loudly instead of
-    silently assigning ids over garbage.
+    Refuses a malformed shape: an attribute whose ``type`` is unknown, or whose ``values`` are
+    absent/empty/non-string/duplicated.
     """
     if not isinstance(data, dict):
         raise RegistryError(f"registry must be a JSON object of subjects, got {type(data).__name__}")
@@ -197,13 +160,9 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
 def attribute_schema_digest(registry: SubjectRegistry, subject: str) -> str | None:
     """Digest over ``subject``'s attribute vocabulary (name -> {type, declared-order values}) only.
 
-    ``None`` if ``subject`` is not in the registry at all. Deliberately excludes ``description``/
-    ``defined_by``/``defined_at``, free-text provenance whose editing (a typo fix, a citation
-    update) says nothing about what an instance of the subject looks like, so hashing it would
-    quarantine confirmations over changes that never affected them. This is attribute-*schema* drift
-    detection, not full subject-redefinition detection: a ``description``-only redefinition of what
-    the subject *is* is real but is a domain-expert judgment call, not something a hash can catch,
-    an attribute-less subject (e.g. ``bush``) still gets a real, stable digest of ``{}``.
+    ``None`` if ``subject`` is not in the registry at all. Excludes
+    ``description``/``defined_by``/``defined_at``. An attribute-less subject gets a real, stable
+    digest of ``{}``.
     """
     s = registry.subject(subject)
     if s is None:
@@ -223,15 +182,10 @@ def _registry_key(path: str | Path) -> "Key":
 
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
-    """The stored registry's decoded document, version-checked: the one implementation
-    :func:`read_registry` and :func:`replace_registry` both call, so an undecodable registry and
-    a version-refused one cannot read as two different facts depending which caller hit them.
+    """The stored registry's decoded document, version-checked.
 
     Raises :class:`RegistryError` for bytes that do not decode as JSON. Propagates
-    :class:`tcip_store.SchemaVersionRefused`, uncaught: a newer writer's document is a policy
-    fact, never the same fact as corruption, so a caller (:func:`replace_registry`'s
-    ``allow_removals`` repair path, ``dataset_fingerprint._registry_term``) that tolerates or
-    folds ``RegistryError`` away must not do the same to this.
+    :class:`tcip_store.SchemaVersionRefused`, uncaught.
     """
     import tcip_store
 
@@ -248,15 +202,10 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
 def read_registry(path: str | Path) -> SubjectRegistry:
     """Read ``subjects.json`` into a :class:`SubjectRegistry`.
 
-    Absence and corruption are different answers: no registry raises ``FileNotFoundError``, and
-    a registry whose bytes are present but will not decode raises :class:`RegistryError`, the
-    same refusal a structurally invalid registry raises. Reading an undecodable registry as an
-    empty one would let every name-based label under it train as an unknown subject. A
-    ``schema_version`` this reader does not accept propagates as
-    :class:`tcip_store.SchemaVersionRefused`, uncaught, distinguishable from ``RegistryError``: a
-    newer writer's registry must refuse whatever reads it (``dataset_fingerprint._registry_term``'s
-    own fingerprint computation included), never fold into the "no registry" answer a genuinely
-    unregistered dataset gets.
+    No registry raises ``FileNotFoundError``, and a registry whose bytes are present but will not
+    decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
+    A ``schema_version`` this reader does not accept propagates as
+    :class:`tcip_store.SchemaVersionRefused`, uncaught.
     """
     import tcip_store
 
@@ -271,27 +220,11 @@ def read_registry(path: str | Path) -> SubjectRegistry:
 def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
     """Write a :class:`SubjectRegistry` to ``subjects.json``, unconditionally.
 
-    Encoded through the canonical record codec object rather than a spelling of its own, so
-    the ordered subject and attribute sequences land exactly as every other JSON document does.
-    A plain overwrite, with no compare-and-set and no refusal for a dropped name: a fixture or a
-    repair that means to place a registry outright uses this; the two doors a breeder or agent
-    actually authors a registry through call :func:`replace_registry` instead.
-
-    Refuses (:class:`SubjectRegistryUnconformed`) when the dataset root still carries the retired
-    ``classes.json`` (:func:`retired_document`): no registry write lands beside it, since a fresh
-    ``subjects.json`` next to a still-present retired copy is a divergent pair; a root carrying
-    both files is refused until one of them is removed by hand.
+    Encoded through the canonical record codec. A plain overwrite, with no compare-and-set and no
+    refusal for a dropped name; :func:`replace_registry` is the checked write.
     """
     import tcip_store
 
-    root = Path(path).absolute().parent
-    stale = retired_document(root)
-    if stale is not None:
-        raise SubjectRegistryUnconformed(
-            f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
-            "by hand before writing subjects.json beside it, and a root carrying both files is "
-            "refused until one of them is removed by hand"
-        )
     tcip_store.put_blob(
         _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
     )
@@ -300,9 +233,7 @@ def write_registry(path: str | Path, registry: SubjectRegistry) -> None:
 def read_version(path: str | Path) -> "Version":
     """The subject registry blob's current version token (``Version.ABSENT`` if it does not exist).
 
-    Reads the version alone, never the content, so it never raises on bytes that will not
-    decode: a caller that only wants a version to pass as :func:`replace_registry`'s ``expect``
-    does not need the stored registry to be readable first.
+    Reads the version alone, never the content, so it never raises on bytes that will not decode.
     """
     import tcip_store
 
@@ -335,34 +266,19 @@ def _sweep_schema_change(
     """Stamp the outgoing attribute-schema digest onto every confirmation of an affected subject
     that carries no stamp yet, before ``incoming`` is what a later read sees.
 
-    A confirmation and its digest stamp are two transactions, status first, so a stamp that could not
-    be written never rejects the human's confirmation and unstamped confirmations legitimately exist
-    (see ``tcip_web.routes.subjects._stamp_digest``). An unstamped confirmation reads as valid
-    (``tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`` quarantines only a stamp that
-    positively disagrees), which is right until the vocabulary changes underneath it: from then on
-    nothing distinguishes it from a confirmation made under the new schema, and it trains against a
-    definition its human never saw. ``outgoing`` (``None`` for a first-ever write, or a stored
-    registry :func:`replace_registry` could not decode) is the last state that digest is
+    A confirmation and its digest stamp are two transactions, so unstamped confirmations exist, and
+    an unstamped confirmation reads as valid. ``outgoing`` (``None`` for a first-ever write, or a
+    stored registry :func:`replace_registry` could not decode) is the last state that digest is
     recoverable from, so it is recorded here, and those confirmations then read as stale exactly
     like the stamped ones.
 
-    Stamps the same set the confirmation-time writer stamps, every status in the subject's buckets
-    rather than the negatives alone, since the quarantine question is asked of whatever a later
-    reader takes from the store; a stamp on a status nobody asserted (``partial``, ``unannotated``)
-    is harmless, and the bulk route stamps those statuses too. Already-stamped confirmations, and
-    subjects whose digest is unchanged, are left alone.
+    Stamps every status in the subject's buckets, not the negatives alone. Already-stamped
+    confirmations, and subjects whose digest is unchanged, are left alone.
 
-    Also counts, per affected subject, its *finished* confirmations
-    (:func:`~tcip_mcp.dataset_layout.is_finished_status`, complete or negative, never a
-    ``partial`` or ``unannotated`` a human never asserted) whose stamped digest, once this
-    write's own stamping above has landed, still disagrees with the subject's new digest: a
-    confirmation stamped under an outgoing schema this write just recorded, and one already
-    stamped under a still-earlier schema that a prior sweep never touched because it was not
-    unstamped, read alike as made before the vocabulary in effect now. The stamping above still
-    runs over every status regardless, so this count narrows what it *reports*, not what it
-    *writes*. Computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`,
-    the same comparison :func:`~tcip_mcp.pipelines.data.label_queries._stale_finished` quarantines
-    a stale finished status by, so the two readers cannot disagree about what "stale" means.
+    Also counts, per affected subject, its finished confirmations
+    (:func:`~tcip_mcp.dataset_layout.is_finished_status`, complete or negative) whose stamped
+    digest, once this write's own stamping has landed, still disagrees with the subject's new
+    digest, computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`.
 
     Never blocks the registry write, which has already landed by the time this runs: an absent
     ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` for the caller to surface.
@@ -373,7 +289,7 @@ def _sweep_schema_change(
 
     from tcip_mcp.dataset_layout import (
         bucket_digest_stamps, bucket_subject_date, image_status_digest_key, image_status_key,
-        is_finished_status, normalize_status_store, stamp_image_status_digests,
+        is_finished_status, status_tokens, stamp_image_status_digests,
     )
     from tcip_mcp.pipelines.data.label_queries import stale_stamped_names
 
@@ -390,7 +306,7 @@ def _sweep_schema_change(
     if not changed:
         return {**empty, "warning": None}
     try:
-        statuses = normalize_status_store(
+        statuses = status_tokens(
             tcip_store.read(image_status_key(dataset_root), default={}))
         for bucket, entries in statuses.items():
             subject, _ = bucket_subject_date(bucket)
@@ -427,58 +343,35 @@ def replace_registry(
     path: str | Path, registry: SubjectRegistry, *, expect: "Version | None", allow_removals: bool = False,
     allow_type_changes: bool = False,
 ) -> dict:
-    """The one write both registry doors call: read what it replaces, refuse a silent drop.
+    """Write the registry, reading what it replaces and refusing a silent drop.
 
-    Refuses an empty ``registry`` outright, whether or not ``allow_removals`` is set: a registry
-    write states subjects, never clears them. Reads the stored registry (absent reads as no
-    prior registry, not a refusal) and refuses a write that drops a subject, an attribute, or an
-    attribute value the stored one declares, unless ``allow_removals`` is true, since labels and
-    confirmations may still reference the dropped name. Stored bytes present but undecodable are
-    likewise refused unless ``allow_removals`` is true, since replacing them is how such a
-    registry is repaired and a repair drops whatever the bytes held. A stored registry whose
-    ``schema_version`` this reader does not accept is a different fact, never a repair
-    candidate: the read routes through :func:`_checked_registry_document`, whose
-    :class:`tcip_store.SchemaVersionRefused` propagates uncaught here regardless of
-    ``allow_removals``, refusing the whole write rather than letting the repair path overwrite a
-    newer writer's document.
+    Refuses an empty ``registry`` outright, whether or not ``allow_removals`` is set. Reads the
+    stored registry (absent reads as no prior registry, not a refusal) and refuses a write that
+    drops a subject, an attribute, or an attribute value the stored one declares, unless
+    ``allow_removals`` is true. Stored bytes present but undecodable are likewise refused unless
+    ``allow_removals`` is true. A stored registry whose ``schema_version`` this reader does not
+    accept refuses the whole write regardless of ``allow_removals``:
+    :class:`tcip_store.SchemaVersionRefused` propagates uncaught from
+    :func:`_checked_registry_document`.
 
-    Refuses, independently of ``allow_removals``, a write that keeps an attribute's name and
-    values but changes its ``type`` (categorical to ordinal or back), unless
-    ``allow_type_changes`` is set: a type flip drops no name, so ``allow_removals`` (a dropped
-    name, or a repair of undecodable bytes) does not admit it. The flip changes what every
-    recorded value of that attribute means, on confirmed and unconfirmed images alike, without a
-    single record changing (a rank against an unordered label, or the reverse); landing it under
-    ``allow_type_changes`` runs the same confirmation-digest sweep a value change does,
-    quarantining the finished statuses under the subject, while the unconfirmed annotated images
-    train by content with their values reinterpreted.
+    Refuses, independently of ``allow_removals``, a write that keeps an attribute's name and values
+    but changes its ``type`` (categorical to ordinal or back), unless ``allow_type_changes`` is
+    set; landing it runs the same confirmation-digest sweep a value change does.
 
     ``expect`` is compare-and-set against the blob's actual version at write time
     (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
     read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` skips the
-    check (an unconditional write), for a caller with no version to assert against.
+    check.
 
     The confirmation-digest sweep (:func:`_sweep_schema_change`) runs only once the write has
-    actually landed, against the registry this call read before writing, so a write that loses
-    the compare-and-set leaves no stamp against a registry that never landed. The accepted
-    residual is the reverse case: a crash between the put landing and the sweep completing leaves
-    the affected confirmations unstamped under the registry that did land, which the training
-    carry's quarantine then admits them as if made under the schema now in effect, the opposite
-    of the caution a landed stamp would have given them. Returns
-    ``{"version": Version, "schema_change_sweep": dict}``.
+    actually landed, against the registry this call read before writing. A crash between the put
+    landing and the sweep completing leaves the affected confirmations unstamped under the registry
+    that did land. Returns ``{"version": Version, "schema_change_sweep": dict}``.
     """
     import tcip_store
 
     if not registry.subjects:
         raise RegistryError("a subject registry write must declare at least one subject")
-
-    root = Path(path).absolute().parent
-    stale = retired_document(root)
-    if stale is not None:
-        raise SubjectRegistryUnconformed(
-            f"{root} still carries the retired registry at {stale}; rename it to subjects.json "
-            "by hand before writing subjects.json beside it, and a root carrying both files is "
-            "refused until one of them is removed by hand"
-        )
 
     key = _registry_key(path)
     versioned = tcip_store.read_blob_versioned(key, default=None)
@@ -536,24 +429,11 @@ def replace_registry(
 
 
 def copy_registry(source: str | Path, destination: str | Path) -> None:
-    """Place one dataset's registry beside another dataset's data, once.
-
-    Carries the stored document across rather than a re-serialization of a parsed registry, so a
-    materialized copy declares exactly what its source declares and a digest taken against either
-    one agrees. Writes create-only (``expect=Version.ABSENT``) and refuses when the destination
-    already holds a registry: a materialization or split run repeated over an existing root must
-    not replace a registry silently, since a breeder or a later write may have changed it since.
+    """Place one dataset's registry beside another dataset's data, once: the stored document
+    byte-for-byte, written create-only (``expect=Version.ABSENT``), refusing when the destination
+    already holds a registry.
     """
     import tcip_store
-
-    dest_root = Path(destination).absolute().parent
-    stale = retired_document(dest_root)
-    if stale is not None:
-        raise SubjectRegistryUnconformed(
-            f"{dest_root} still carries the retired registry at {stale}; remove that file by "
-            "hand (the registry copy is placed from the source), or delete the destination "
-            "tree, before a copy lands beside it"
-        )
 
     dest_key = _registry_key(destination)
     try:
@@ -570,17 +450,15 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
 
 
 def assign_class_ids(registry: SubjectRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:
-    """The deterministic name→id map for one training scope, in the registry's *declared* order.
+    """The deterministic name→id map for one training scope, in the registry's declared order.
 
-    - ``attribute`` given: one class per value of that attribute (``{value: 0..N-1}``), in the order
-      the registry declares them, the rank order for an ordinal attribute.
-    - ``attribute`` is ``None``: the subject is trained as a single detection class (``{subject: 0}``),
-      whether or not it carries attributes, a plain detector that does not classify instances.
+    - ``attribute`` given: one class per value of that attribute (``{value: 0..N-1}``), in the
+      order the registry declares them, the rank order for an ordinal attribute.
+    - ``attribute`` is ``None``: the subject is trained as a single detection class (``{subject:
+      0}``), whether or not it carries attributes.
 
-    Same registry + scope → identical map, every call: the assignment iterates the declared ``values``
-    tuple, never a set/dict, so nothing depends on hashing or insertion iteration. Callers that need
-    the map to survive a later registry edit must record this return value (see the module docstring),
-    not re-derive it. Raises :class:`RegistryError` for an absent subject/attribute rather than guessing.
+    Same registry + scope → identical map, every call. Raises :class:`RegistryError` for an absent
+    subject/attribute.
     """
     subj = registry.subject(subject)
     if subj is None:
@@ -607,14 +485,9 @@ def decode_class_ids(id_map: dict[str, int]) -> dict[int, str]:
 
 
 def positive_value_problem(registry: SubjectRegistry, subject_name: str, value: str) -> str | None:
-    """Why ``value`` cannot be ``subject_name``'s positive value in ``registry``, or ``None``
-    when some attribute of that subject lists it among its values.
-
-    Deliberately stricter than :func:`assign_class_ids`'s own id-map shape: a subject with no
-    attributes decodes as a single class keyed by its own name, a bare detector with no
-    classification axis at all, and a bare single-class detector never assessed a trait's positive
-    state (the precondition ``count_by_class`` checks), so a subject with no attributes cannot
-    carry a positive value here even though it decodes fine as a training scope.
+    """Why ``value`` cannot be ``subject_name``'s positive value in ``registry``, or ``None`` when
+    some attribute of that subject lists it among its values. A subject with no attributes cannot
+    carry a positive value.
     """
     subject = registry.subject(subject_name)
     if subject is None:
@@ -643,12 +516,10 @@ def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | Non
         return None
 
 
-def _distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
+def distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
     """The single dataset root every one of ``pred_dirs`` resolves under, or ``None`` when none
     do. Refuses (``RegistryError``) when the directories span more than one: no delivery this
-    platform ships mixes datasets, so that can only be a caller error, never a case to silently
-    resolve by picking one. The one computation ``registry_for_pred_dirs`` and
-    ``dataset_root_for_pred_dirs`` both build on, so the two cannot disagree about it.
+    platform ships mixes datasets, so that can only be a caller error.
     """
     from tcip_mcp.dataset_layout import bucket_dataset_root
 
@@ -665,14 +536,10 @@ def _distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
 def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
     """The single dataset root every one of ``pred_dirs`` resolves under.
 
-    Refuses (``RegistryError``) when the directories span more than one dataset root, the same
-    check ``registry_for_pred_dirs`` makes, and refuses by name when none resolves to a dataset
-    root at all: a plant-mapping delivery needs the dataset the buckets belong to, and buckets
-    under no dataset root cannot supply one. This is a mapping-delivery-only requirement:
-    ``run_inference`` itself writes and reads a bucket under no dataset root fine, only this
-    dataset-bound delivery refuses it.
+    Refuses (``RegistryError``) when the directories span more than one dataset root, and refuses
+    by name when none resolves to a dataset root at all.
     """
-    root = _distinct_dataset_root(pred_dirs)
+    root = distinct_dataset_root(pred_dirs)
     if root is None:
         raise RegistryError(
             f"none of the prediction directories {[str(d) for d in pred_dirs]} resolves to a "
@@ -687,12 +554,11 @@ def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
 def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> SubjectRegistry | None:
     """The registry for the single dataset every one of ``pred_dirs`` resolves under.
 
-    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve
-    to carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
-    dataset root: no delivery this platform ships mixes datasets, so that can only be a caller error,
-    never a case to silently resolve by picking one.
+    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve to
+    carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
+    dataset root.
     """
-    root = _distinct_dataset_root(pred_dirs)
+    root = distinct_dataset_root(pred_dirs)
     if root is None:
         return None
     return registry_for_dataset_root(root)

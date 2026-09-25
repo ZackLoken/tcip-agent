@@ -124,7 +124,7 @@ def test_reconcile_review_confirmed_reference_preserved(tmp_path):
     assert default("lr", 1e-3).value == 1e-3
 
 
-def test_unvalidated_value_requires_acknowledgement():
+def test_unvalidated_value_requires_acknowledgment():
     p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                 validated_against=VALIDATED_FALSE)
     with pytest.raises(UnvalidatedOperatingPointError):

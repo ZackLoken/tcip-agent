@@ -152,7 +152,7 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
     (root / "images" / "2026-03-24").mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-02-11" / "IMG_1.JPG")
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-03-24" / "IMG_2.JPG")
-    # bud labelled + baseline predicted on 02-11; nothing on 03-24. One file per image.
+    # bud labeled + baseline predicted on 02-11; nothing on 03-24. One file per image.
     det = root / "annotations" / "2026-02-11"
     det.mkdir(parents=True)
     _write_gt(det / "IMG_1.json", [(1, 1, 3, 3)], w=8, h=8)

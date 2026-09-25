@@ -64,10 +64,10 @@ export async function adoptWorkspaceProject(
   return selection;
 }
 
-/** The most-recent date that actually has a labelled subject, or null if none do. */
-function newestLabelledDate(p: ProjectSummary): string | null {
-  const labelled = p.dates.filter((d) => (p.subjects_by_date[d] ?? []).length > 0);
-  return labelled.length ? defaultDate(labelled) : null;
+/** The most-recent date that actually has a labeled subject, or null if none do. */
+function newestLabeledDate(p: ProjectSummary): string | null {
+  const labeled = p.dates.filter((d) => (p.subjects_by_date[d] ?? []).length > 0);
+  return labeled.length ? defaultDate(labeled) : null;
 }
 
 /** The project (by name) plus the default date/subject/model to open it on; null if the name
@@ -81,9 +81,9 @@ async function resolveDefaultOpen(name: string): Promise<{
   const { projects } = await api.projects.list();
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
-  // Prefers a labelled date: an agent ingesting a still-unlabelled newer date would
+  // Prefers a labeled date: an agent ingesting a still-unlabeled newer date would
   // otherwise land the human on a blank canvas with no date selector to recover.
-  const date = newestLabelledDate(p) ?? defaultDate(p.dates);
+  const date = newestLabeledDate(p) ?? defaultDate(p.dates);
   const subject = (p.subjects_by_date[date] ?? [])[0] ?? null;
   const model = (p.models_by_date[date] ?? [])[0] ?? null;
   return { p, date, subject, model };

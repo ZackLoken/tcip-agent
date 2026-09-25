@@ -71,19 +71,6 @@ class _Assignment:
         self.accession_name = None
 
 
-def test_per_plant_series_raises_for_a_neither_key_stamp(tmp_path: Path) -> None:
-    pred_dir = tmp_path / "predictions" / "classifier" / "2026-05-01"
-    json_io.write_annotations(
-        pred_dir / "s1.json",
-        [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), attributes={ATTRIBUTE: "open"})],
-        8, 8)
-    _seed_sidecar(pred_dir, {"id_map": {"open": 0, "closed": 1}})
-    mapping = {"2026-05-01": [_Assignment("s1", "P1")]}
-
-    with pytest.raises(resolution.StampScopeUnstated, match="repair-classified-predictions"):
-        phenology.per_plant_series(mapping, {"2026-05-01": str(pred_dir)}, "open", ["P1"])
-
-
 def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> None:
     pred_dir = tmp_path / "predictions" / "classifier" / "2026-05-02"
     json_io.write_annotations(

@@ -2,7 +2,7 @@
 documents for, a bucket holding at least one document whose stamp decodes with no
 ``image_filenames`` map (unjudgeable rather than clean), a validation row sealed over a mixed-run
 bucket, and nothing for a bucket whose stamp names every document or for a stamp with no
-document beside it. Coverage of a read-only census; it changes no behaviour."""
+document beside it. Coverage of a read-only census; it changes no behavior."""
 
 from __future__ import annotations
 

@@ -683,7 +683,7 @@ export function TrainingTab() {
         <ul className="space-y-1">
           {runs.map((r) => {
             const isMarked = markedExperimentIds.has(r.experiment_id);
-            const cancelling = pendingCancel.has(r.experiment_id);
+            const canceling = pendingCancel.has(r.experiment_id);
             const cancelError = cancelErrors[r.experiment_id];
             const heartbeatText = r.status === "running" ? heartbeatAge(r.heartbeat) : null;
             return (
@@ -753,11 +753,11 @@ export function TrainingTab() {
                           aria-describedby={
                             cancelError ? `cancel-error-${r.experiment_id}` : undefined
                           }
-                          disabled={cancelling}
+                          disabled={canceling}
                           className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
                           onClick={() => void onCancel(r.experiment_id)}
                         >
-                          {cancelling ? "Cancelling…" : "Cancel"}
+                          {canceling ? "Canceling…" : "Cancel"}
                         </button>
                       )}
                     </div>

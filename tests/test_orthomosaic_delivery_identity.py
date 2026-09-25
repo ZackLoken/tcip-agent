@@ -3,7 +3,7 @@ produced on.
 
 The counts in the delivered CSV are attributed to plants by the caller-supplied raster's own
 georeferencing, so the raster is part of the measurement, not a convenience argument: a
-pixel-identical copy at a moved tiepoint re-attributes every count to a neighbouring plant, and a
+pixel-identical copy at a moved tiepoint re-attributes every count to a neighboring plant, and a
 far-shifted one reads every plant as an explicit zero. Covers the delivery-time identity check and
 the claim-scope dimension the shared delivery gate reconciles from a bucket's own sidecar.
 """
@@ -174,7 +174,7 @@ def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_unc
     recorded by the producer itself rather than written into the fixture by hand: the mapping
     resolves and attributes the detection to its plant. A bare run_inference pass reserved no
     calibration region, so the count operating point never earned a reference and this door takes
-    no acknowledgement; the refusal named is the gate's, never the identity check's."""
+    no acknowledgment; the refusal named is the gate's, never the identity check's."""
     _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)

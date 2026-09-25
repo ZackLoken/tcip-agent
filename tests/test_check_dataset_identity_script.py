@@ -1,7 +1,5 @@
-"""Tests for tcip check-dataset-identity's CHANGED branch: a bare recorded fingerprint
-compared against a prefixed recompute must report formula-unrecorded with the re-register
-remedy, never CHANGED, since the two were never computed under the same formula.
-"""
+"""Tests for tcip check-dataset-identity's outcomes: OK, CHANGED, VERSION-REFUSED,
+NEVER-RECORDED and MOVED."""
 
 from __future__ import annotations
 
@@ -34,7 +32,7 @@ def _real_dataset(root: Path) -> None:
     )
 
 
-def test_a_matching_prefixed_fingerprint_reports_ok(tmp_path):
+def test_a_matching_fingerprint_reports_ok(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
     _real_dataset(root)
@@ -45,26 +43,6 @@ def test_a_matching_prefixed_fingerprint_reports_ok(tmp_path):
 
     assert completed.returncode == 0, completed.stdout
     assert "OK" in completed.stdout
-
-
-def test_a_bare_fingerprint_reports_formula_unrecorded_never_changed(tmp_path):
-    root = tmp_path / "dataset"
-    root.mkdir()
-    _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(root))
-    assert "error" not in result, result
-
-    identity = require_dataset_identity(root)
-    bare = identity["fingerprint"].split(":", 1)[1]
-    document = {**identity, "fingerprint": bare}
-    ts.put_blob(dataset_identity_key(root), ts.RECORD_JSON.encode(document))
-
-    completed = _run_script(str(root))
-
-    assert completed.returncode == 3, completed.stdout
-    assert "FORMULA-UNRECORDED" in completed.stdout
-    assert "CHANGED" not in completed.stdout
-    assert "register_dataset" in completed.stdout
 
 
 def test_a_real_content_change_still_reports_changed(tmp_path):
@@ -83,7 +61,6 @@ def test_a_real_content_change_still_reports_changed(tmp_path):
 
     assert completed.returncode == 2, completed.stdout
     assert "CHANGED" in completed.stdout
-    assert "FORMULA-UNRECORDED" not in completed.stdout
 
 
 def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path):
@@ -104,7 +81,7 @@ def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path
     assert "Traceback" not in completed.stderr
 
 
-def test_a_never_recorded_fingerprint_is_its_own_outcome_not_a_bare_value(tmp_path):
+def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
     result = register_dataset(str(root), "chestnut", str(root))
@@ -112,17 +89,16 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome_not_a_bare_value(tmp_pa
     assert result["fingerprint"] is None
 
     # Real content shows up after the fingerprint-less registration: recorded stays None while
-    # a fresh recompute now finds real content, never-recorded rather than a bare legacy value.
+    # a fresh recompute now finds real content.
     _real_dataset(root)
 
     completed = _run_script(str(root))
 
     assert completed.returncode == 4, completed.stdout
     assert "NEVER-RECORDED" in completed.stdout
-    assert "FORMULA-UNRECORDED" not in completed.stdout
 
 
-def test_a_moved_dataset_with_a_prefixed_registry_entry_is_reported_moved(tmp_path):
+def test_a_moved_dataset_is_reported_moved(tmp_path):
     root = tmp_path / "dataset"
     _real_dataset(root)
     result = register_dataset(str(root), "chestnut", str(tmp_path))
@@ -139,19 +115,3 @@ def test_a_moved_dataset_with_a_prefixed_registry_entry_is_reported_moved(tmp_pa
     assert f"MOVED: id {result['id']}" in completed.stdout, completed.stdout
 
 
-def test_a_moved_dataset_with_a_bare_registry_entry_reports_formula_unrecorded_not_silence(
-    tmp_path,
-):
-    root = tmp_path / "dataset"
-    _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(tmp_path))
-    assert "error" not in result, result
-    bare = result["fingerprint"].split(":", 1)[1]
-    stale_path = str((tmp_path / "gone_now").resolve())
-    upsert_dataset(tmp_path, {"id": result["id"], "path": stale_path,
-                              "crop": "chestnut", "fingerprint": bare})
-
-    completed = _run_script(str(root), "--project", str(tmp_path))
-
-    assert f"MOVED-FORMULA-UNRECORDED: id {result['id']}" in completed.stdout, completed.stdout
-    assert "  MOVED:" not in completed.stdout

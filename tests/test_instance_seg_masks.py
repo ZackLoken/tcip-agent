@@ -250,10 +250,10 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")],
+    r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["tiled"] is True
+    assert r["operating_point"]["tiled"]["value"] is True
     assert r["operating_point"]["tiled"]["value"] is True
     assert len(r["results"]) == 1
     result = r["results"][0]
@@ -268,10 +268,10 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")],
+    r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["tiled"] is True
+    assert r["operating_point"]["tiled"]["value"] is True
     assert len(r["results"]) == 1
     assert "masks" in r["results"][0]
 
@@ -290,7 +290,7 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
 
 
 def test_deliver_per_image_counts_instance_seg_refuses_a_bare_tiled_pass(instance_seg_ckpt, tmp_path):
-    """deliver_per_image_counts takes no acknowledgement for the CSV itself, so a masked tiled
+    """deliver_per_image_counts takes no acknowledgment for the CSV itself, so a masked tiled
     instance_seg run with no calibration behind it refuses cleanly, the same as any other detection
     checkpoint, now that tiled inference carries masks rather than being blocked."""
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
@@ -326,7 +326,7 @@ def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_mask
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
 
-    # This door takes no acknowledgement for the CSV itself, so the live pass refuses; the raw
+    # This door takes no acknowledgment for the CSV itself, so the live pass refuses; the raw
     # bucket it published ahead of that refusal is what the bucket-regime reads below promote.
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     published = deliver_per_image_counts(

@@ -1,11 +1,10 @@
-"""Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema.
+r"""Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema.
 
-Composes ``plant_mapping.read_plant_shapefile`` for the actual read (the CRS refusal, the
+Reads through ``plant_mapping.read_plant_shapefile`` (the CRS refusal, the
 point/polygon/multipolygon geometry rule, the DBF field resolution and truncation) and writes its
-rows through ``PLANT_CSV_COLUMNS``, the same header ``read_plant_csv_bytes`` reads, so the two
-sides cannot drift; ``n_features`` is the rows written, which excludes the null-geometry features
-``skipped_null_geometry`` counts. Validates its own output by reading it back through
-``read_plant_csvs`` before reporting success.
+rows through ``PLANT_CSV_COLUMNS``, the header ``read_plant_csv_bytes`` reads; ``n_features`` is
+the rows written, which excludes the null-geometry features ``skipped_null_geometry`` counts.
+Validates its own output by reading it back through ``read_plant_csvs`` before reporting success.
 
 Usage:
     tcip shp-to-plant-csv <plants.shp> <plants.csv> \
@@ -22,9 +21,7 @@ from pathlib import Path
 
 
 def _validate_round_trip(csv_path: Path, n_written: int) -> int:
-    """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the real cause,
-    rather than letting a schema/column mismatch surface later as ``draw_splits``' generic
-    "group_key_map is missing N stems"."""
+    """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the cause."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PLANT_CSV_COLUMNS, read_plant_csvs
 
     parsed = read_plant_csvs([csv_path])

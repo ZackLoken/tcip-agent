@@ -37,7 +37,7 @@ const PROJECTS: ProjectSummary[] = [
     dates: ["2026-02-11", "2026-03-01"],
     subjects: ["subject_a", "bush"],
     models: ["baseline"],
-    // subject_a labelled (+ baseline predicted) on 02-11; bush labelled on 03-01.
+    // subject_a labeled (+ baseline predicted) on 02-11; bush labeled on 03-01.
     subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-01": ["bush"] },
     models_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
@@ -302,7 +302,7 @@ describe("ProjectPicker", () => {
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("crop_a_subject_a_valley-farm"));
   });
 
-  it("filters the subject options to the selected date's labelled subjects", async () => {
+  it("filters the subject options to the selected date's labeled subjects", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
@@ -316,13 +316,13 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
     fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
 
-    // Default date is the most recent ISO date (2026-03-01), where only 'bush' is labelled.
+    // Default date is the most recent ISO date (2026-03-01), where only 'bush' is labeled.
     const subjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
     let opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("bush");
     expect(opts).not.toContain("subject_a");
 
-    // Switch to 2026-02-11, where only 'subject_a' is labelled.
+    // Switch to 2026-02-11, where only 'subject_a' is labeled.
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-02-11" } });
     opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("subject_a");

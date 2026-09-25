@@ -432,7 +432,7 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
     assert "RUN FAILED" in captured.out
     assert "antigravity" in captured.out.split("RUN FAILED")[1]
     assert "no answer text" in captured.out
-    # Last, so a tail of the output cannot cut the verdict off in favour of a "wrote ..." line.
+    # Last, so a tail of the output cannot cut the verdict off in favor of a "wrote ..." line.
     assert captured.out.rstrip().splitlines()[-1].strip().startswith("Nothing here is reviewable")
     assert "RUN FAILED" in captured.err
 

@@ -1,63 +1,26 @@
 """Project rename: mark for rename, move onto the new name at the next backend start.
 
-Two doors, GUI-only (the picker's "Rename..." dialog; the agent has no MCP tool for any of
-this): :func:`request_project_rename` (phase one, run from the rename route) and
-:func:`complete_pending_renames` (phase two, run once at backend startup, ahead of
-``complete_pending_removals``, or through ``tcip complete-renames``). A third door,
-:func:`withdraw_project_rename`, clears a pending marker with no rename of its own, for a
-request whose destination name was taken by something else before phase two ran.
+:func:`request_project_rename` (phase one) writes a ``pending_rename`` marker naming the old and
+the new name; every reader of :func:`~tcip_mcp.workspace.pending_marker_or_none` refuses or skips a
+marked project from that moment. :func:`complete_pending_renames` (phase two, run at backend
+startup ahead of ``complete_pending_removals``, or through ``tcip complete-renames``) renames each
+marked project's directory onto its own new name, deleting the marker only once the rename and its
+own completion line have landed; a directory already carrying the new name writes the completion
+line and deletes the marker with no rename of its own. :func:`withdraw_project_rename` clears a
+pending marker with no rename, for a request whose destination name was taken before phase two ran;
+nothing reserves a destination name during the pending window.
 
-Phase one writes a ``pending_rename`` marker naming the old and the new name; every reader that
-already re-points onto :func:`~tcip_mcp.workspace.pending_marker_or_none` refuses or skips a
-marked project from that moment, the same way it already does for a pending removal. Phase two
-walks the workspace and renames each marked project's directory onto its own new name, deleting
-the marker only once the rename and its own completion line have landed; a directory already
-carrying the new name (the crash window between the rename and the marker's own delete) writes
-the completion line and deletes the marker with no rename of its own. A blocked rename (the new
-name taken by the time phase two runs) is not finishable by the next start on its own: nothing
-reserves a destination name during the pending window (four routes can still occupy it -
-``ingest_images``, ``initialize_project``, ``import_project``, and a second rename request naming
-the same destination), so :func:`withdraw_project_rename` is the way out, clearing the marker so
-the breeder can request another name.
+:func:`project_records_present` refuses a project that holds any experiment, plant mapping, plant
+registry, delivery event, persisted job or HPO sweep, since those stores can carry the project's
+own path absolutely and no door here re-points a record's own path. A dependent project's own
+dataset-registry entry is warned, never refused on and never re-pointed: before the request through
+the preview and after it through :func:`~tcip_mcp.project_removal.dependency_warnings`'s
+``pending_kind``. The dependent's own remedy is ``register_dataset`` at the renamed path, which
+keeps the id its own ``dataset.json`` carries.
 
-The rename door's whole scope is a project before it trains, maps or delivers:
-:func:`project_records_present` refuses a project that holds any experiment, plant mapping,
-plant registry, delivery event, persisted job or HPO sweep, since those stores can carry the
-project's own path absolutely and no door here re-points a record's own path. (A re-pointer does
-exist elsewhere, ``model_registry._conform_entries``, but it is anchored on a checkpoint's own
-sha256 rather than on string surgery; these six records carry no identity to verify a re-point
-against, which is why they refuse rather than move.) A dependent
-project's own dataset-registry entry is never refused on and never re-pointed: it is warned,
-before the request through the preview and after it through
-:func:`~tcip_mcp.project_removal.dependency_warnings`'s ``pending_kind``, the same ruling Q26
-already made for the removal door and for the same reason (no door writes into a second
-project's registry). The dependent's own remedy is ``register_dataset`` at the renamed path,
-which keeps the id its own ``dataset.json`` carries.
-
-Both doors share :data:`tcip_mcp.project_removal._request_lock`, so a removal and a rename
-request against the same project serialize: the second to enter meets the first one's freshly
-written marker and refuses. The shared refusal chain (name shape, existence, a link, both
-markers, the open-project identity checks, a live run, a non-terminal job) is read from
-:func:`tcip_mcp.project_removal._ordered_refusal`, called here with ``door="rename"``, so the two
-doors cannot silently drift on a refusal they both must answer alike (CLAUDE.md).
-
-That lock holds within one process. Two backends on one workspace can write both markers on one
-project; startup answers that by running this walk before ``complete_pending_removals``
-(``tcip_web.app.bind_startup_root``), so the tree renames and then archives under its new name.
-The two console commands carry no such order: ``tcip complete-removals`` run first moves the tree
-into the workspace's holding directory, where this walk never looks (it iterates workspace
-children carrying a ``.tcip``), leaving the rename marker inert inside an archived tree. Nothing
-is lost, and the marker would only fire again if that tree were moved back under the workspace by
-hand. A second process bound to the pre-rename root (an MCP server, which never runs
-``bind_startup_root``) keeps writing at the old path, the residual
-``project_removal``'s own module docstring states for its door and which holds here too.
-
-Importing this module pulls in nothing that imports ``tcip_mcp.server`` at module level:
-``workspace``, ``audit``, ``tcip_store`` and ``tcip_mcp.project_removal`` are safe there (none of
-them import it either), while ``experiments``, ``tcip_mcp.pipelines.postprocessing.plant_mapping``,
-``tcip_mcp.pipelines.resolution``, ``tcip_mcp.web_client`` and ``tcip_mcp.tools.training_tools``
-(which imports ``tcip_mcp.server`` at its own top) are imported inside the function bodies that
-need them, the same rule ``project_removal._live_run_conflict`` already follows.
+A removal and a rename request against the same project serialize on
+:data:`tcip_mcp.project_removal._request_lock`, and the shared refusal chain is
+:func:`tcip_mcp.project_removal._ordered_refusal`, called here with ``door="rename"``.
 """
 
 from __future__ import annotations
@@ -80,28 +43,10 @@ _rename_startup_outcomes_lock = threading.Lock()
 
 
 def project_records_present(project: Path) -> list[str]:
-    """The names of ``project``'s own stores that hold any record: a conservative bound over six
-    stores whose records can carry the project's own path absolutely, with no door that
-    re-points a record's own path once the project's directory moves. Returns ``[]`` for a
-    project that has not yet trained, mapped or delivered, whatever the GUI has open on it.
-
-    ``experiments`` (:func:`tcip_mcp.experiments.experiment_ids_with_status` non-empty, so a
-    pre-created but never-launched experiment carries no ``output_dir`` and is still counted:
-    the bound is deliberately conservative); ``plant_mapping`` and ``plant_registries``
-    (:func:`tcip_store.keys` under the project's own ``.tcip/state``, unfiltered so an archived
-    mapping counts, never :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.plant_mapping_names`);
-    ``delivery_events`` (the same, scoped through
-    :func:`~tcip_mcp.pipelines.resolution.delivery_events_scope`; a supersession exists only over
-    an event, so it needs no row of its own); ``job_registry`` (any of
-    :data:`~tcip_mcp.web_client.JOB_REGISTRY_DOCUMENTS` holding a non-empty list under this
-    project); ``hpo_sweep_manifest`` (any immediate subdirectory of
-    :func:`~tcip_mcp.tools.training_tools.hpo_root` that holds a sweep manifest, read through
-    :func:`~tcip_mcp.tools.training_tools.sweep_manifest_key`, rather than any directory a bare
-    walk would enumerate, so an empty sweep directory never refuses anything). The
-    canvas-open binding is deliberately not in this bound: it is workspace-scoped, one record for
-    the whole workspace rather than one per project, and its ``root`` is rewritten on every
-    dataset select, so it is live GUI state beside ``gui.json`` rather than a project's own
-    record.
+    """The names of ``project``'s own stores that hold any record, over the six stores whose
+    records can carry the project's own path absolutely: ``experiments``, ``plant_mapping``,
+    ``plant_registries``, ``delivery_events``, ``job_registry`` and ``hpo_sweep_manifest``. Returns
+    ``[]`` for a project that has not yet trained, mapped or delivered.
     """
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -161,10 +106,6 @@ sentence verbatim and a store's own name says nothing to the person holding the 
 def _records_refusal(project: Path) -> Optional[str]:
     """:func:`project_records_present`'s answer rendered as the door's own refusal text, or
     ``None`` when the project holds no such record.
-
-    The breeder's sentence comes first and the platform's reason second: the dialog shows this
-    string as it stands, so a reader who stops after one sentence has still been told what is
-    wrong and what it means for them.
     """
     records = project_records_present(project)
     if not records:
@@ -180,17 +121,14 @@ def _records_refusal(project: Path) -> Optional[str]:
 
 
 def rename_preview(name: str, *, job_conflict: JobConflict) -> dict:
-    """Every fact the rename dialog needs before a new name is even typed: the shared refusal
-    chain plus the records refusal (:func:`project_records_present`), the new-name-specific
-    checks excluded since none is typed yet, run once on dialog open.
+    """Every fact the rename dialog needs before a new name is even typed: the shared refusal chain
+    plus the records refusal (:func:`project_records_present`), the new-name-specific checks
+    excluded.
 
-    ``dependent_projects`` is :func:`~tcip_mcp.project_removal.dependent_projects_of`'s own
-    answer: every other workspace project's dataset registered under this one, pending ones
-    included, listed for the dialog whether or not the request would be refused on records.
-    ``releasable`` is :func:`~tcip_mcp.project_removal.binding_release_available` against
-    whatever name resolves, computed before the refusal chain runs so a refused preview still
-    tells the dialog whether a release would help, the same order :func:`
-    tcip_mcp.project_removal._preview` uses.
+    ``dependent_projects`` is :func:`~tcip_mcp.project_removal.dependent_projects_of`'s own answer,
+    listed whether or not the request would be refused on records. ``releasable`` is
+    :func:`~tcip_mcp.project_removal.binding_release_available` against whatever name resolves,
+    computed before the refusal chain runs.
     """
     state = project_removal.read_open_project_state()
     try:
@@ -376,18 +314,14 @@ def request_project_rename(
 
 
 def withdraw_project_rename(name: str, *, requested_by: str) -> dict:
-    """Clear ``name``'s pending-rename marker with no rename of its own.
+    """Clear ``name``'s pending-rename marker with no rename of its own. Nothing is moved or
+    deleted but the marker, so it takes no typed name.
 
-    Exists because nothing reserves the destination name during the pending window: a second
-    rename request, ``ingest_images``, ``initialize_project`` or ``import_project`` can all still
-    occupy it, and phase two then blocks with no platform step that clears it. Not destructive
-    (nothing is moved or deleted but the marker), so it takes no typed name.
-
-    Writes ``project_rename_withdrawn`` (``{name, new_name, requested_by}``, scoped to the
-    project) before deleting the marker at the version just read, under the shared lock so a
-    concurrent rename or removal request cannot land between the read and the delete. 404 when
-    ``name`` names no workspace project or carries no pending-rename marker; 409 naming the
-    marker read that changed underneath, or the line that did not write (the marker then stands).
+    Writes ``project_rename_withdrawn`` (``{name, new_name, requested_by}``, scoped to the project)
+    before deleting the marker at the version just read, under the shared lock so a concurrent
+    rename or removal request cannot land between the read and the delete. 404 when ``name`` names
+    no workspace project or carries no pending-rename marker; 409 naming the marker read that
+    changed underneath, or the line that did not write (the marker then stands).
     """
     with project_removal._request_lock:
         try:
@@ -437,26 +371,23 @@ def withdraw_project_rename(name: str, *, requested_by: str) -> dict:
 
 
 def complete_pending_renames(workspace_root: Path) -> list[dict]:
-    """Phase two: rename every workspace project carrying a pending-rename marker onto its own
-    new name. Runs once per process, before :func:`~tcip_mcp.project_removal.
-    complete_pending_removals` (so a rename marker is never walked past inside a tree the removal
-    walk has already moved into the holding directory).
+    """Phase two: rename every workspace project carrying a pending-rename marker onto its own new
+    name. Runs once per process, before
+    :func:`~tcip_mcp.project_removal.complete_pending_removals`.
 
     Three branches per marked project. Normal: ``os.path.lexists(<ws>/<new_name>)`` answers
     ``{name, new_name, blocked_by}`` naming what sits there (never an overwrite); else
-    :func:`tcip_store.close_connections`, ``os.rename`` under :data:`
-    tcip_mcp.project_removal.RENAME_BUDGET_S` (a denied or cross-device rename answers ``{name,
-    new_name, blocked_by, blocked_errno}`` and the marker stays), then the completion line
+    :func:`tcip_store.close_connections`, ``os.rename`` under
+    :data:`tcip_mcp.project_removal.RENAME_BUDGET_S` (a denied or cross-device rename answers
+    ``{name, new_name, blocked_by, blocked_errno}`` and the marker stays), then the completion line
     ``project_rename_completed`` on the renamed tree, an ``AuditEntryNotWritten`` folded into the
-    outcome's ``note`` exactly as ``complete_pending_removals`` folds its own, then the marker
-    delete at the version read under the new root's key, then :func:`tcip_store.close_connections`
-    again; the outcome is ``{name, new_name}``. Resume: when the child's own name already equals
-    the marker's ``new_name`` (the crash window between the rename and the marker delete), no
-    rename; the completion line is written first, its failure folded into ``note`` the same way,
-    then the marker is deleted at the version read, and the outcome says ``{name, new_name,
-    already_renamed, note}``. Skipped: the marker itself could not be read (a loose layout, an
-    undecodable or over-version document), answering ``{name, skipped}`` with that project left
-    exactly as it was.
+    outcome's ``note``, then the marker delete at the version read under the new root's key, then
+    :func:`tcip_store.close_connections` again; the outcome is ``{name, new_name}``. Resume: when
+    the child's own name already equals the marker's ``new_name``, no rename; the completion line
+    is written first, its failure folded into ``note`` the same way, then the marker is deleted at
+    the version read, and the outcome says ``{name, new_name, already_renamed, note}``. Skipped:
+    the marker itself could not be read (a loose layout, an undecodable or over-version document),
+    answering ``{name, skipped}`` with that project left exactly as it was.
     """
     outcomes: list[dict] = []
     ws = workspace_root

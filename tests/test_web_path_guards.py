@@ -72,12 +72,12 @@ def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(tmp_path, monkey
         assert_path_allowed(str(secret))
 
 
-def test_every_configured_root_is_honoured_not_only_the_first(
+def test_every_configured_root_is_honored_not_only_the_first(
     tmp_path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
 ) -> None:
     """A multi-entry ``TCIP_IMAGE_ROOTS`` admits work under each entry it names.
 
-    The two roots differ in depth and in the file they hold, so honouring only the first
+    The two roots differ in depth and in the file they hold, so honoring only the first
     entry, or failing to split the list, changes the outcome for the second.
     """
     first = tmp_path / "imagery_a" / "2026-02-11"

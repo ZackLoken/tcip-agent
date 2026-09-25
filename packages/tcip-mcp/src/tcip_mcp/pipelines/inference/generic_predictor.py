@@ -30,7 +30,10 @@ from tcip_mcp.pipelines.image_utils import (
     BandGroupRef, display_source_path, load_image, pad_tile, pil_to_tensor,
 )
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_BATCH_SIZE
+from tcip_mcp.pipelines.resolution import (
+    DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_NMS_IOU, DEFAULT_OVERLAP, DEFAULT_POSTPROCESS,
+    DEFAULT_TILE_BATCH_SIZE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +46,10 @@ from tcip_mcp.pipelines.image_utils import crop_pad_tile as _crop_pad_tile  # no
 
 
 class WindowedRasterReader(Protocol):
-    """The read surface a huge-raster tile source must expose for :meth:`GenericPredictor.
-    predict_tiled`: full-raster pixel dimensions, band count, and a windowed decode.
-    Duck-typed rather than importing a concrete reader here, so this stays usable for any raster
-    too large to load whole, not just the ``pipelines/raster_source.py`` backends (each of which
-    exposes this surface; :class:`~tcip_mcp.pipelines.raster_source.GdalSource` is the one a huge
-    GeoTIFF opens as).
+    """The read surface a huge-raster tile source must expose for
+    :meth:`GenericPredictor.predict_tiled`: full-raster pixel dimensions, band count, and a
+    windowed decode. Every ``pipelines/raster_source.py`` backend exposes it;
+    :class:`~tcip_mcp.pipelines.raster_source.GdalSource` is the one a huge GeoTIFF opens as.
     """
 
     height: int
@@ -62,17 +63,15 @@ class GenericPredictor:
     """Load any bespoke ``model_source`` checkpoint and run inference.
 
     The checkpoint must carry the model reference and the weights (``model_build``'s
-    ``MODEL_SOURCE_KEY`` / ``STATE_DICT_KEY``).
-    Task type is read from the model_source.
+    ``MODEL_SOURCE_KEY`` / ``STATE_DICT_KEY``). Task type is read from the model_source.
 
     The input geometry the run trained at travels on the checkpoint's embedded config and is
     exposed as-recorded: ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice),
     ``train_native_size`` (the one frame size an untiled run's frames all shared, ``[width,
     height]``), and ``train_augmentation`` (the augmentation config that run declared, a dict or a
-    preset name). Turning those into a tile geometry to infer at is
-    :func:`~tcip_mcp.pipelines.inference.predictor.resolve_tile_geometry`'s job, paired with
-    :func:`~tcip_mcp.pipelines.inference.predictor.native_ratio_tile_resize` for the resize half;
-    nothing here picks a geometry on its own.
+    preset name). :func:`~tcip_mcp.pipelines.inference.predictor.resolve_tile_geometry` and
+    :func:`~tcip_mcp.pipelines.inference.predictor.native_ratio_tile_resize` turn those into an
+    inference geometry.
     """
 
     def __init__(
@@ -117,10 +116,10 @@ class GenericPredictor:
         set_detector_operating_point(self.model, score_thresh=score_threshold,
                                      nms_thresh=nms_iou, detections_per_img=max_dets)
 
-        # The task comes from the bespoke model_source; the width from the run this checkpoint
-        # came out of, its model's declaration or its data config's recorded one.
+        # The width comes from the run this checkpoint came out of, its model's declaration or its
+        # data config's recorded one.
         src = self.model_source or {}
-        self.task = src.get("task", "unknown")
+        self.task = checkpoint.task
         width = run_in_chans(src, self.config.get("data"))
         if width is None:
             raise ValueError(
@@ -132,18 +131,19 @@ class GenericPredictor:
             )
         self.in_chans = width
 
-    @torch.no_grad()
-    def predict(self, image_path: str | Path | BandGroupRef) -> dict:
-        """Run inference on a single image.
-
-        ``image_path`` may be a plain path/string or a :class:`BandGroupRef`, the same image
-        sources ``image_utils.list_logical_images``/``resolve_image_source`` hand every other
-        reader in this platform, so a band-grouped capture decodes through the channel-aware
-        loader here too instead of needing its own stringified stand-in.
-        """
+    def model_input(self, image_path: str | Path | BandGroupRef) -> tuple[torch.Tensor, int, int]:
+        """One source as this model reads it: EXIF-oriented at the model's own width, as a
+        tensor on its device, with the source's ``(width, height)``."""
         img = load_image(image_path, self.in_chans)
         w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
-        tensor = pil_to_tensor(img).to(self.device)
+        return pil_to_tensor(img).to(self.device), int(w), int(h)
+
+    @torch.no_grad()
+    def predict(self, image_path: str | Path | BandGroupRef) -> dict:
+        """Run inference on a single image. ``image_path`` may be a plain path/string or a
+        :class:`BandGroupRef`.
+        """
+        tensor, w, h = self.model_input(image_path)
         disp = display_source_path(image_path)
 
         if self.task in _DETECTION_TASKS:
@@ -158,24 +158,22 @@ class GenericPredictor:
     @torch.no_grad()
     def predict_batch(
         self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
-        tile_size: int | None = None, overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-        global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = 16, postprocess: str = "nms",
+        tile_size: int | None = None, overlap: float = DEFAULT_OVERLAP, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+        global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = DEFAULT_IMAGE_BATCH_SIZE, postprocess: str = DEFAULT_POSTPROCESS,
         *, require_masks: bool = True, tile_resize: tuple[int, int] | None = None,
     ) -> list[dict]:
         """Run inference on multiple images (optionally tiled for small objects).
 
-        For detection, images are run through the detector in batches of ``batch_size``
-        (one GPU forward per batch, torchvision detectors take a list of variable-size
-        images), instead of one forward per image. Non-detection heads stay per-image
-        since their inputs are native-resolution (can't be stacked without resizing).
+        For detection, images are run through the detector in batches of ``batch_size`` (one GPU
+        forward per batch, torchvision detectors take a list of variable-size images), instead of
+        one forward per image. Non-detection heads stay per-image since their inputs are
+        native-resolution (can't be stacked without resizing).
 
-        Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef`
-        (see :meth:`predict`). ``require_masks`` forwards to :meth:`predict_tiled` when ``tile=True``
-        (see its own docstring for the tiled mask shape); ignored when ``tile=False``, since the
-        untiled path always carries masks for ``instance_seg``. ``tile_size``/``tile_resize`` are
-        only meaningful when ``tile=True``: ``tile_size`` is never defaulted here (see
-        :meth:`predict_tiled`'s own docstring for why), a caller that tiles without resolving one
-        gets that method's own clear refusal, and ``tile_resize`` forwards unchanged.
+        Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef` (see
+        :meth:`predict`). ``require_masks`` forwards to :meth:`predict_tiled` when ``tile=True``;
+        ignored when ``tile=False``, since the untiled path always carries masks for
+        ``instance_seg``. ``tile_size``/``tile_resize`` are only meaningful when ``tile=True`` and
+        forward unchanged; ``tile_size`` has no default.
         """
         if tile:
             return [
@@ -198,9 +196,8 @@ class GenericPredictor:
             chunk = image_paths[start:start + max(1, batch_size)]
             tensors, meta = [], []
             for p in chunk:
-                img = load_image(p, self.in_chans)
-                w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
-                tensors.append(pil_to_tensor(img).to(self.device))
+                tensor, w, h = self.model_input(p)
+                tensors.append(tensor)
                 meta.append((display_source_path(p), w, h))
             outputs = self.model(tensors)  # one forward over the whole chunk
             for (disp, w, h), out in zip(meta, outputs):
@@ -213,18 +210,13 @@ class GenericPredictor:
         were multiplied by getting there.
 
         ``tile_resize`` given, the tile is stretched to it through the training chain's own
-        :class:`~tcip_mcp.pipelines.data.augmentations.Resize` (never a second resize
-        implementation), which is a per-axis stretch: the two factors differ whenever the target's
-        aspect differs from the tile's, so they travel separately and are never collapsed to one.
+        :class:`~tcip_mcp.pipelines.data.augmentations.Resize`, a per-axis stretch: the two factors
+        differ whenever the target's aspect differs from the tile's, so they travel separately.
 
         A tile no PIL mode represents faithfully (uint16, 5-band, or a 4-channel tile whose
-        alpha-vs-spectral-band status is unresolved) is returned untouched at ``(1.0, 1.0)``: the
-        training loader's own transform chain is PIL-only and skipped such a sample too
-        (``BaseImageDataset._finalize``), so resizing here would introduce a geometry training
-        never applied. ``to_pil_if_faithful`` is that same shared decision, not a second one;
-        ``band_interpretations`` (the windowed source's own GDAL color interpretations, absent
-        for the whole-decode path since ``load_image`` already resolved it there) is the same
-        real signal that decision reads elsewhere, never guessed here either.
+        alpha-vs-spectral-band status is unresolved, per ``to_pil_if_faithful`` over
+        ``band_interpretations``) is returned untouched at ``(1.0, 1.0)``, as the training loader's
+        PIL-only transform chain skips such a sample (``BaseImageDataset._finalize``).
         """
         if tile_resize is None:
             return crop, 1.0, 1.0
@@ -247,57 +239,39 @@ class GenericPredictor:
         prior: dict | None = None,
         progress: "Callable[[int, int, dict], None] | None" = None,
     ) -> dict:
-        """Shared tiling/batching/reconstruction loop behind :meth:`predict_tiled`'s two source
-        kinds (a fully decoded in-memory image, or a windowed raster reader): build tile positions
-        from ``(height, width)``, pull each tile's pixels via ``get_tile(tile_x,
-        tile_y)`` (already cropped-and-padded to ``tile_size`` x ``tile_size``, PIL image or ``[H,
-        W, C]`` array), batch them through the model, then ``reconstruct_core``/``global_nms``/
-        ``global_merge``. The two callers differ only in how ``get_tile`` sources its pixels; this
-        loop is not duplicated between them.
+        """Tiling/batching/reconstruction loop behind :meth:`predict_tiled`'s two source kinds (a
+        fully decoded in-memory image, or a windowed raster reader): build tile positions from
+        ``(height, width)``, pull each tile's pixels via ``get_tile(tile_x, tile_y)`` (already
+        cropped-and-padded to ``tile_size`` x ``tile_size``, PIL image or ``[H, W, C]`` array),
+        batch them through the model, then ``reconstruct_core``/``global_nms``/``global_merge``.
 
         For ``instance_seg`` with ``require_masks=True`` (the default), each tile's soft masks
         (``outputs["masks"]``, same squeeze convention as :meth:`_format_detection`) travel through
         the same reconstruction/merge in lockstep with their boxes, and the returned dict gains a
-        ``masks`` key: a list of ``{"mask_patch", "offset_x", "offset_y"}`` dicts, one per surviving
-        detection (tile-local soft-mask patch + its full-image-space origin, never a dense
-        full-image-sized array; see :class:`tcip_mcp.pipelines.data.tiling.MaskPatch`). This
-        deliberately differs from the untiled result's own ``masks`` (one dense ``[H, W]`` array per
-        detection, already in full-image coordinates): a huge orthomosaic tile source can never
-        afford one full-raster-sized mask per detection, so the tiled shape stays patch-local and a
-        consumer (export, visualization) adds the offset only at the point of use. Any task other
-        than ``instance_seg``, or ``require_masks=False``, never collects masks and the returned
-        dict carries no ``masks`` key at all (an explicit boxes-only opt-out, still worth taking
-        when a caller never reads masks: a mask patch per detection is real extra memory/compute
-        across a dense tile grid).
+        ``masks`` key: a list of ``{"mask_patch", "offset_x", "offset_y"}`` dicts, one per
+        surviving detection (tile-local soft-mask patch + its full-image-space origin; see
+        :class:`tcip_mcp.pipelines.data.tiling.MaskPatch`), not the untiled result's dense ``[H,
+        W]`` arrays. Any task other than ``instance_seg``, or ``require_masks=False``, never
+        collects masks and the returned dict carries no ``masks`` key.
 
-        ``tile_resize`` (a ``(width, height)``) resizes every tile to it before the forward pass and
-        undoes that stretch on the way back, per axis (:meth:`_tile_model_input`), inside this loop:
-        the boxes and mask patches leaving it are in the tile's own native pixel space, which is the
-        space ``reconstruct_core`` shifts to full-image coordinates and runs its core-region keep
-        test in. Undoing the stretch after reconstruction instead would run that keep test at the
-        wrong scale and change which detections survive. What the model itself does internally to the
-        tensor it is handed (a detector's own ``GeneralizedRCNNTransform`` resizes it, then maps its
-        boxes back to that tensor's coordinate space) is already undone before this loop sees a box,
-        so only the resize applied here is corrected here. ``band_interpretations`` passes through
-        to :meth:`_tile_model_input` for the windowed-reader caller only (the whole-decode caller's
-        tiles are already the type ``load_image`` resolved them to, with its own real signal).
+        ``tile_resize`` (a ``(width, height)``) resizes every tile to it before the forward pass
+        and undoes that stretch per axis (:meth:`_tile_model_input`) before reconstruction, so the
+        boxes and mask patches reaching ``reconstruct_core``'s keep test are in the tile's own
+        native pixel space. ``band_interpretations`` passes through to :meth:`_tile_model_input`
+        for the windowed-reader caller only.
 
-        ``prior`` (default ``None``) seeds the accumulators with tiles a caller already has, from
-        an earlier, interrupted run of this same pass: a mapping with ``tile_info``/``boxes``/
-        ``scores``/``labels``, one entry per already-done tile, in the shape a batch record from
-        ``progress`` below carries. Every position in ``prior["tile_info"]`` is skipped in the live
-        loop, so this resumes rather than repeats it; the merge (reconstruction, cross-tile NMS or
-        NMM, the ``max_dets`` cap) runs over ``prior`` and the live tiles together, and ``tiles``
-        still reports the whole grid's count either way. ``progress`` (default ``None``), when
-        given, is called once per flushed live batch with that batch's own first and last tile
-        index into the full position grid and a mapping of its own new ``tile_info``/``boxes``/
-        ``scores``/``labels`` (never ``masks``, whatever ``require_masks`` says: resuming a
-        mask-bearing pass is a caller's own decision to refuse, this loop stays generic), so a
-        caller can persist it and resume from it later. Neither seeds nor reports mask patches.
+        ``prior`` (default ``None``) seeds the accumulators with tiles from an earlier, interrupted
+        run of this same pass: a mapping with ``tile_info``/``boxes``/``scores``/``labels``, one
+        entry per already-done tile, in the shape a ``progress`` batch record carries. Every
+        position in ``prior["tile_info"]`` is skipped in the live loop; the merge (reconstruction,
+        cross-tile NMS or NMM, the ``max_dets`` cap) runs over ``prior`` and the live tiles
+        together, and ``tiles`` reports the whole grid's count either way. ``progress`` (default
+        ``None``), when given, is called once per flushed live batch with that batch's own first
+        and last tile index into the full position grid and a mapping of its own new
+        ``tile_info``/``boxes``/``scores``/``labels``. Neither seeds nor reports mask patches.
 
         Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles`` (``masks``
-        when applicable); the caller stamps its own ``image`` field (a display path or a windowed
-        reader's own label).
+        when applicable); the caller stamps its own ``image`` field.
         """
         import numpy as np
         from tcip_mcp.pipelines.data.tiling import (
@@ -463,69 +437,46 @@ class GenericPredictor:
     @torch.no_grad()
     def predict_tiled(
         self, source: str | Path | BandGroupRef | WindowedRasterReader, tile_size: int | None = None,
-        overlap: float = 0.2, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, global_nms_iou: float = DEFAULT_NMS_IOU,
-        postprocess: str = "nms", *, require_masks: bool = True, source_label: str = "",
+        overlap: float = DEFAULT_OVERLAP, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, global_nms_iou: float = DEFAULT_NMS_IOU,
+        postprocess: str = DEFAULT_POSTPROCESS, *, require_masks: bool = True, source_label: str = "",
         tile_resize: tuple[int, int] | None = None,
         prior: dict | None = None,
         progress: "Callable[[int, int, dict], None] | None" = None,
     ) -> dict:
-        """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
-        core-region reconstruction -> cross-tile merge -> full-image detections.
+        """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict -> core-region
+        reconstruction -> cross-tile merge -> full-image detections.
 
-        Dispatches on ``source``'s own container layout, never its size, the same principle
-        ``raster_source.open_raster`` follows: a plain path/string or :class:`BandGroupRef` decodes
-        the whole image into memory once (via ``load_image``) before tiling; a
-        :class:`WindowedRasterReader`-shaped object (duck-typed: has ``.read_window``, see that
-        Protocol) sources each tile's pixels on demand instead, so a raster too large to load whole
-        (a multi-gigabyte orthomosaic) never has to be. ``source_label`` names the windowed case's
-        ``image`` result field (a windowed reader carries no single on-disk path the caller doesn't
-        already know); ignored for the whole-decode case, whose own display path is used instead.
+        Dispatches on ``source``'s own container layout, never its size: a plain path/string or
+        :class:`BandGroupRef` decodes the whole image into memory once (via ``load_image``) before
+        tiling; a :class:`WindowedRasterReader`-shaped object (has ``.read_window``) sources each
+        tile's pixels on demand instead. ``source_label`` names the windowed case's ``image``
+        result field; ignored for the whole-decode case, whose own display path is used instead.
 
         ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
         unions boxes split across a seam. A whole-decode non-detection source falls back to
-        :meth:`predict`; a windowed-reader source has no untiled fallback (the whole point of that
-        path is a raster too large to decode whole), so a non-detection task there raises
-        ``ValueError`` instead.
+        :meth:`predict`; a non-detection task on a windowed-reader source raises ``ValueError``.
 
         A source with no safe coercion has its band count checked against ``self.in_chans`` before
         any tile is read: the reader's own declared ``num_channels`` for the windowed case, always
-        checked (a raster source is never coerced); :func:`derivations.probe_channels`
-        (header-only where possible) for the whole-decode case, but only when ``source`` is not a
-        photographic file (:func:`raster_source.photographic_container`) - ``load_image`` converts
-        any photographic frame to ``in_chans`` itself (PIL's own RGBA/RGB/L conversion), so a probed
-        mismatch there is not a real one. Either way, a genuine mismatch raises ``ValueError``
-        rather than silently truncating/padding the band count the model trained on.
+        checked; :func:`derivations.probe_channels` for the whole-decode case, only when ``source``
+        is not a photographic file (:func:`raster_source.photographic_container`), since
+        ``load_image`` converts a photographic frame to ``in_chans`` itself. A mismatch raises
+        ``ValueError``.
 
-        ``tile_size`` has no default: the caller (``resolve_tile_geometry``, upstream of every real
-        entry point) resolves a real basis before calling, this raw tiling primitive never
-        fabricates one.
+        ``tile_size`` has no default.
 
         ``tile_resize`` (a ``(width, height)``, default ``None`` = feed each tile as it stands)
         resizes every tile to it before the forward pass and maps the boxes/masks back into the
         tile's own native pixel space per axis, so the result is in the source's real pixel space
-        either way. It exists so a run can reproduce the input geometry a checkpoint trained at: the
-        native-size ratio tier cuts tiles at the training frame's own size and hands them the same
-        resize the training chain applied (``native_ratio_tile_resize``). A tile edge that is
-        explicit or from persisted tile geometry passes ``None``: the tile as it stands is what those
-        tiers mean.
+        either way; the native-size ratio tier passes the training chain's resize
+        (``native_ratio_tile_resize``).
 
         ``require_masks`` (default True) governs whether an ``instance_seg`` checkpoint's masks are
-        threaded through the cross-tile reconstruction/merge at all: a mask patch per detection is
-        real extra memory/compute across a dense tile grid, so a caller that never reads masks
-        (``run_full_frame_evaluation`` scores boxes against full-frame GT) can pass
-        ``require_masks=False`` to skip it deliberately; the result then carries no ``masks`` key
-        for any task. With ``require_masks=True`` and ``instance_seg``, the returned ``masks`` are
-        not the untiled result's dense ``[H, W]`` full-image arrays: each is a small tile-local
-        patch plus its full-image-space offset (``{"mask_patch", "offset_x", "offset_y"}``, see
-        :meth:`_tiled_infer_core`), the shape a source too large to hold one full-size mask per
-        detection requires; a consumer must not assume the two ``masks`` shapes are interchangeable.
+        threaded through the cross-tile reconstruction/merge; ``False`` returns no ``masks`` key
+        for any task. The tiled ``masks`` shape is :meth:`_tiled_infer_core`'s.
 
         ``prior``/``progress`` (both default ``None``) forward to :meth:`_tiled_infer_core` for the
-        windowed-reader source only, the resume seam a raster too large to decode whole needs; see
-        that method's own docstring. The whole-decode source never resumes (a plain directory-of-
-        images pass writes its files all at the end), so a caller of that path leaves both
-        unset; passing either against a whole-decode source refuses by name rather than
-        silently dropping the resume state the caller thinks it handed over.
+        windowed-reader source only; passing either against a whole-decode source refuses by name.
         """
         if not hasattr(source, "read_window") and (prior is not None or progress is not None):
             raise ValueError(

@@ -9,6 +9,8 @@ for a label is the one that produced the number the label was stamped on.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import importlib
 
 import pytest
@@ -35,8 +37,8 @@ def _write_bare_trait(name: str, **extra) -> None:
     specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
     ts.replace(
         trait_spec_key(specs_dir, name),
-        {"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
-         **extra},
+        complete_spec_record({"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
+         **extra}),
         expect=ts.Version.ABSENT,
     )
 

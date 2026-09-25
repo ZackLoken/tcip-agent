@@ -1,12 +1,11 @@
-"""The reader of an external dataset-level COCO document, on its way into per-image documents.
+"""The reader of an external dataset-level COCO document (an ``"images"`` / ``"annotations"`` /
+``"categories"`` key), on its way into per-image documents.
 
-The platform writes and trains on the per-image label document (``json_io``). A dataset-level COCO
-document (an ``"images"`` / ``"annotations"`` / ``"categories"`` key) is an external export: it is
-read here once, by the import, and never written. Its records already carry the per-image
-document's own field spellings (``bbox`` as ``[x, y, w, h]``, ``segmentation`` rings, ``iscrowd``,
-``attributes``, ``score``, provenance), so this reader names each record's subject from the
-document's own ``categories``, turns a run-length mask into rings through the one contour
-extractor, and hands each record to the one per-record decoder.
+Its records carry the per-image document's own field spellings (``bbox`` as ``[x, y, w, h]``,
+``segmentation`` rings, ``iscrowd``, ``attributes``, ``score``, provenance); this reader names each
+record's subject from the document's own ``categories``, turns a run-length mask into rings through
+:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`, and hands each record to the
+per-record decoder.
 """
 
 from __future__ import annotations
@@ -31,10 +30,8 @@ def is_coco_id(value: Any) -> bool:
 def coco_categories(coco: dict, *, problems: list[str]) -> dict[int, str]:
     """``{category_id: name}`` from the document's own ``categories``, checked without coercion.
 
-    A declaration that is not an object with an integer ``id``, and a second declaration of one
-    id, is appended to ``problems`` by index rather than read: either would leave a record's
-    subject decided by a coercion, or by which declaration happened to be read last. A ``name``
-    is the subject a record takes, so :class:`Annotation` and the registry answer for it.
+    A declaration that is not an object with an integer ``id``, and a second declaration of one id,
+    is appended to ``problems`` by index rather than read.
     """
     out: dict[int, str] = {}
     declared = coco.get("categories", [])
@@ -75,17 +72,15 @@ def parse_coco_annotations(
     :class:`Annotation` keyed by the integer ``image_id`` its record names, and every fault found.
 
     A document without a dataset-level COCO's keys raises ``ValueError``. Every other fault is
-    returned rather than raised, each naming its declaration or record index, so a caller reports
-    all of them at once: a malformed or repeated category declaration (:func:`coco_categories`), a
-    record whose ``image_id`` is not an integer, and a record the decoding refuses (a
-    ``category_id`` no valid declaration names, then anything
-    :func:`~tcip_annotation.json_io.annotation_of_record` refuses). A record's identity and its
-    decoding are checked independently, so one record can report both, and only a record whose
-    ``image_id`` is valid is associated with an image. A run-length ``segmentation`` (a dict with
-    ``counts`` and ``size``) is decoded to a mask by ``decode_rle`` and converted to rings by
-    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`, the extractor every mask on its
-    way into a label document goes through; a mask that yields no ring is refused by the decoder
-    like any other segmentation with no ring.
+    returned rather than raised, each naming its declaration or record index: a malformed or
+    repeated category declaration (:func:`coco_categories`), a record whose ``image_id`` is not an
+    integer, and a record the decoding refuses (a ``category_id`` no valid declaration names, then
+    anything :func:`~tcip_annotation.json_io.annotation_of_record` refuses). A record's identity
+    and its decoding are checked independently, so one record can report both, and only a record
+    whose ``image_id`` is valid is associated with an image. A run-length ``segmentation`` (a dict
+    with ``counts`` and ``size``) is decoded to a mask by ``decode_rle`` and converted to rings by
+    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`; a mask that yields no ring is
+    refused by the decoder like any other segmentation with no ring.
     """
     if not is_dataset_level_document(coco):
         raise ValueError(

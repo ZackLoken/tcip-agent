@@ -1,6 +1,5 @@
 """``per_image_counts_from_bucket``: a classified bucket delivers the object count its own scope
-says its detections are of, never the value count, and refuses a neither-key stamp naming the
-conform script rather than reading it as an ordinary, unscoped bucket.
+says its detections are of, never the value count.
 """
 
 from __future__ import annotations
@@ -10,9 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-from tcip_mcp.pipelines.resolution import operating_point_stamp, sidecar_key, write_sidecar
+from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tests import _operationalization_fixtures as fx
 
 SUBJECT = fx.COUNT_SUBJECT  # "stem": what the confirmed per_image_count says the counts are of
@@ -50,45 +48,14 @@ def test_a_classified_bucket_delivers_its_object_count_not_its_value_count(tmp_p
     bucket = _classified_bucket(tmp_path)
     out = tmp_path / "counts.csv"
 
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
     result = per_image_counts_from_bucket(
         str(bucket), str(out), trait=fx.COUNT_TRAIT, project_root=tmp_path,
-        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="unvalidated fixture"))
+        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="unvalidated fixture"))
 
     assert "error" not in result
     rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 1
     assert int(rows[0]["detection_count"]) == 2  # both records counted as the object class
 
-
-def test_a_neither_key_stamp_refuses_naming_the_repair_command(tmp_path: Path) -> None:
-    import tcip_store
-
-    from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
-
-    bucket = tmp_path / "predictions" / "classifier" / "2026-05-21"
-    write_predictions_json(
-        bucket / "img1.json",
-        {"width": 100, "height": 100, "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1]},
-        subject=None, attribute=None, id_map=None,
-    )
-    # Overwrite the annotation's own subject/value into the classified shape by hand, then seed a
-    # stamp predating the writer rail (id_map alone, no subject/attribute pair at all).
-    from tcip_annotation.json_io import write_annotations
-
-    write_annotations(
-        str(bucket / "img1.json"),
-        [Annotation(subject=SUBJECT, geometry=BBox(10, 10, 30, 30), score=0.9,
-                   attributes={ATTRIBUTE: "upright"})],
-        100, 100,
-    )
-    tcip_store.replace(sidecar_key(bucket, "operating_point"), {"id_map": ID_MAP},
-                       expect=tcip_store.Version.ABSENT)
-    out = tmp_path / "counts.csv"
-
-    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
-
-    with pytest.raises(CountDeliveryRefused, match="repair-classified-predictions"):
-        per_image_counts_from_bucket(str(bucket), str(out), trait=fx.COUNT_TRAIT,
-                                     project_root=tmp_path)

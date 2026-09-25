@@ -155,9 +155,9 @@ export const subjectsApi = {
     ),
 };
 
-// High-contrast palette the GUI derives subject/value colours from. Colour is GUI-local (the
+// High-contrast palette the GUI derives subject/value colors from. Color is GUI-local (the
 // registry stores none), so it is a pure function of the name: the same subject renders the same
-// colour every session with nothing persisted.
+// color every session with nothing persisted.
 export const SUBJECT_COLORS = [
   "#FF0000",
   "#00FFFF",
@@ -171,7 +171,7 @@ export const SUBJECT_COLORS = [
   "#00CED1",
 ];
 
-/** A subject's colour: this browser's override (lib/subjectColors), else its collision-free slot
+/** A subject's color: this browser's override (lib/subjectColors), else its collision-free slot
  *  in the loaded registry, else the bare name -> hex derivation below. */
 export function subjectColor(name: string): string {
   const override = subjectColorOverride(name);
@@ -191,7 +191,7 @@ function fnv1aSlot(name: string, size: number): number {
 }
 
 /** Deterministic name -> hex: a subject (or attribute-value) name always maps to the same swatch,
- *  without storing colour anywhere. FNV-1a over the name, indexed into the palette; a name inside
+ *  without storing color anywhere. FNV-1a over the name, indexed into the palette; a name inside
  *  the loaded registry gets its collision-free slot from `subjectColor` instead. */
 export function derivedSubjectColor(name: string): string {
   return SUBJECT_COLORS[fnv1aSlot(name, SUBJECT_COLORS.length)];
@@ -204,7 +204,7 @@ let registrySlots: Map<string, number> = new Map();
 /** Assigns each of `subjectNames` its own palette slot where the palette has room: sorted names
  *  take their FNV-1a slot when free, else the next free slot going forward (wrapping past the
  *  last). Past `SUBJECT_COLORS.length` names, free slots run out and later names share one again,
- *  exactly as the bare hash always could; a subject's derived colour therefore depends on the
+ *  exactly as the bare hash always could; a subject's derived color therefore depends on the
  *  registry it sits in, not on its name alone. Called once per registry load (`setRegistry`);
  *  `subjectColor` reads the result, never recomputes it. */
 export function setSubjectColorRegistry(subjectNames: Iterable<string>): void {

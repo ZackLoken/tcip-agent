@@ -9,6 +9,8 @@ own resolution rather than against a path spelled out beside them.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import os
 import subprocess
 import sys
@@ -35,17 +37,17 @@ def _seed_registry(project_root: Path) -> Path:
     stamp = {"schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}
     ts.replace(
         traits.trait_spec_key(specs_dir, "leaf"),
-        {"name": "leaf", "delivers": ["leaf_length", "leaf_width"], "milestone_fractions": [0.5],
-         **stamp},
+        complete_spec_record({"name": "leaf", "delivers": ["leaf_length", "leaf_width"], "milestone_fractions": [0.5],
+         **stamp}),
         expect=ts.Version.ABSENT)
     ts.replace(
-        traits.trait_spec_key(specs_dir, "bloom"),
-        {"name": "bloom", "delivers": ["bloom_50per_date"], "milestone_fractions": [0.05, 0.5, 0.95],
-         **stamp},
+        traits.trait_spec_key(specs_dir, "fruit"),
+        complete_spec_record({"name": "fruit", "delivers": ["fruit_ripe_50per_date"], "milestone_fractions": [0.05, 0.5, 0.95],
+         **stamp}),
         expect=ts.Version.ABSENT)
     ts.replace(
         traits.trait_spec_key(specs_dir, "unicorn"),
-        {"name": "unicorn", "delivers": ["unicorn_horn_length"], **stamp},
+        complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"], **stamp}),
         expect=ts.Version.ABSENT)
     return specs_dir
 
@@ -54,16 +56,16 @@ def test_the_traits_route_serves_what_the_registry_resolves(client: TestClient, 
     """Same project root, same answer: the route's trait names and broken-spec files are the
     registry's, so a breeder facing an empty picker is seeing an empty registry."""
     _seed_registry(tmp_path)
-    registered = registered_traits_for(tmp_path)
-    _specs, errors = load_trait_specs_with_errors(
+    specs, errors = load_trait_specs_with_errors(
         specs_dir=tmp_path / traits._TRAIT_SPECS_RELPATH)
-    assert registered == ["bloom", "leaf"]
+    registered = sorted(spec.name for spec in specs)
+    assert registered == ["fruit", "leaf"]
     assert [e["file"] for e in errors] == ["unicorn.json"]
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
     assert body["traits"] == registered
     assert [e["file"] for e in body["invalid_specs"]] == [e["file"] for e in errors]
-    assert body["milestone_fractions_by_trait"] == {"bloom": [0.05, 0.5, 0.95], "leaf": [0.5]}
+    assert body["milestone_fractions_by_trait"] == {"fruit": [0.05, 0.5, 0.95], "leaf": [0.5]}
 
 
 def test_the_doctor_reports_every_spec_the_registry_could_not_load(tmp_path: Path):
@@ -101,8 +103,8 @@ def test_the_traits_route_follows_the_registry_when_the_registry_moves(
     monkeypatch.setattr(traits, "trait_specs_dir", lambda project_root=None: redirected)
     ts.replace(
         traits.trait_spec_key(redirected, "leaf"),
-        {"name": "leaf", "delivers": ["leaf_length"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": "leaf", "delivers": ["leaf_length"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT)
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
@@ -118,8 +120,8 @@ def test_the_doctor_follows_the_registry_when_the_registry_moves(
     monkeypatch.setattr(traits, "trait_specs_dir", lambda project_root=None: redirected)
     ts.replace(
         traits.trait_spec_key(redirected, "unicorn"),
-        {"name": "unicorn", "delivers": ["unicorn_horn_length"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}, expect=ts.Version.ABSENT)
+        complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}), expect=ts.Version.ABSENT)
 
     findings: list[tuple[str, str]] = []
     _load_doctor().check_trait_specs(tmp_path, findings)
@@ -154,8 +156,8 @@ def test_a_registry_with_nothing_broken_reports_nothing_broken(client: TestClien
     specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
     ts.replace(
         traits.trait_spec_key(specs_dir, "leaf"),
-        {"name": "leaf", "delivers": ["leaf_length"],
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
+        complete_spec_record({"name": "leaf", "delivers": ["leaf_length"],
+         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
         expect=ts.Version.ABSENT)
     # A confirmed, current statement makes this registry genuinely nothing-broken under the
     # three-state check_trait_spec_statements too.

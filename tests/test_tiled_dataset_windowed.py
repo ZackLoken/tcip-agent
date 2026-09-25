@@ -145,7 +145,7 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     assert all(isinstance(s, str) and isinstance(tx, int) and isinstance(ty, int)
                for s, tx, ty in entries)
     assert entries[0] == (_only_source(ds), 0, 0)
-    assert ds.member_stem_of(entries[0][0]) == "img0"
+    assert ds.member_of(entries[0][0]) == "img0"
     assert entries == [(e["stem"], e["tile_x"], e["tile_y"]) for e in ds._index]
 
 

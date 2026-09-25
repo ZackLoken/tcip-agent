@@ -1,17 +1,11 @@
 """Deriving and validating a physical per-pixel scale against real physical measurements.
 
-A physical scale is never agent-guessed and never accepted as a bare candidate: it is derived from
-a breeder's own reference measurements (a scale bar, a reference disc, an organ measured with
-calipers) and tested against a held-out half of the same references it was not derived from, the
-same locked calibration/holdout discipline the scalar-head calibrators use
-(``tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split``). A candidate derived from and
-then tested against the same references would pass by construction; that is exactly what this
-module refuses to do.
+A physical scale is derived from a breeder's own reference measurements (a scale bar, a reference
+disc, an organ measured with calipers) and tested against a held-out half of the same references it
+was not derived from (``tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split``).
 
-The one function here, :func:`resolve_physical_scale`, is this document's registered
-``_DOCUMENT_RESOLVERS["resolve_scale"]`` entry (see ``pipelines.resolution``); its caller is
-``tools.scale_tools.calibrate_physical_scale``, which reads the references (an annotated reference
-object's pixel extent, a breeder-authored CSV's physical extent) and runs this gate over them.
+:func:`resolve_physical_scale` is the registered ``_DOCUMENT_RESOLVERS["resolve_scale"]`` entry
+(see ``pipelines.resolution``).
 """
 
 from __future__ import annotations
@@ -22,6 +16,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_GROUP_BY, DEFAULT_HOLDOUT_RATIO
+
 
 def resolve_physical_scale(
     *,
@@ -30,14 +26,14 @@ def resolve_physical_scale(
     tolerance_frac: float | None,
     dataset_root: str | Path,
     identity_hash: str,
-    group_by: str = "tile_prefix",
+    group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
-    seed: int = 0,
-    holdout_ratio: float = 0.5,
+    seed: int = DEFAULT_CAL_SEED,
+    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     capture_id: str | None = None,
 ) -> dict:
     """Derive a per-pixel scale from a locked calibration half of ``references`` and validate it
-    against the holdout half, never against the references it was derived from.
+    against the holdout half.
 
     ``references`` is ``{stem: {"physical_extent": float, "unit": str, "pixel_extent": float}}``,
     one entry per reference image: ``physical_extent``/``unit`` are the breeder's own physical
@@ -45,30 +41,21 @@ def resolve_physical_scale(
     extent in that image (``mask_geometry.principal_axis_extent_of_points``, never a bounding box's
     long side). Each reference implies a scale ``physical_extent / pixel_extent``.
 
-    ``tolerance_frac`` is the trait-authored ``TraitSpec.scale_tolerance_frac``. ``None`` (not yet
-    authored) refuses: unlike the count gate's own tolerance, there is no platform default
-    fallback for how much reference disagreement a physical-scale claim may carry, that is a
-    measurement decision only the domain expert can make.
+    ``tolerance_frac`` is the trait-authored ``TraitSpec.scale_tolerance_frac``; ``None`` (not yet
+    authored) refuses.
 
     The candidate is the mean of the calibration half's implied scales. It clears when its relative
-    deviation from the holdout mean is within the authored ``tolerance_frac``, and when the holdout's
-    own relative dispersion (sample standard deviation of its implied scales over their mean) is
-    itself within ``tolerance_frac``: a reference set that disagrees with itself by more than the
-    tolerance cannot validate to it. The dispersion check already bounds the holdout's own relative
-    standard error at ``tolerance_frac / sqrt(holdout count)``, strictly tighter than
-    ``tolerance_frac`` for any holdout of two or more, so a second floor derived from that same
-    standard error would never bind once the dispersion check passes; the relative standard error is
-    still recorded in ``gate_evidence`` as a diagnostic. Either half with fewer than two references
-    refuses, naming which.
+    deviation from the holdout mean is within ``tolerance_frac``, and when the holdout's own
+    relative dispersion (sample standard deviation of its implied scales over their mean) is itself
+    within ``tolerance_frac``. The relative standard error is recorded in ``gate_evidence`` as a
+    diagnostic. Either half with fewer than two references refuses, naming which.
 
-    Returns ``{validated_against, passed, value, unit, failures, gate_evidence}``, the same shape the
-    scalar-head resolvers return (never a ``ResolvedParam``, which cannot carry a ``failures``
-    list): ``value`` is the derived scale on a pass, ``None`` otherwise; ``gate_evidence`` carries every
-    implied scale by half, both means, the holdout dispersion, the relative standard error and the
-    split identity, so a failed calibration is diagnosable from the returned dict alone. Never raises
-    for an evidence-quality failure (too few references, a disagreeing reference set, an unauthored
-    tolerance); raises only for a caller-composition error (a non-string ``unit``, a unit that is not
-    a linear length unit crops.yml declares, a non-mapping ``references``).
+    Returns ``{validated_against, passed, value, unit, failures, gate_evidence}``: ``value`` is the
+    derived scale on a pass, ``None`` otherwise; ``gate_evidence`` carries every implied scale by
+    half, both means, the holdout dispersion, the relative standard error and the split identity.
+    Never raises for an evidence-quality failure (too few references, a disagreeing reference set,
+    an unauthored tolerance); raises only for a caller-composition error (a non-string ``unit``, a
+    unit that is not a linear length unit crops.yml declares, a non-mapping ``references``).
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
     from tcip_mcp.traits import crops_length_units

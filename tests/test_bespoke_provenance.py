@@ -42,7 +42,7 @@ def _model_source() -> dict:
 
 
 # --------------------------------------------------------------------------
-# snapshot_model_source: source files + sha256 + env + seed
+# snapshot_model_source: source files + sha256 + env
 # --------------------------------------------------------------------------
 
 def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
@@ -57,7 +57,7 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     assert (exp_dir / "model_src" / entry["file"]).is_file()  # content-addressed destination
     assert manifest["builder"].endswith(":build_bespoke_detector")
     assert manifest["env"]["torch"]
-    assert manifest["seed"] == 123
+    assert "seed" not in manifest
     assert manifest["missing"] == []
     assert manifest["snapshot_errors"] == []
 

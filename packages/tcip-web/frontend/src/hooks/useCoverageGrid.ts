@@ -90,11 +90,11 @@ export function useCoverageGrid(args: {
   useEffect(() => {
     const path = imagePath;
     if (!path) return;
-    let cancelled = false;
+    let canceled = false;
     let raf: number | null = null;
 
     const attempt = (): void => {
-      if (cancelled) return;
+      if (canceled) return;
       const host = viewportRef.current ?? measureCanvasHost();
       if (!host) {
         raf = requestAnimationFrame(attempt);
@@ -117,7 +117,7 @@ export function useCoverageGrid(args: {
         })
         .then(
           (res) => {
-            if (cancelled) return;
+            if (canceled) return;
             const { cells: servingCells, derivation: servingDerivation, ...serving } = res.serving;
             setState({
               path,
@@ -133,7 +133,7 @@ export function useCoverageGrid(args: {
             });
           },
           (e: unknown) => {
-            if (cancelled) return;
+            if (canceled) return;
             fetchingKeyRef.current = null;
             const detail = e instanceof Error ? e.message : String(e);
             setState({ ...EMPTY_FETCHED, path, error: detail, answered: true });
@@ -142,7 +142,7 @@ export function useCoverageGrid(args: {
     };
     attempt();
     return () => {
-      cancelled = true;
+      canceled = true;
       if (raf !== null) cancelAnimationFrame(raf);
     };
   }, [imagePath, subject, date, datasetRoot, refetchNonce]);

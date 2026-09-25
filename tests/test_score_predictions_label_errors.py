@@ -90,29 +90,6 @@ def _damage_sidecar(pred_dir: Path) -> None:
         conn.close()
 
 
-def test_score_predictions_single_image_refuses_a_neither_key_stamp(tmp_path: Path) -> None:
-    """A classified bucket's stamp predating the writer rail's (subject, attribute) pair is never
-    scored as if its value-keyed record were the object class; the remedy names the conform
-    script rather than silently reading the bucket as a bare, unscoped directory."""
-    images = tmp_path / "images"
-    labels = tmp_path / "annotations"
-    preds = tmp_path / "predictions" / "classifier"
-    labels.mkdir(parents=True)
-    preds.mkdir(parents=True)
-    img = images / "IMG_0000.jpg"
-    _write_image(img)
-    write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
-    write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="open", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
-    _seed_sidecar(preds, {"id_map": {"open": 0}})
-
-    res = score_predictions(str(img))
-
-    assert "error" in res
-    assert "repair-classified-predictions" in res["error"]
-
-
 def test_score_predictions_folder_refuses_an_undecodable_stamp(tmp_path: Path) -> None:
     root = tmp_path / "ds"
     images = root / "images"

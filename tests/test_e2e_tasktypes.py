@@ -49,8 +49,15 @@ def _save_png(path: Path, bright: bool = False) -> None:
     save_image(img, str(path))
 
 
+_TASK_OF_BUILDER = {"build_bespoke_detection": "detection",
+                    "build_bespoke_instance_seg": "instance_seg",
+                    "build_bespoke_semantic_seg": "semantic_seg",
+                    "build_bespoke_ordinal": "ordinal", "build_bespoke_regressor": "regression"}
+
+
 def _model_source(builder: str, **kwargs) -> dict:
-    return {"builder": f"tests.bespoke_models:{builder}", "builder_kwargs": kwargs}
+    return {"builder": f"tests.bespoke_models:{builder}", "builder_kwargs": kwargs,
+            "task": _TASK_OF_BUILDER[builder]}
 
 
 def _train_config(model_source: dict) -> dict:
@@ -301,7 +308,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
                          project_path=str(tmp_path))
     assert "error" not in reg, reg
 
-    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path), task="ordinal")
+    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "quadratic_weighted_kappa" in result
@@ -333,7 +340,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
                          project_path=str(tmp_path))
     assert "error" not in reg, reg
 
-    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path), task="regression")
+    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "r_squared" in result

@@ -1104,7 +1104,7 @@ def _build_attribute_scoped_experiment(
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.model_build import build_model
-    from tcip_mcp.pipelines.training.subprocess_worker import _admitted_class_space
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
@@ -1135,8 +1135,8 @@ def _build_attribute_scoped_experiment(
     }
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
-    recorded_scope = _admitted_class_space(data_cfg)
-    assert recorded_scope is not None
+    recorded_scope = ClassScope.recorded_in(data_cfg)
+    assert recorded_scope.subject and recorded_scope.id_map
     recorded_scope.onto(data_cfg)
     recorded_id_map = recorded_scope.id_map
     create_experiment(experiment_id, {"data": data_cfg})

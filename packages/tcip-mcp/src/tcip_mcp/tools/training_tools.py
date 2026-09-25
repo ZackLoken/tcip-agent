@@ -24,6 +24,7 @@ from tcip_store import (
     StoreDescriptor,
     StoreError,
     VersionConflict,
+    canonical_path,
     check_json_value,
     register_store,
     store,
@@ -33,6 +34,10 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.data.split_construction import split_seed
+from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
+from tcip_mcp.pipelines.model_build import run_task
+from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +61,8 @@ declared_launcher: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 @contextmanager
 def declare_launcher(name: str) -> Iterator[None]:
     """Declare ``name`` as this thread's launcher for the one ``launch_training`` call inside the
-    block: the web backend's relaunch route wraps its call in ``with declare_launcher("gui"):``,
-    since the tool's own signature is the MCP schema and cannot carry a declaration as a
-    parameter. Scoped to the calling thread only, so a launch's own background watchdog thread
-    (which never calls this) and the training subprocess (a separate process) never see it.
+    block. Scoped to the calling thread only: a launch's own background watchdog thread and the
+    training subprocess never see it.
     """
     token = declared_launcher.set(name)
     try:
@@ -92,13 +95,8 @@ _SELECTION_CONFLICT_KEYS = (
 
 def _split_selection_drawn_conflicts(split_cfg: dict) -> list[str]:
     """Every key under ``data.split`` that ``data.split.selection_dir`` conflicts with: a drawn
-    split's own parameters
-    (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
-    ``data.split.redraw_within_selection`` is true (:func:`_redraw_flag_issue` covers the flag's
-    own remaining requirement, that a redraw states a seed at all): a seed left over from a
-    forked or drawn config still conflicts by name otherwise. Shared by ``preflight_config`` and
-    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s selection branch, so the
-    two report the identical set for one config.
+    split's own parameters (:data:`_SELECTION_CONFLICT_KEYS`). ``seed`` is admitted only when
+    ``data.split.redraw_within_selection`` is true; a seed otherwise conflicts by name.
     """
     keys: tuple[str, ...] = _SELECTION_CONFLICT_KEYS
     if split_cfg.get("redraw_within_selection"):
@@ -107,14 +105,9 @@ def _split_selection_drawn_conflicts(split_cfg: dict) -> list[str]:
 
 
 def _redraw_flag_issue(split_cfg: dict) -> str | None:
-    """The one objection ``data.split.redraw_within_selection`` raises that
-    :func:`_split_selection_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
-    it, the redraw's own required pairing (a seed states which partition inside the selection's
-    train-plus-val samples the redraw draws; the redraw states its own seed here rather than
-    inheriting one, since ``run_hyperparameter_search``'s own default of 42 for a bound
-    ``base_config`` (:func:`_base_config_for_split_draws`) is that caller's own choice, not a
-    fallback this function reaches for). ``None`` when the flag is unset, false, or paired with a
-    seed.
+    """The objection ``data.split.redraw_within_selection`` raises that
+    :func:`_split_selection_drawn_conflicts` cannot: the flag set true with no ``seed`` beside it.
+    ``None`` when the flag is unset, false, or paired with a seed.
     """
     if split_cfg.get("redraw_within_selection") and split_cfg.get("seed") is None:
         return (
@@ -125,19 +118,9 @@ def _redraw_flag_issue(split_cfg: dict) -> str | None:
 
 
 def _data_dir_issues(data_cfg: dict) -> list[str]:
-    """Every objection ``preflight_config`` raises about the data locations this run's own
-    producer reads: a required key missing, or naming a path that does not exist.
-
-    A run of any task needs ``data.images_dir`` and ``data.labels_dir``, the place its ground
-    truth lives, whatever shape that ground truth turns out to be, and that holds whether its
-    loaders are the built-in ones or a bespoke ``data.dataset_source`` builder: the platform's own
-    producer names the samples either way, so it needs the same data to read. A no-op for a config
-    bound to a selection: each sample names its own source and ground truth, so the run reads no
-    place to discover membership in, and the selection's own reader states what is missing.
-
-    The one implementation ``preflight_config`` and the data picker's "As recorded" listing both
-    call, so a relaunch whose recorded directories moved shows the same words before Start that
-    ``launch_training`` would refuse it with.
+    """Every objection to the data locations this run's own producer reads: ``data.images_dir``
+    or ``data.labels_dir`` missing, or naming a path that does not exist, whatever the task and
+    whatever builds its loaders. Empty for a config bound to a selection.
     """
     split_cfg = data_cfg.get("split")
     if isinstance(split_cfg, dict) and split_cfg.get("selection_dir"):
@@ -167,56 +150,40 @@ class RunPopulation(NamedTuple):
 
 def _run_population(data_cfg: dict, selection) -> RunPopulation:
     """The samples this run would train and validate over, as the producer names them, with the
-    class space it admitted them under.
-
-    One population, resolved the way the run itself resolves it: the recorded train and val
-    samples of the selection it is bound to, or the producer's own admission over the locations
-    its config names (:func:`~tcip_mcp.pipelines.data.label_queries.admit`). A bound run admits
-    nothing out of a directory, because its membership is already decided.
-
-    The samples themselves, never a mapping keyed by their bare names: a selection spanning two
-    capture dates holds two samples of one name, and a population keyed by name would report a
-    run smaller than the one that trains, and a source of that run as outside it. Every preflight
-    leg that needs a source to probe, a member name to group or a count to report reads this one
-    population, so a preflight cannot describe a dataset the run would not train on, and admits
-    once: a leg needing the admitted samples takes them from here.
+    class space it admitted them under: the recorded train and val samples of the selection it is
+    bound to, or the producer's own admission over the locations its config names
+    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`).
 
     Its ``issues`` are the admission's own refusals, in the words the run would refuse with (a
-    label document that will not decode, a dataset-level export where per-image documents belong,
-    a document directory with no subject to admit under): a preflight that swallowed them would
-    report valid over data the launch then refuses. Its ``warnings`` name a confirmed negative
-    whose label now holds annotations, which admission excludes silently. A bucket naming two
-    files under one stem propagates (:class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`):
-    which of them a member means is not a question this or any other reader answers by picking
-    one.
+    label document that will not decode, a dataset-level export where per-image documents belong, a
+    document directory with no subject to admit under). Its ``warnings`` name a confirmed negative
+    whose label now holds annotations, which admission excludes. A bucket naming two files under
+    one stem propagates (:class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`).
     """
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     if selection is not None:
-        return RunPopulation(
-            [s for s in selection.samples if s.side in ("train", "val")],
-            selection.scope, {}, [], [])
-    images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
+        return RunPopulation(selection.trainable(), selection.scope, {}, [], [])
     empty = RunPopulation([], ClassScope(), {}, [], [])
-    if not images_dir or not labels_dir:
-        return empty  # _data_dir_issues already named the missing key
+    if _data_dir_issues(data_cfg):
+        return empty  # preflight names each of them
 
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_store import SchemaVersionRefused
 
-    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.label_queries import admit_run
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
 
     contradicted: set[str] = set()
     try:
-        admitted = admit(images_dir, labels_dir, subject=data_cfg.get("subject"),
-                         attribute=data_cfg.get("attribute"), contradicted_out=contradicted)
+        admitted = admit_run(data_cfg, contradicted_out=contradicted)
     except UnreadableLabelDocument as exc:
         # A run over this ground truth fails on the same file, so this blocks, not warns.
         return empty._replace(issues=[f"data.labels_dir: {exc}"])
     except SchemaVersionRefused as exc:
         return empty._replace(
-            issues=[f"a .bandgroup manifest under {images_dir} could not be read: {exc}"])
+            issues=[f"a .bandgroup manifest under {data_cfg['images_dir']} could not be read: "
+                    f"{exc}"])
     except AmbiguousImageStem:
         raise
     except (OSError, ValueError) as exc:
@@ -227,26 +194,18 @@ def _run_population(data_cfg: dict, selection) -> RunPopulation:
         warnings.append(
             f"data: {sorted(contradicted)} are recorded negative for the subject but their label "
             "file now holds subject annotations; the stored negative is stale, they train on "
-            "their labelled content instead, and the confirmation needs re-review."
+            "their labeled content instead, and the confirmation needs re-review."
         )
     return RunPopulation(
         admitted.every_sample(), admitted.scope, admitted.counts, [], warnings)
 
 
-def _selection_dir_conflicts(config: dict) -> list[str]:
-    """Every objection a ``data.split.selection_dir`` binding raises from ``config``'s own fields
+def _selection_dir_conflicts(data_cfg: dict) -> list[str]:
+    """Every objection a ``data.split.selection_dir`` binding raises from a run's data section
     alone, computed without reading any selection: the drawn-split key conflicts
     (:data:`_SELECTION_CONFLICT_KEYS`), and a ``redraw_within_selection`` flag with no seed beside
     it (:func:`_redraw_flag_issue`).
-
-    ``preflight_config`` and :func:`selection_compatibility` both compute these before attempting
-    to read a selection at all, so a moved or absent selection never suppresses an objection the
-    config alone already carries. Whether the task can bind at all is not a config-only question:
-    it is whether the selection's samples carry the ground truth that task reads, which
-    :func:`_selection_dependent_issues` answers with the selection in hand.
     """
-    data_cfg_raw = config.get("data")
-    data_cfg: dict = data_cfg_raw if isinstance(data_cfg_raw, dict) else {}
     split_cfg_raw = data_cfg.get("split")
     split_cfg: dict = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
 
@@ -264,23 +223,11 @@ def _selection_dir_conflicts(config: dict) -> list[str]:
 
 
 def _selection_dependent_issues(selection, selection_dir: str) -> list[str]:
-    """Every objection that needs the selection itself, read at ``selection_dir``, to answer.
-
-    A selection states its own subject, attribute and class map, and each of its samples states
-    its own source and ground truth, so a bound run reads its scope off the selection rather than
-    restating it and nothing here compares one against the other. What remains: it names a subject
-    when the ground truth is a label document
-    (:func:`~tcip_mcp.pipelines.data.selection.unscoped_document_issue`, the one statement every
-    reader of a selection's scope asks), and its train and val sides are both populated, since a
-    run needs both loaders. Whether the selected loader can read the ground truth these samples
-    name is that loader's own refusal, raised when it is built over them.
-
-    The bind raises these same objections by calling this function
-    (:func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`), so a launch refuses a
-    selection in the words the preflight that offered it used.
-    :func:`selection_compatibility` composes this with the config-only checks for a caller with
-    one selection in hand, and ``preflight_config`` calls this directly so a failed read never
-    hides the other check's issues.
+    """Every objection that needs the selection itself, read at ``selection_dir``, to answer: it
+    names a subject when the ground truth is a label document
+    (:func:`~tcip_mcp.pipelines.data.selection.unscoped_document_issue`), and its train and val
+    sides are both populated. Whether the selected loader can read the ground truth these samples
+    name is that loader's own refusal.
     """
     from tcip_mcp.pipelines.data.selection import unscoped_document_issue
 
@@ -297,33 +244,12 @@ def _selection_dependent_issues(selection, selection_dir: str) -> list[str]:
     return issues
 
 
-def _redraw_starvation_issues(config: dict, selection, selection_dir: str) -> list[str]:
-    """Whether ``data.split.redraw_within_selection`` on ``config`` would starve a side, checked
-    over ``selection`` before any run starts: the one refusal the child's own redraw raises at run
-    time (:func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), called here over the same
-    record rather than restated.
-    """
-    from tcip_mcp.pipelines.data.splits import redraw_starved_issue
-
-    split_cfg = (config.get("data") or {}).get("split") or {}
-    starved = redraw_starved_issue(
-        selection, selection_dir=selection_dir, seed=split_cfg.get("seed"))
-    return [starved] if starved else []
-
-
 def selection_compatibility(config: dict, selection, selection_dir: str) -> list[str]:
     """Every objection a launch binding ``config`` to ``selection`` (read at ``selection_dir``)
-    would raise, checked ahead of that launch rather than only inside it.
-
-    Composes :func:`_selection_dir_conflicts` (config-only, computed before any read) with
-    :func:`_selection_dependent_issues` (needs the selection in hand). ``preflight_config`` calls
-    both directly, in the same order, so a read failure never suppresses the config-only issues;
-    the data picker's :func:`list_split_choices` calls this one composed function per candidate
-    selection, before Start, over a selection it also read itself. Never calls
-    :func:`preflight_config`: that function imports the config's builder and scans its labels, a
-    cost neither caller here means to pay for a compatibility read.
+    would raise: :func:`_selection_dir_conflicts` (config-only) composed with
+    :func:`_selection_dependent_issues` (needs the selection in hand).
     """
-    issues = _selection_dir_conflicts(config)
+    issues = _selection_dir_conflicts(config.get("data") or {})
     issues.extend(_selection_dependent_issues(selection, selection_dir))
     return issues
 
@@ -331,11 +257,7 @@ def selection_compatibility(config: dict, selection, selection_dir: str) -> list
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own "As recorded" data
     section would build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``,
-    and the recorded class scope emptied, since a bound run reads its scope off the selection and
-    the bind overwrites whatever the config carried: an offer that still showed the previous
-    subject would describe a run in a vocabulary it will not train in. The one implementation the
-    data picker's own compatibility check (:func:`list_split_choices`) and the relaunch route's
-    launch build both call, so an offer is exactly what would launch.
+    and the recorded class scope emptied, since a bound run reads its scope off the selection.
     """
     from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -351,10 +273,6 @@ def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
 def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -> dict:
     """Validate a training configuration before launching.
 
-    Not an MCP tool: run through ``tcip preflight-config``, per the admission standard
-    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
-    ``launch_training``, which calls this function directly before spawning the training thread.
-
     Config structure, one placement for everything::
 
         model_source: {builder, builder_kwargs, task, in_chans}
@@ -366,24 +284,19 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         evaluation: {trait, selection_metric, ...}
         training_source: optional custom train(ctx) loop.
 
-    A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``): a key
-    under it would be read by nothing.
+    A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``).
 
     Args:
         config: Full training configuration dict.
         smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
-            forward at the resolved in_chans/num_classes/img_size). A contract failure is a
-            guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch,
-            ``launch_training`` runs this before spawning the training thread. For a task the
-            contract has no synthetic batch schema for, one real batch is built from ``data`` and
-            used instead; if no batch can be built either, the boundary is unproven and that also
-            blocks. Default False keeps a plain call to structural checks plus a builder import,
-            no model construction and no forward pass.
-        overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
-            report it under ``overfit_check``, never gating (a noisy-but-valid model can fail it).
-            The stored report is already rendered (``model_contract.render_overfit_report``): a
-            diverging model's raw losses may hold ``nan``/``inf``, which a JSON-RPC caller such as
-            ``launch_training`` cannot answer with directly.
+            forward at the resolved in_chans/num_classes/img_size). A contract failure is appended
+            to ``issues`` and blocks the launch. For a task the contract has no synthetic batch
+            schema for, one real batch is built from ``data`` and used instead; if no batch can be
+            built either, that also blocks. Default False keeps a plain call to structural checks
+            plus a builder import.
+        overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
+            and report it under ``overfit_check``, never gating. The stored report is already
+            rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY
@@ -451,7 +364,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         from tcip_mcp.pipelines.data.selection import read_selection
 
         # Config-only issues fire before the read, so a moved selection never hides them.
-        issues.extend(_selection_dir_conflicts(config))
+        issues.extend(_selection_dir_conflicts(data_cfg_dict))
         try:
             selection = read_selection(selection_dir)
         except ValueError as exc:
@@ -464,7 +377,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     "val inside the selection's own train and val samples at this seed; "
                     "the selection's calibration side stays untouched."
                 )
-                issues.extend(_redraw_starvation_issues(config, selection, selection_dir))
+                from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
+
+                starved = redraw_starved_issue(*redraw_pool(selection), selection_dir=selection_dir,
+                                               seed=split_cfg_dict.get("seed"))
+                issues.extend([starved] if starved else [])
 
     # The run's own membership and sources, resolved once: every leg below reads it rather than
     # listing a directory or admitting again of its own.
@@ -483,10 +400,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         from tcip_annotation.json_io import UnreadableLabelDocument
         from tcip_mcp.pipelines.data.datasets import resolve_sizes
 
-        run_task = ((model_source.get("task") if isinstance(model_source, dict) else None)
-                    or data_cfg_dict.get("task", "detection"))
         try:
-            sizes = resolve_sizes(run_task, data_cfg_dict, population,
+            sizes = resolve_sizes(run_task(config), data_cfg_dict, population,
                                   data_cfg_dict.get(DATASET_SOURCE_KEY) or None)
         except (ValueError, UnreadableLabelDocument) as exc:
             issues.append(f"data: {exc}")
@@ -550,9 +465,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             # Through the producers' own derivation, over the capture date they admit
             # under: resolving a second spelling here refuses the map the draw requires.
             recorded_group_key_fn(
-                split_cfg_dict.get("group_by", "tile_prefix"),
+                split_cfg_dict.get("group_by", DEFAULT_GROUP_BY),
                 date=admission_date(data_cfg_dict.get("labels_dir", "")),
-                stems=sorted({s.member_stem for s in population}),
+                stems=sorted({s.member for s in population}),
                 group_key_map=split_cfg_dict.get("group_key_map"))
         except ValueError as exc:
             issues.append(f"data.split: {exc}")
@@ -562,7 +477,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     reserve_cal_frac = split_cfg_dict.get("reserve_calibration_fraction")
     if reserve_cal_frac:
         issues.extend(_reserve_calibration_feasibility_issues(
-            model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac,
+            run_task(config), data_cfg_dict, split_cfg_dict, reserve_cal_frac,
             run=run, sizes=sizes, smoke=smoke))
 
     # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated images
@@ -578,24 +493,6 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 f"not train, {dict(sorted(dropped.items()))}. "
                 f"{len(population)} stem(s) admitted.")
 
-    # Training keys, read where train() reads them: the top level.
-    batch_size = config.get("batch_size", 2)
-    if not isinstance(batch_size, int) or batch_size < 1:
-        issues.append("'batch_size' must be a positive integer")
-
-    # Per-stage 'epochs' is required; a per-stage 'lr' is accepted and ignored (StageSpec), the
-    # trainer reads learning rates from config['optimizer'] alone. Absent stages are fine.
-    for i, stage in enumerate(config.get("stages") or []):
-        if "epochs" not in stage:
-            issues.append(f"Stage {i} missing 'epochs'")
-        if "lr" in stage:
-            warnings.append(
-                f"stages[{i}].lr is set but ignored, the trainer reads learning rate "
-                "only from the top-level 'optimizer' block (backbone_lr/head_lr), applied "
-                "uniformly across every stage. Move the value into 'optimizer' if you meant to "
-                "change it."
-            )
-
     # Fail fast on an explicit selection_metric that is undeclared or, with a center-match trait,
     # comparability-only, at validation time rather than mid-run.
     eval_cfg = config.get("evaluation") or {}
@@ -605,15 +502,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             f"{type(eval_cfg).__name__}"
         )
         eval_cfg = {}
-    sel_metric = eval_cfg.get("selection_metric")
-    trait_name = eval_cfg.get("trait")
-    if sel_metric:
-        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+    if eval_cfg.get("selection_metric"):
+        from tcip_mcp.pipelines.training.generic_trainer import config_selection_metric
 
-        task_for_check = (model_source.get("task") if isinstance(model_source, dict) else None) \
-            or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
         try:
-            resolve_selection_metric(task_for_check, trait_name, sel_metric)
+            config_selection_metric(config)
         except ValueError as exc:
             issues.append(str(exc))
 
@@ -633,8 +526,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
-            ms = config.get(MODEL_SOURCE_KEY) or {}
-            task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
+            task = run_task(config)
             # The sizes preflight resolved above, this run having recorded none yet; a run that
             # states none has no synthetic shape and smokes against a real batch.
             dims = resolve_contract_dims(config, task, scope=run.scope, sizes=sizes)
@@ -723,27 +615,15 @@ def launch_training(
 ) -> dict:
     """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
 
-    The run's actual training body (dataset build, model forward/backward, checkpointing) executes
-    in a separate OS process, not this one, a bug/OOM/hang in one run can't take down this
-    process or any other concurrent run's process. Use monitor_training to monitor progress;
-    it reads the run's own status/metrics from disk, not shared memory.
+    The run's training body (dataset build, model forward/backward, checkpointing) executes in a
+    separate OS process. Use monitor_training to monitor progress and cancel_training to stop a
+    run. The platform itself stops a run only when it is dead (two consecutive full training passes
+    with no finite batch loss) or stagnant against its own validation metric (early stopping); a
+    run launched with no validation loader gets divergence as its only automatic stop.
 
-    Watching a launched run's metrics and deciding to stop a poorly performing one is the
-    launching agent's own judgment call, made through cancel_training; the platform itself only
-    stops a run objectively dead (two consecutive full training passes with no finite batch
-    loss) or stagnant against its own validation metric (early stopping), never one merely
-    performing worse than hoped. Early stopping needs a validation loader to have anything to
-    watch: a run launched with none gets divergence as its only automatic stop, and is worth
-    closer agent monitoring than a run early stopping can also catch.
-
-    Stamps the resolved experiment's ``status.json`` with who launched this run
-    (``launched_by``): the name :func:`declare_launcher` declared for this thread (``"gui"`` for
-    the web backend's relaunch route, whatever client actually posted to it, since the route
-    cannot tell a browser from a script), else the connected MCP agent's identity when a
-    handshake is in force, else ``"process"`` for a caller with neither (a bare backend call, a
-    script, a test). A future backend caller of this function outside the wrapped route is
-    stamped ``"process"`` too; telling a browser apart from another client is a later
-    authentication concern, not this field's.
+    Stamps the resolved experiment's ``status.json`` with who launched this run (``launched_by``):
+    the name :func:`declare_launcher` declared for this thread, else the connected MCP agent's
+    identity when a handshake is in force, else ``"process"``.
 
     Args:
         config: Full training configuration dict: model_source and data, with every training
@@ -751,32 +631,27 @@ def launch_training(
             ``experiment_id`` names the record to launch under (one run's immutable record,
             ``tcip_mcp.experiments``; created if absent, reused while pristine, forked if it
             already has history); absent, a fresh id is minted.
-        output_dir: Base directory for checkpoints and logs. Empty defaults to the experiment
-            store (``<project>/.tcip/experiments``, the same base the experiment records use); a
-            relative path resolves against the platform state root, never the server process's
-            cwd. The run's own artifacts land under ``output_dir/<experiment_id>``.
-        resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
-            (restores model + optimizer + scheduler + scaler and continues).
+        output_dir: Base directory for checkpoints and logs. Empty defaults to the experiment store
+            (``<project>/.tcip/experiments``); a relative path resolves against the platform state
+            root, never the server process's cwd. The run's own artifacts land under
+            ``output_dir/<experiment_id>``.
+        resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from (restores model +
+            optimizer + scheduler + scaler and continues).
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
-            own by then, it is terminated and the run marked failed with that reason, no
-            cooperative grace period is attempted (a hung process isn't responding to cooperative
-            signals). Omit for no timeout (the default).
-        overfit_check: When True, runs the voluntary ``overfit_check`` diagnostic (twenty
-            optimizer steps at the training tile edge, on the CPU, inside this synchronous call)
-            on the same batch the contract proved, before the subprocess spawns, and records the
-            result on the run's ``model_contract`` under ``overfit_check``. Never gates: a valid
-            model can fail twenty steps on noise, so only the contract itself decides ``valid``.
-            Default False, since the cost is one the agent elects per launch rather than pays on
-            every one.
+            own by then, it is terminated and the run marked failed with that reason, with no
+            cooperative grace period. Omit for no timeout (the default).
+        overfit_check: When True, runs the voluntary ``overfit_check`` diagnostic (twenty optimizer
+            steps at the training tile edge, on the CPU, inside this synchronous call) on the same
+            batch the contract proved, before the subprocess spawns, and records the result on the
+            run's ``model_contract`` under ``overfit_check``. Never gates. Default False.
 
     No record, no run: everything through the experiment stamp below is one boundary. Before it:
     preflight, normalization, the model contract, and the dataset identity read (a
     ``SchemaVersionRefused`` reader-ceiling mismatch refuses the launch by name; an absent,
     malformed or otherwise-unreadable identity trains untracked, the same as an unregistered
-    dataset). After it: the registry entry, the launch config, the subprocess and TensorBoard.
-    A spawn failure after the stamp leaves a ``running`` record with no process, which reads
-    ``interrupted`` once its heartbeat stales and forks on relaunch, the same as any other
-    process death.
+    dataset). After it: the registry entry, the launch config, the subprocess and TensorBoard. A
+    spawn failure after the stamp leaves a ``running`` record with no process, which reads
+    ``interrupted`` once its heartbeat stales and forks on relaunch.
     """
     # The caller's config is stored twice, as the launch config and as the experiment's
     # snapshot, so what it holds is checked before either write.
@@ -905,19 +780,9 @@ def launch_training(
 
 
 def _child_env_for_launch(config: dict) -> dict[str, str]:
-    """Subprocess env for a launch: round-robin GPU pinning when the config names no
-    explicit device, left untouched when it does. ``CUDA_VISIBLE_DEVICES`` remaps device
-    *indices* inside the child, pinning it would ask an explicit ``device: "cuda:1"`` config for
-    an ordinal invalid in the child's own remapped view, so pinning applies only to the unpinned
-    case it's meant to spread out.
-
-    Also propagates this process's own import search path via ``PYTHONPATH``, the child is a
-    fresh interpreter with only sys.path's own defaults, not whatever got this process's bespoke
-    ``model_source``/``training_source``/``dataset_source`` module importable in the first place
-    (an editable install's extra path entries, a test runner's rootdir insertion, an agent's own
-    working-directory convention). Without this, a bespoke module importable to the caller can
-    become unimportable to the child purely because of the process boundary, a correctness gap,
-    not just a convenience.
+    """Subprocess env for a launch: round-robin GPU pinning (``CUDA_VISIBLE_DEVICES``) when the
+    config names no device, untouched when it does; this process's import search path propagated
+    via ``PYTHONPATH``.
     """
     import os
 
@@ -944,15 +809,11 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
 
 def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
                       timeout_seconds: float, *, root: Path | str) -> None:
-    """Daemon watcher: hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
-    records the reason through the same status channel every other terminal state uses, never an
-    in-memory-only mark, since ``monitor_training`` always defers to disk for a pid-bearing
-    run and would otherwise never surface it. No cooperative grace period: a hung process isn't
-    responding to cooperative signals, so this is a hard kill, not the cancel path.
+    """Daemon watcher: hard-terminates ``proc`` if it outlives ``timeout_seconds`` and records the
+    reason through the status channel every other terminal state uses. No cooperative grace period.
 
-    ``root`` is the platform root this run launched under, captured once at launch: this
-    process may have since adopted a different project, and the write belongs to the run's
-    own root regardless.
+    ``root`` is the platform root this run launched under, captured once at launch; the write goes
+    there.
     """
     def _watch() -> None:
         try:
@@ -976,35 +837,27 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 def monitor_training(experiment_id: str | None = None, sweep_id: str | None = None) -> dict:
     """Check the status of a training run, or of a hyperparameter sweep.
 
-    Exactly one of ``experiment_id`` and ``sweep_id`` names what to check; both or neither
-    refuses by name. The two return different shapes. A read: it changes nothing and leaves no
-    audit line, however often a browser polls it.
+    Exactly one of ``experiment_id`` and ``sweep_id`` names what to check; both or neither refuses
+    by name. The two return different shapes. A read: it changes nothing and leaves no audit line.
 
-    ``experiment_id``: reads the run's own status/metrics from disk whenever its training body
-    runs in a subprocess, the in-memory record for a subprocess-delegated run is a launch-time
-    placeholder only, since the subprocess mutates its own separate copy in its own process
-    memory, or when this process never held the run in memory at all (a different process
-    launched it, or it was pre-created and launched by its own custom id from elsewhere). Returns
-    ``{"experiment_id", "status", "epoch", "best_metric", "output_dir", "error",
-    "tensorboard_url"}``, or ``{"error": "Run not found: ..."}`` for an id no record claims,
-    malformed ids folded to the same answer. An HPO trial is monitored through its sweep
-    (``sweep_id=``) and cancelled with it (``cancel_hyperparameter_search``); it was never listed
-    by id, so no documented route is lost here.
+    ``experiment_id``: reads the run's own status/metrics from disk whenever its training body runs
+        in a subprocess, or when this process never held the run in memory at all. Returns
+        ``{"experiment_id", "status", "epoch", "best_metric", "output_dir", "error",
+        "tensorboard_url"}``, or ``{"error": "Run not found: ..."}`` for an id no record claims,
+        malformed ids folded to the same answer. An HPO trial is monitored through its sweep
+        (``sweep_id=``) and canceled with it (``cancel_hyperparameter_search``).
 
     ``sweep_id``: reads the sweep's own manifest and trial directories from disk under this
-    process's own pinned platform root, through :func:`read_sweep_from_disk`, the same reader
-    ``routes.tuning``'s disk-only paths call, then layers the study result's own fields onto a
-    completed sweep through :func:`enrich_with_study_result`, the same rule that route applies:
-    an agent on a host with no browser open answers the same "how is this sweep doing" question
-    the Tuning tab reads. This is a disk read only, so a sweep a live web session just launched
-    over HTTP but has not yet written a manifest for reads as not found. Returns
-    ``read_sweep_from_disk``'s own shape, enriched (``{"sweep_id", "status", "error", "result",
-    "manifest", "relaunched_from", "has_manifest", "trials"}``), or ``{"error": ...}`` when no
-    manifest exists or ``sweep_id`` would address a record outside the HPO store.
+        process's own pinned platform root, through :func:`read_sweep_from_disk`, then layers the
+        study result's own fields onto a completed sweep through :func:`enrich_with_study_result`.
+        A sweep that has not yet written a manifest reads as not found. Returns
+        ``read_sweep_from_disk``'s own shape, enriched (``{"sweep_id", "status", "error", "result",
+        "manifest", "relaunched_from", "has_manifest", "trials"}``), or ``{"error": ...}`` when no
+        manifest exists or ``sweep_id`` would address a record outside the HPO store.
 
     Args:
-        experiment_id: The run's record id (one run's immutable record, ``tcip_mcp.experiments``),
-            from launch_training. Exactly one of ``experiment_id``/``sweep_id`` is required.
+        experiment_id: The run's record id (``tcip_mcp.experiments``), from launch_training.
+            Exactly one of ``experiment_id``/``sweep_id`` is required.
         sweep_id: Hyperparameter sweep identifier. Exactly one of ``experiment_id``/``sweep_id``.
     """
     if sweep_id is not None:
@@ -1070,23 +923,20 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     """Every launched training run this store holds a record for, reconstructed from disk.
 
     A record is a launched run when its config carries ``model_source`` and
-    :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``output_dir``, a state other
-    than ``"created"``, or the ``metrics_logged`` marker, so a record whose ``state`` write never
-    landed beside its stamp still lists, and a pre-created experiment that never launched does
-    not; the same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before
-    deriving a heartbeat state at all. Rows come back sorted by experiment id
-    (``experiment_ids_with_status``'s own order), each carrying ``external: True``:
-    a process-locality fact only (this record was reconstructed from disk, not held in this
-    process's own registry), never a statement about who launched it, which is the record's own
-    ``launched_by`` (see :func:`~tcip_mcp.experiments.reconstruct_from_status`).
-    ``read_progress`` governs whether ``current_epoch`` costs a metrics-log read per record.
-    Cost: one status read and one config read per experiment record on disk, plus, when
-    ``read_progress`` is true, one metrics-log read per launched record.
+    it is no longer pristine (:func:`~tcip_mcp.experiments.is_pristine`): a state other than
+    ``"created"``, or the ``metrics_logged`` marker. Rows come back sorted by experiment id
+    (``experiment_ids_with_status``'s own order), each carrying ``external: True``, a
+    process-locality fact only (this record was reconstructed from disk); who launched it is the
+    record's own ``launched_by`` (see :func:`~tcip_mcp.experiments.reconstruct_from_status`).
+    ``read_progress`` governs whether ``current_epoch`` costs a metrics-log read per record. Cost:
+    one status read and one config read per experiment record on disk, plus, when ``read_progress``
+    is true, one metrics-log read per launched record.
     """
     from tcip_store import DecodeError
 
     from tcip_mcp.experiments import (
-        config_key, experiment_ids_with_status, is_launched, reconstruct_from_status, status_key,
+        config_key, experiment_ids_with_status, is_pristine, metrics_logged_of,
+        reconstruct_from_status, recorded_state, status_key,
     )
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -1102,7 +952,7 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
             continue
         if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
             continue  # not a training experiment (e.g. review-feedback lineage)
-        if not is_launched(status):
+        if is_pristine(recorded_state(status), metrics_logged_of(status)):
             continue
         row = reconstruct_from_status(experiment_id, status, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
                                       read_progress=read_progress)
@@ -1112,33 +962,17 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
 
 
 def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
-    """This process's in-memory registry merged with every launched run's own disk record: the
-    one implementation :func:`tcip_mcp.tools.experiment_tools.list_experiments` (with
-    ``launched_only=True``) and :func:`inspect_compute_resources` both build on, so a
-    subprocess-delegated run's real status is visible to both and neither reimplements the merge.
+    """This process's in-memory registry merged with every launched run's own disk record.
 
     A live in-memory entry (HPO trials excluded) wins by its own id over its own disk row: a
-    ``pid``-bearing one takes the disk overlay for ``status``/``heartbeat``/``current_epoch``/
-    ``error`` and ``best_metric``/``best_metric_name`` (a subprocess-delegated run mutates its
-    own separate copy on disk, so the parent-side in-memory record, ``best_metric`` included, is
-    a stale launch-time placeholder past that point); a ``pid``-less one (every synchronous run)
-    is reported from its own in-memory record, untouched, with no ``heartbeat`` at all: this
-    process running the loop is itself the liveness fact, nothing else to legibilize. Both carry
-    ``external: False`` (a process-locality fact, never who launched the run) and
-    ``experiment_id``, the row's own id: a training run's own id is always its experiment id (no
-    record, no run), so there is nothing here to resolve or fall back to.
-    ``launched_by`` is never carried on ``TrainRun``: a ``pid``-bearing row with a disk overlay
-    takes the overlay's own ``launched_by``, already reconstructed through
-    ``reconstruct_from_status`` when that overlay's status record was read, rather than reading
-    the record a second time; a ``pid``-less row (no overlay to reuse) reads its resolved
-    experiment's status record directly, since no other status read exists for it. Either way the
-    value is the record's own, so a row never states a launcher the record itself does not hold; a
-    run whose stamp failed reads ``None`` here exactly as it does on disk, never the caller's
-    in-memory intent. A ``pid``-less row's own id can name no record at all (a path separator, an
-    empty or dot name, reachable only through ``create_run`` called directly, never through
-    ``launch_training``'s own directory-name refusal): ``BadKey`` folds to ``launched_by: None``
-    here the same way it does everywhere else this module resolves a status key, rather than
-    raising out of the whole listing.
+    ``pid``-bearing one takes the disk overlay for
+    ``status``/``heartbeat``/``current_epoch``/``error`` and ``best_metric``/``best_metric_name``;
+    a ``pid``-less one (every synchronous run) is reported from its own in-memory record,
+    untouched, with no ``heartbeat``. Both carry ``external: False`` and ``experiment_id``, the
+    row's own id. ``launched_by`` is the record's own: a ``pid``-bearing row takes the overlay's, a
+    ``pid``-less row reads its resolved experiment's status record directly; a run whose stamp
+    failed reads ``None``, and an id that can name no record (``BadKey``) folds to ``None``.
+
     Rows: this process's own, in registry order, then the disk-only rows, sorted by experiment id.
     """
     from tcip_mcp.experiments import read_member, status_key
@@ -1181,25 +1015,18 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
 
 
 def list_launchable_configs() -> list[dict]:
-    """Every experiment in this project with a model source, as a row the config picker can
-    start a run from: the id, the builder and task, the data it names, the subject, its derived
-    state and its parent when it has one.
+    """Every experiment in this project with a model source, as a row the config picker can start a
+    run from: the id, the builder and task, the data it names, the subject, its derived state and
+    its parent when it has one.
 
-    Not agent-facing (not an ``@mcp.tool()``): a GUI-picker-specific projection over records the
-    agent already has ``list_experiments``/``get_experiment`` for, never ``get_experiment``
-    (which also reads the whole metrics log). Cost: ``list_experiments()``'s own one status
-    read plus one config read per experiment record, and this function's own further read of
-    that same config, plus one status read and one lineage read per experiment that carries a
-    model source.
-
-    State is ``derived_state``, gated by ``is_launched`` the identical way ``compare_experiments``
-    and this platform's runs list already gate it, so a pristine never-launched config reads its
-    recorded ``"created"`` rather than a heartbeat-derived ``"interrupted"`` implying a crash
-    that never happened, and a crashed run reads the same way here as it does in the runs list.
+    Cost: ``list_experiments()``'s own one status read plus one config read per experiment record,
+        and a further read of that same config, plus one status read and one lineage read per
+        experiment that carries a model source. State is ``derived_state`` once the record is no
+        longer pristine (``is_pristine``), so a never-launched config reads ``"created"``.
     """
     from tcip_mcp.experiments import (
-        config_key, derived_state, is_launched, lineage_key, list_experiments, read_member,
-        status_key,
+        config_key, derived_state, is_pristine, lineage_key, list_experiments,
+        metrics_logged_of, read_member, status_key,
     )
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -1216,75 +1043,45 @@ def list_launchable_configs() -> list[dict]:
         rows.append({
             "experiment_id": experiment_id,
             "builder": (model_source or {}).get("builder"),
-            "task": (model_source or {}).get("task"),
+            "task": run_task(config),
             "images_dir": (data_cfg or {}).get("images_dir"),
             "subject": (data_cfg or {}).get("subject"),
             "created": exp["created"],
-            "state": derived_state(status, TCIP_HEARTBEAT_STALE_SECONDS) if is_launched(status)
-                     else status.get("state", exp["state"]),
+            "state": exp["state"] if is_pristine(exp["state"], metrics_logged_of(status))
+                     else derived_state(status, TCIP_HEARTBEAT_STALE_SECONDS),
             "parent_experiment": (lineage or {}).get("parent_experiment"),
         })
     return rows
 
 
-def split_dir_identity(path: str) -> str:
-    """The normalized identity of a selection directory: case-folded, symlinks resolved
-    (``os.path.normcase(str(Path(path).resolve()))``), so two differently spelled, cased or
-    symlinked paths to the same directory compare equal. Shared by ``list_split_choices``
-    (excluding a config's own binding from its candidates, deduping the rest) and the relaunch
-    route (checking a client-picked spelling against what was actually offered), so a directory
-    is never refused, or offered twice, over a spelling difference alone.
-    """
-    return os.path.normcase(str(Path(path).resolve()))
-
-
 def list_split_choices(experiment_id: str) -> dict:
     """Every choice this config's own "Data" control offers a relaunch of ``experiment_id``: its
-    stored data section as recorded, and every selection directory this project's own bound runs
-    or the dataset's own ``splits`` directory hold, each compatibility-checked the identical way a
-    launch itself would check it.
+    stored data section as recorded, and every selection directory this project's own bound runs or
+    the dataset's own ``splits`` directory hold, each compatibility-checked the way a launch would
+    check it.
 
-    Not agent-facing (not an ``@mcp.tool()``): a plain reader, importable by the agent's own
-    scripts, wrapped by ``GET /api/training/configs/{experiment_id}/splits``. Never calls
-    ``preflight_config`` (a demoted function that imports the picked config's builder and scans
-    its labels): every check here is :func:`selection_compatibility` over a selection this reader
-    read itself, through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`, no
-    second presence test anywhere. A candidate selection is checked against the config
-    :func:`candidate_config_with_selection` builds (``data.split`` replaced wholesale),
-    the identical shape the launch route builds, so an offer is
-    exactly what would launch; "As recorded" is checked against the stored config unchanged
-    (plus the directory-presence issues :func:`preflight_config` would raise, so a snapshot
-    whose recorded directories moved shows the same words before Start that a launch would
-    refuse it with).
+    Every check is :func:`selection_compatibility` over a selection this reader read itself,
+    through :func:`~tcip_mcp.pipelines.data.selection.read_selection_checked`. A candidate
+    selection is checked against the config :func:`candidate_config_with_selection` builds
+    (``data.split`` replaced wholesale); "As recorded" is checked against the stored config
+    unchanged, plus the directory-presence issues :func:`preflight_config` would raise.
 
-    The listing is thin: the selection directories other enumerable experiment configs in this
-    project bound to (the picked config's own excluded, since it is "As recorded"), plus, when
+    The listing: the selection directories other enumerable experiment configs in this project
+    bound to (the picked config's own excluded, since it is "As recorded"), plus, when
     ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory (offered only
-    when something is actually recorded there directly, the ``draw_splits`` default writes it, it
-    does not always exist) and every directory one level under it holding a selection (where
-    ``freeze_selection`` writes a frozen run's own drawn partition). The own-binding exclusion and
-    the candidate dedupe compare each directory by :func:`split_dir_identity` (folding both case
-    and symlinks), so a differently spelled, cased or symlinked path to the identical directory is
-    never offered as if it were a second one.
+    when something is recorded there directly) and every directory one level under it holding a
+    selection. The own-binding exclusion and the candidate dedupe compare each directory by
+    ``tcip_store.canonical_path``.
 
-    Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
-    ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
-    "reason": str | None}, "selections": [{"selection_dir": str, "enabled": bool,
-    "reason": str | None, "seed": int | None, "group_by": str | None, "train": int, "val": int,
-    "calibration": int, "replaced_split_keys": list[str], "origin": dict | None}, ...]}``.
-    ``origin`` is the selection's own ``{"experiment_id", "frozen_at"}`` for a frozen selection,
-    ``None`` for a drawn one. The counts are the selection's whole sides, not a narrowing: a
-    selection spans whatever capture dates its draw admitted, and every sample of it trains.
-    ``replaced_split_keys`` names every recorded ``data.split`` key other than ``selection_dir``
-    choosing any offered partition drops, exactly what :func:`candidate_config_with_selection`
-    replaces wholesale, read from the stored config once and carried on every entry: the same
-    set for every candidate, since it describes what the config's own recorded policy holds, not
-    what a given candidate carries. The config a candidate launches never carries a seed
-    (:func:`candidate_config_with_selection` replaces ``data.split`` outright), so this listing
-    says nothing about a redraw either; that is the launched config's own concern.
-    A bound config anchors the search for sibling selections at its own selection's first sample
-    source; an unbound one at ``data.images_dir``. With neither readable, the answer carries only
-    ``as_recorded`` (``selections`` empty; there is no dataset root to look for candidates under).
+    Returns ``{"error": ...}`` for an unknown ``experiment_id``. Otherwise: ``{"as_recorded":
+    {"case": "bound"|"drawn", "line": str, "compatible": bool, "reason": str | None}, "selections":
+    [{"selection_dir": str, "enabled": bool, "reason": str | None, "seed": int | None, "group_by":
+    str | None, "train": int, "val": int, "calibration": int, "replaced_split_keys": list[str]},
+    ...]}``. The counts are the selection's whole sides. ``replaced_split_keys`` names every
+    recorded ``data.split`` key other than ``selection_dir`` choosing any offered partition drops,
+    the same set for every candidate. A bound config anchors the search for sibling selections at
+    its own selection's first sample source; an unbound one at ``data.images_dir``. With neither
+    readable, ``selections`` is empty.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import config_key, experiment_exists, experiment_ids_with_status, read_member
@@ -1319,7 +1116,7 @@ def list_split_choices(experiment_id: str) -> dict:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
     else:
-        seed = split_cfg.get("seed", 42)
+        seed = split_seed(split_cfg)
         as_recorded = {
             "case": "drawn",
             "line": f"draws its split again with seed {seed} over the labels as they are now",
@@ -1339,14 +1136,12 @@ def list_split_choices(experiment_id: str) -> dict:
     # sibling search the way an unbound config's images_dir does.
     if own_selection is not None and own_selection.samples:
         root_anchor = str(Path(own_selection.samples[0].source).parent)
-    elif data_cfg.get("images_dir") and data_cfg.get("labels_dir"):
-        # The images anchor the dataset; data.labels_dir says where its ground truth lives, a
-        # directory of per-image files or a table alike.
+    elif not own_selection_dir and not dir_issues:
         root_anchor = str(data_cfg["images_dir"])
     else:
         return {"as_recorded": as_recorded, "selections": []}
 
-    own_norm = split_dir_identity(own_selection_dir) if own_selection_dir else None
+    own_norm = canonical_path(own_selection_dir) if own_selection_dir else None
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other_id in experiment_ids_with_status():
@@ -1364,7 +1159,7 @@ def list_split_choices(experiment_id: str) -> dict:
         candidate = other_split.get("selection_dir")
         if not candidate:
             continue
-        candidate_norm = split_dir_identity(candidate)
+        candidate_norm = canonical_path(candidate)
         if candidate_norm == own_norm or candidate_norm in seen:
             continue
         seen.add(candidate_norm)
@@ -1372,7 +1167,7 @@ def list_split_choices(experiment_id: str) -> dict:
     dataset_root = dataset_root_of(root_anchor)
     if dataset_root is not None:
         default_dir = str(dataset_root / "splits")
-        default_norm = split_dir_identity(default_dir)
+        default_norm = canonical_path(default_dir)
         if default_norm != own_norm and default_norm not in seen:
             seen.add(default_norm)
             candidate_dirs.append(default_dir)
@@ -1380,7 +1175,7 @@ def list_split_choices(experiment_id: str) -> dict:
         splits_dir = Path(default_dir)
         if splits_dir.is_dir():
             for sub in sorted(p for p in splits_dir.iterdir() if p.is_dir()):
-                sub_norm = split_dir_identity(str(sub))
+                sub_norm = canonical_path(str(sub))
                 if sub_norm == own_norm or sub_norm in seen:
                     continue
                 seen.add(sub_norm)
@@ -1395,7 +1190,7 @@ def list_split_choices(experiment_id: str) -> dict:
             selections.append({
                 "selection_dir": candidate_dir, "enabled": False, "reason": error_text,
                 "seed": None, "group_by": None, "train": 0, "val": 0, "calibration": 0,
-                "replaced_split_keys": replaced_split_keys, "origin": None,
+                "replaced_split_keys": replaced_split_keys,
             })
             continue
         candidate_config = candidate_config_with_selection(config, candidate_dir)
@@ -1405,7 +1200,7 @@ def list_split_choices(experiment_id: str) -> dict:
             "selection_dir": candidate_dir, "seed": selection.seed,
             "group_by": selection.group_by, "train": counts["train"],
             "val": counts["val"], "calibration": counts["calibration"],
-            "replaced_split_keys": replaced_split_keys, "origin": selection.origin,
+            "replaced_split_keys": replaced_split_keys,
         }
         if issues:
             entry["enabled"] = False
@@ -1425,7 +1220,7 @@ def cancel_training(experiment_id: str) -> dict:
 
     The trainer stops at the next batch/epoch boundary, still saves ``model_final.pt``
     (so partial progress is recoverable), and sets the run + its experiment to
-    'cancelled'. Status updates asynchronously, so the returned status may still read
+    'canceled'. Status updates asynchronously, so the returned status may still read
     'running' immediately after the request. A run whose divergence verdict lands first (two
     consecutive full training passes with no finite batch loss, checked ahead of cancellation
     at the same boundary) ends 'failed' instead, with no ``model_final.pt``.
@@ -1441,7 +1236,7 @@ def cancel_training(experiment_id: str) -> dict:
     if run is not None:
         status = run.status
     else:
-        # Cancelled via the disk fallback: no in-memory status, so reflect the disk record
+        # Canceled via the disk fallback: no in-memory status, so reflect the disk record
         # cancel_run itself resolved to write the sentinel, if it's still discoverable.
         from tcip_mcp.experiments import reconstruct_run_status
         disk = reconstruct_run_status(experiment_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
@@ -1450,29 +1245,18 @@ def cancel_training(experiment_id: str) -> dict:
 
 
 def inspect_compute_resources() -> dict:
-    """Report the host's current compute headroom, a fact to reason with before launching
-    another concurrent training/HPO run, not an enforced cap.
-
-    Not an MCP tool: run through ``tcip inspect-compute-resources``, per the admission
-    standard (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests. This
-    platform doesn't cap memory/CPU per run (no portable, non-pinned way to do that across
-    POSIX/Windows without guessing a number that's wrong on the next host); it gives you the
-    real numbers and trusts you to judge whether another candidate run fits, the same way you'd
-    judge any other CV-scientist tradeoff.
+    """Report the host's current compute headroom, a fact to reason with before launching another
+    concurrent training/HPO run, not an enforced cap.
 
     Returns:
-        ``cpu``: ``{logical_count, percent_used}``, ``percent_used`` is ``None`` without
-            ``psutil`` installed.
+        ``cpu``: ``{logical_count, percent_used}``, ``percent_used`` is ``None`` without ``psutil``
+            installed.
         ``memory``: ``{total_bytes, available_bytes}``, both ``None`` without ``psutil``.
         ``gpus``: ``[{index, free_bytes, total_bytes}, ...]``, always populated when CUDA is
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
         ``active_training_runs``: count of every run whose derived state is ``"running"``, a
-            heartbeat fresher than ``TCIP_HEARTBEAT_STALE_SECONDS`` (600s by default, so a live
-            run whose epoch outlasts the window reads ``"interrupted"`` and is not counted),
-            through :func:`_all_training_runs` with progress reads off: this process's own
-            in-memory registry (no live process ever reads as stale) merged with every launched
-            record on disk, one status read and one config read per disk record, no metrics-log
-            read.
+            heartbeat fresher than ``TCIP_HEARTBEAT_STALE_SECONDS`` (600s by default), through
+            :func:`_all_training_runs` with progress reads off.
     """
     cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
     memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}
@@ -1502,16 +1286,9 @@ def inspect_compute_resources() -> dict:
 
 
 def hpo_root(output_dir: str = "", *, root: Path | str | None = None) -> Path:
-    """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
-    under ``root`` (default: the platform state root). A relative ``output_dir`` resolves
-    against the platform state root, never the server process's cwd.
-
-    ``root`` lets a caller that already knows which project a sweep belongs to (its own
-    registry entry's launch root) resolve its directory there, rather than under whatever
-    root this process currently has pinned.
-
-    The one resolver for that decision. Anything that has to find a sweep on disk (the
-    Tuning routes included) calls this rather than rebuilding the same default.
+    """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo`` under
+    ``root`` (default: the platform state root). A relative ``output_dir`` resolves against the
+    platform state root, never the server process's cwd.
     """
     from tcip_mcp.project_paths import platform_state_root, resolve_output_path
 
@@ -1534,16 +1311,15 @@ SWEEP_CANCEL_SENTINEL = ".sweep_cancel_requested"
 ``run_registry.CANCEL_SENTINEL`` (written per trial directory): one name per protocol, since a
 sweep-wide stop and one run's own stop answer different questions."""
 
-_CANCEL_BEFORE_START_REASON = "cancelled before the sweep's first trial started"
-_CANCEL_DURING_RUN_REASON = "the sweep was cancelled by request before it could finish"
+_CANCEL_BEFORE_START_REASON = "canceled before the sweep's first trial started"
+_CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could finish"
 
 _TRIAL_DIR_PREFIX = "trial_"
 
 def sweep_heartbeat_seconds() -> float:
-    """How often ``run_hyperparameter_search``'s driver thread restamps the sweep manifest's ``heartbeat`` while
-    ``tune_search`` runs: :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on every call (not
-    frozen at import) and divided by ten, so a live driver stamps ten times within one
-    staleness window whatever that window is set to while the heartbeat loop is running.
+    """How often ``run_hyperparameter_search``'s driver thread restamps the sweep manifest's
+    ``heartbeat`` while ``tune_search`` runs: :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on
+    every call, divided by ten.
     """
     return TCIP_HEARTBEAT_STALE_SECONDS / 10
 
@@ -1555,15 +1331,13 @@ would otherwise find nothing on disk and nothing in ``run_registry._RUNS`` to ac
 
 
 def mark_sweep_launching(study_name: str, output_dir: str = "", *, root: Path | str | None = None) -> None:
-    """Record that ``study_name`` is about to become a sweep at this resolved root, closing
-    the window between a caller minting the id and ``run_hyperparameter_search`` writing its first manifest.
+    """Record that ``study_name`` is about to become a sweep at this resolved root, closing the
+    window between a caller minting the id and ``run_hyperparameter_search`` writing its first
+    manifest.
 
-    ``run_hyperparameter_search`` itself discards the mark, in a ``finally`` around everything from its own
-    entry through its first manifest write, so the mark is live for exactly that window; a
-    caller that marks a study and never actually calls ``run_hyperparameter_search`` for it (a request that
-    errored before starting the worker) leaves an entry this module cannot itself clean up,
-    which is why the web relaunch route's worker also discards it, in its own ``finally``, on
-    every exit that never reached ``run_hyperparameter_search`` (see :func:`discard_sweep_launching`).
+    ``run_hyperparameter_search`` discards the mark in a ``finally`` around everything from its own
+    entry through its first manifest write; a caller that marks a study and never calls
+    ``run_hyperparameter_search`` for it discards it itself (:func:`discard_sweep_launching`).
     """
     resolved = sweep_dir(study_name, output_dir, root=root).resolve()
     with _LAUNCHING_SWEEPS_LOCK:
@@ -1592,40 +1366,25 @@ def _sweep_launching(study_name: str, resolved_root: Path) -> bool:
 
 
 def sweep_state(manifest: dict, *, stale_seconds: float, driver_live: bool = False) -> str:
-    """The sweep's derived liveness, the one rule every Tuning listing row reports as its
-    ``status`` instead of a manifest's own recorded value verbatim.
+    """The sweep's derived liveness, the ``status`` every Tuning listing row reports.
 
-    ``driver_live`` is true only where a process can vouch for the driver directly (the
-    Tuning route's own worker thread, still alive, for a sweep it launched): that beats the
-    manifest's heartbeat outright, since a live thread proves the driver is running even in
-    the instant before its next heartbeat write lands. Every other case reads through
-    :func:`tcip_mcp.experiments.derived_state`, the training run's own heartbeat-freshness
-    rule, over ``{"state": manifest["status"], "heartbeat": manifest["heartbeat"]}``: a
-    sweep's four statuses (``running``/``completed``/``failed``/``cancelled``) are the same
-    words a training run uses, so the one rule applies unchanged rather than a second,
-    silently-drifting copy of it living here.
+    ``driver_live`` is true only where a process can vouch for the driver directly (a live worker
+    thread for a sweep it launched), which beats the manifest's heartbeat outright. Every other
+    case reads through :func:`tcip_mcp.experiments.derived_state` over ``{"state":
+    manifest["status"], "heartbeat": manifest["heartbeat"]}``.
     """
     from tcip_mcp.experiments import _RECORDED_AS_DONE, derived_state
 
-    status = manifest.get("status", "unknown") if isinstance(manifest, dict) else "unknown"
+    status = manifest["status"]
     if driver_live and status not in _RECORDED_AS_DONE:
         return "running"
-    heartbeat = manifest.get("heartbeat") if isinstance(manifest, dict) else None
-    return derived_state({"state": status, "heartbeat": heartbeat}, stale_seconds)
+    return derived_state({"state": status, "heartbeat": manifest["heartbeat"]}, stale_seconds)
 
 
 def _running_trial_dirs(sweep_root: Path) -> list[Path]:
     """Every ``trial_<id>`` directory under ``sweep_root`` that has not yet written its
-    resolved-config record: ``_run_hpo_trial``'s own ``finally`` block writes that record
-    exactly once, at the very end of the trial, success or failure, so its absence means the
-    trial has not reached that point yet.
-
-    Used by :func:`cancel_hyperparameter_search` to decide which trial directories still need the run-level
-    cancel sentinel written into them; a sentinel dropped into a trial that already wrote its
-    resolved config is inert. The sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper`'s own
-    ``stop_all`` does not read this: a trial Ray killed outright may never reach its own
-    ``finally``, so the stopper tracks Ray's own live-trial reports instead (see
-    ``_build_sweep_stopper``).
+    resolved-config record (``_run_hpo_trial``'s ``finally`` block writes it once, at the end of
+    the trial).
     """
     if not sweep_root.is_dir():
         return []
@@ -1696,10 +1455,8 @@ register_store(
 
 
 def _sweep_name(study_name: str) -> str:
-    """``study_name`` once it is known to name one sweep and not a path through the store.
-
-    A sweep name reaches this from an HTTP path segment, so a separator, a drive letter or a
-    parent reference is refused here rather than resolved into a record somewhere else.
+    """``study_name`` once it is known to name one sweep and not a path through the store: a
+    separator, a drive letter or a parent reference is refused.
     """
     if PureWindowsPath(study_name).name != study_name or study_name == "..":
         raise BadKey(
@@ -1713,21 +1470,13 @@ def _sweep_name(study_name: str) -> str:
 def sweep_manifest_key(
     study_name: str, output_dir: str = "", *, root: Path | str | None = None
 ) -> Key:
-    """The manifest a sweep is listed and read back from.
+    """The manifest a sweep is listed and read back from, keyed off the HPO root.
 
-    Keyed off the HPO root, the scope every sweep-level record hangs off, and declared here
-    because ``hpo_root``/``sweep_dir`` already answer where a sweep lives.
-
-    Two writers share this record. ``run_hyperparameter_search`` holds the manifest in memory for the whole sweep
-    and replaces the whole document at each state change; it re-derives ``cancel_requested`` from
-    the sweep's own stop file on every one of those writes, so it never overwrites a cancel
-    ``cancel_hyperparameter_search`` recorded in between. ``cancel_hyperparameter_search`` itself, reached from a different request
-    (a cancel this process is not running the sweep for), read-modify-writes only
-    ``cancel_requested`` through the store's compare-and-set (``read_versioned`` plus
-    ``replace(..., expect=version)``) and never over a manifest already in a terminal status, so a
-    ``run_hyperparameter_search`` write racing ahead of it is never reverted back to a stale ``"running"``.
-    ``concurrency="last_writer_wins"`` names the store's own policy; the two writers avoid
-    clobbering each other by these rules, not by the store enforcing one.
+    Two writers share this record. ``run_hyperparameter_search`` replaces the whole document at
+    each state change, re-deriving ``cancel_requested`` from the sweep's own stop file on every
+    write. ``cancel_hyperparameter_search`` read-modify-writes only ``cancel_requested`` through
+    the store's compare-and-set (``read_versioned`` plus ``replace(..., expect=version)``) and
+    never over a manifest already in a terminal status. ``concurrency="last_writer_wins"``.
     """
     return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name), "manifest"))
@@ -1740,23 +1489,17 @@ STUDY_RESULT_FIELDS = ("all_trials", "search_alg", "scheduler", "warm_start", "b
 def study_result_key(
     study_name: str, output_dir: str = "", *, root: Path | str | None = None
 ) -> Key:
-    """A finished sweep's result document, beside the sweep's own directory.
-
-    ``root`` mirrors :func:`sweep_manifest_key`'s: a caller that already knows which root a
-    sweep launched under resolves the record there rather than under whatever root this
-    process currently has pinned.
-
-    ``last_writer_wins``: written once, when the sweep ends, from the result it returns.
+    """A finished sweep's result document, beside the sweep's own directory, under ``root`` as
+    :func:`sweep_manifest_key` resolves it. ``last_writer_wins``: written once, when the sweep
+    ends.
     """
     return Key(STUDY_RESULT_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name),))
 
 
 def _trial_name(trial_dir_name: str) -> str:
-    """``trial_dir_name`` once it is known to name one trial and not a path through the sweep.
-
-    A trial name reaches this from an HTTP path segment, so a separator, a drive letter or a
-    parent reference is refused here rather than resolved into a record somewhere else.
+    """``trial_dir_name`` once it is known to name one trial and not a path through the sweep: a
+    separator, a drive letter or a parent reference is refused.
     """
     if PureWindowsPath(trial_dir_name).name != trial_dir_name or trial_dir_name == "..":
         raise BadKey(
@@ -1767,33 +1510,24 @@ def _trial_name(trial_dir_name: str) -> str:
 
 
 def trial_config_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
-    """The point one trial actually trained at: its merged config plus the sampled params.
-
-    Scoped to the sweep rather than to the HPO root, because a trial belongs to its sweep and
-    not to the store the sweeps sit in. ``last_writer_wins``: one trial process writes its own
-    document once, when the trial finishes.
+    """The point one trial actually trained at: its merged config plus the sampled params, scoped
+    to the sweep. ``last_writer_wins``: one trial process writes its own document once, when the
+    trial finishes.
     """
     return Key(TRIAL_CONFIG_STORE, str(Path(sweep_root).resolve()),
                (_trial_name(trial_dir_name), "resolved_config"))
 
 
 def trial_metrics_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
-    """One trial's epoch-by-epoch metrics, one entry per row, append only.
-
-    A trial has no experiment record, so its rows belong to the sweep rather than to the
-    experiment metrics log: same scope as :func:`trial_config_key`, which is the directory the
-    Tuning view reads a trial back from.
+    """One trial's epoch-by-epoch metrics, one entry per row, append only, scoped to the sweep like
+    :func:`trial_config_key`.
     """
     return Key(TRIAL_METRICS_STORE, str(Path(sweep_root).resolve()),
                (_trial_name(trial_dir_name), "metrics"))
 
 
 def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
-    """The metrics log of the trial that writes into ``trial_dir``.
-
-    What a trainer holds is its own output directory, not the sweep it belongs to, so the
-    split into (sweep root, trial name) is made here rather than at each caller.
-    """
+    """The metrics log of the trial that writes into ``trial_dir``."""
     path = Path(trial_dir).resolve()
     return trial_metrics_key(path.parent, path.name)
 
@@ -1801,10 +1535,6 @@ def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
 def log_holds_anything(page: Any) -> bool:
     """Whether a metrics log holds anything at all: rows, a torn tail, undecodable bytes, or
     entries at a schema_version this reader does not accept.
-
-    One predicate: ``read_sweep_from_disk``'s per-trial ``has_metrics`` flag and
-    ``routes.tuning.get_trial_metrics``'s own ``exists`` answer share this, rather than each
-    restating what a log with nothing readable back looks like.
     """
     return bool(page.records or page.torn_tail or page.corrupt or page.version_refused)
 
@@ -1812,15 +1542,9 @@ def log_holds_anything(page: Any) -> bool:
 def enrich_with_study_result(
     response: dict[str, Any], sweep_id: str, *, root: Path | str | None = None
 ) -> dict[str, Any]:
-    """Layer the study result's own fields onto ``response["result"]`` for a completed sweep,
-    read through the store and never fabricated: a sweep whose study result is absent (or
-    already carries these fields, the common case for a sweep this process just ran) is served
-    exactly as it already was.
-
-    The one place this rule is written: ``read_sweep_from_disk`` answers the manifest-and-trials
-    question only, and both ``routes.tuning.get_sweep``'s disk branch and
-    ``monitor_training(sweep_id=)`` call this afterward on a completed sweep rather than each
-    layering the study result on their own.
+    """Layer the study result's own fields onto ``response["result"]`` for a completed sweep, read
+    through the store and never fabricated: a sweep whose study result is absent (or already
+    carries these fields) is served as it already was.
     """
     if response.get("status") != "completed":
         return response
@@ -1846,26 +1570,16 @@ def enrich_with_study_result(
 
 
 def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> dict[str, Any] | None:
-    """One sweep's manifest-derived summary plus every trial directory it has produced, read
-    from the sweep's own store records alone, with no in-memory job registry consulted.
+    """One sweep's manifest-derived summary plus every trial directory it has produced, read from
+    the sweep's own store records alone.
 
     Returns ``None`` when no manifest exists under ``root`` (the current platform root when
-    ``root`` is ``None``): the "sweep not found" case ``routes.tuning.get_sweep``'s disk branch
-    and ``routes.tuning.list_trials`` already answer this way, and ``monitor_training``'s own
-    caller answers the same. Otherwise: ``{"sweep_id", "status", "error", "result", "manifest",
+    ``root`` is ``None``). Otherwise: ``{"sweep_id", "status", "error", "result", "manifest",
     "relaunched_from", "has_manifest": True, "trials"}``. ``status`` is the derived liveness
-    (:func:`sweep_state`, ``driver_live=False``: no process reading from disk alone can vouch
-    for a sweep's driver). ``result`` is the manifest's own, exactly as written: layering the
-    study result's own fields onto a completed sweep's result is :func:`enrich_with_study_result`'s
-    own separate question, so a caller that only wants the manifest and trials never pays for a
-    study-result read it does not need. ``trials`` is one entry per ``trial_<id>`` directory
-    under the sweep's own root: its resolved params and whether it has
+    (:func:`sweep_state`, ``driver_live=False``). ``result`` is the manifest's own, exactly as
+    written (:func:`enrich_with_study_result` layers the study result). ``trials`` is one entry per
+    ``trial_<id>`` directory under the sweep's own root: its resolved params and whether it has
     logged any metrics yet (:func:`log_holds_anything`).
-
-    This is the one reader ``routes.tuning``'s disk-only paths and ``monitor_training(sweep_id=)``
-    both call rather than each re-implementing it: the web route's own live/jobstore branch (an
-    in-memory job this process is still running) is a different question this function does not
-    answer, and stays the route's own code.
     """
     from tcip_store import read_log
 
@@ -1908,56 +1622,41 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
         "error": manifest.get("error"),
         "result": result,
         "manifest": manifest,
-        "relaunched_from": manifest.get("relaunched_from"),
+        "relaunched_from": manifest["relaunched_from"],
         "has_manifest": True,
         "trials": trials,
     }
 
 
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
-    """Train one HPO trial and ``report`` its resolved selection metric, in whatever direction
-    that metric's own declaration says is better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, via
-    :func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_selection_metric`), never a fixed
-    minimize convention.
+    """Train one HPO trial and ``report`` its resolved selection metric, in whatever direction that
+    metric's own declaration says is better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, via
+    :func:`~tcip_mcp.pipelines.training.generic_trainer.config_selection_metric`).
 
-    ``report(value)`` feeds the Ray Tune searcher/scheduler; call it each epoch (so a scheduler
-    can prune) and once at the end with the best value this trial actually reached (Tune's default
-    ``get_best_result`` scope reads only the last value each trial reported, so the run's best
-    epoch would otherwise be lost behind a worse later one). A trial that never reports a real
-    value, before training starts or on any failure, and a trial whose run ended ``"failed"`` or
-    ``"cancelled"`` (even one that reported a real value from an epoch before it ended), both
-    report the losing side of its own direction as that final value instead of a real number, so
-    neither a trial with nothing to say, nor a config that killed its own run, nor a run a
-    sweep-wide cancel cut short mid-training, can outrank a config that merely scored worse.
-    Trials train under the final run's
-    regime, same augmentation, imbalance handling, and dispatch: a ``training_source`` in
-    ``base_config`` actually runs under that loop here too, not always the stock trainer, or the
-    selected hyperparameters won't transfer.
+    ``report(value)`` feeds the Ray Tune searcher/scheduler; it is called each epoch and once at
+    the end with the best value this trial reached. A trial that never reports a real value, before
+    training starts or on any failure, and a trial whose run ended ``"failed"`` or ``"canceled"``,
+    report the losing side of its own direction as that final value. Trials train under the final
+    run's regime, same augmentation, imbalance handling, and dispatch: a ``training_source`` in
+    ``base_config`` runs under that loop here too.
     """
     trial_config = _apply_hpo_params(base_config, config)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import (
-        _improves, resolve_selection_metric, seeded_loader_kwargs,
+        _improves, config_selection_metric, run_loaders, run_transforms,
         stamp_effective_data_geometry,
     )
-    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
-    from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-    from torch.utils.data import DataLoader
 
-    model_source = trial_config.get(MODEL_SOURCE_KEY)
     # setdefault, not get: creates "data" if base_config omitted it, and the geometry stamp
     # below mutates the tree the resolved-config snapshot is spread from below.
     data_cfg = trial_config.setdefault("data", {})
-    task = (model_source.get("task") if model_source else None) or data_cfg.get("task", "detection")
-    eval_cfg = trial_config.get("evaluation") or {}
+    task = run_task(trial_config)
     try:
-        higher_is_better = HIGHER_IS_BETTER_BY_METRIC[resolve_selection_metric(
-            task, eval_cfg.get("trait"), eval_cfg.get("selection_metric"))]
+        higher_is_better = HIGHER_IS_BETTER_BY_METRIC[config_selection_metric(trial_config)]
     except Exception:
         # Undeclared direction, an unregistered trait, or any other resolution failure; the
         # trial fails below either way, this only decides which sentinel that failure reports.
@@ -1967,10 +1666,6 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     # A sweep-wide cancel already requested: report the losing side without training, so every
     # trial Ray still schedules after the request ends at once.
     if (Path(trial_dir).parent / SWEEP_CANCEL_SENTINEL).exists():
-        report(losing_side)
-        return
-
-    if not model_source:
         report(losing_side)
         return
 
@@ -1990,38 +1685,15 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         report(value)
 
     try:
-        transforms = None
-        aug_cfg = trial_config.get("augmentation", {})
-        if aug_cfg:
-            from tcip_mcp.pipelines.data.augmentations import build_augmentation
-            transforms = build_augmentation(aug_cfg)
-
         # Auto-val gives the val_loader that the composite objective / the scheduler need.
-        train_ds, val_ds, _label_digests = auto_train_val(task, data_cfg, transforms)
+        train_ds, val_ds, _partition = auto_train_val(
+            task, data_cfg, run_transforms(trial_config))
         # Stamped before training so a pruned/failed trial's resolved-config snapshot still
         # records the geometry the trial actually trained on.
         stamp_effective_data_geometry(data_cfg, train_ds)
-        batch_size = trial_config.get("batch_size", 4)
-        num_workers = trial_config.get("num_workers", 0)
-        # Built after the loader context is known: a sampler whose read order depends on the
-        # worker regime and batching consumes both.
-        sampler = build_sampler(trial_config.get("sampler", "random"), train_ds,
-                                num_workers=num_workers, batch_size=batch_size)
-        # run.config's seed is draw_seed_if_unset-resolved; read off run.config, not merged, so
-        # the loader is seeded with the value actually used.
-        loader_kwargs = seeded_loader_kwargs(run.config.get("seed"), num_workers=num_workers)
-        train_loader = DataLoader(
-            train_ds, batch_size=batch_size, shuffle=(sampler is None),
-            sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
-            **loader_kwargs,
-        )
-        val_loader = None
-        if val_ds is not None:
-            val_loader = DataLoader(
-                val_ds, batch_size=batch_size, shuffle=False,
-                collate_fn=task_collate(task), num_workers=num_workers,
-                **loader_kwargs,
-            )
+        # run.config's seed is draw_seed_if_unset-resolved, the value the trial actually uses.
+        train_loader, val_loader = run_loaders(
+            trial_config, task, train_ds, val_ds, run.config.get("seed"))
 
         def epoch_cb(epoch: int, metrics: dict) -> None:
             # resolve_selection_metric governs which key decides checkpoint choice once
@@ -2035,8 +1707,8 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
                            experiment_id=None, epoch_hook=epoch_cb, trial_report=call_report)
         dispatch_train_body(ctx)
-        # A diverged or cancelled run reports the losing side, never what it reported before ending.
-        if run.status in ("failed", "cancelled"):
+        # A diverged or canceled run reports the losing side, never what it reported before ending.
+        if run.status in ("failed", "canceled"):
             report(losing_side)
         else:
             report(best["value"])  # the trial's best reported value, or the losing side if none
@@ -2049,8 +1721,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             # sweep actually varied (the config as sampled cannot say that).
             trial_path = Path(trial_dir)
             store.replace(trial_config_key(trial_path.parent, trial_path.name),
-                          {**trial_config, "trial_params": dict(config),
-                           "seed": run.config.get("seed")})
+                          {**trial_config, "trial_params": dict(config)})
         except (OSError, StoreError):
             logger.warning("could not persist the resolved config for %s", trial_dir, exc_info=True)
 
@@ -2075,153 +1746,104 @@ def run_hyperparameter_search(
     split_draws: int = 1,
     split_draw_seeds: list[int] | None = None,
     *,
+    search_seed: int,
     trial_budget: int | None = None,
     relaunched_from: str | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
-    The search *algorithm* and trial *scheduler* are yours to choose per task/data, pick
-    from what is installed on this machine (call the ``hpo`` module's ``available_search_algs``
-    / ``available_schedulers`` for the live list); the defaults below are a sane starting
-    point, not a recipe:
+    The search algorithm and trial scheduler are the caller's choice (call the ``hpo`` module's
+    ``available_search_algs`` / ``available_schedulers`` for the live list):
       - ``search_alg``: ``random``/``grid`` (native), or a backend, ``optuna``, ``bayesopt``,
-        ``hyperopt``, ``nevergrad``, ``ax``.
-      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or
-        ``none`` to run every trial to completion.
+        ``hyperopt``, each constructed with ``search_seed``.
+      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or ``none``
+        to run every trial to completion.
 
     Trials optimize ``base_config``'s own resolved selection metric, in whatever direction that
     metric's declaration says is better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, resolved once
-    for the whole sweep via ``resolve_selection_metric``), not a fixed minimize convention; each
-    trains under the base config's regime so the chosen hyperparameters transfer to
-    ``launch_training``.
+    for the whole sweep); each trains under the base config's regime.
 
     Everything one sweep writes lands under ``<output_dir or .tcip/hpo>/<study_name>/``: a
-    ``manifest.json`` stamped ``running`` before the first trial starts (so a sweep is
-    visible while it runs, not only once it ends) and updated when the sweep ends, one
-    ``trial_<id>/`` directory per trial, and Ray's own experiment store (also the
+    ``manifest.json`` stamped ``running`` before the first trial starts and updated when the sweep
+    ends, one ``trial_<id>/`` directory per trial, and Ray's own experiment store (also the
     TensorBoard logdir). The full result is written alongside as ``<study_name>.json``. The
     manifest also carries every argument this call resolved (``base_config`` and the resolved
-    ``param_space`` included), so a relaunch can replay it exactly from the manifest alone.
-    The manifest's ``heartbeat`` is restamped every :func:`sweep_heartbeat_seconds` from a
-    daemon thread for as long as the search runs, stopped and joined before any terminal
-    write, so a listing reading the manifest mid-sweep can tell a live driver from a dead one
-    (see ``sweep_state``); a restamp a store or OS error interrupts costs one beat, not the
-    rest of the sweep. A caller that calls :func:`mark_sweep_launching` for ``study_name``
-    before this call keeps a cancel reachable in the window before the first manifest write
-    (see :func:`cancel_hyperparameter_search`); this call discards that mark itself once it no longer needs it.
+    ``param_space`` included). The manifest's ``heartbeat`` is restamped every
+    :func:`sweep_heartbeat_seconds` from a daemon thread for as long as the search runs, stopped
+    and joined before any terminal write; a restamp a store or OS error interrupts costs one beat.
+    This call discards a :func:`mark_sweep_launching` mark for ``study_name`` once its first
+    manifest is written.
 
-    Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
-    training source, or a config with no ``data`` section, at every point the search space
-    could resolve a trial's config to (``base_config`` with a sampled point applied, not only
-    the first). Also refuses a ``param_space`` axis whose sampled points would resolve to a
-    different selection metric or ranking direction than ``base_config``'s own resolution,
-    Ray's Tuner taking only one fixed metric/mode for the whole sweep: this catches a dotted or
-    nested-dict axis naming ``selection_metric`` directly, and an axis (``model_source.task``,
-    in particular) that changes the metric's own task-derived default with no
-    ``selection_metric`` key in sight. Also refuses, whatever the sampler, a ``param_space``
-    axis naming ``data.split.seed`` while ``split_draws`` draws at most one partition (see
-    :func:`caller_split_seed_refusal`): the paired grid above one draw is the way to sweep the
-    split seed itself. Also refuses ``split_draws`` above 1 on an unbound, built-in detection
-    config with tiling on that admits exactly one trainable source under ``data.labels_dir``:
-    that config's own single-source spatial-strip path pairs no distinct partition with any
-    draw (see :func:`_split_draws_refusal`). Also refuses, whatever else is true, a ``split_draws``
-    that is not an integer, or below 1 (see :func:`_split_draws_argument_refusal`, checked before
-    every other leg). Also refuses, on a launch (never a relaunch) above one draw, or on any call
-    naming a ``trial_budget``: an ``n_trials`` or ``trial_budget`` that is not a positive integer;
-    an unbuildable or ungenerable ``param_space``, naming what could not be counted; a launch above
-    one draw that names no ``trial_budget``, naming the budget Ray's own variant count over the
-    built space would admit; and a stated ``trial_budget`` Ray's own count exceeds, naming the
-    count, the budget and, when even one draw would exceed it, that fact, else how many draws the
-    budget admits (see :func:`_trial_budget_refusal`). ``cancel_hyperparameter_search`` requested against
-    this study before or during the run instead ends the sweep ``{"status": "cancelled", ...}``,
-    the manifest recording the same, rather than a completed result.
+    Refuses (``{"error": ..., "issues": [...]}``, nothing minted): an unimportable builder or
+        training source, or a config with no ``data`` section, at every point the search space
+        could resolve a trial's config to; a ``param_space`` axis whose sampled points would
+        resolve to a different selection metric or ranking direction than ``base_config``'s own
+        (including an axis such as ``model_source.task`` that changes the metric's task-derived
+        default); a ``param_space`` axis naming ``data.split.seed`` while ``split_draws`` draws at
+        most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
+        unbound, built-in detection config with tiling on that admits exactly one trainable source
+        (:func:`_split_draws_refusal`); a ``split_draws`` that is not an integer, or below 1
+        (:func:`_split_draws_argument_refusal`, checked first); and, on a launch above one draw or
+        any call naming a ``trial_budget``, the bound refusals of :func:`_trial_budget_refusal`. A
+        cancel (``cancel_hyperparameter_search``) requested before or during the run ends the sweep
+        ``{"status": "canceled", ...}``, the manifest recording the same.
 
     Args:
         base_config: Base training config each trial modifies.
-        param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
-            Every axis is checked against ``base_config``'s own resolved selection metric and
-            direction (see above); an axis that would disagree at any sampled point is refused
-            rather than minted. A ``data.split.seed`` axis is refused outright whenever
-            ``split_draws`` draws at most one partition, unset or 1, since zero or below is
-            refused at the door (see
-            :func:`caller_split_seed_refusal`); above 1 it
-            belongs to ``split_draws``/``split_draw_seeds`` instead, never to this dict.
+        param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted. Every
+            axis is checked against ``base_config``'s own resolved selection metric and direction.
+            A ``data.split.seed`` axis is refused whenever ``split_draws`` draws at most one
+            partition; above 1 it belongs to ``split_draws``/``split_draw_seeds``.
         n_trials: Number of trials; a whole number of at least one on a call that reads a
-            ``trial_budget`` bound (see ``trial_budget`` below), since Ray runs a negative count
-            as an unbounded sweep and a zero count as none.
+            ``trial_budget`` bound.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
-        search_alg: Search algorithm, see the list above; call ``hpo.available_search_algs()``
-            for what's actually installed on this box.
+        search_alg: Search algorithm, see the list above.
         scheduler: Trial scheduler, see the list above.
-        grace_period: Minimum epochs before a halving scheduler (``asha``/``hyperband``) can
-            stop a trial early.
-        reduction_factor: Halving factor for ``asha``/``hyperband`` (fraction of trials kept
-            at each rung).
+        grace_period: Minimum epochs before a halving scheduler (``asha``/``hyperband``) can stop a
+            trial early.
+        reduction_factor: Halving factor for ``asha``/``hyperband`` (fraction of trials kept at
+            each rung).
         warm_start: Seed the search with ``baseline_params`` as a known-good starting point.
         baseline_params: Hyperparameter values to seed the search with when ``warm_start=True``.
         max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
-        resources_per_trial: Ray resource request per trial, omit to derive one from the
-            host's real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``);
-            an explicit value always wins over the derivation.
-        study_name: The sweep's id, for a caller (the Tuning route's launch) that already
-            minted one and must have its own registry entry, manifest and every sweep route
-            agree on it; omitted mints one here.
-        auto_tensorboard: Launch a TensorBoard over the sweep root once it finishes. The
-            Tuning route's launch passes ``False``: it serves its own per-sweep TensorBoard
-            view on demand, so leaving this on there would run a second, unaddressable
-            TensorBoard process over the same trials.
-        relaunched_from: The sweep this one replays, for a caller (the Tuning route's relaunch)
-            that started it from another sweep's own recorded manifest; recorded on this
-            sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
-            a relaunch. Refused when it names no sweep manifest under this resolved root. It
-            exempts nothing from the budget leg: the Tuning relaunch route passes the source
-            manifest's own ``trial_budget`` through (or none, which reads no bound), and a
-            ``trial_budget`` this call states is counted and checked on a relaunch exactly as on
-            a launch.
-        trial_budget: The most trials this sweep may launch, counted the way Ray will launch
-            them (see :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`). Required by
-            name above one draw on a launch that is not a relaunch, since the paired grid
-            multiplies a count this call never stated otherwise; checked whenever stated,
-            including at one draw. Recorded on the sweep manifest beside ``split_draws``,
-            ``None`` when the caller stated none.
+        resources_per_trial: Ray resource request per trial, omit to derive one from the host's
+            real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``); an
+            explicit value always wins.
+        study_name: The sweep's id, when the caller already minted one; omitted mints one here.
+        auto_tensorboard: Launch a TensorBoard over the sweep root once it finishes.
+        relaunched_from: The sweep this one replays, recorded on this sweep's manifest, ``None``
+            when this sweep was not a relaunch. Refused when it names no sweep manifest under this
+            resolved root. A stated ``trial_budget`` is checked on a relaunch exactly as on a
+            launch.
+        search_seed: The search algorithm's own seed, recorded on the manifest; required, and
+            distinct from the split seed a trial's data draw uses.
+        trial_budget: The most trials this sweep may launch, counted the way Ray will launch them
+            (see :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`). Required above one
+            draw on a launch that is not a relaunch; checked whenever stated, including at one
+            draw. Recorded on the sweep manifest beside ``split_draws``, ``None`` when the caller
+            stated none.
         split_draws: Above 1, adds ``data.split.seed`` to the search space as a grid over
-            ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
-            plus the draw index), paired with every sampled point through Ray's own
-            ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
-            seed, a blocked comparison of the split's own sensitivity. Refused outright on a
-            built-in detection config with tiling on that admits exactly one trainable source
-            under ``data.labels_dir``: that config's own single-source spatial-strip path places
-            every strip by declared order alone, so no draw would hold a different partition out
-            and the report's split sensitivity would be training-seed noise, not a split's.
-            ``base_config`` bound to
-            a selection is admitted, not refused: its own copy gains
-            ``data.split.redraw_within_selection: true``, defaulting ``data.split.seed`` to 42
-            when the bound config carries none, the same default an unset-seed drawn config
-            uses, so every trial redraws train and val inside the selection's own train-plus-val
-            samples at its own seed, calibration untouched, rather than training every trial on
-            the selection's one recorded partition; refused before minting when those samples
-            resolve to fewer than two foreground groups (a redraw could only starve a side).
-            Otherwise refused, before minting the sweep, when ``data.auto_val``
-            is off, ``search_alg`` is not a
-            native one (``random``/``grid``/``variant_generator``: only the native generator
-            pairs a grid axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable
-            with a completed one), ``split_draw_seeds`` is given at a length other than
-            ``split_draws``, or names the same seed twice (a repeated seed is not a spread over
-            distinct partitions), ``warm_start``'s ``baseline_params`` names ``data.split.seed``
-            (Ray's preset-variant pinning would pin every draw to one seed instead of pairing
-            the grid), ``param_space`` already sweeps ``data.split.seed`` itself, or
-            ``param_space`` sweeps any other ``data.*`` axis (a second data axis would change
-            what a point admits or how it draws, so draw ``k`` would no longer be the same
-            partition for every point). The result groups trials by point (params minus the
-            seed) and chooses the best by mean over each point's draws; see
+            ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else
+            ``DEFAULT_SEED``, plus the draw index), paired with every sampled point through Ray's
+            own ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
+            seed. A ``base_config`` bound to a selection gains
+            ``data.split.redraw_within_selection: true`` on its own copy (``data.split.seed``
+            defaulting to ``DEFAULT_SEED``), so every trial redraws train and val inside the
+            selection's own train-plus-val samples, calibration untouched; refused when those
+            samples resolve to fewer than two foreground groups. Otherwise refused when
+            ``data.auto_val`` is off, ``search_alg`` is not a native one
+            (``random``/``grid``/``variant_generator``), ``scheduler`` is not ``none``,
+            ``split_draw_seeds`` is given at a length other than ``split_draws`` or names the same
+            seed twice, ``warm_start``'s ``baseline_params`` names ``data.split.seed``,
+            ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
+            any other ``data.*`` axis. The result groups trials by point (params minus the seed)
+            and chooses the best by mean over each point's draws; see
             ``result["best_value_spread"]``, and every point's own block at
             ``result["split_sensitivity"]`` beside ``result["n_points"]`` (planned points) and
-            ``result["split_draws"]``, both mirrored onto the sweep manifest's own ``result``.
-            1 is the default and pairs no spread; zero or below is refused at the door naming the
-            value (see :func:`_split_draws_argument_refusal`); above 1, a launch (never a
-            relaunch) states a ``trial_budget``.
-        split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per
-            draw; omit for the derived default (see ``split_draws``).
+            ``result["split_draws"]``, both mirrored onto the sweep manifest's own ``result``. 1 is
+            the default; zero or below is refused naming the value.
+        split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per draw;
+            omit for the derived default (see ``split_draws``).
     """
     from tcip_mcp.pipelines.training.hpo import (
         get_default_space,
@@ -2263,7 +1885,7 @@ def run_hyperparameter_search(
 
         # Checked ahead of preflight, so its own reason is what a bound or auto_val refusal
         # reads as, not whatever preflight would have hit first.
-        hpo_task = _resolved_task(base_config)
+        hpo_task = run_task(base_config)
         draws_refusal = _split_draws_refusal(
             base_config, param_space, hpo_task, search_alg, scheduler,
             split_draws, split_draw_seeds, warm_start, baseline_params)
@@ -2276,19 +1898,17 @@ def run_hyperparameter_search(
                     "issues": []}
 
         from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
-        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+        from tcip_mcp.pipelines.training.generic_trainer import config_selection_metric
         # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
         # once here, from base_config; every point below is checked against it the same way.
-        hpo_eval_cfg = base_config.get("evaluation") or {}
         try:
-            hpo_metric = resolve_selection_metric(
-                hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
+            hpo_metric = config_selection_metric(base_config)
         except ValueError as exc:
             return {"error": str(exc), "issues": []}
         hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
 
         axis_conflict = _selection_metric_axis_conflict(
-            base_config, param_space, hpo_task, hpo_metric, hpo_mode)
+            base_config, param_space, hpo_metric, hpo_mode)
         if axis_conflict is not None:
             return {"error": axis_conflict, "issues": []}
 
@@ -2346,6 +1966,7 @@ def run_hyperparameter_search(
             "relaunched_from": relaunched_from,
             "split_draws": split_draws,
             "split_draw_seeds": resolved_draw_seeds,
+            "search_seed": search_seed,
             "trial_budget": trial_budget,
         }
         manifest_key = sweep_manifest_key(study_name, output_dir)
@@ -2360,12 +1981,12 @@ def run_hyperparameter_search(
                 store.replace(manifest_key, manifest)
 
         # A cancel already requested (the study_name was minted and registered before this
-        # call reached the manifest write) records a cancelled manifest rather than refusing.
+        # call reached the manifest write) records a canceled manifest rather than refusing.
         if cancel_path.exists():
-            manifest.update(status="cancelled", error=_CANCEL_BEFORE_START_REASON,
+            manifest.update(status="canceled", error=_CANCEL_BEFORE_START_REASON,
                             finished_at=datetime.now(timezone.utc).isoformat())
             _write_manifest()
-            return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_BEFORE_START_REASON}
+            return {"status": "canceled", "study_name": study_name, "error": _CANCEL_BEFORE_START_REASON}
 
         _write_manifest()
     finally:
@@ -2404,6 +2025,7 @@ def run_hyperparameter_search(
             scheduler=scheduler,
             grace_period=grace_period,
             reduction_factor=reduction_factor,
+            seed=search_seed,
             warm_start=warm_start,
             baseline_params=baseline_params,
             max_concurrent=max_concurrent,
@@ -2419,10 +2041,10 @@ def run_hyperparameter_search(
         heartbeat_stop.set()
         heartbeat_thread.join()
         if cancel_path.exists():
-            manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
+            manifest.update(status="canceled", error=_CANCEL_DURING_RUN_REASON,
                             finished_at=datetime.now(timezone.utc).isoformat())
             _write_manifest()
-            return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
+            return {"status": "canceled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
         manifest.update(status="failed", error=str(exc),
                         finished_at=datetime.now(timezone.utc).isoformat())
         _write_manifest()
@@ -2432,10 +2054,10 @@ def run_hyperparameter_search(
     heartbeat_thread.join()
 
     if cancel_path.exists():
-        manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
+        manifest.update(status="canceled", error=_CANCEL_DURING_RUN_REASON,
                         finished_at=datetime.now(timezone.utc).isoformat())
         _write_manifest()
-        return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
+        return {"status": "canceled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
 
     # Auto-launch TensorBoard on the sweep root: Ray's per-trial event files and each
     # trial's own tensorboard dir both sit under it.
@@ -2508,36 +2130,29 @@ def _path_under(path: Path, root: Path) -> bool:
 def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root: str | None = None) -> dict:
     """Request cooperative cancellation of a running HPO sweep.
 
-    Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root: ``run_hyperparameter_search``
-    checks it after preflight and before minting the manifest, ``_run_hpo_trial`` checks it at
-    the start of every trial, and the sweep's own Tune ``Stopper`` polls it to end each trial's
-    report and, once no trial directory still looks unfinished (or the heartbeat stale window has
-    passed since the file was written), the whole experiment. Also writes the run-level sentinel
-    (``run_registry.CANCEL_SENTINEL``) into every trial directory that has not yet written its
-    resolved config, so a trial mid-epoch sees the request at its very next batch boundary the
-    same way a standalone training run does, without waiting on the driver's own poll.
+    Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root, which
+    ``run_hyperparameter_search``, ``_run_hpo_trial`` and the sweep's own Tune ``Stopper`` poll.
+    Also writes the run-level sentinel (``run_registry.CANCEL_SENTINEL``) into every trial
+    directory that has not yet written its resolved config, so a trial mid-epoch sees the request
+    at its next batch boundary.
 
     Refuses when the study names no sweep this process can find: no manifest under the resolved
     root, no live trial of this study registered in this process's own run registry, and no
-    ``mark_sweep_launching`` entry for it at this same resolved root either (the last covers
-    the narrow window between a caller minting the id and ``run_hyperparameter_search`` writing its first
-    manifest; a marked study with no manifest yet answers ``"running"`` with
-    ``cancel_requested`` set. A mark recorded under a different root does not count: that study
-    is one ``run_hyperparameter_search`` will never look for here).
+    ``mark_sweep_launching`` entry for it at this same resolved root either. A marked study with no
+    manifest yet answers ``"running"`` with ``cancel_requested`` set; a mark recorded under a
+    different root does not count.
 
-    The manifest's own ``cancel_requested`` (read by the Tuning listing) is written through the
-    store's compare-and-set, and never over a manifest already in a terminal status: ``run_hyperparameter_search``
-    is the other writer of this record, and a terminal write of its own must never be reverted
-    back to ``"running"`` by a cancel that read the manifest just before it (see
-    :func:`sweep_manifest_key`). The sentinel files below are the authoritative signal either
-    way; the manifest field is a best-effort mirror of them for the listing to read.
+    The manifest's own ``cancel_requested`` is written through the store's compare-and-set, and
+    never over a manifest already in a terminal status (see :func:`sweep_manifest_key`). The
+    sentinel files are the authoritative signal; the manifest field mirrors them best-effort.
 
     Args:
         study_name: The sweep to cancel.
-        output_dir: Where the sweep's own directory lives, as given to ``run_hyperparameter_search``; empty
-            resolves the same ``.tcip/hpo`` default, under ``root``.
-        root: The platform root this sweep launched under, for a caller (the Tuning cancel
-            route) that already knows it; omitted resolves under this process's own root.
+        output_dir: Where the sweep's own directory lives, as given to
+            ``run_hyperparameter_search``; empty resolves the same ``.tcip/hpo`` default, under
+            ``root``.
+        root: The platform root this sweep launched under; omitted resolves under this process's
+            own root.
     """
     from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL, _RUNS, _RUNS_LOCK
 
@@ -2568,8 +2183,9 @@ def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root:
         return {"study_name": study_name, "status": "running", "cancel_requested": True}
 
     state_manifest = manifest
-    status = manifest.get("status", "running")
-    if status not in ("completed", "failed", "cancelled"):
+    from tcip_mcp.experiments import _RECORDED_AS_DONE
+
+    if manifest["status"] not in _RECORDED_AS_DONE:
         working = {**manifest, "cancel_requested": True}
         try:
             store.replace(manifest_key, working, expect=versioned.version)
@@ -2586,19 +2202,13 @@ def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root:
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     """Apply flat HPO params onto a deep copy of ``base_config``, where ``train()`` reads them.
-
-    Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep), so
-    only optimizer/batch axes get purpose-built handling here; ``base_config``'s own progressive-
-    unfreeze schedule is left untouched, preserving whatever schedule the agent configured:
+    ``base_config``'s own progressive-unfreeze schedule is left untouched:
 
       - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
                             whatever backbone/head ratio ``base_config`` already expressed
-                            (derived, not pinned, a frozen ``lr*0.1`` would discard an agent's
-                            own deliberate ratio)
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
       - anything else    -> the top level of ``cfg`` (``batch_size`` included), where
-                            ``train()`` reads every key of its own, free for a bespoke
-                            ``training_source`` to sweep its own axes; no whitelist, no reject.
+                            ``train()`` reads every key of its own
     """
     import copy
 
@@ -2645,47 +2255,29 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-def _resolved_task(config: dict) -> str:
-    """The task ``run_hyperparameter_search`` resolves a config to: ``model_source.task``, else ``data.task``,
-    else ``"detection"``. The one definition both the base config's own resolution and a
-    param_space point's resolution share, so an axis that changes task is judged by the same
-    rule everywhere it is read.
-    """
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-
-    return (config.get(MODEL_SOURCE_KEY) or {}).get("task") \
-        or (config.get("data") or {}).get("task", "detection")
-
-
 def _selection_metric_axis_conflict(
-    base_config: dict, param_space: dict, hpo_task: str, hpo_metric: str, hpo_mode: str,
+    base_config: dict, param_space: dict, hpo_metric: str, hpo_mode: str,
 ) -> str | None:
-    """The refusal reason, if any, when some point ``param_space`` could resolve a trial to
-    picks a different selection metric or ranking direction than ``(hpo_metric, hpo_mode)``,
-    the pair ``run_hyperparameter_search`` already resolved from ``base_config`` and fixes once on the Tuner (Ray
-    forbids setting metric/mode anywhere else).
+    """The refusal reason, if any, when some point ``param_space`` could resolve a trial to picks a
+    different selection metric or ranking direction than ``(hpo_metric, hpo_mode)``, the pair
+    ``run_hyperparameter_search`` resolved from ``base_config`` and fixes on the Tuner.
 
-    Resolves every :func:`_preflight_points` point through the same
-    ``evaluation``/``resolve_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC`` path the
-    sweep itself uses, rather than enumerating the key shapes that could reach
-    ``selection_metric``: this also catches an axis that changes the metric's own task-derived
-    default (``model_source.task``, in particular) with no ``selection_metric`` key in sight.
-    A point whose params fail to apply is left for the structural preflight loop to report.
-    ``None`` when every point agrees with ``base_config``.
+    Resolves every :func:`_preflight_points` point through
+    ``config_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC``, so an axis that changes the
+    metric's own task-derived default (``model_source.task``) is caught too. A point whose params
+    fail to apply is left for the structural preflight loop to report. ``None`` when every point
+    agrees with ``base_config``.
     """
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
-    from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+    from tcip_mcp.pipelines.training.generic_trainer import config_selection_metric
     axes = sorted(param_space)
     for label, point in _preflight_points(param_space):
         try:
             point_cfg = _apply_hpo_params(base_config, point)
         except ValueError:
             continue
-        point_task = _resolved_task(point_cfg)
-        point_eval_cfg = point_cfg.get("evaluation") or {}
         try:
-            point_metric = resolve_selection_metric(
-                point_task, point_eval_cfg.get("trait"), point_eval_cfg.get("selection_metric"))
+            point_metric = config_selection_metric(point_cfg)
         except ValueError as exc:
             return (f"param_space (axes {axes}) disagrees with base_config's selection metric "
                     f"at {label}: {exc}")
@@ -2701,12 +2293,9 @@ def _selection_metric_axis_conflict(
 
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
     """``base_config`` as ``run_hyperparameter_search`` mints the sweep from: unchanged unless
-    ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy
-    carries ``data.split.redraw_within_selection: true`` (defaulting ``data.split.seed`` to 42
-    when absent, the same default every unset-seed config draws from), so every trial redraws
-    train and val inside the selection's own samples instead of running on its one recorded
-    partition. A caller who already set the flag (and a seed) by hand gets the same copy back in
-    substance: an already-true flag or an already-set seed is left as it is.
+    ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy carries
+    ``data.split.redraw_within_selection: true`` (defaulting ``data.split.seed`` to
+    ``DEFAULT_SEED`` when absent). An already-true flag or an already-set seed is left as it is.
     """
     if split_draws <= 1:
         return base_config
@@ -2715,19 +2304,15 @@ def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
     if not split_cfg.get("selection_dir"):
         return base_config
     new_split = {**split_cfg, "redraw_within_selection": True}
-    new_split.setdefault("seed", 42)
+    new_split["seed"] = split_seed(split_cfg)
     return {**base_config, "data": {**data_cfg, "split": new_split}}
 
 
 def _split_draws_argument_refusal(split_draws: object) -> str | None:
     """Whether ``split_draws`` itself is a draw count at all, checked before every other leg
-    (including :func:`_base_config_for_split_draws`), so every later leg sees a draw count of at
-    least one: a value that is not an ``int`` (a ``bool`` is an ``int`` and reads as the integer
-    it names, so ``False`` reaches the next clause) refuses by name, and a value below one
-    refuses by name, rather than failing inside ``range(split_draws)`` or being read as one draw
-    with no reason given. Reachable by a direct Python call alone for the not-an-int clause (the
-    MCP boundary coerces ``"2"``/``2.0`` to ``2`` and rejects ``2.5``; the relaunch worker passes
-    :func:`coerce_split_draws`'s own ``int``).
+    (including :func:`_base_config_for_split_draws`): a value that is not an ``int`` (a ``bool`` is
+    an ``int`` and reads as the integer it names) refuses by name, and a value below one refuses by
+    name.
     """
     if not isinstance(split_draws, int):
         return (f"split_draws={split_draws!r} is not a draw count; pass a whole number of "
@@ -2746,20 +2331,16 @@ def _trial_budget_refusal(
 ) -> str | None:
     """Whether this call's own trial count fits the bound it must state or check, run only when
     ``reads_bound`` says one is read (a launch, never a relaunch, above one draw; or any call
-    naming ``trial_budget``): not called at all otherwise, so a one-draw budgetless launch and a
-    budgetless relaunch import no Ray, count nothing, and behave exactly as before this family.
+    naming ``trial_budget``).
 
-    Runs its two argument clauses first (an ``n_trials`` or ``trial_budget`` that is not a
-    positive ``int``, a ``bool`` excluded by name), then counts Ray's own variant count over
-    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`
-    (a space that cannot be counted or generated answers its own refusal, naming the exception,
-    rather than raising out of an audited door), then its two bound clauses: a launch above one
-    draw naming no ``trial_budget`` refuses naming the budget Ray's own count would admit; a
-    stated ``trial_budget`` the count exceeds refuses naming the count, the budget, and whether
-    even one draw exceeds it (the per-draw count, exact by construction: the seed axis is a grid
-    factor of every sample, so ``count // split_draws`` is one draw's own count of this sweep,
-    with no second count taken). Everything else answers ``None``: a budget the count fits
-    under, or a call that reads no bound at all.
+    Runs its two argument clauses first (an ``n_trials`` or ``trial_budget`` that is not a positive
+    ``int``, a ``bool`` excluded by name), then counts Ray's own variant count over
+    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count` (a
+    space that cannot be counted or generated answers its own refusal, naming the exception), then
+    its two bound clauses: a launch above one draw naming no ``trial_budget`` refuses naming the
+    budget Ray's own count would admit; a stated ``trial_budget`` the count exceeds refuses naming
+    the count, the budget, and whether even one draw exceeds it (``count // split_draws`` is one
+    draw's own count). Everything else answers ``None``.
     """
     if not reads_bound:
         return None
@@ -2814,29 +2395,13 @@ def _split_draws_refusal(
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason of the paired path's own that ``run_hyperparameter_search`` refuses
-    ``split_draws`` above 1 for, checked before minting the sweep (the door's own
-    :func:`_split_draws_argument_refusal` and :func:`_trial_budget_refusal` run separately, the
-    budget being the door's own to check, never this function's). ``None`` when nothing here
-    objects; the door's own :func:`_split_draws_argument_refusal` has already refused every value
-    below one before this runs, so one draw alone reaches the early return below, since
-    split_draws governs nothing at or under its default. A caller-supplied ``data.split.seed``
-    axis at one draw is its sibling's own refusal, not this one's: see
-    :func:`caller_split_seed_refusal`.
+    ``split_draws`` above 1 for, checked before minting the sweep. ``None`` when nothing here
+    objects, and for one draw.
 
-    ``base_config`` bound to a selection is admitted rather than refused:
-    ``run_hyperparameter_search`` has already set ``data.split.redraw_within_selection`` on its
-    own copy (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train
-    and val inside the selection's own train-plus-val samples instead of running on its one
-    recorded partition. A bound config does not read ``auto_val`` (the
-    selection branch binds ahead of it), so that leg is skipped for it; in its place,
-    the selection's own foreground-groups check runs once here so a sweep whose every trial would
-    starve a side is refused before minting rather than after every trial fails the same way.
-
-    An unbound config gets its own last leg (:func:`_unbound_single_source_spatial_issue`): a
-    built-in detection build with tiling on that admits exactly one trainable source under
-    ``data.labels_dir`` takes ``auto_train_val``'s single-source spatial-strip path, whose
-    partition no draw of ``data.split.seed`` varies, so ``split_draws`` above 1 there would
-    only multiply cost and report training-seed noise as a split spread.
+    A ``base_config`` bound to a selection (already carrying ``data.split.redraw_within_selection``
+    from :func:`_base_config_for_split_draws`) skips the ``auto_val`` leg and runs the selection's
+    own foreground-groups check instead. An unbound config gets its own last leg
+    (:func:`_unbound_single_source_spatial_issue`).
     """
     if split_draws <= 1:
         return None
@@ -2880,49 +2445,39 @@ def _split_draws_refusal(
                 f"than {SPLIT_DRAW_SEED_KEY} changes what a point admits or how it draws, so "
                 "draw k would no longer be the same partition for every point.")
     if bound:
-        return _bound_redraw_starvation_issue(data_cfg, split_cfg)
+        return _bound_redraw_starvation_issue(split_cfg)
     return _unbound_single_source_spatial_issue(task, data_cfg, split_draws)
 
 
-def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
+def _bound_redraw_starvation_issue(split_cfg: dict) -> str | None:
     """Whether ``run_hyperparameter_search``'s ``split_draws`` minting a redraw sweep over a bound
-    ``base_config``'s selection would starve every trial the identical way: the selection's own
-    foreground-groups check (:func:`_redraw_starvation_issues`, the same one ``preflight_config``
-    runs for one config), run once here over the sweep's shared selection. ``None`` when the
-    selection reads and holds enough foreground groups.
+    ``base_config``'s selection would starve every trial the identical way
+    (:func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), or ``None``.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
 
     selection_dir = split_cfg["selection_dir"]
     try:
         selection = read_selection(selection_dir)
     except ValueError as exc:
         return f"split_draws: {exc}"
-    issues = _redraw_starvation_issues(
-        {"data": {**data_cfg, "split": split_cfg}}, selection, selection_dir)
-    return issues[0] if issues else None
+    return redraw_starved_issue(*redraw_pool(selection), selection_dir=selection_dir,
+                                seed=split_cfg.get("seed"))
 
 
 def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws: int) -> str | None:
     """Whether ``split_draws`` above 1 would redraw the identical partition on every trial: an
-    unbound config with exactly one admitted source takes ``auto_train_val``'s single-source
-    spatial-strip branch (:func:`~tcip_mcp.pipelines.data.split_construction.
-    spatial_single_source_split`), which places every strip by declared order and share alone,
-    never by ``data.split.seed``, or trains with no validation, or fails outright on a reserved
-    calibration fraction; no draw of that path holds a different partition out.
+    unbound, built-in detection config with tiling on that admits exactly one source takes
+    ``auto_train_val``'s single-source spatial-strip branch
+    (:func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split`), which no
+    draw of ``data.split.seed`` varies.
 
-    Only for a built-in detection build: a bespoke ``dataset_source`` is excluded because the
-    spatial-strip route serves datasets the platform built itself, so a bespoke run never takes
-    it however few sources it admits. Counts the members ``base_config`` admits through the
-    producer the run itself admits through
-    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`), never a second
-    admission, inside one handler answering no refusal on any exception: a dataset-level COCO
-    misrouted as ``data.labels_dir``, or an unreadable label document, is a caller-config error
-    the trial or the preflight that follows reports in its own words, never this leg's to fold in.
-    ``None`` when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not a mapping, or
-    disabled, a bespoke ``dataset_source`` is named, the admitted count could not be resolved, or
-    the admitted count is not exactly one: a run admitting none refuses in the split's own words,
-    so this leg never names a path a run does not take.
+    Counts the members ``base_config`` admits through
+    :func:`~tcip_mcp.pipelines.data.label_queries.admit`, inside one handler answering no refusal
+    on any exception. ``None`` when ``task`` is not ``"detection"``, ``data.tiling`` is absent, not
+    a mapping, or disabled, a bespoke ``dataset_source`` is named, the admitted count could not be
+    resolved, or the admitted count is not exactly one.
     """
     if task != "detection":
         return None
@@ -2934,11 +2489,10 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
     if not isinstance(tiling, dict) or not tiling or not tiling.get("enabled", True):
         return None
 
-    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.label_queries import admit_run
 
     try:
-        admitted = admit(data_cfg.get("images_dir", ""), data_cfg.get("labels_dir", ""),
-                         subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
+        admitted = admit_run(data_cfg)
     except Exception:
         return None
     if len(admitted.records) != 1:
@@ -2956,10 +2510,8 @@ def _unbound_single_source_spatial_issue(task: str, data_cfg: dict, split_draws:
 
 class SeedAxisRefusal(NamedTuple):
     """Why a caller-supplied ``data.split.seed`` axis in ``param_space`` refuses at one draw:
-    ``reason`` names the fact and the breeder's own next step, in the register of the Tuning
-    tab's row caption; ``remedy`` names the Ray mechanics and what the tool's caller passes
-    instead. ``run_hyperparameter_search`` and the Tuning relaunch route each join the two with
-    one space for their own error surface; the caption shows ``reason`` alone.
+    ``reason`` names the fact and the breeder's own next step; ``remedy`` names the Ray mechanics
+    and what the tool's caller passes instead.
     """
 
     reason: str
@@ -2996,22 +2548,12 @@ _SEED_AXIS_REMEDY = (
 
 
 def coerce_split_draws(split_draws: object) -> int | None:
-    """``split_draws`` read the way a manifest of unknown provenance must be read: ``None``
-    stands for 1, the platform's own unset default; an ``int`` is read directly, whatever its
-    sign, a ``bool`` included, since the helper reads a ``bool`` as the integer it names (the
-    door itself refuses ``False`` as below one; see :func:`_split_draws_argument_refusal`); a
-    ``str`` or a finite ``float`` is read as the integer its ``int()`` names when that integer
-    equals the value it was given, so ``2`` and ``"2"`` and ``2.0`` all read as ``2`` while
-    ``2.5`` reads as ``None`` rather than silently truncating to ``2``. This helper carries no
-    lower bound of its own: it reads whatever integer a value names and bounds nothing, whether
-    that integer is at or below one, positive, zero or negative; the tool's own door refuses a
-    value below one, and the Tuning route's relaunch worker reads through this coercion before
-    that door ever sees it, so a manifest recording zero or a negative value reaches the same
-    refusal a fresh call does. A non-numeric string, a non-finite float and anything else
-    ``int()`` cannot read answer ``None``. Shared by :func:`caller_split_seed_refusal`, which
-    treats an unreadable value as no refusal, and by the Tuning route's relaunch surface, which
-    refuses a manifest recording one outright rather than replaying it into a crash or a silently
-    reinterpreted value.
+    """``split_draws`` read from a manifest of unknown provenance: ``None`` stands for 1; an
+    ``int`` is read directly, whatever its sign, a ``bool`` included; a ``str`` or a finite
+    ``float`` is read as the integer its ``int()`` names when that integer equals the value it was
+    given, so ``2`` and ``"2"`` and ``2.0`` all read as ``2`` while ``2.5`` reads as ``None``.
+    Carries no lower bound of its own. A non-numeric string, a non-finite float and anything else
+    ``int()`` cannot read answer ``None``.
     """
     if split_draws is None:
         return 1
@@ -3035,16 +2577,10 @@ def caller_split_seed_refusal(
     param_space: object, split_draws: object,
 ) -> SeedAxisRefusal | None:
     """Whether ``param_space`` names ``data.split.seed`` as its own axis while ``split_draws``
-    draws at most one partition: refused whatever the sampler, since a caller-supplied seed
-    axis at one draw is sampled or gridded with the point rather than paired across draws (see
-    ``_split_draws_refusal`` for the paired path's own conditions above one draw). Read by
-    ``run_hyperparameter_search`` before minting a sweep and by the Tuning route before
-    reporting a manifest relaunchable, so both surfaces refuse the same axis the same way.
+    draws at most one partition: refused whatever the sampler.
 
-    ``split_draws`` is read through :func:`coerce_split_draws`; a value it cannot read is not a
-    draw count and refuses nothing. ``param_space`` that is not a mapping is not an axis
-    declaration and refuses nothing either: both tolerances let a listing walk a manifest of
-    unknown shape without raising.
+    ``split_draws`` is read through :func:`coerce_split_draws`; a value it cannot read refuses
+    nothing, and neither does a ``param_space`` that is not a mapping.
     """
     from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY
 
@@ -3059,26 +2595,21 @@ def caller_split_seed_refusal(
 
 
 def group_split_draws(all_trials: list[dict], planned_seeds: list[int]) -> list[dict]:
-    """Group ``tune_search``'s own ``all_trials`` rows by the point each draw shares (every
-    param but ``hpo.SPLIT_DRAW_SEED_KEY``), each group carrying the ``split_draws`` block the
-    sweep result and its manifest both record.
+    """Group ``tune_search``'s own ``all_trials`` rows by the point each draw shares (every param
+    but ``hpo.SPLIT_DRAW_SEED_KEY``), each group carrying the ``split_draws`` block the sweep
+    result and its manifest both record.
 
-    ``planned_seeds`` names every seed the sweep asked for; a group is ``eligible`` for best
-    only when every one of them completed for that point and the group holds no errored or
-    never-answered row, never merely a count of complete rows: a point Ray repeated (grid
-    search repeats every point per sample; a categorical-only random space collides) can land
-    two complete values under the same seed while its other planned seed never completes, and
-    counting complete values alone would call that eligible on a mean over one seed twice. Pass
-    an empty list to accept any single complete row per point regardless of seed identity (a
-    sweep that never asked for draws, or an older result read back).
+    ``planned_seeds`` names every seed the sweep asked for; a group is ``eligible`` for best only
+    when every one of them completed for that point and the group holds no errored or
+    never-answered row. Pass an empty list to accept any single complete row per point regardless
+    of seed identity.
 
-    A group's block always carries ``n`` (every row seen for the point, ``COMPLETE`` and
-    ``ERROR`` alike), ``n_complete`` (rows among them that completed with a real value) and
-    ``seeds_complete`` (the distinct seeds among those complete rows, sorted), plus ``seeds``
-    (one entry per complete row, not deduplicated), ``values``, ``mean``, ``std`` (the sample
-    standard deviation, ``None`` under two values), ``min`` and ``max`` over ``values``. A row
-    with no ``params`` at all (Ray's own never-answered case) forms its own singleton,
-    ineligible group, ``point`` ``None``: it names no point to group under.
+    A group's block always carries ``n`` (every row seen for the point, ``COMPLETE`` and ``ERROR``
+    alike), ``n_complete`` (rows among them that completed with a real value) and
+    ``seeds_complete`` (the distinct seeds among those complete rows, sorted), plus ``seeds`` (one
+    entry per complete row, not deduplicated), ``values``, ``mean``, ``std`` (the sample standard
+    deviation, ``None`` under two values), ``min`` and ``max`` over ``values``. A row with no
+    ``params`` at all forms its own singleton, ineligible group, ``point`` ``None``.
     """
     import statistics
 
@@ -3129,12 +2660,7 @@ def group_split_draws(all_trials: list[dict], planned_seeds: list[int]) -> list[
 
 
 def _first_sampled_point(param_space: dict) -> dict:
-    """One deterministic point from ``param_space``, spanning its declared range or choices.
-
-    Not a real trial's sample (Ray Tune's own samplers are what a trial actually draws from),
-    but enough structure to resolve what ``_apply_hpo_params`` would apply to any given trial's
-    config, so a structural preflight run over it sees the same shape a trial would.
-    """
+    """One deterministic point from ``param_space``, spanning its declared range or choices."""
     point: dict = {}
     for key, spec in param_space.items():
         if not isinstance(spec, dict):
@@ -3154,14 +2680,9 @@ def _first_sampled_point(param_space: dict) -> dict:
 
 
 def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
-    """Every point ``run_hyperparameter_search``'s preflight must check: the first sampled corner, plus one variant
-    per categorical choice and one per numeric bound, each holding every other axis at its first
-    sampled value.
-
-    Judging the whole space by its first sampled corner alone misses a broken choice that sits
-    anywhere but first: a categorical axis naming a builder or a data path is checked at every
-    value it could resolve a trial to, not just one, so a sweep whose first choice happens to
-    work but whose second does not is still caught before any trial runs.
+    """Every point ``run_hyperparameter_search``'s preflight must check: the first sampled corner,
+    plus one variant per categorical choice and one per numeric bound, each holding every other
+    axis at its first sampled value.
     """
     base = _first_sampled_point(param_space)
     points: list[tuple[str, dict]] = [("the first sampled point", dict(base))]
@@ -3190,26 +2711,16 @@ def _ensure_experiment(
 ) -> tuple[str, str]:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
-    Returns ``(experiment_id, output_dir)``: the id actually used, and its directory
-    (``output_base / experiment_id``, computed here from the id each branch resolves, so a fork's
-    own directory is stamped and the shared base never is). An existing id may be reused only
-    when the experiment is pristine (agent pre-created it: state 'created', no metrics), in which
-    case its ``config.json`` (written before tiling/seed resolution) is refreshed with the config
-    this run is actually launching. Anything else, including a ``resume_from`` that targets an id
-    which already has recorded history, mints a fresh ``<id>_<minted>`` (with the old id as parent
-    lineage) so the prior run's status, metrics, lineage, and registry entry stay intact.
+    Returns ``(experiment_id, output_dir)``: the id actually used, and its directory (``output_base
+    / experiment_id``). An existing id may be reused only when the experiment is pristine (state
+    'created', no metrics), in which case its ``config.json`` is refreshed with the config this run
+    is launching. Anything else, including a ``resume_from`` that targets an id which already has
+    recorded history, mints a fresh ``<id>_<minted>`` (with the old id as parent lineage).
 
     Every branch stamps this experiment through :func:`~tcip_mcp.experiments.stamp_run_identity`,
-    one compare-and-set transaction that moves the record to ``running`` in the same write; the
-    pristine-reuse branch gives it the config to write in that same transaction, so the record
-    that ends up running is never left carrying one launch's config under another's identity. A
-    stamp whose precondition fails means another launch's stamp beat this one to the same record
-    (the fresh-creation branch loses only when a concurrent pristine-reuse claimed the id this
-    call just created, between that creation and this call's own stamp; the pristine-reuse branch
-    loses to any other launch racing for the same pristine record), and both branches fall to the
-    fork below rather than returning an error, since losing that race is not a failure this call
-    should report. ``launched_by`` is resolved once by ``launch_training``, before this call, so
-    every branch stamps the identical declaration.
+    one compare-and-set transaction that moves the record to ``running`` (the pristine-reuse branch
+    writing its config in that same transaction). A stamp whose precondition fails falls to the
+    fork. ``launched_by`` is the one declaration ``launch_training`` resolved.
     """
     from tcip_mcp.experiments import StampPreconditionFailed, create_experiment, stamp_run_identity
 
@@ -3251,23 +2762,10 @@ def _ensure_experiment(
 
 
 def _one_real_batch(task: str, config: dict, n: int = 2):
-    """``(batch, reason_it_failed)``, one collated ``(images, targets)`` from the run's dataset.
-
-    Lets the model contract smoke a task it has no synthetic schema for, without the platform
-    enumerating tasks. The batch comes off the run's own training loader, resolved through
-    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`, the one function the run
-    itself resolves membership with: a bound run smokes its selection's train side alone, a drawn
-    one smokes the side its draw assigned, and a bespoke builder is handed exactly what it will be
-    handed at launch. Re-admitting a location here instead would smoke a batch holding the
-    validation and calibration members the run never trains on, which is not the batch whose
-    measurement boundary this proves.
-
-    ``auto_train_val`` is resolved over a deep copy of the config: it writes a binding block and
-    the resolved split policy onto the data section it is given, and a preflight read must leave
-    the caller's config exactly as it found it. Best-effort by design: a config that cannot yield
-    a batch returns ``(None, reason)`` and the caller decides what that means, this function never
-    decides whether a run proceeds. The reason is returned rather than only logged, so a caller
-    that blocks can say what actually failed.
+    """``(batch, reason_it_failed)``, one collated ``(images, targets)`` from the run's own
+    training loader, resolved through
+    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val` over a deep copy of the
+    config. A config that cannot yield a batch returns ``(None, reason)``.
     """
     data_cfg = config.get("data") or {}
     try:
@@ -3275,14 +2773,10 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
 
         from tcip_mcp.pipelines.data.split_construction import auto_train_val
         from tcip_mcp.pipelines.training.collation import task_collate
-
-        transforms = None
-        if config.get("augmentation"):
-            from tcip_mcp.pipelines.data.augmentations import build_augmentation
-            transforms = build_augmentation(config["augmentation"])
+        from tcip_mcp.pipelines.training.generic_trainer import run_transforms
 
         train_ds, _val_ds, _partition = auto_train_val(
-            task, copy.deepcopy(data_cfg), transforms)
+            task, copy.deepcopy(data_cfg), run_transforms(config))
         assert isinstance(train_ds, Sized), "every build_dataset task backend defines __len__"
         indexable: Any = train_ds
         items = [indexable[i] for i in range(min(n, len(train_ds)))]
@@ -3295,30 +2789,18 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
 
 
 def _reserve_calibration_feasibility_issues(
-    model_source: dict | None, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
+    task: str, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
     run: RunPopulation, sizes: "Mapping[str, int]", smoke: bool,
 ) -> list[str]:
     """Named ``preflight_config`` issues for an explicitly-requested
-    ``reserve_calibration_fraction`` that cannot be honored, so the launch refuses here rather
-    than silently training without a calibration region or failing deep inside the training
-    subprocess. Routed through ``preflight_config``/``launch_training``'s own validation surface
-    (not ``pipelines.feedback.review_calibration``'s ``_FAILURE_MESSAGES``: that registry's only
-    consumer is the Review tab reading a ``ResolvedBundle``'s sweep failures, and this refusal
-    fires at training-launch time, with neither in scope).
+    ``reserve_calibration_fraction`` that cannot be honored.
 
-    Structurally inapplicable configs (not detection, tiling disabled, a multi-member dataset that
-    would use the group-balanced split instead) are always flagged from ``run``, the run's own
-    admitted samples and class space as the caller already resolved them. The single-source geometry
-    :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` itself would
-    derive (extent, strip-layout feasibility, an empty side after real filtering) is checked by
-    actually calling it over that same single sample, so the feasibility reported here is the
-    feasibility of the dataset the run will build and nothing is admitted a second time, and so
-    gated on ``smoke=True`` like this function's other dataset/model-touching checks (a plain,
-    non-smoke ``preflight_config`` call still catches the structurally-inapplicable cases above,
-    just not this geometry).
+    Structurally inapplicable configs (not detection, tiling disabled, a multi-member dataset) are
+    always flagged from ``run``, the run's own admitted samples and class space. The single-source
+    geometry (extent, strip-layout feasibility, an empty side after real filtering) is checked by
+    calling :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` over
+    that same single sample, only when ``smoke=True``.
     """
-    task = (model_source.get("task") if isinstance(model_source, dict) else None) \
-        or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
     tiling_cfg = data_cfg.get("tiling") if isinstance(data_cfg, dict) else None
     if task != "detection" or not tiling_cfg or not tiling_cfg.get("enabled", True):
         return [
@@ -3327,9 +2809,8 @@ def _reserve_calibration_feasibility_issues(
             f"split), this config's task is {task!r} with tiling={tiling_cfg!r}."
         ]
 
-    images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
-    if not images_dir or not labels_dir:
-        return []  # the existing images_dir/labels_dir structural checks already cover this
+    if _data_dir_issues(data_cfg):
+        return []  # preflight names each of them
 
     if len(run.samples) >= 2:
         return [
@@ -3364,7 +2845,6 @@ def evaluate_model(
     experiment_id_or_ckpt: str,
     images_dir: str,
     labels_dir: str = "",
-    task: str = "detection",
     conf_threshold: float | None = None,  # report/select at the ship point
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
@@ -3372,7 +2852,7 @@ def evaluate_model(
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
     global_nms_iou: float | None = None,
-    postprocess: str = "nms",
+    postprocess: str = DEFAULT_POSTPROCESS,
     trait: str | None = None,
     subject: str | None = None,
     attribute: str | None = None,
@@ -3380,74 +2860,67 @@ def evaluate_model(
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
-    Computes the same per-task metrics as validation, detection/instance_seg get
-    pycocotools mAP + precision/recall/F1; classification/ordinal/regression get the
-    in-house scalar metrics, and writes ``test_results.json`` beside the checkpoint.
+    Computes the same per-task metrics as validation, detection/instance_seg get pycocotools mAP +
+    precision/recall/F1; classification/ordinal/regression get the in-house scalar metrics, and
+    writes ``test_results.json`` beside the checkpoint.
 
     Three detection eval regimes:
       * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
-        forward pass, ``eval_regime="full-frame-single-pass"``. For a checkpoint that was never
-        tile-trained, this is the correct delivery gate, untiled training, untiled eval, untiled
-        inference are all the same regime, so there is nothing to reconcile. Do not reach for
-        ``use_tiled_inference`` for such a checkpoint; it has no persisted tile geometry to gate
-        against and will refuse (see below).
+      forward pass, ``eval_regime="full-frame-single-pass"``: the delivery gate for a checkpoint
+      never tile-trained. ``use_tiled_inference`` for such a checkpoint refuses (see below).
       * ``tiling`` set (or a run id whose training was tiled, reused automatically) -> tile-level
-        diagnostic that matches the training-run val mAP. This is not the delivery metric, it
-        scores fragmented tiles against fragmented GT, not the shipped full-frame count.
+      diagnostic that matches the training-run val mAP; not the delivery metric.
       * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a tile-trained
-        checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Report
-        this to gate a delivery for such a checkpoint. Tile geometry is resolved from the
-        checkpoint's own persisted or native-frame training geometry, or an explicit override; a
-        checkpoint with none of those refuses rather than silently fabricating a scale, see
-        ``run_full_frame_evaluation``'s docstring for the full precedence.
+      checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Tile
+      geometry is resolved from the checkpoint's own persisted or native-frame training geometry,
+      or an explicit override; a checkpoint with none of those refuses (see
+      ``run_full_frame_evaluation``).
 
     Args:
-        experiment_id_or_ckpt: An experiment id this process launched (uses its
-            ``model_best.pt``, resolved through the in-process registry alone) or a checkpoint
-            path. Either way the resolved checkpoint must be registered under this process's
-            platform state root (``register_model``, explicit mode for a foreign or bespoke
-            checkpoint) or this door refuses before loading it.
+        experiment_id_or_ckpt: An experiment id this process launched (uses its ``model_best.pt``,
+            resolved through the in-process registry alone) or a checkpoint path. Either way the
+            resolved checkpoint must be registered under this process's platform state root
+            (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this door
+            refuses before loading it.
         images_dir: Images directory for the evaluation split.
         labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
-            path (classification/ordinal/regression, one row per image stem).
-        task: Task type.
+            path (classification/ordinal/regression, one row per image stem); the task is the
+            checkpoint's own.
         conf_threshold: Operating confidence for P/R/F1. ``None`` (default) resolves to the
-            platform default (``DEFAULT_CONF``) on every regime; an explicit value is always
-            honored verbatim, on every regime, a stated value equal to the default included.
+            platform default (``DEFAULT_CONF``) on every regime; an explicit value is honored
+            verbatim.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
-            instance_seg, 'bbox' otherwise, so a mask model isn't silently scored as boxes.
-        max_dets: Full-frame/COCOeval detection cap. ``None`` (default) resolves
-            per-regime, 100 (the COCOeval ``maxDets`` convention) on the tile-level diagnostic
-            path, 1000 (``DEFAULT_MAX_DETS``, dense full-frame scenes aren't truncated) on the
-            delivery-grade ``use_tiled_inference`` path. An explicit value is always honored
-            verbatim on both paths (no rescuing substitution), the delivery-grade path stamps a
-            per-image ``cap_hit``/``max_dets_cap_saturated_frac`` so an explicit cap that actually
-            truncates real detections is visible rather than silently assumed safe.
+            instance_seg, 'bbox' otherwise.
+        max_dets: Full-frame/COCOeval detection cap. ``None`` (default) resolves per-regime, 100
+            (the COCOeval ``maxDets`` convention) on the tile-level diagnostic path, 1000
+            (``DEFAULT_MAX_DETS``) on the delivery-grade ``use_tiled_inference`` path. An explicit
+            value is honored verbatim on both paths; the delivery-grade path stamps a per-image
+            ``cap_hit``/``max_dets_cap_saturated_frac``.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
-            tile-level eval. None + a run id reuses the run's training tiling; None + a
-            checkpoint path stays untiled.
+            tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
+            path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
-        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only). ``None``
-            (default) resolves to the platform default (``DEFAULT_NMS_IOU``); an explicit value
-            is always honored verbatim.
-        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
-            across a tile seam.
+        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only). ``None`` (default)
+            resolves to the platform default (``DEFAULT_NMS_IOU``); an explicit value is honored
+            verbatim.
+        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split across a
+            tile seam.
         trait: When set, the trait's derived localization criterion (traits.py, e.g. a count
-            trait's center-match) governs the reported count and the selection f1; AP@0.5 (``iou_threshold``)
-            is kept as a labeled comparability metric. Absent -> the IoU convention governs.
-        subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing
-            run's own config so the eval reads GT through the same id map the run trained with.
+            trait's center-match) governs the reported count and the selection f1; AP@0.5
+            (``iou_threshold``) is kept as a labeled comparability metric. Absent -> the IoU
+            convention governs.
+        subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing run's
+            own config.
         attribute: Attribute scope for the same name-based GT resolution as ``subject``.
         selection_dir: Score the checkpoint over this selection's ``calibration`` samples whose
             label documents live under ``labels_dir`` instead of the whole directory, refusing by
             name the way the calibration door does (detection/instance_seg only, and not combined
-            with ``use_tiled_inference``), except with its own floor of one foreground group,
-            since this door draws no lock and halves nothing. ``test_results.json`` then records
-            ``selection_dir`` and the evaluated stem count, the loader's own count, refused by
-            name (naming the difference and the remedy) when the loader admits fewer than the
-            universe the selection drew, since the data moved under the selection since the draw;
-            omitted, the whole directory is scored.
+            with ``use_tiled_inference``), with a floor of one foreground group.
+            ``test_results.json`` then records ``selection_dir`` and the evaluated stem count, the
+            loader's own count, refused by name (naming the difference and the remedy) when the
+            loader admits fewer than the universe the selection drew; omitted, the whole directory
+            is scored.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -3481,7 +2954,8 @@ def evaluate_model(
 
     try:
         checkpoint = load_registered_checkpoint(ckpt)
-    except UnregisteredCheckpoint as exc:
+        task = checkpoint.task
+    except (UnregisteredCheckpoint, ValueError) as exc:
         return {"error": str(exc)}
 
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -3509,7 +2983,7 @@ def evaluate_model(
 
         selection = read_selection(selection_dir)
         try:
-            (selection_stems, _group_by, _group_key_map, _excluded,
+            (selection_stems, _group_by, _group_key_map, _excluded, _counts,
              selection_samples) = selection_calibration_universe(
                 selection, labels_dir, min_foreground_groups={"calibration": 1})
         except ValueError as exc:
@@ -3609,7 +3083,7 @@ def evaluate_model(
     # from the delivery-grade path's 1000 above; an explicit caller max_dets is honored verbatim.
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
-        checkpoint, predictor.model, loader, device, task, str(Path(ckpt).parent),
+        checkpoint, predictor.model, loader, device, str(Path(ckpt).parent),
         conf_threshold=applied_conf, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
         selection_dir=selection_dir,

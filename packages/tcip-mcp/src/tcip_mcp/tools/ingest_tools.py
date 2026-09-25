@@ -1,11 +1,9 @@
 """Image ingestion: turn a raw folder of photos into a structured TCIP project.
 
-``ingest_images`` is the missing structuring primitive. It copies (or moves) raw
-images into the canonical layout (``images/<YYYY-MM-DD>/<stem><ext>``) under a
-workspace project, bucketing by the capture date each file states. It does not annotate, split,
-choose a task, or write ``subjects.json``; those are later steps in the project-setup
-arc (see ``packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md``). It is one auditable
-primitive the agent composes, instead of improvising file ops per project.
+``ingest_images`` copies (or moves) raw images into the canonical layout
+(``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project, bucketing by the capture date each
+file states. It does not annotate, split, choose a task, or write ``subjects.json`` (see
+``packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md``).
 """
 
 from __future__ import annotations
@@ -60,9 +58,7 @@ def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
     """EXIF ``DateTimeOriginal`` from a photographic container, and why it could not be read.
 
     Reads via the public ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG, PNG,
-    HEIC). ``Image.open`` decodes the header only and never the pixels, so a file whose header and
-    EXIF block read is reported as stating a date or as stating none, whatever its pixel data later
-    turns out to be. PIL is lazy-imported so tool startup stays fast.
+    HEIC). ``Image.open`` decodes the header only and never the pixels.
     """
     from PIL import Image
 
@@ -89,8 +85,7 @@ def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
 
     Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
     stitching-engine items of :data:`_GDAL_DATE_ITEMS` in the default metadata domain, which is
-    where an orthomosaic states the day it was flown. Metadata only: no pixels are read. rasterio
-    is lazy-imported so tool startup stays fast.
+    where an orthomosaic states the day it was flown. Metadata only: no pixels are read.
     """
     import rasterio
 
@@ -118,9 +113,8 @@ def _capture_iso_date(path: Path) -> tuple[str | None, str | None]:
 
     Both ``None`` is the readable-but-undated fact: the container was read and states no capture
     date (a photo with no EXIF date, a raster with no date item, an array file with nowhere to put
-    one). A reason is the different fact that the container itself could not be read this far, so
-    whether it states a date is unknown. Neither outcome stops the file being ingested; the reason
-    is what ``ingest_images`` reports so the difference stays visible.
+    one). A reason is the different fact that the container itself could not be read this far.
+    Neither outcome stops the file being ingested.
     """
     ext = path.suffix.lower()
     if ext in _PHOTOGRAPHIC_EXTS:
@@ -171,19 +165,14 @@ def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
 def _collision_refusal(
     dest_root: Path, resolved_sources: list[tuple[Path, str, str | None]],
 ) -> str | None:
-    """The whole-call refusal naming every source that would create a second logical image under
-    a stem key another source, an existing raw file, or an existing band-group manifest already
-    holds in its bucket; ``None`` when every source either names a new stem or names the same
-    destination filename an existing raw identity already holds at its key.
+    """The whole-call refusal naming every source that would create a second logical image under a
+    stem key another source, an existing raw file, or an existing band-group manifest already holds
+    in its bucket; ``None`` when every source either names a new stem or names the same destination
+    filename an existing raw identity already holds at its key.
 
-    Reads each touched bucket's identities once (``bucket_logical_identities``, an absent
-    directory answering empty) and adds the batch's own sources as would-be raw identities under
-    their keys, so a key ending up held by more than one identity refuses. The carve-out tests the
-    destination filename only, not the source bytes: a source whose destination filename equals
-    the one existing raw identity already at its key is left out of this refusal and out of
-    ``identities``, whether or not its own bytes match that file, and is left to the copy loop's
-    own ``dest.exists()`` skip; two distinct sources in one batch that both name that filename
-    both skip there the same way, since neither is added to ``identities`` either.
+    The carve-out tests the destination filename only, not the source bytes: such a source is left
+    out of this refusal and out of ``identities``, whether or not its own bytes match that file,
+    and is skipped by the copy loop's own ``dest.exists()`` check.
     """
     buckets = sorted({bucket for _src, bucket, _unreadable in resolved_sources})
     collisions: dict[str, dict[str, list[Path]]] = {}
@@ -229,59 +218,48 @@ def ingest_images(
     """Copy raw images into a structured project, bucketed by the capture date each file states.
 
     Turns a raw folder (or glob) of photos into the canonical layout
-    (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by
-    default; originals are left byte-identical; pass ``copy=False`` to move.
-    Refuses the whole call, before anything is copied, when a source's destination stem would
-    create a second logical image under a key another source, an existing raw file, or an
-    existing band-group manifest already holds in that bucket; re-ingesting the exact same
-    destination file is not a second identity and is skipped instead, recorded in
+    (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by default; originals
+    are left byte-identical; pass ``copy=False`` to move. Refuses the whole call, before anything
+    is copied, when a source's destination stem would create a second logical image under a key
+    another source, an existing raw file, or an existing band-group manifest already holds in that
+    bucket; re-ingesting the exact same destination file is skipped instead, recorded in
     ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
 
     The capture date never gates ingestion: a file whose date cannot be read is copied and counted
-    like any other, lands in ``undated/``, and is listed in ``unreadable_dates`` so the difference
-    between a file that states no date and one that could not be asked stays visible.
+    like any other, lands in ``undated/``, and is listed in ``unreadable_dates``.
 
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
         name: Project slug; the destination folder is ``<TCIP_WORKSPACE>/<name>/`` unless
             ``project_path`` overrides it. When that destination is a new directory under the
             workspace, ``name`` (or the override's basename) must fit ``crop_subject_phenotype``
-            (``workspace.format_project_name``/``parse_project_name``); ingesting another date
-            into an existing project opens it by the name it already has.
-        site: The orchard or station this project's plants stand in, in the breeder's own
-            words. Ask the breeder rather than guessing it from a path or filename; refuses
-            before a byte is copied if the project already records a different site. A call
-            with no images under ``source`` refuses on that before the site is even read, so a
-            call carrying both faults reports the missing images; a stem collision among the
-            sources, or against an existing image or band-group manifest, is checked next,
-            before the site too, so a call carrying both a collision and a conflicting site
-            reports the collision.
+            (``workspace.format_project_name``/``parse_project_name``); ingesting another date into
+            an existing project opens it by the name it already has.
+        site: The orchard or station this project's plants stand in, in the breeder's own words;
+            ask the breeder. Refuses before a byte is copied if the project already records a
+            different site. A call with no images under ``source``, and a stem collision, refuse
+            before the site is read.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
-        date_from: ``"exif"`` (each file's own capture date → ISO date, missing →
-            ``undated/``; a photo's EXIF ``DateTimeOriginal``, a raster's own date metadata),
-            ``"none"`` (all → ``undated/``), or a literal bucket name
-            (all → ``images/<literal>/``, e.g. a known ISO capture date). Only ``"exif"``
-            opens a file at all, and only its header.
+        date_from: ``"exif"`` (each file's own capture date -> ISO date, missing -> ``undated/``; a
+            photo's EXIF ``DateTimeOriginal``, a raster's own date metadata), ``"none"`` (all ->
+            ``undated/``), or a literal bucket name (all -> ``images/<literal>/``, e.g. a known ISO
+            capture date). Only ``"exif"`` opens a file at all, and only its header.
         recursive: Recurse into source subfolders.
         detect_band_groups: After copying, run the band-group correlation strategies
             (``pipelines.data.band_groups``) over each touched bucket, writing a ``.bandgroup``
-            manifest for every sibling-single-band-file group found (e.g. a multispectral rig
-            that writes one file per band instead of one multi-band file per capture). Default
-            ``False``; a project with no such capture pays nothing for this pass.
+            manifest for every sibling-single-band-file group found (e.g. a multispectral rig that
+            writes one file per band instead of one multi-band file per capture). Default
+            ``False``.
 
-    Returns a manifest: ``{project_path, name, image_root, total, found, copied,
-    moved, buckets, undated, skipped_collisions, reserved_name_skips, errors, unreadable_dates,
-    move, band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date
-    could not be read and the reason, and ``reserved_name_skips`` names each source file not
-    ingested because its own stem is reserved for a prediction bucket's own provenance stamp.
-    ``skipped_collisions`` names only an exact re-ingest (a source whose destination filename
-    already exists); any other stem collision refuses the call instead of appearing here.
-    A band group whose *formed* stem (the siblings' common prefix, not any one source file's own
-    stem) is reserved the same way is not written as a manifest either, its members staying the
-    standalone files they were placed as; ``band_groups.reserved_name_skips`` names each one
-    (a group, not a single file, so it carries the same shape as ``band_groups.formed`` rather
-    than joining the file-level ``reserved_name_skips`` above).
+    Returns a manifest: ``{project_path, name, image_root, total, found, copied, moved, buckets,
+    undated, skipped_collisions, reserved_name_skips, errors, unreadable_dates, move,
+    band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date could
+    not be read and the reason, and ``reserved_name_skips`` names each source file not ingested
+    because its own stem is reserved for a prediction bucket's own provenance stamp.
+    ``skipped_collisions`` names only an exact re-ingest. A band group whose formed stem (the
+    siblings' common prefix) is reserved the same way is not written as a manifest either;
+    ``band_groups.reserved_name_skips`` names each one, in the shape of ``band_groups.formed``.
     """
     from tcip_store import StoreError
 
@@ -435,11 +413,11 @@ def ingest_images(
 
 @mcp.tool()
 def import_coco(document: str, dataset_root: str, date: str) -> dict:
-    """Convert an external dataset-level COCO document into the dataset's per-image label documents.
+    """Convert an external dataset-level COCO document into the dataset's per-image label
+    documents.
 
-    Nothing trains or calibrates on a COCO file: this is the one way its labels come in. Run it
-    after ``ingest_images`` has placed the images it names. Every declared category must be a
-    subject the dataset's registry declares, and each image is the capture's image of that exact
+    Run it after ``ingest_images`` has placed the images it names. Every declared category must be
+    a subject the dataset's registry declares, and each image is the capture's image of that exact
     file name (a ``.bandgroup`` capture by stem). Every fault found before writing is named
     together and refuses the import with nothing written: a malformed or unregistered category, a
     malformed record, a duplicate id or image, an image not in the capture, a frame that disagrees
@@ -454,7 +432,8 @@ def import_coco(document: str, dataset_root: str, date: str) -> dict:
         dataset_root: The dataset the images were ingested into.
         date: The capture bucket under ``images/`` the images sit in (for a dataset with no dated
             buckets, the flat ``images/`` root); the documents are written under
-            ``annotations/<date>/``. A COCO document states no capture date, so it is named.
+            ``annotations/<date>/``, or the flat ``annotations/`` root beside flat images. A COCO
+            document states no capture date, so it is named.
 
     Returns ``{document, date, written}`` with every per-image document written.
     """

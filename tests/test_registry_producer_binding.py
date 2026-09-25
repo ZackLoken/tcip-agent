@@ -333,34 +333,6 @@ def test_a_second_run_s_binding_under_a_bound_name_refuses_naming_the_run(tmp_pa
     assert entry["sha256"] == bound["sha256"]
 
 
-# Rail 7: a registry entry with no experiment_id key refuses the load by name.
-
-def test_missing_experiment_id_key_refuses_the_load(tmp_path, monkeypatch):
-    """A guard: a registry entry with no experiment_id key refuses the load naming the missing
-    key, even though the payload itself is a real, torch-loadable checkpoint."""
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint, registry_index_key
-    import tcip_store as ts
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = tmp_path / "pre_field.pt"
-    torch.save({"model_state_dict": {}}, ckpt)
-    from tcip_mcp.model_registry import _sha256_of_bytes
-
-    digest = _sha256_of_bytes(ckpt.read_bytes())
-    key = registry_index_key(str(tmp_path))
-    entry = {
-        "name": "pre-field-entry", "checkpoint_path": str(ckpt), "kind": None, "sha256": digest,
-        "file_size_bytes": ckpt.stat().st_size, "registered_at": "2026-01-01T00:00:00+00:00",
-        "config": {}, "metrics": {}, "metrics_source": None, "tags": [],
-    }  # experiment_id key deliberately absent
-    with ts.transaction(key) as txn:
-        txn.write(key, {"entries": [entry]})
-
-    with pytest.raises(UnregisteredCheckpoint, match="experiment_id"):
-        load_registered_checkpoint(ckpt, project_path=str(tmp_path))
-
-
 # Rail 10: a repeat registration, and a byte-identical copy, both admit.
 
 def test_register_model_from_experiment_twice_and_from_a_copy_both_admit(tmp_path, monkeypatch):

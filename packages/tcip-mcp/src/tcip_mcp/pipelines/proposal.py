@@ -1,22 +1,18 @@
 """Annotation-proposal engines: a method-neutral seam for auto-labeling.
 
-An auto-labeling *engine* turns an image into candidate shapes a human then reviews. This seam is
-deliberately as open as ``model_source``: name a built-in engine ('sam') or bring your own by dotted
-``module:factory`` path, so the agent can wire, trial, and compare techniques (Grounding DINO,
-open-vocab, a bespoke proposer it writes) and deduce which serves a task best by how well each
-engine's high-conf proposals survive breeder review. No engine is privileged; SAM is the one that
-ships as a runnable reference.
+An auto-labeling engine turns an image into candidate shapes a human then reviews. Name a built-in
+engine ('sam') or bring your own by dotted ``module:factory`` path (Grounding DINO, open-vocab, a
+bespoke proposer); how well each engine's high-conf proposals survive breeder review compares them.
+SAM ships as a runnable reference.
 
 An engine implements :class:`Proposer`: ``propose`` for whole-image candidates (auto-labeling) and
-``segment`` for a prompted single mask; an engine may supply either, and the dispatch checks for the
-method it needs. Candidates use a neutral schema (``candidate_id`` / ``bbox`` / ``area`` /
-``rings`` / ``score`` / ``engine`` / ``engine_meta``); engine-specific signals (SAM's stability
-and predicted-IoU scores) live under ``engine_meta`` so the shared review/staging path stays
-method-agnostic.
+``segment`` for a prompted single mask; an engine may supply either, and the dispatch checks for
+the method it needs. Candidates use a neutral schema (``candidate_id`` / ``bbox`` / ``area`` /
+``rings`` / ``score`` / ``engine`` / ``engine_meta``); engine-specific signals (SAM's stability and
+predicted-IoU scores) live under ``engine_meta``.
 
-``rings`` is a candidate's geometry as ``Polygon.rings``: one closed contour per connected region of
-the proposed mask. An engine that only ever finds whole objects yields one ring per candidate; one
-that proposes an occlusion-split object yields several, and the staging path keeps all of them.
+``rings`` is a candidate's geometry as ``Polygon.rings``: one closed contour per connected region
+of the proposed mask; the staging path keeps all of them.
 """
 
 from __future__ import annotations
@@ -51,7 +47,7 @@ def neutral_candidate(raw: dict, *, engine: str, score_key: str, meta_keys: tupl
         "bbox": raw["bbox"],
         "area": raw["area"],
         "rings": raw["rings"],
-        "score": float(raw[score_key]),
+        "score": raw[score_key],
         "engine": engine,
         "engine_meta": {k: raw[k] for k in meta_keys if k in raw},
     }

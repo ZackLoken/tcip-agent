@@ -1,31 +1,19 @@
 """Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back.
 
-The frontend posts here on a hybrid cadence: a tiny heartbeat (image, viewport, classes,
-counts; ``shapes`` omitted) on view/meta changes, and the full display-resolved geometry only
-when shapes actually change. State is split across two files under
-``<project_root>/.tcip/state/`` so the cadences never contend:
+A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) arrives on view/meta changes,
+and the full display-resolved geometry only when shapes change. State is split across two files
+under ``<project_root>/.tcip/state/``:
 
   - ``canvas_live.json``: the small meta document; overwritten atomically by every push.
   - ``canvas_shapes.json``: the geometry blob; written only by full pushes.
 
-There is no read-modify-write merge, so nothing can interleave and resurrect stale geometry:
-each document is replaced whole, and the reader (``capture_live_canvas``) treats the geometry
-as valid only when its ``(image_path, tab)`` identity matches the meta document: a heartbeat
-for a different image/tab implicitly invalidates stale shapes.
+Each document is replaced whole; the geometry is valid only when its ``(image_path, tab)`` identity
+matches the meta document. Both records declare ``durable=False``.
 
-Both records declare ``durable=False``, so a push returns after the atomic replace and before
-any flush: this is ephemeral live-view state re-pushed every heartbeat (as often as every
-debounce cycle), not durable review/annotation history, and a crash losing the last push costs
-nothing, the next push repaints it.
-
-The write destination is the ``canvas_open_binding`` record, never the payload: a push names
-only the generation it was built against, and this route reads the record fresh on every push
-and writes under its own ``root``. ``/dataset/select`` and ``tcip_mcp.project_removal.
-release_project_binding`` are its two writers; a push whose generation the record no longer
-carries (the GUI opened another project since the push was built), or whose record now reads as
-nothing open (:func:`tcip_mcp.web_client.binding_released_or_absent`: absent, or a release
-marked it), answers 409 rather than land under a root the payload never named and the pusher
-never chose.
+The write destination is the ``canvas_open_binding`` record, never the payload: a push names only
+the generation it was built against, and this route reads the record fresh on every push and writes
+under its own ``root``. A push whose generation the record no longer carries, or whose record now
+reads as nothing open (:func:`tcip_mcp.web_client.binding_released_or_absent`), answers 409.
 """
 
 from __future__ import annotations
@@ -74,10 +62,8 @@ class CanvasStatePayload(BaseModel):
 
 
 def _guard_project_root(project_root: str) -> str:
-    """Confine the binding's own root and hand back the resolved spelling the writes use.
-
-    This route writes files under the binding's root, so the confinement is the same one every
-    other path-taking route applies; 403 on escape.
+    """Confine the binding's own root and hand back the resolved spelling the writes use; 403 on
+    escape.
     """
     try:
         return str(assert_path_allowed(project_root))

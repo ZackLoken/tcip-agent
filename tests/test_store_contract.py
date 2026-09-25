@@ -16,6 +16,8 @@ backend it is about and why; everything else must pass unchanged on both.
 
 from __future__ import annotations
 
+from tests._trait_fixtures import complete_spec_record
+
 import json
 import os
 import re
@@ -1708,7 +1710,7 @@ def test_trait_specs_shares_the_state_database_rather_than_gaining_its_own(store
     op_key = operationalization.operationalization_key(
         operationalization.operationalizations_scope(store.root), "bud_opening", "phenology")
 
-    ts.replace(spec_key, {"name": "bud_opening", "delivers": ["leaf_out_05per_date"]},
+    ts.replace(spec_key, complete_spec_record({"name": "bud_opening", "delivers": ["leaf_out_05per_date"]}),
                expect=ts.Version.ABSENT)
     ts.replace(op_key, {"trait": "bud_opening", "delivery_kind": "phenology"}, expect=ts.Version.ABSENT)
 
@@ -1981,14 +1983,13 @@ def _real_selection() -> dict:
         scratch,
         Selection(
             samples=(
-                Sample(source="ü/images/2026-03-04/a_1.jpg",
+                Sample(member="a_1", source="ü/images/2026-03-04/a_1.jpg",
                        ground_truth="ü/annotations/2026-03-04/a_1.json",
                        group="a", side="train", confirmation_bucket="bud/2026-03-04",
                        ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
             subject="bud", attribute=None, id_map={"bud": 0}, seed=42,
-            group_by="stem", dataset_fingerprint="7ac1", admission_counts={"annotated": 1},
-            realized_ratios={"train": 1.0, "val": 0.0, "calibration": 0.0},
+            group_by="stem", dataset_fingerprint="7ac1",
         ),
     )))
 
@@ -2115,7 +2116,8 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/artifacts.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_env": Registered(
-        {"env": {"python": "3.12"}, "seed": 42}, lambda root: experiments.env_key(EXPERIMENT),
+        {"env": {"python": "3.12"}, "model_kind": "tcip_module", "resumed_from": None},
+        lambda root: experiments.env_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
@@ -2128,6 +2130,8 @@ REGISTERED = {
              "group_key_map": {"img_001": "img", "img_002": "img"},
              "sources": {"img_001": "ü/images/img_001.jpg",
                          "img_002": "ü/images/img_002.jpg"},
+             "row_keys": {},
+             "confirmation_bucket": "bud/2026-03-04",
              "label_digests": {
                  "at_split": {"img_001": "d1", "img_002": "d2"},
                  "at_run": {"img_001": "d1", "img_002": "d2"},
@@ -2207,7 +2211,7 @@ REGISTERED = {
         {"name": TRAIT_UNDER_TEST, "count_objective": "", "localization": "",
          "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
          "positive_value": "", "milestone_fractions": [], "milestone_on": "",
-         "majority_milestone": "", "majority_provisional": False, "phenology_prefix": "",
+         "majority_milestone": "", "crossing_unconfirmed": False, "phenology_prefix": "",
          "majority_label": "", "sliver_policy": "class_avg_size", "sliver_frac": 0.5,
          "count_bias_tolerance_frac": None, "count_error_tolerance": None,
          "classifier_agreement_floor": None, "ordinal_agreement_floor": None,
@@ -2407,9 +2411,7 @@ REGISTERED = {
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
          "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
          "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
-         "measurement_documents": ["operating_point", "classifier_operating_point"],
-         "scale_document": None,
-         "acknowledged_by": None, "acknowledgement_reason": None,
+         "acknowledged_by": None, "acknowledgment_reason": None,
          "plant_mapping": {
              "name": "valley", "project_root": "P:/valley", "dataset_id": "ds-1",
              "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",

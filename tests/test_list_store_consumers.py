@@ -156,11 +156,11 @@ def test_build_listing_composes_one_row_per_registered_store(tmp_path, monkeypat
         schema_version = 2
         declared_in = "pkg.widget_store"
 
-    fake_module = type(sys)("tcip_mcp.store_catalogue")
+    fake_module = type(sys)("tcip_mcp.store_catalog")
     fake_module.bootstrapped_stores = lambda: ("widgets",)
     fake_store_module = type(sys)("tcip_store")
     fake_store_module.get_descriptor = lambda name: _FakeDescriptor()
-    monkeypatch.setitem(sys.modules, "tcip_mcp.store_catalogue", fake_module)
+    monkeypatch.setitem(sys.modules, "tcip_mcp.store_catalog", fake_module)
     monkeypatch.setitem(sys.modules, "tcip_store", fake_store_module)
 
     rows = tool.build_listing(inventory, tmp_path)

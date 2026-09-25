@@ -684,7 +684,7 @@ def test_ps_guard_fails_open_on_garbage_stdin():
 @pytest.mark.parametrize(
     "cmd",
     [
-        # A redirect grammar that recognises every file-writing form, into breeder data and into
+        # A redirect grammar that recognizes every file-writing form, into breeder data and into
         # platform code, so an allow-listed read prefix carrying one is stopped with no human loop.
         "echo x >| /c/proj/labels/a.json",  # noclobber override
         "ls -la >& /c/proj/labels/a.json",  # both streams to a file, riding allow-listed ls

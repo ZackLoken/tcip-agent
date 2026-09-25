@@ -214,7 +214,7 @@ describe("InferenceTab job table", () => {
     });
     const cancelSpy = vi.spyOn(inferenceApi, "cancel").mockResolvedValue({
       job_id: "inf-live",
-      status: "cancelled",
+      status: "canceled",
       cancel_requested: true,
     });
 

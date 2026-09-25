@@ -1,21 +1,16 @@
-"""Review routes: verdict/GT recording (compute matches, walk detections, record actions, save
-GT) plus the image-status group (mark_complete, backup_labels, image_statuses,
-generation_conf) and the priority queue. Promoting a review into a validation reference lives in
-``routes/validation.py``, which shares this module's engine cache, audit writer and bucket-key
-helpers rather than a second implementation of them.
+"""Review routes: verdict/GT recording (compute matches, walk detections, record actions, save GT)
+plus the image-status group (mark_complete, backup_labels, image_statuses, generation_conf) and the
+priority queue.
 
 Uses the shared :class:`tcip_annotation.ReviewEngine`; one engine instance lives in memory per
 dataset (keyed by dataset_root). Review state is persisted via the engine to per-image shards under
-``<dataset_root>/.tcip/state/review/``, so a verdict travels with the images it was recorded on and
-the immutability guard that counts verdicts reads the store the reviewer wrote.
+``<dataset_root>/.tcip/state/review/``.
 
-Ground truth and predictions are each one JSON file per image holding every subject's annotations by
-name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a class
-is named by its ``subject``, never an integer id, so the recorded verdict carries the real subject
-name and a resolved ``class_id``: the producing bucket's own recorded name->id map, read once at
-record time (``_resolve_verdict_class_id``), never a registry re-derivation, so a class-aware
-reference (``review_calibration.review_to_records``) can be built from these verdicts without
-guessing.
+Ground truth and predictions are each one JSON file per image holding every subject's annotations
+by name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a
+class is named by its ``subject``, never an integer id, so the recorded verdict carries the real
+subject name and a resolved ``class_id``: the producing bucket's own recorded name->id map, read
+once at record time (``_resolve_verdict_class_id``).
 """
 
 from __future__ import annotations
@@ -95,16 +90,8 @@ def _get_engine(dataset_root: str) -> ReviewEngine:
 
 
 def _audit(scope: str, tool: str, arguments: dict) -> None:
-    """Record a GUI review mutation in the audit log ``scope`` names.
-
-    Every mutation these routes make changes a record that travels with the dataset: the verdict
-    store, the ground-truth labels and a prediction bucket's provenance stamp all live under the
-    dataset root, so the dataset root the request states is the scope for all of them. Every
-    caller refuses an empty ``dataset_root`` before it reaches this point, so ``scope`` is always
-    a real path here. The scope is confined before the append, so no audit line lands outside the
-    allowed roots. A failed append raises ``AuditEntryNotWritten``: the mutation has already
-    committed by the time this runs, so the caller answers the gap rather than have it pass as
-    silently recorded.
+    """Record a GUI review mutation in the audit log of the dataset root the request states,
+    confined before the append. A failed append raises ``AuditEntryNotWritten``.
     """
     from tcip_web.routes.audit_gap import record_committed
 
@@ -114,11 +101,8 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
 def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str]:
     """The content identity of ``image_name``'s prediction document in ``pred_dir``, as it is now.
 
-    The platform's own :func:`~tcip_mcp.pipelines.resolution.dataset_hash` over that one stem, the
-    hasher a bucket's whole-content digest is built from, so a verdict records the file the reviewer
-    actually saw and the promotion can tell whether that file still says what it said. ``None`` when
-    the image has no prediction document, or the review names no bucket at all: the confirmed-negative
-    case, a value that is compared rather than a comparison that is skipped.
+    :func:`~tcip_mcp.pipelines.resolution.dataset_hash` over that one stem. ``None`` when the image
+    has no prediction document, or the review names no bucket at all.
     """
     if not pred_dir:
         return None
@@ -134,10 +118,8 @@ def _resolve_producer_identity_for_dir(pred_dir: Optional[str], image_name: str)
     """The producing model's identity for ``image_name`` in prediction bucket ``pred_dir``.
 
     Resolved from the bucket's own ``operating_point.json`` sidecar: ``checkpoint_sha256`` and
-    ``experiment_id``, the same facts ``validate_reference`` already reads for its own scoping,
-    alongside the content identity of the one prediction document this review is being recorded
-    against. ``None`` when there is no dir or no sidecar to read; callers store this as a plain fact
-    on the verdict/image record rather than looking it up again at validation time.
+    ``experiment_id``, alongside the content identity of the one prediction document this review is
+    being recorded against. ``None`` when there is no dir or no sidecar to read.
     """
     if not pred_dir:
         return None
@@ -147,16 +129,17 @@ def _resolve_producer_identity_for_dir(pred_dir: Optional[str], image_name: str)
     if sidecar is None:
         return None
     return {
-        "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
-        "experiment_id": sidecar.get("experiment_id"),
+        "checkpoint_sha256": sidecar["checkpoint_sha256"],
+        "experiment_id": sidecar["experiment_id"],
         "bucket_dir": str(Path(pred_dir)),
         "prediction_digest": _prediction_digest(pred_dir, image_name),
     }
 
 
 def _bucket_of_dir(pred_dir: Optional[str]) -> str:
-    """The verdict store's key for the prediction bucket dir this request names, through the one
-    spelling the immutability guard also uses. No dir is a review with no bucket at all."""
+    """The verdict store's key for the prediction bucket dir this request names. No dir is a review
+    with no bucket at all.
+    """
     from tcip_mcp.prediction_buckets import bucket_key_of
 
     return bucket_key_of(pred_dir)
@@ -169,8 +152,8 @@ def _bucket_of_file(pred_path: Optional[str]) -> str:
 
 def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
     """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image prediction file path
-    (``ActionPayload.pred_path``): the bucket dir is its parent, used only as the lookup key to
-    find the sidecar, never as the identity itself."""
+    (``ActionPayload.pred_path``), whose parent is the bucket dir.
+    """
     if not pred_path:
         return None
     return _resolve_producer_identity_for_dir(str(Path(pred_path).parent), Path(pred_path).name)
@@ -178,15 +161,9 @@ def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
 
 def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Optional[int]:
     """The 0-indexed class identity ``class_name`` resolves to under the producing bucket's own
-    recorded name->id map: resolved at verdict-record time, from the same ``operating_point.json``
-    ``id_map`` field ``phenology.resolve_positive_class_id`` reads for a prediction bucket, never a
-    fresh registry re-derivation (the recorded map is what the bucket's predictions were actually
-    decoded through; the registry could have changed since). Under a classified scope
-    ``class_name`` is the value the verdict confirmed, a genuine key of the bucket's value-keyed
-    map; the case that remains unresolved is a bucket with no recorded ``id_map`` at all (a bare
-    hand-split directory) or ``class_name`` naming a foreign, stale definition. ``None`` in either
-    case; see ``review_calibration.review_to_records``, which refuses rather than guesses when this
-    is ``None``. Never defaults to 0: an unresolved identity is an honest fact, not a class.
+    recorded name->id map (``operating_point.json`` ``id_map``), resolved at verdict-record time.
+    ``None`` for a bucket with no recorded ``id_map`` or a ``class_name`` the map does not carry;
+    never defaults to 0.
     """
     if not pred_path:
         return None
@@ -223,10 +200,8 @@ def _image_dims(path: str) -> tuple[int, int]:
 
 
 def _guard_path(path: Optional[str]) -> Optional[str]:
-    """Confine a client-supplied label/dir path and hand back its resolved spelling, or None.
-
-    ``/action`` / ``backup_labels`` write to caller-provided paths, so every writer uses the
-    path this returns, never the string the client sent. 403 on escape.
+    """Confine a client-supplied label/dir path and hand back its resolved spelling, or None; 403
+    on escape.
     """
     if not path:
         return None
@@ -236,12 +211,9 @@ def _guard_path(path: Optional[str]) -> Optional[str]:
 def _ensure_original_backup(label_path: Optional[str]) -> None:
     """Capture one label file's pristine bytes before its first mutation, if none is held yet.
 
-    The per-file, O(1) counterpart of :meth:`ReviewEngine.backup_original_labels`'s directory
-    sweep: same baseline record, same create-only capture, so a verdict never overwrites a
-    pristine original without a copy no matter which of the two ran first. New GT files a verdict
-    is creating have no original to preserve, so they are skipped, and an already-held baseline is
-    kept rather than replaced by this call's read of a file the platform may already have edited.
-    Called from ``/action``, the one route that rewrites a GT file.
+    Same baseline record and create-only capture as :meth:`ReviewEngine.backup_original_labels`,
+    per file. New GT files a verdict is creating have no original to preserve, so they are skipped,
+    and an already-held baseline is kept.
     """
     if not label_path:
         return
@@ -251,9 +223,9 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
 
 
 def _check_classification_scope(subject: Optional[str], attribute: Optional[str]) -> None:
-    """Reviewing a classified trait needs both facts: ``attribute`` alone can't say which GT
-    instances it scopes. Raised before anything is read/mutated, not just at the matcher call, so a
-    malformed request 400s instead of silently authoring GT under a ``None`` subject."""
+    """Reviewing a classified trait needs both ``subject`` and ``attribute``; a request naming
+    ``attribute`` alone is refused (400) before anything is read or mutated.
+    """
     if attribute is not None and not subject:
         raise HTTPException(400, "attribute given for a classified-trait review, but no subject "
                                   "was provided to scope which GT instances it applies to")
@@ -269,11 +241,11 @@ def _review_scope(
     refuses a stated attribute with no subject). A bucket with no stamp: a stated attribute refuses
     (400, the bucket carries no scope of its own to classify along), else a detector review under
     the caller's own statement. A stamp that will not decode: 400 with the seam's own error. A
-    stamp carrying neither key: 400 naming the conform script. A classified stamp: the bucket's own
+    classified stamp: the bucket's own
     scope, whether or not the caller stated one; a stated pair that disagrees refuses. A detector
     stamp: a stated attribute refuses; otherwise a detector review under the bucket's own subject.
     """
-    from tcip_mcp.pipelines.resolution import BucketScope, StampScopeUnstated, bucket_scope
+    from tcip_mcp.pipelines.resolution import BucketScope, bucket_scope
     from tcip_store import StoreError
 
     _check_classification_scope(stated_subject, stated_attribute)
@@ -282,8 +254,6 @@ def _review_scope(
     bucket_dir = str(Path(pred_path).parent)
     try:
         scope = bucket_scope(bucket_dir)
-    except StampScopeUnstated as exc:
-        raise HTTPException(400, str(exc)) from exc
     except StoreError as exc:
         raise HTTPException(400, str(exc)) from exc
     if scope is None:
@@ -316,9 +286,8 @@ def _compute_matches(
     subject: Optional[str], attribute: Optional[str], vocabulary=None,
 ) -> dict:
     """Dispatch to plain detection matching, or classified-trait matching when the caller names the
-    (subject, attribute) axis under review. The one call site both ``/matches`` and ``/action`` use,
-    so a verdict's freshly recomputed matches are always scoped identically to what produced it.
-    A record the matching refuses (a scoreless prediction, an unclassified record) answers 400."""
+    (subject, attribute) axis under review. A record the matching refuses answers 400.
+    """
     try:
         if attribute is None:
             return compute_matches(gt, preds, iou_threshold, conf_threshold)
@@ -334,8 +303,7 @@ def _compute_matches(
 
 
 def _read_annotations_or_400(read, path: str) -> list:
-    """``read(path)``, refused (400) naming the file when the document will not read: a review
-    derived from a document nobody can read is a claim about nothing."""
+    """``read(path)``, refused (400) naming the file when the document will not read."""
     try:
         return read(path)
     except UnreadableLabelDocument as exc:
@@ -414,13 +382,11 @@ def _matches_response(
     filter_class: str,
     scope=None,
 ) -> MatchesResponse:
-    """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations, status)
-    from an already-computed match set. Shared by /matches and /action so both surfaces return the
-    identical shape, letting a verdict return its fresh matches instead of forcing a second fetch.
+    """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations,
+    status) from an already-computed match set.
 
     ``n_reviewed``/``n_total`` come from :meth:`ReviewEngine.review_progress` over the unfiltered
-    ``matches``, before ``filter_type``/``filter_class`` narrow ``detections`` to what is rendered:
-    the status-bar wheel reports the whole image's progress regardless of the active filter.
+    ``matches``, before ``filter_type``/``filter_class`` narrow ``detections`` to what is rendered.
     """
     # Built once for the whole image: the wheel's progress is over the unfiltered set, so a filter
     # that narrows the rendered list below must not narrow what review_progress counts.
@@ -534,18 +500,13 @@ class ActionPayload(BaseModel):
 
 
 def _names_prediction(payload: "ActionPayload", ctx: ReviewContext) -> bool:
-    """Whether ``payload.pred_idx`` names a prediction of this image's loaded document: the one
-    test the accept branch and a rule-admitted claim's own verification share."""
+    """Whether ``payload.pred_idx`` names a prediction of this image's loaded document."""
     return payload.pred_idx is not None and 0 <= payload.pred_idx < len(ctx.preds)
 
 
 def _is_reviewer_drawn_new_shape(payload: "ActionPayload") -> bool:
     """A reviewer drew a brand-new shape from scratch: no matched GT, no matched prediction, and
-    not a sweep attestation (``ReviewTab.tsx``'s missed-object gesture, posted through ``/action``).
-
-    Under a classified scope this is refused by :func:`_apply_gt_mutation`: the tab posts the
-    missed object with ``class_name = dataset.subject`` (the object class), and authoring that as
-    the attribute's value would fabricate a state nobody assessed.
+    not a sweep attestation.
     """
     return payload.gt_idx is None and payload.pred_idx is None and payload.action != SWEPT_ACTION
 
@@ -575,37 +536,29 @@ def _apply_gt_mutation(
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
     ctx.gt)``: the index is set only for edited/accepted writes. ``action="swept"`` (an explicit
     "checked this image for missed objects, found none" attestation) matches none of the branches
-    below and always no-ops, GT is never mutated by sweeping.
+    below and always no-ops.
 
-    ``scope`` is the resolved review scope (``_review_scope``), never ``payload.subject``/
-    ``payload.attribute`` directly; ``vocabulary`` is the bucket's own recorded ``id_map`` keys
-    (``_bucket_vocabulary``). Under a classified scope (``scope.attribute`` set) a verdict judges
-    the *value* of an object a person already placed, checking a written ``payload.class_name``
-    against ``vocabulary`` and an edited record's own subject against ``scope.subject``, refusing
-    by name rather than trusting the client's string; under a detector review it judges the
-    object's presence, as it always has.
+    ``scope`` is the resolved review scope (``_review_scope``), never
+    ``payload.subject``/``payload.attribute`` directly; ``vocabulary`` is the bucket's own recorded
+    ``id_map`` keys (``_bucket_vocabulary``). Under a classified scope (``scope.attribute`` set) a
+    verdict judges the value of an object a person already placed, checking a written
+    ``payload.class_name`` against ``vocabulary`` and an edited record's own subject against
+    ``scope.subject``, refusing by name; under a detector review it judges the object's presence.
 
     Accept on a false positive: a paired one (``payload.gt_idx`` set, its partner a ground-truth
     record of the subject whose value differs) replaces the confirmed value on the person's own
     record, keeping their geometry and authorship; an unpaired one appends a fresh GT record from
     the prediction, its origin traveling with it. Under a detector review, accept always appends
-    with empty ``attributes``: ``reviewed`` is exactly the attribute values this review adjudicated,
-    none under a detector review, which adjudicated presence and nothing about state. ``accepted_by_rule``
-    is written only there, the one arm a verified rule-admitted claim can reach (a classified scope
-    refuses one); the unpaired classified accept and both edit branches write ``None`` explicitly,
-    and the paired classified accept keeps the record's own value (no platform producer mints one
-    there; a client-supplied marker the Annotate save door round-tripped stays, as the sign-off
-    beside it does). Reject
-    on a false positive leaves ground truth untouched under either regime. Reject on a true
-    positive or false negative under a classified scope refuses: removing the object is a
-    detector-scope act.
+    with empty ``attributes``. ``accepted_by_rule`` is written only there; the unpaired classified
+    accept and both edit branches write ``None`` explicitly, and the paired classified accept keeps
+    the record's own value. Reject on a false positive leaves ground truth untouched under either
+    regime. Reject on a true positive or false negative under a classified scope refuses.
 
     Edit authors the edited geometry onto the record it edits (a true positive/false negative, or a
     paired false positive) with the reviewer as author, keeping the record's other attribute values
-    and dropping any sign-off and rule marker alike, since an edit is the reviewer's own geometry
-    now and unmarks a record a rule had admitted; a stated ``gt_idx`` out of range refuses. An
-    unpaired false positive edited into ground truth is a fresh record, no score and no sign-off.
-    A reviewer-drawn new shape (:func:`_is_reviewer_drawn_new_shape`) refuses under a classified
+    and dropping any sign-off and rule marker; a stated ``gt_idx`` out of range refuses. An
+    unpaired false positive edited into ground truth is a fresh record, no score and no sign-off. A
+    reviewer-drawn new shape (:func:`_is_reviewer_drawn_new_shape`) refuses under a classified
     scope.
     """
     dt, act = payload.det_type, payload.action
@@ -891,36 +844,27 @@ class MarkCompletePayload(BaseModel):
 def _is_negative_for_subject(
     pred_dir: Optional[str], image_name: str, subject: Optional[str]
 ) -> Optional[bool]:
-    """Whether ``pred_dir``'s predictions for ``image_name`` hold nothing for ``subject``, the fact
-    a zero-verdict Complete is confirming; ``None`` when the bucket cannot answer for ``subject``
-    at all.
+    """Whether ``pred_dir``'s predictions for ``image_name`` hold nothing for ``subject``; ``None``
+    when the bucket cannot answer for ``subject`` at all.
 
-    No prediction bucket at all is unconditionally negative, there is nothing to check against. A
-    subject-less Complete checks the whole file (the claim a subject-less Complete makes, about
-    every subject). A named subject reads the bucket's own recorded scope
-    (``resolution.bucket_scope``) first: a classified stamp admits exactly its own object class and
-    answers ``None`` for any other name, so a value name (a key of the bucket's own value-keyed
-    ``id_map``) can never be recorded as a negative subject. A bare directory or a detector stamp
-    keeps the map-membership admission (``phenology.bucket_id_map``, the same map
-    ``_resolve_verdict_class_id`` reads for a verdict's class identity): membership proves the
-    bucket assessed this subject at all, and the comparison itself is by the decoded name
-    (``cached_label_annotations``' own ``subject`` field), never the id, so the two branches read
-    the file through this one memo and cannot disagree about its current content. A neither-key or
-    undecodable stamp answers ``None`` too, caught here rather than left to the route (whose own
-    catch covers only :class:`~tcip_annotation.json_io.UnreadableLabelDocument`): the Complete and
-    its status write still proceed, with no coverage entry for a subject nothing here can resolve.
+    No prediction bucket at all is unconditionally negative. A subject-less Complete checks the
+    whole file. A named subject reads the bucket's own recorded scope (``resolution.bucket_scope``)
+    first: a classified stamp admits exactly its own object class and answers ``None`` for any
+    other name. A bare directory or a detector stamp admits a subject its recorded map
+    (``phenology.bucket_id_map``) carries, compared by decoded name (``cached_label_annotations``'
+    own ``subject`` field). A neither-key or undecodable stamp answers ``None``.
     """
     if not pred_dir:
         return True
     pred_file = Path(pred_dir) / label_filename(Path(image_name).stem)
     if subject is None:
         return not _has_objects(pred_file)
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_store import StoreError
 
     try:
         scope = bucket_scope(Path(pred_dir))
-    except (StampScopeUnstated, StoreError):
+    except StoreError:
         return None
     if scope is not None and scope.classified:
         if subject != scope.subject:
@@ -939,11 +883,10 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases.
 
     Adjudication coverage is recorded per subject: a map from subject name (or ``"*"`` for a
-    subject-less Complete, a claim about every subject) to whether that zero-verdict completion
-    was a genuine negative for it, so a later Complete under another subject on the same image
-    adds its own entry rather than overwriting the first. A subject the bucket's own recorded
-    class map cannot resolve writes no entry at all: the Complete and its status write still
-    proceed, and the coverage reader fails closed on the missing entry at validation time.
+    subject-less Complete, a claim about every subject) to whether that zero-verdict completion was
+    a genuine negative for it, so a later Complete under another subject on the same image adds its
+    own entry. A subject the bucket's own recorded class map cannot resolve writes no entry at all;
+    the Complete and its status write still proceed.
     """
     if not payload.dataset_root:
         raise HTTPException(
@@ -1031,21 +974,16 @@ class ImageStatusesResponse(BaseModel):
 
 
 def _has_objects(path: Path) -> bool:
-    """True if ``path`` holds at least one annotation record, read through the label memo shared
-    with the classes and dataset routes. An empty (confirmed-negative) or missing file has
-    nothing to review."""
+    """True if ``path`` holds at least one annotation record. An empty (confirmed-negative) or
+    missing file has nothing to review.
+    """
     return bool(cached_label_annotations(path))
 
 
 def _stems_with_objects(*dirs: Optional[str]) -> tuple[set[str], set[str]]:
     """Stems with >=1 annotation record across ``dirs``, and the absolute paths of documents that
-    would not read (per file: one bad document costs its own stem, never the whole scan). A stem
-    can appear in both sets at once, when one directory's document is unreadable and the other's
-    holds objects for the same stem.
-
-    Every directory's own document for a stem is opened, never skipped because an earlier
-    directory already resolved that stem: a corrupt prediction document must surface as
-    unreadable even when the ground truth already supplied an object for the same stem.
+    would not read (per file). A stem can appear in both sets at once. Every directory's own
+    document for a stem is opened.
     """
     stems: set[str] = set()
     unreadable: set[str] = set()
@@ -1069,10 +1007,9 @@ def image_statuses(
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
-    """Batch review status + detection presence for a whole (date): one call the Review tab makes
-    on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip images with
-    nothing to review. ``gt_dir``/``pred_dir`` are the per-image label dirs (annotations / a model's
-    predictions on the date)."""
+    """Batch review status + detection presence for a whole (date). ``gt_dir``/``pred_dir`` are the
+    per-image label dirs (annotations / a model's predictions on the date).
+    """
     gt_dir = _guard_path(gt_dir)
     pred_dir = _guard_path(pred_dir)
     engine = _get_engine(dataset_root)
@@ -1104,14 +1041,10 @@ class GenerationConfResponse(BaseModel):
 def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
     """The prediction bucket's own generation confidence and admission rule.
 
-    Raising the review's own "Conf >=" filter above the generation confidence hides low-confidence
-    detections from review; any verdict then recorded raises review_conf_threshold above it, which
-    validate_reference's identical gate reads as conf_censored, exposed here so the breeder can
-    see it live. Also answers the bucket's own validated count operating point through
-    admission_rule_of, the one reader /action verifies a rule_admitted claim against, and the
-    binding's own diagnosis when no rule applies (admission_reason): a stamp read strictly here,
-    so a stamp that will not decode answers its own decode error as the reason, an absent stamp
-    and a stamp claiming nothing each read as what they are.
+    Answers the generation confidence, the bucket's own validated count operating point through
+    ``admission_rule_of``, and the binding's own diagnosis when no rule applies
+    (``admission_reason``): a stamp that will not decode answers its own decode error as the
+    reason, an absent stamp and a stamp claiming nothing each read as what they are.
     """
     from tcip_mcp.pipelines.resolution import (
         AdmissionResolution, admission_rule_of, read_operating_point_sidecar,
@@ -1151,9 +1084,6 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 # Its sibling door, triage_predictions, can auto-accept predictions as GT above a breeder-confirmed threshold, a different and more consequential capability deliberately left agent/operator-only for now.
 
 
-REVIEW_PRIORITY_REGISTRY = REVIEW_PRIORITY_JOBS
-"""The job registry this module persists its priority-queue jobs to."""
-
 
 def _pq_current_root() -> str:
     return current_root()
@@ -1191,24 +1121,24 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
     }
 
 
-def _pq_from_summary(s: dict, root: str) -> PriorityQueueJob:
+def _pq_from_summary(s: dict) -> PriorityQueueJob:
     return PriorityQueueJob(
         job_id=s["job_id"],
         checkpoint_path="",
         images_dir="",
         dataset_root="",
         status=jobstore.rehydrated_status(s),
-        error=s.get("error"),
-        queue=s.get("queue") or [],
-        total_candidates=s.get("total_candidates", 0),
-        reviewed_skipped=s.get("reviewed_skipped", 0),
-        marks_unresolved=s.get("marks_unresolved"),
-        platform_root=jobstore.require_platform_root(s, name=REVIEW_PRIORITY_REGISTRY, root=root),
+        error=s["error"],
+        queue=s["queue"],
+        total_candidates=s["total_candidates"],
+        reviewed_skipped=s["reviewed_skipped"],
+        marks_unresolved=s["marks_unresolved"],
+        platform_root=s["platform_root"],
     )
 
 
 _pq_registry = jobstore.JobRegistry(
-    REVIEW_PRIORITY_REGISTRY, to_summary=_pq_summary, from_summary=_pq_from_summary,
+    REVIEW_PRIORITY_JOBS, to_summary=_pq_summary, from_summary=_pq_from_summary,
 )
 """The dict-plus-lock live registry for this queue's own jobs (see ``jobstore.JobRegistry``),
 the shared home inference.py's and tuning.py's own registries adopt too."""
@@ -1223,9 +1153,7 @@ def _pq_register(job: PriorityQueueJob) -> None:
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
-    """A job by id, from any root this process holds: a repin to another project must not
-    make an in-flight priority-queue job unreachable, the same contract inference and tuning
-    hold for their own by-id lookups."""
+    """A job by id, from any root this process holds."""
     return _pq_registry.get(job_id)
 
 
@@ -1233,14 +1161,9 @@ def rehydrate_for_current_root() -> None:
     """Merge this root's persisted priority-queue jobs, not already live, into memory via
     :func:`_pq_from_summary`.
 
-    Called at startup and again after this process repins to another root, the same
-    treatment ``routes.inference``/``routes.tuning`` give their own registries. The worker
-    thread behind a persisted non-terminal job is gone, so it is surfaced as ``interrupted``;
-    its ranked queue is restored from what :func:`_pq_summary` persisted, so a completed job
-    still answers its own ranked images after a restart or a repin. Bounds the dict
-    afterwards the same way registering a job does, so adopting N roots without ever
-    registering one here still keeps this process's memory bounded rather than growing by
-    ``MAX_JOBS`` for every root adopted.
+    A persisted non-terminal job is surfaced as ``interrupted``; its ranked queue is restored from
+    what :func:`_pq_summary` persisted. Bounds the dict afterwards the same way registering a job
+    does.
     """
     _pq_registry.rehydrate()
 

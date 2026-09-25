@@ -29,7 +29,7 @@ from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 logger = logging.getLogger(__name__)
 
 # The array containers that carry no georeferencing tags at all, whatever is inside them: a door
-# that needs metres refuses these by name rather than opening one and reporting a read failure.
+# that needs meters refuses these by name rather than opening one and reporting a read failure.
 UNGEOREFERENCED_ARRAY_EXTS = (".npy", ".npz")
 
 # The containers band data is read out of as an array. Any other extension is a photographic frame
@@ -64,15 +64,10 @@ _GDAL_CACHEMAX_BYTES_FLOOR = 100_000
 
 
 def configure_gdal_cache(share: float = 1.0) -> None:
-    """Hand GDAL's block cache its share of this module's memory budget.
-
-    Called once at each process entry point (the MCP server's ``main``, the web backend's app
-    startup, the training subprocess, and each of its spawned DataLoader workers), never at
-    source construction: the cache is process-global, and a per-open call would re-decide a
-    process-wide fact on every read path. ``share`` scales the budget down for a process that
-    is one of several peers each holding their own GDAL cache (a DataLoader worker: pass
-    ``1 / num_workers`` so ``num_workers`` peers together still commit the platform's intended
-    budget rather than that amount each).
+    """Hand GDAL's block cache its share of this module's memory budget, once per process: the
+    cache is process-global. ``share`` scales the budget down for a process that is one of several
+    peers each holding their own GDAL cache (a DataLoader worker: pass ``1 / num_workers`` so
+    ``num_workers`` peers together still commit the platform's intended budget).
     """
     from rasterio.env import set_gdal_config
 
@@ -81,12 +76,9 @@ def configure_gdal_cache(share: float = 1.0) -> None:
 
 
 def gdal_cache_bytes() -> int:
-    """The block-cache budget currently in force, in bytes.
-
-    Read from the configuration :func:`configure_gdal_cache` set, falling back to what that
-    function would have set for a process that never called it. This module owns the budget, so a
-    consumer sizing work against it asks here rather than asking GDAL, and the two can never
-    disagree about a number one of them chose.
+    """The block-cache budget currently in force, in bytes: the configuration
+    :func:`configure_gdal_cache` set, or what that function would have set for a process that never
+    called it.
     """
     from rasterio.env import get_gdal_config
 
@@ -284,31 +276,17 @@ class _RegionView:
     """A read-only offset view over an already-open :class:`RasterSource`, restricted to one
     sub-rectangle of its full extent.
 
-    Exposes exactly the minimal duck-typed surface a windowed tile source needs
-    (``read_window``/``height``/``width``/``num_channels``, the
-    ``inference.generic_predictor.WindowedRasterReader`` Protocol): a rectangular sub-region of a
-    mosaic then reads as an ordinary windowed raster source in its own local coordinate space, so
-    tiled inference over a haloed calibration/holdout block runs through the exact same
-    ``predict_tiled`` code path a whole-mosaic export does, never a second implementation of
-    tiled inference for one region.
+    Exposes the ``inference.generic_predictor.WindowedRasterReader`` surface
+    (``read_window``/``height``/``width``/``num_channels``), so a rectangular sub-region of a
+    mosaic reads as an ordinary windowed raster source in its own local coordinate space.
 
-    Dims invariant, load-bearing for measurement integrity, not just an implementation detail:
-    ``height``/``width`` always report this view's own rect extent, never the parent source's,
-    and every read is translated into the parent's coordinate space by adding the rect's own
-    origin. A read past this view's declared bounds raises rather than falling through to the
-    parent's own out-of-bounds check, which validates against the *whole* mosaic and would
-    otherwise happily serve real training/buffer pixels through the offset: exactly what
-    ``predict_tiled``'s own edge clip (``min(tile_y + edge, source.height)``, checked against
-    this class's own reported ``height``) relies on to keep a windowed pass over one region from
-    ever silently reading pixels outside it. This must hold for every future caller of this
-    class, not only ``predict_tiled``.
+    ``height``/``width`` always report this view's own rect extent, never the parent source's, and
+    every read is translated into the parent's coordinate space by adding the rect's own origin. A
+    read past this view's declared bounds raises, so a windowed pass over one region never reads
+    pixels outside it.
 
     ``band_interpretations`` forwards the parent's own attribute verbatim when it has one (a
-    ``GdalSource`` parent), absent otherwise, the same ``getattr(src, "band_interpretations",
-    None)`` convention every other consumer of this fact uses: a haloed calibration/holdout block
-    read through this view is still the same file the whole-mosaic export path reads, so the two
-    must resolve the same alpha-vs-spectral-band decision (:func:`image_utils.to_pil_if_faithful`)
-    rather than one seeing the real signal and the other silently seeing none.
+    ``GdalSource`` parent), absent otherwise.
     """
 
     def __init__(self, parent: RasterSource, rect: Rect) -> None:
@@ -376,12 +354,7 @@ def _serve_region(region: np.ndarray, rect: Rect, backend: str,
 
 def channel_first_reinterpreted(shape: tuple[int, ...], num_channels: int) -> bool:
     """Whether a channel-last reading of a 3-D ``shape`` is instead taken as channel-first: the
-    leading axis matches the caller's expected band count while the trailing one does not, the one
-    shape where channel-first is unambiguous against what the caller asked for.
-
-    The single predicate behind ``_channel_last``'s transpose, :func:`tiff_frame`'s header
-    measurement, and the TIFF dispatch's whole-decode routing, so a raster can never be measured
-    through one reading and decoded through another.
+    leading axis matches the caller's expected band count while the trailing one does not.
     """
     return len(shape) == 3 and shape[0] == num_channels and shape[2] != num_channels
 
@@ -420,11 +393,7 @@ def _tiff_series_probe(path: str | Path) -> tuple[tuple[int, ...], str] | None:
 
 
 def tiff_series_shape(path: str | Path) -> tuple[int, ...] | None:
-    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way.
-
-    Shared with ``derivations.probe_channels`` so a full pixel read is never paid just to learn
-    the shape.
-    """
+    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way."""
     probe = _tiff_series_probe(path)
     return probe[0] if probe is not None else None
 
@@ -449,11 +418,10 @@ def tiff_frame(path: str | Path, num_channels: int) -> tuple[int, int, int] | No
     at ``num_channels``, from the header alone; ``None`` when the header can't be read and only a
     decode can answer.
 
-    The same axes normalization and channel-first reading the dispatch itself applies
-    (:func:`_series_frame`, :func:`channel_first_reinterpreted`), so a frame measured here and
-    pixels decoded later come from one set of rules: an axes-normalizable series serves in its own
-    frame unless the channel-first reinterpretation sends it to the whole decode (which
-    transposes); a stacked multi-page series serves whole in tifffile's raw reading.
+    Applies the dispatch's own axes normalization and channel-first reading (:func:`_series_frame`,
+    :func:`channel_first_reinterpreted`): an axes-normalizable series serves in its own frame
+    unless the channel-first reinterpretation sends it to the whole decode (which transposes); a
+    stacked multi-page series serves whole in tifffile's raw reading.
     """
     probe = _tiff_series_probe(path)
     if probe is None:
@@ -512,14 +480,11 @@ class PhotographicSource(_ClosableSource):
     """A whole photographic frame decoded through PIL, EXIF-oriented and converted to the mode the
     caller's channel count names (1 -> L, 3 -> RGB, 4 -> RGBA).
 
-    ``image`` is that PIL frame itself: the augmentation and tiling code downstream works on PIL
-    images at these counts, so this backend exposes the native object rather than forcing every
-    caller through an array copy of it. The frame is fully decoded and independent of the file,
+    ``image`` is that PIL frame itself. The frame is fully decoded and independent of the file,
     which is closed as soon as it has been read.
 
     The frame is EXIF-oriented before the mode conversion so it matches what
-    ``get_image_dimensions`` measures: labels are authored in the upright frame, and an
-    Orientation-6 JPEG's raw sensor frame has its axes swapped against it.
+    ``get_image_dimensions`` measures: labels are authored in the upright frame.
     """
 
     def __init__(self, path: str | Path, num_channels: int):
@@ -578,7 +543,7 @@ class TiffWholeSource(_ArraySource):
 
 class NpySource(_ArraySource):
     """A ``.npy`` array, memory-mapped so a region read touches only the pages it covers. An array
-    container carries no georeference; every door that needs metres refuses it by name."""
+    container carries no georeference; every door that needs meters refuses it by name."""
 
     _backend = "npy"
 
@@ -712,10 +677,8 @@ class GdalSource(_ClosableSource):
 
         The tag's 16-bit entries carry the 8-bit palette scaled by 256 (PIL) or 257 (the TIFF
         specification's full-range convention), and the high byte recovers the original value
-        exactly under either scaling. GDAL's converted color-table entries are not used because
-        the conversion changed across GDAL versions (3.8 truncate-divides by 257, off by one
-        against PIL's decode; 3.12 agrees with the high byte), measured on both.
-        ``None`` when the tag cannot be read; the caller falls back to GDAL's entries.
+        exactly under either scaling; GDAL's converted color-table entries differ across GDAL
+        versions. ``None`` when the tag cannot be read; the caller falls back to GDAL's entries.
         """
         try:
             import tifffile
@@ -799,9 +762,6 @@ def photographic_container(source: "str | Path | BandGroupRef", num_channels: in
     """Whether ``source`` decodes as a whole photographic frame through PIL rather than as band
     data: any extension outside :data:`ARRAY_CONTAINER_EXTS`, at one of the channel counts PIL's
     own modes cover.
-
-    The one routing decision this module's factory and ``image_utils``' dimension probe share, so a
-    file can never be measured through one path and decoded through another.
     """
     if isinstance(source, BandGroupRef):
         return False
@@ -815,11 +775,9 @@ def image_route_channel_count(
     """The channel count a plain (non-composited) image-route read opens ``source`` at:
     :func:`~tcip_mcp.pipelines.derivations.probe_channels`, or three in place of a photographic
     container's own band count, since a plain serve decodes a grayscale or palette frame through
-    PIL's RGB expansion rather than its raw band count.
+    PIL's RGB expansion.
 
-    ``probed`` lets a caller that already has :func:`probe_channels`'s answer pass it through
-    instead of probing the header twice. The one place this rule is spelled, so the display route
-    and a content identity computed at its default channel count can never drift apart.
+    ``probed`` lets a caller that already has :func:`probe_channels`'s answer pass it through.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
 
@@ -855,15 +813,14 @@ def _tiff_needs_whole_decode(source: GdalSource, num_channels: int) -> bool:
     """Whether a GDAL-opened TIFF must instead decode whole through tifffile.
 
     GDAL reads a TIFF's first IFD as the dataset, which misreads the stacked multi-page layouts
-    tifffile itself writes (a channel-last raster one row-block per page, a ``[C, H, W]`` stack
-    one band per page), so GDAL's frame is checked against the file's own axes-normalized series
-    shape (:func:`_series_frame`) and any disagreement, including an axes layout with no
-    single-frame reading, decodes whole through tifffile. An unreadable series header routes to
-    GDAL alone: tifffile could not decode such a file either. A raster whose shape a whole decode
-    would reinterpret channel-first (:func:`channel_first_reinterpreted`) also decodes whole, so
-    ``load_multiband`` and ``image_dimensions`` keep reporting the same frame for it.
+    tifffile itself writes (a channel-last raster one row-block per page, a ``[C, H, W]`` stack one
+    band per page), so GDAL's frame is checked against the file's own axes-normalized series shape
+    (:func:`_series_frame`) and any disagreement, including an axes layout with no single-frame
+    reading, decodes whole through tifffile. An unreadable series header routes to GDAL alone. A
+    raster whose shape a whole decode would reinterpret channel-first
+    (:func:`channel_first_reinterpreted`) also decodes whole.
 
-    Header reads only, never a pixel decode: :func:`opens_windowed` answers from this too.
+    Header reads only, never a pixel decode.
     """
     # The raw band count, not the served one: a palette raster serves as three expanded channels
     # while the file's own header (what tifffile reports) still says one band.
@@ -970,18 +927,14 @@ def source_pool_key(source: "str | Path | BandGroupRef", num_channels: int) -> t
 def pooled_source(source: "str | Path | BandGroupRef", num_channels: int) -> RasterSource:
     """An open source for ``source`` from this process's pool, opening one if it holds none.
 
-    The pool keeps recently used sources open so a caller that revisits the same raster does not
-    reopen and reparse it, and evicts least-recently-used sources (closing them) once what it holds
-    exceeds this module's pool budget. It belongs to the process that filled it: a forked worker
-    (a DataLoader's, say) finds it empty rather than reusing handles the parent owns.
+    The pool keeps recently used sources open and evicts least-recently-used sources (closing them)
+    once what it holds exceeds this module's pool budget. It belongs to the process that filled it:
+    a forked worker finds it empty.
 
-    A caller must not close what this returns; the pool owns it. The ``image_utils`` loaders open
-    and close their own sources; the tiled training dataset reads its windowed sources through
-    here so every tile of one raster shares one open handle.
+    A caller must not close what this returns; the pool owns it.
 
-    A GDAL dataset handle is not thread-safe, so this pool must never vend one
-    :class:`GdalSource` to two concurrent threads; a threaded consumer needs thread-keyed pooling
-    or a per-source lock before it can read through here.
+    A GDAL dataset handle is not thread-safe, so this pool must never vend one :class:`GdalSource`
+    to two concurrent threads.
     """
     global _POOL_PID, _POOL_BYTES
     pid = os.getpid()
@@ -1024,27 +977,18 @@ class RasterIdentity:
     """One raster file's own content identity: header facts plus a deterministic, seeded pixel
     checksum.
 
-    A sibling primitive to ``resolution.dataset_hash``/``dataset_fingerprint.dataset_fingerprint``,
-    never an extension of either: those identify a whole *dataset's* ground truth (or ground truth +
-    pixels + registry + confirmations) across many images, a coarser granularity that answers a
-    different question ("is this the same dataset") than the one this class answers ("is this the
-    same raster file"). ``pixel_checksum`` is the discriminating term (two different rasters of
-    identical dimensions checksum differently); ``width``/``height``/``num_channels``/``dtype``
-    travel alongside it for a human-readable identity, never in place of the checksum.
+    Identifies one raster file, not a dataset
+    (``resolution.dataset_hash``/``dataset_fingerprint.dataset_fingerprint`` do that).
+    ``pixel_checksum`` is the discriminating term (two different rasters of identical dimensions
+    checksum differently); ``width``/``height``/``num_channels``/``dtype`` travel alongside it.
 
     ``band_interpretations`` is present only when the backend that served this raster carries it
-    (GDAL-only today) and is ``None`` otherwise; absence is never a refusal condition, only a
-    narrower identity. ``geotransform`` is an optional strengthening term, present only when the
-    raster is a georeferenced GeoTIFF whose affine tags this module can read, and is never
-    load-bearing: an unprojected or non-GeoTIFF raster still gets a fully usable identity from the
-    checksum alone.
+    (GDAL) and is ``None`` otherwise. ``geotransform`` is optional, present only when the raster is
+    a georeferenced GeoTIFF whose affine tags this module can read.
 
     ``seed``/``window_size``/``max_windows``/``pixel_fraction`` are the sampling parameters that
-    produced ``pixel_checksum``, recorded by name (not just implied by the windows actually read)
-    so a later comparison can recompute the other side's identity under the exact same parameters
-    rather than each side's own independent default: otherwise a genuinely identical raster can
-    checksum differently purely from parameter drift between the two calls, never from a real
-    content difference.
+    produced ``pixel_checksum``, recorded so a later comparison recomputes under the same
+    parameters.
     """
 
     width: int
@@ -1087,19 +1031,13 @@ def raster_content_identity(
 ) -> RasterIdentity:
     """The content identity of one raster file, read through :func:`open_raster`.
 
-    Backend-agnostic by construction: the checksum walks the same :func:`sample_windows`
-    selection every backend serves through :meth:`RasterSource.read_region`, so a GDAL-served
-    GeoTIFF and a memory-mapped ``.npy`` of identical pixel content resolve the same identity,
-    and two different-content rasters of identical dimensions resolve different ones: the
-    checksum is the discriminating term, since a GDAL-only attribute cannot provide one for a
-    legitimate ``.npy``/``.npz``/whole-decode-TIFF training raster. ``band_interpretations`` is
-    read with ``getattr(src, "band_interpretations", None)``, this module's own convention for
-    the one GDAL-only attribute (see :class:`GdalSource`), never a refusal condition on its own.
+    The checksum walks the same :func:`sample_windows` selection every backend serves through
+    :meth:`RasterSource.read_region`, so a GDAL-served GeoTIFF and a memory-mapped ``.npy`` of
+    identical pixel content resolve the same identity. ``band_interpretations`` is read with
+    ``getattr(src, "band_interpretations", None)``.
 
-    Raises ``ValueError`` naming the source when the raster genuinely cannot be opened or sampled
-    at all (whatever the backend's own open or read failure was, wrapped uniformly here rather
-    than leaking a backend-specific exception type); never refuses merely for lacking a GDAL-only
-    attribute or a resolvable geotransform, both optional terms here.
+    Raises ``ValueError`` naming the source when the raster cannot be opened or sampled at all;
+    never refuses for lacking a GDAL-only attribute or a resolvable geotransform.
     """
     try:
         with open_raster(source, num_channels) as src:
@@ -1130,14 +1068,10 @@ def raster_content_identity(
 
 def raster_identity_matches(recorded: dict, source: "str | Path | BandGroupRef") -> bool:
     """Whether ``source`` is content-identical to a previously recorded
-    :func:`raster_content_identity` result (as its ``dataclasses.asdict`` form).
-
-    Recomputes ``source``'s identity under the *exact* sampling parameters (``seed``/
-    ``window_size``/``max_windows``) the recorded identity carries, never this call's own
-    default: a genuinely identical raster must not read as different purely from parameter drift
-    between a training-time and an export-time call. Raises ``ValueError`` (from
-    :func:`raster_content_identity`) naming ``source`` when it cannot be opened/sampled at all,
-    never silently reporting a false non-match for an unresolvable identity.
+    :func:`raster_content_identity` result (as its ``dataclasses.asdict`` form), recomputed under
+    the recorded identity's own sampling parameters (``seed``/``window_size``/``max_windows``).
+    Raises ``ValueError`` (from :func:`raster_content_identity`) naming ``source`` when it cannot
+    be opened/sampled at all.
     """
     fresh = raster_content_identity(
         source, int(recorded["num_channels"]), seed=int(recorded["seed"]),
@@ -1155,12 +1089,8 @@ def content_identity(
     source: "str | Path | BandGroupRef", num_channels: int | None = None,
 ) -> RasterIdentity:
     """:func:`raster_content_identity` of ``source`` under the platform's own sampling budget.
-
-    ``num_channels`` defaults to :func:`image_route_channel_count`'s rule: a caller with no
-    channel count of its own (a proposal run addressing the image it just proposed on) gets the
-    same count the image route would open the file at. A caller that already has one (a trained
-    model's ``in_chans``, a training-time probe already computed for its own reasons) passes it
-    through explicitly and gets exactly that value, never the route's own derivation.
+    ``num_channels`` defaults to :func:`image_route_channel_count`'s rule; a stated value is used
+    as given.
     """
     if num_channels is None:
         num_channels = image_route_channel_count(source)
@@ -1173,20 +1103,9 @@ def georeferenced_raster_identity_mismatch(
     recorded: dict, source: "str | Path | BandGroupRef",
 ) -> str | None:
     """``None`` when ``source`` is both content-identical to a recorded
-    :func:`raster_content_identity` result and carries the georeferencing that result recorded;
-    otherwise a summary naming which part mismatched and the values behind it.
-
-    The georeferencing-inclusive companion to :func:`raster_identity_matches`, which it calls for
-    the content half rather than restating that comparison. The two scopes answer different
-    questions and both are real: pixels alone decide which mosaic a model was calibrated on, so a
-    claim about that scope is content-only by construction; a consumer that resolves a pixel
-    position to a real-world coordinate (per-plant attribution through an orthomosaic's affine
-    tags) also depends on those tags, and to it a pixel-identical copy with a moved tiepoint is a
-    different raster.
-
-    Geotransform values compare exactly: both sides are read by the same tag reader and a JSON
-    round-trip of a float returns the same value, so a genuine match cannot drift apart here and
-    any difference found is a real one, never sampling or serialization noise.
+    :func:`raster_content_identity` result (:func:`raster_identity_matches`) and carries the
+    georeferencing that result recorded; otherwise a summary naming which part mismatched and the
+    values behind it. Geotransform values compare exactly.
     """
     if not raster_identity_matches(recorded, source):
         return (

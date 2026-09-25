@@ -47,7 +47,7 @@ function cellText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** A cancelled sweep whose record carries no reason: shown identically in the row and the
+/** A canceled sweep whose record carries no reason: shown identically in the row and the
  * detail pane, from this one wording. */
 const NO_CANCEL_REASON = "no reason recorded";
 
@@ -159,17 +159,17 @@ export function TuningTab() {
       setTrialMetrics([]);
       return;
     }
-    let cancelled = false;
+    let canceled = false;
     void tuningApi.getTrialMetrics(selectedId, selectedTrialId).then(
       (r) => {
-        if (!cancelled) setTrialMetrics(r.metrics ?? []);
+        if (!canceled) setTrialMetrics(r.metrics ?? []);
       },
       () => {
-        if (!cancelled) setTrialMetrics([]);
+        if (!canceled) setTrialMetrics([]);
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [selectedId, selectedTrialId]);
 
@@ -179,19 +179,19 @@ export function TuningTab() {
     setRayUrl(null);
     setRayError(null);
     if (!selectedId) return;
-    let cancelled = false;
+    let canceled = false;
     void tuningApi.getRayDashboard().then(
       (r) => {
-        if (cancelled) return;
+        if (canceled) return;
         setRayUrl(r.url);
         setRayError(r.url ? null : "Ray's dashboard isn't running right now.");
       },
       (e) => {
-        if (!cancelled) setRayError(messageOf(e));
+        if (!canceled) setRayError(messageOf(e));
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [selectedId, rayAttempt]);
 
@@ -227,17 +227,17 @@ export function TuningTab() {
     if (!selectedId || !selectedTrialId) return;
     const sweepId = selectedId;
     const trialId = selectedTrialId;
-    let cancelled = false;
+    let canceled = false;
     void tuningApi.launchTrialTensorboard(sweepId, trialId).then(
       (launched) => {
-        if (!cancelled) setTrialTb(launchOutcome(launched));
+        if (!canceled) setTrialTb(launchOutcome(launched));
       },
       (e) => {
-        if (!cancelled) setTrialTb({ url: null, error: messageOf(e) });
+        if (!canceled) setTrialTb({ url: null, error: messageOf(e) });
       },
     );
     return () => {
-      cancelled = true;
+      canceled = true;
       void tuningApi.stopTrialTensorboard(sweepId, trialId).catch(() => {
         /* the trial's TensorBoard is already gone */
       });
@@ -330,7 +330,7 @@ export function TuningTab() {
             void onCancelSweep(s.sweep_id);
           }}
         >
-          {pending === "cancel" ? "Cancelling…" : "Cancel"}
+          {pending === "cancel" ? "Canceling…" : "Cancel"}
         </button>
       );
     }
@@ -460,9 +460,9 @@ export function TuningTab() {
                 <div role="status" aria-live="polite" className="text-[11px] text-tcip-muted">
                   {SWEEP_NO_RECORD_YET}
                 </div>
-              ) : detail.status === "cancelled" ? (
+              ) : detail.status === "canceled" ? (
                 <div className="text-[11px] text-tcip-muted">
-                  Cancelled: {detail.error ?? NO_CANCEL_REASON}
+                  Canceled: {detail.error ?? NO_CANCEL_REASON}
                 </div>
               ) : hasContent(detail.result) ? (
                 <>
@@ -609,7 +609,7 @@ export function TuningTab() {
                   ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned${
                       s.split_draws != null && s.split_draws > 1
                         ? `, ${s.split_draws} draws each${
-                            s.redraws_within_selection ? " inside the bound selection" : ""
+                            s.redraw_within_selection ? " inside the bound selection" : ""
                           }`
                         : ""
                     }`
@@ -676,7 +676,7 @@ export function TuningTab() {
                             {s.error}
                           </span>
                         ) : (
-                          s.status === "cancelled" && (
+                          s.status === "canceled" && (
                             <span className="block text-[10px] text-tcip-muted">
                               {NO_CANCEL_REASON}
                             </span>

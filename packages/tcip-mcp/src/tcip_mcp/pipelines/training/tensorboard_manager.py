@@ -1,31 +1,17 @@
 """TensorBoard process management for training and HPO runs.
 
-A launched child is tied to the life of the process that launched it, since nothing else stops
-it once the launcher is gone. On Windows every child is assigned to one job object created with
-``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``, so the kernel kills every assigned child the moment this
-process's last handle to the job closes, on any parent death. On Linux and macOS each child runs
-under a guardian process (``tensorboard_guardian``) that watches this process by pid and, on this
-process's death, ends the child within the guardian's own ``_PARENT_POLL_SECONDS`` (about a
-second) to detect the death, plus ``_GUARDIAN_TERM_GRACE_SECONDS`` for a child that ignores its
-terminate signal, about three seconds together at these values. Everywhere, and as a second
-line of defense beside the platform tie, a normal interpreter exit runs an ``atexit`` hook that
-stops every tracked child, which does not run when this process is killed rather than exiting on
-its own.
+A launched child is tied to the life of the process that launched it. On Windows every child is
+assigned to one job object created with ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``, so the kernel kills
+every assigned child when this process's last handle to the job closes. On Linux and macOS each
+child runs under a guardian process (``tensorboard_guardian``) that watches this process by pid
+and, on its death, ends the child within ``_PARENT_POLL_SECONDS`` plus
+``_GUARDIAN_TERM_GRACE_SECONDS``. Everywhere, a normal interpreter exit runs an ``atexit`` hook
+that stops every tracked child.
 
-``_GUARDIAN_TERM_GRACE_SECONDS`` (passed to the guardian as ``--term-grace``, which carries no
-grace of its own) must stay more than a second under ``_STOP_WAIT_SECONDS``, the wait
-``stop_tensorboard`` gives the guardian to end before force-killing it; a module-level check at
-import raises if it does not, so the two never drift apart silently. With the constraint held,
-the guardian's kill of a stubborn TensorBoard lands, and the guardian itself exits, before this
-process's own wait gives up and reports stopped with TensorBoard still alive underneath it. Two
-cases are left uncovered: the guardian failing to exit within that first wait despite the
-margin, and a guardian the kernel ends outright rather than through its own signal handling
-(``entry.proc.poll()`` is then already set, so ``stop_tensorboard`` skips its own terminate and
-kill and answers stopped while TensorBoard keeps running with nothing watching it).
-``stop_tensorboard``'s own docstring states what its own kill of the guardian then does to a
-TensorBoard still mid-escalation. The half-second startup grace below covers the guardian's own
-start (about 0.2 to 0.3 s measured), leaving about 0.2 to 0.3 s of it as the margin left for
-TensorBoard's own failure to surface in time.
+``_GUARDIAN_TERM_GRACE_SECONDS`` must stay more than a second under ``_STOP_WAIT_SECONDS``, the
+wait ``stop_tensorboard`` gives the guardian to end before force-killing it; a module-level check
+at import raises if it does not. Uncovered: a guardian that fails to exit within that first wait,
+and a guardian the kernel ends outright, leaving TensorBoard running unwatched.
 """
 
 from __future__ import annotations
@@ -50,9 +36,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _Launched:
-    """A TensorBoard child this process is tracking: its port, output capture, and lifetime tie
-    live here, not stuffed onto the ``Popen`` object, since an attribute added to it at runtime
-    is invisible to callers that only know the process's declared type."""
+    """A TensorBoard child this process tracks: its port, output capture and lifetime tie."""
 
     proc: subprocess.Popen
     port: int
@@ -192,14 +176,9 @@ if sys.platform == "win32":
 
 
 def _stop_all_tracked() -> None:
-    """Stop every child this process still has tracked, for the atexit hook to call.
-
-    Runs serially, one stop after another, each up to twice ``_STOP_WAIT_SECONDS`` (the wait for
-    a clean exit, then the same wait again for the kill to be reaped). A stop that cannot confirm
-    its kill within that reports so rather than raising, so this continues past any single
-    stop's outcome instead of leaving the rest of the sweep unrun; each such answer is logged
-    here too, so a TensorBoard the exit sweep leaves running is visible in the log rather than
-    only in a return value nothing reads.
+    """Stop every child this process still has tracked, for the atexit hook to call, serially, each
+    up to twice ``_STOP_WAIT_SECONDS``. A stop that cannot confirm its kill is logged and the sweep
+    continues.
     """
     for key in list(_TB_PROCESSES):
         result = stop_tensorboard(key=key)
@@ -272,22 +251,16 @@ def _release_output(entry: _Launched) -> None:
 def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
     """Launch a TensorBoard process for the given log directory.
 
-    ``key`` is the tracking key this process's children are indexed by, generic since a sweep
-    and a trial each pass their own unnamespaced key while a run passes none and is keyed by its
-    own log directory (the default below), so a caller-chosen record id can never collide with a
-    sweep's or a trial's key.
+    ``key`` is the tracking key this process's children are indexed by; a run passes none and is
+    keyed by its own log directory.
 
-    Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or
-    ``{'error': ..., 'output': ...}`` when the process died during startup, so a caller never
-    advertises a URL nothing is serving. If TensorBoard is already running for this logdir,
-    returns existing info. ``lifetime_tie`` is ``"job"``, ``"guardian"``, or ``"none: <reason>"``,
-    a fact recorded for whichever caller wants it; no route reads it. Two things can go
-    wrong here: an exception during the launch or the tie assignment is a failed launch, the
-    child killed and waited if one was started, reported back as ``error``, a kill this cannot
-    confirm within ``_STOP_WAIT_SECONDS`` folded into that same message by pid rather than
-    raising a ``TimeoutExpired`` out of this function; a platform tie call returning falsy for
-    failure (the Windows job API's own convention) is not an exception, the launch still
-    succeeds and ``lifetime_tie`` becomes ``"none: <reason>"`` instead.
+    Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
+    ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
+    returns existing info. ``lifetime_tie`` is ``"job"``, ``"guardian"``, or ``"none: <reason>"``.
+    An exception during the launch or the tie assignment is a failed launch, the child killed and
+    waited if one was started, reported back as ``error`` (a kill this cannot confirm within
+    ``_STOP_WAIT_SECONDS`` named by pid in that message); a platform tie call returning falsy for
+    failure still succeeds with ``lifetime_tie`` ``"none: <reason>"``.
     """
     logdir = str(Path(logdir).resolve())
     key = key or logdir
@@ -357,28 +330,14 @@ def launch_tensorboard(logdir: str, key: str | None = None) -> dict:
 def stop_tensorboard(key: str | None = None, logdir: str | None = None) -> dict:
     """Stop a running TensorBoard process.
 
-    Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it
-    and waits the same bound again for the kill to be reaped, so the worst case is twice the
-    wait, never unbounded; the entry is dropped from tracking either way. What is left watching
-    the child once this function returns depends on ``entry.lifetime_tie``: with ``"job"``,
-    ``entry.proc`` is TensorBoard itself and the Windows job object stays assigned regardless of
-    this function's own outcome, so a parent-process death later still ends it; with
-    ``"guardian"``, ``entry.proc`` is the guardian, not TensorBoard, and nothing is left watching
-    TensorBoard once this function returns, whatever its answer: either this function's own
-    terminate/kill ends the guardian, or the guardian's ``poll()`` was already set (the kernel
-    ended it outright) and this function's own signals never reach it at all; with
-    ``"none: ..."``, ``entry.proc`` is TensorBoard itself, held until this call by the atexit
-    sweep (which holds every tracked entry regardless of its tie) beside this function's own
-    wait, and by nothing at all once this call has dropped it from tracking. A
-    kill this cannot confirm reaped within that second wait is logged (the key and pid) and
-    answered ``{"status": "kill_unconfirmed", "pid": ...}`` rather than left to raise a
-    ``TimeoutExpired`` out of this function. On a guardian tie, reaching the second wait means
-    the first one gave up on the guardian's own graceful exit (forwarding ``SIGTERM`` to
-    TensorBoard and waiting on it), so this function's own ``kill()`` call lands on the guardian
-    directly, a signal it cannot catch or forward, and if TensorBoard had not yet been stopped by
-    the guardian's own escalation that TensorBoard is now orphaned; the answer is then
-    ``stopped`` (the guardian's own death is reaped by the second wait) or ``kill_unconfirmed``
-    (it is not).
+    Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it and
+    waits the same bound again for the kill to be reaped; the entry is dropped from tracking either
+    way. A kill this cannot confirm reaped within that second wait is logged (the key and pid) and
+    answered ``{"status": "kill_unconfirmed", "pid": ...}``.
+
+    On a ``"guardian"`` tie, ``entry.proc`` is the guardian, and a kill that reaches it can orphan
+    a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or
+    ``kill_unconfirmed`` for the guardian itself.
     """
     key = key or (str(Path(logdir).resolve()) if logdir else None)
     if not key or key not in _TB_PROCESSES:

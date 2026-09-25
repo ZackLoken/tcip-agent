@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 def _load(path: Path):
@@ -24,12 +25,7 @@ def _load(path: Path):
 
 
 def _note_version(findings: list, where: str, store: str, doc) -> None:
-    """Report, never refuse, a document whose schema_version this reader does not accept.
-
-    The doctor reads raw files and reports findings; it never acts on a document's content, so
-    an unsupported version is a finding here, not the hard refusal a reader about to train or
-    measure on the document would raise.
-    """
+    """Report, never refuse, a document whose schema_version this reader does not accept."""
     from tcip_store import SchemaVersionRefused, check_schema_version, get_descriptor
 
     try:
@@ -38,14 +34,63 @@ def _note_version(findings: list, where: str, store: str, doc) -> None:
         findings.append(("warn", f"{where}: {exc}"))
 
 
-def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | None") -> None:
-    """Append one collided-bucket finding, skipping a message this run already reported.
+def _read_reporting_version(findings: list, root: Path, key, path: Path) -> dict | None:
+    """One store document read through the seam, ``{}`` when none is stored, or ``None`` with a
+    warning finding when its schema version is above this reader's."""
+    import tcip_store
+    from tcip_store import SchemaVersionRefused
 
-    ``check_negatives``, ``check_data_quality`` and ``check_state`` each independently enumerate
-    the same ``images/`` tree, through ``_image_stems`` or ``_scan_dataset``, and can reach the
-    identical collision; a breeder reads about it once, not once per check that reaches it.
-    ``seen`` is ``None`` for a check run standalone (every existing single-check test), which
-    reports exactly as before.
+    try:
+        return tcip_store.read(key, default={})
+    except SchemaVersionRefused as exc:
+        findings.append(("warn", f"{path.relative_to(root)}: {exc}"))
+        return None
+
+
+def _census(root: Path, findings: list, seen: "set[str]") -> dict | None:
+    """The one dataset census a doctor run reads (``data_tools._scan_dataset``), or ``None`` with
+    its failure reported: an ``images/`` stem collision or an unreadable ``.bandgroup``
+    manifest.
+
+    ``label_reads`` maps each census label's resolved path to its annotations as the one
+    per-image reader (``json_io.read_annotations``) returns them, or to the
+    ``UnreadableLabelDocument`` it raised: every check that reads a label reads it from here, so
+    a run reads each label once, and only :func:`check_data_quality` reports an unreadable one.
+    """
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_mcp.tools.data_tools import _scan_dataset
+    from tcip_store import SchemaVersionRefused
+
+    try:
+        scan = _scan_dataset(str(root))
+    except AmbiguousImageStem as exc:
+        _report_stem_collision(findings, exc, seen)
+        return None
+    except SchemaVersionRefused as exc:
+        _report_band_group_version_refusal(findings, root, exc)
+        return None
+    label_reads: dict[Path, object] = {}
+    for label in scan["labels"]:
+        try:
+            label_reads[Path(label).resolve()] = read_annotations(label)
+        except UnreadableLabelDocument as exc:
+            label_reads[Path(label).resolve()] = exc
+    return {**scan, "label_reads": label_reads}
+
+
+def _readable_annotations(census: dict, label: Path) -> list | None:
+    """``label``'s annotations from the census's one read, ``[]`` for a label the census holds no
+    file for, ``None`` for one that will not read (:func:`check_data_quality`'s finding)."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    read = census["label_reads"].get(Path(label).resolve(), [])
+    return None if isinstance(read, UnreadableLabelDocument) else read
+
+
+def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | None") -> None:
+    """Append one collided-bucket finding, skipping a message this run already reported; ``seen``
+    is ``None`` for a check run standalone.
     """
     message = str(exc)
     if seen is not None:
@@ -56,10 +101,8 @@ def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | Non
 
 
 def _report_band_group_version_refusal(findings: list, root: Path, exc: Exception) -> None:
-    """Report a ``.bandgroup`` manifest whose ``schema_version`` this reader does not accept as
-    a finding naming the images tree it sits under, rather than letting the doctor crash: the
-    same soft-rail posture :func:`_note_version` already takes for every other versioned
-    document the doctor reads.
+    """Report a ``.bandgroup`` manifest whose ``schema_version`` this reader does not accept as a
+    finding naming the images tree it sits under.
     """
     from tcip_mcp.dataset_layout import image_root
 
@@ -69,9 +112,9 @@ def _report_band_group_version_refusal(findings: list, root: Path, exc: Exceptio
 def _image_stems(root: Path) -> dict[str, str]:
     """stem -> file name for every image under images/ (the flat form and every date bucket),
     through the platform's own bucket enumeration, so a stem collision within one bucket refuses
-    here too rather than this walk silently keeping one raw file of the pair. A stem present in
-    more than one bucket keeps the latest bucket's file, buckets visited in sorted (chronological,
-    for ISO dates) order."""
+    here too. A stem present in more than one bucket keeps the latest bucket's file, buckets
+    visited in sorted (chronological, for ISO dates) order.
+    """
     from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
@@ -86,39 +129,35 @@ def _image_stems(root: Path) -> dict[str, str]:
     return out
 
 
-def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
-    """A negative is empty labels + human Complete, per subject: flag every disk/status disagreement.
+def check_negatives(root: Path, findings: list, *, census: dict | None,
+                    seen: "set[str] | None" = None) -> None:
+    """A negative is empty labels + human Complete, per subject: flag every disk/status
+    disagreement.
 
     Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
     subject and date, so the disagreement is checked per subject present in the file. An
-    image-level record (a subject with no geometry) counts as content for that subject, the same
-    rule ``annotations_hold_subject`` applies everywhere else this question is asked.
+    image-level record (a subject with no geometry) counts as content for that subject. Reads the
+    status store through the storage seam.
 
-    Reads the status store through the same seam ``check_data_quality`` reads it through, so
-    the two agree on one root under whichever backend the process is bound to. Not gated in
-    ``gated_stores`` for that reason: the label files this check also walks are blobs, a real
-    file under both backends, so neither read can be stale relative to the bound backend the way
-    a raw document read would be behind the database.
-
-    ``seen`` carries a stem-collision message across this check, ``check_data_quality`` and
-    ``check_state``, all three of which enumerate the same ``images/`` tree, so one collision is
-    reported once for a run that passes the same set to all three (``main``'s own call), rather
-    than once per check that happens to reach it.
+    ``census`` is the run's one dataset census (:func:`_census`), ``None`` when it could not be
+    taken; ``seen`` carries a stem-collision message across the checks that enumerate the same
+    ``images/`` tree, so one collision is reported once per run. An unreadable label is
+    :func:`check_data_quality`'s finding.
     """
-    from tcip_annotation import json_io
-    from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import (
-        LABEL_SUFFIX, annotation_date, annotation_root, annotations_hold_subject,
-        bucket_subject_date, confirmed_negative_names_any_subject, is_confirmed_negative,
-        label_filename, normalize_status_store, read_image_status_store, resolve_image_name,
+        annotation_date, annotations_hold_subject, bucket_subject_date,
+        confirmed_negative_names_any_subject, is_confirmed_negative, status_tokens,
+        read_image_status_store, resolve_image_name,
     )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_store import SchemaVersionRefused, StoreError
+    from tcip_store import StoreError
+
+    if census is None:
+        return
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
     try:
-        by_bucket = normalize_status_store(read_image_status_store(root))
+        by_bucket = status_tokens(read_image_status_store(root))
     except StoreError as exc:
         # The same soft-rail posture check_status_tokens already takes on this file: a reporter
         # names what it could not verify rather than blocking the whole run over it.
@@ -130,20 +169,13 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
     except AmbiguousImageStem as exc:
         _report_stem_collision(findings, exc, seen)
         return
-    except SchemaVersionRefused as exc:
-        _report_band_group_version_refusal(findings, root, exc)
-        return
-    ann_root = annotation_root(root)
+    labels = [Path(p) for p in census["labels"]]
     neg_names = confirmed_negative_names_any_subject(by_bucket)
     ambiguous_reported: set[str] = set()
 
-    for label in ann_root.rglob(f"*{LABEL_SUFFIX}") if ann_root.is_dir() else []:
-        if BASELINE_DIRNAME in label.parts:
-            continue
-        try:
-            anns = json_io.read_annotations(str(label))
-        except UnreadableLabelDocument as exc:
-            findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
+    for label in labels:
+        anns = _readable_annotations(census, label)
+        if anns is None:
             continue
         date = annotation_date(label)
         try:
@@ -165,18 +197,11 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
                     findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations "
                                     f"but the status store says 'negative' for {subj!r}, "
                                     "contradictory; re-review"))
-        if not anns and (name is None or name not in neg_names):
-            findings.append(("warn", f"{label.relative_to(root)}: empty label but not a confirmed "
-                            "negative for any subject; excluded from training (delete the file, or "
-                            "mark the image Complete for the subject it should be a negative of)"))
-        if label.stem not in stems:
-            findings.append(("warn", f"{label.relative_to(root)}: label has no matching image"))
 
-    # Images with no label record at all: excluded from training, so a breeder who labelled 30 of
+    # Images with no label record at all: excluded from training, so a breeder who labeled 30 of
     # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
-    labelled = {p.stem for p in ann_root.rglob(f"*{LABEL_SUFFIX}")
-                if BASELINE_DIRNAME not in p.parts} if ann_root.is_dir() else set()
-    unannotated = sorted(set(stems) - labelled)
+    labeled = {p.stem for p in labels}
+    unannotated = sorted(set(stems) - labeled)
     if unannotated:
         shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
         findings.append(("info", f"{len(unannotated)} of {len(stems)} image(s) have no label "
@@ -184,57 +209,36 @@ def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = Non
                         "the genuinely-empty ones Complete to train them as negatives."))
 
     for name in neg_names:
-        stem = Path(name).stem
-        det = list(ann_root.rglob(label_filename(stem))) if ann_root.is_dir() else []
-        if not det:
+        if Path(name).stem not in labeled:
             findings.append(("warn", f"status says {name} is negative but no label file exists "
                             "(a confirmed negative should have an empty label file)"))
 
 
-def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
+def check_data_quality(root: Path, findings: list, *, census: dict | None) -> None:
     """Per-file annotation quality: stem matching between images and labels, an empty per-image
     label with no human confirmation the image is a negative, and a file the one per-image reader
     refuses (undecodable, a dataset-level COCO, an unrecognized shape), each file read on its own
     so one bad document never hides the findings about the rest.
 
-    Reuses ``data_tools._scan_dataset``'s own image/label census rather than re-deriving it, so
-    this check and ``scan_dataset`` can never silently disagree on what counts as a label. Some
-    overlap with ``check_negatives`` is expected (an orphan or unconfirmed-empty per-image label
-    can be named by both).
-
-    Reads the status store through the same seam ``check_negatives`` reads it through, so the
-    two agree on one root under whichever backend the process is bound to. Not gated in
-    ``gated_stores`` for that reason: the label files this check reads through ``_scan_dataset``
-    are blobs, a real file under both backends, so neither read can be stale relative to the
-    bound backend the way a raw document read would be behind the database.
-
-    ``seen`` is the same cross-check stem-collision set ``check_negatives`` takes, so the three
-    checks that enumerate ``images/`` report one collision once, not once each.
+    Reads the run's one dataset census (``census``, ``None`` when it could not be taken), and
+    the status store through the storage seam.
     """
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations as read_labels
     from tcip_mcp.dataset_layout import (
-        annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
+        annotation_date, confirmed_negative_names_any_subject, status_tokens,
         read_image_status_store, resolve_image_name,
     )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_mcp.tools.data_tools import _scan_dataset
-    from tcip_store import SchemaVersionRefused, StoreError
+    from tcip_store import StoreError
 
-    try:
-        scan = _scan_dataset(str(root))
-    except AmbiguousImageStem as exc:
-        _report_stem_collision(findings, exc, seen)
+    if census is None:
         return
-    except SchemaVersionRefused as exc:
-        _report_band_group_version_refusal(findings, root, exc)
-        return
-
+    scan = census
     image_stems = {Path(p).stem for p in scan["images"]}
     ambiguous_reported: set[str] = set()
 
     try:
         negatives = confirmed_negative_names_any_subject(
-            normalize_status_store(read_image_status_store(str(root)))
+            status_tokens(read_image_status_store(str(root)))
         )
     except StoreError as exc:
         # The same soft-rail posture check_negatives already takes on this file: a reporter
@@ -249,10 +253,9 @@ def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = 
         stem = label.stem
         if stem not in image_stems:
             findings.append(("error", f"{rel}: no matching image"))
-        try:
-            anns = read_labels(label_path)
-        except UnreadableLabelDocument as exc:
-            findings.append(("error", f"{rel}: label file will not read: {exc}"))
+        anns = scan["label_reads"][label.resolve()]
+        if not isinstance(anns, list):
+            findings.append(("error", f"{rel}: label file will not read: {anns}"))
             continue
         if not anns:
             try:
@@ -268,69 +271,45 @@ def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = 
                                 "negative for any subject; excluded from training"))
 
 
-def check_reserved_names(root: Path, findings: list) -> None:
+def check_reserved_names(root: Path, findings: list, *, census: dict | None) -> None:
     """Flag every image and label document whose stem is reserved for a prediction bucket's own
-    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``).
+    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``), as the dataset census names
+    them."""
+    if census is None:
+        return
+    scan = census
+    for p in scan["reserved_name_images"]:
+        findings.append(("error", f"{Path(p).relative_to(root)}: image stem is reserved for a "
+                        "prediction bucket's own provenance stamp; its label can never be read "
+                        "through any bucket walk"))
+    for p in scan["reserved_name_labels"]:
+        findings.append(("error", f"{Path(p).relative_to(root)}: label filename is reserved for "
+                        "a prediction bucket's own provenance stamp; it is excluded from every "
+                        "bucket walk and its annotations are unreadable through them"))
 
-    Ingest and band grouping both refuse to mint one, but data not brought in through the
-    platform (a hand-placed file, an older export) can still carry one, and every walk that
-    enumerates a bucket through ``prediction_documents`` silently excludes it rather than raising.
-    This check walks with ``rglob``, so it sees exactly what those walks hide.
+
+def check_status_tokens(root: Path, findings: list, *, census: dict | None) -> None:
+    """Flag a stored ``"complete"`` whose label file holds no annotation of the confirmed subject
+    (a stale token), and a status store above this reader's schema version. A report, never a
+    rewrite. Labels are read from the run's one census (``None`` when it could not be taken); an
+    unreadable one is :func:`check_data_quality`'s finding.
     """
-    from tcip_annotation.json_io import is_sidecar_name
-    from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root, image_root, label_filename
-    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
-
-    images = image_root(root)
-    if images.is_dir():
-        for p in sorted(images.rglob("*")):
-            if (p.is_file() and p.suffix.lower() in IMAGE_EXTS
-                    and is_sidecar_name(label_filename(p.stem))):
-                findings.append(("error", f"{p.relative_to(root)}: image stem is reserved for a "
-                                "prediction bucket's own provenance stamp; its label can never be "
-                                "read through any bucket walk"))
-
-    ann_root = annotation_root(root)
-    if ann_root.is_dir():
-        for p in sorted(ann_root.rglob(f"*{LABEL_SUFFIX}")):
-            if p.is_file() and is_sidecar_name(p.name):
-                findings.append(("error", f"{p.relative_to(root)}: label filename is reserved for "
-                                "a prediction bucket's own provenance stamp; it is excluded from "
-                                "every bucket walk and its annotations are unreadable through them"))
-
-
-def check_status_tokens(root: Path, findings: list) -> None:
-    """Flag two ways the status store can no longer be trusted at face value: an entry a reader
-    doesn't recognize (dropped silently by any merge), and a stored ``"complete"`` whose label
-    file holds no annotation of the confirmed subject (a stale token). The GUI's own hydrate
-    surfaces the same disagreement for re-confirmation but never rewrites it, so this finding may
-    already be one the breeder has seen and not yet acted on, not a new discovery. A report, not a
-    rewrite either way: the record names who confirmed it, and this doctor is not that person.
-    """
-    from tcip_annotation import json_io
-    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
-        IMAGE_STATUS_STORE, annotation_path, annotations_hold_subject, bucket_subject_date,
-        image_status_path, status_confirmations, unreadable_status_entries,
+        annotation_path, annotations_hold_subject, bucket_subject_date, image_status_key,
+        image_status_path, status_confirmations,
     )
 
-    raw = _load(image_status_path(root))
-    _note_version(findings, str(image_status_path(root).relative_to(root)), IMAGE_STATUS_STORE, raw)
-    unreadable = unreadable_status_entries(raw)
-    if unreadable:
-        findings.append(("warn", f"{len(unreadable)} status entr{'y is' if len(unreadable) == 1 else 'ies are'} "
-                        f"in a shape this reader does not recognize, starting with {unreadable[:3]}"))
+    raw = _read_reporting_version(findings, root, image_status_key(root), image_status_path(root))
+    if raw is None or census is None:
+        return
 
     for bucket, records in status_confirmations(raw).items():
         subject, date = bucket_subject_date(bucket)
         for name, record in records.items():
-            if record.get("status") != "complete":
+            if record["status"] != "complete":
                 continue
-            label = annotation_path(root, date, Path(name).stem)
-            try:
-                anns = json_io.read_annotations(str(label)) if label.is_file() else []
-            except UnreadableLabelDocument as exc:
-                findings.append(("error", f"{bucket}/{name}: label file will not read: {exc}"))
+            anns = _readable_annotations(census, annotation_path(root, date, Path(name).stem))
+            if anns is None:
                 continue
             if not annotations_hold_subject(anns, subject):
                 findings.append(("warn", f"{bucket}/{name}: status says 'complete' but the label "
@@ -345,19 +324,13 @@ def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
     every prediction bucket whose stamp names a checkpoint digest no registry entry carries.
 
-    The bucket walk includes the cleared archive (``include_cleared=True``): a de-registered
-    checkpoint behind a cleared bucket's own stamp is still a fact worth a warning, on every run.
+    The bucket walk includes the cleared archive (``include_cleared=True``).
 
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
-    when the root itself sits under one (a fixture, a sandboxed workspace): a marker anywhere in
-    that path is then a fact about the root's own location, not the checkpoint's, and the project
-    is legitimate work, not pollution. Only a checkpoint the root does not contain is scanned, the
-    genuinely stray case the marker exists to catch.
+    when the root itself sits under one; only a checkpoint the root does not contain is scanned.
 
-    Every way the registry index can refuse to be read comes out as a finding, not as a
-    traceback: the doctor's contract is an exit code and a list, and a check that dies takes the
-    whole run's findings and exit code with it. A store that will not decode and a database file
-    that will not open are both "this could not be checked", which is not the same answer as clean.
+    Every way the registry index can refuse to be read (a store that will not decode, a database
+    file that will not open) comes out as a finding, not as a traceback.
     """
     from tcip_store import StoreError
 
@@ -374,39 +347,25 @@ def check_registry(root: Path, findings: list) -> None:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
         return
-    entry_list = entries if isinstance(entries, list) else []
     root_resolved = Path(root).resolve()
-    for m in entry_list:
-        ckpt_raw = m.get("checkpoint_path", "")
-        if "metrics_source" not in m:
-            findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
-                            "metrics_source (predates the field, and experiment_id with it); "
-                            "no operator door adds either missing field to an existing entry"))
-        if "experiment_id" not in m:
-            findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
-                            "experiment_id (predates the producer-binding field); no operator "
-                            "door adds the missing field to an existing entry"))
-        if not ckpt_raw:
-            continue
+    for m in entries:
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
-            resolved = resolved_registry_path(root, ckpt_raw)
+            resolved = resolved_registry_path(root, m["checkpoint_path"])
         except (RegistryPathEmpty, RegistryPathTraversal) as exc:
-            findings.append(("error", f"registry entry {m.get('name')!r} checkpoint_path "
+            findings.append(("error", f"registry entry {m['name']!r} checkpoint_path "
                             f"could not be resolved: {exc}"))
             continue
         ckpt = str(resolved)
         stray = not is_at_or_under(resolved, root_resolved) and any(
             marker in ckpt for marker in TEMP_TREE_MARKERS)
         if stray:
-            findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
+            findings.append(("error", f"registry entry {m['name']!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))
         elif not Path(ckpt).is_file():
-            findings.append(("error", f"registry entry {m.get('name')!r} checkpoint missing: {ckpt}"))
+            findings.append(("error", f"registry entry {m['name']!r} checkpoint missing: {ckpt}"))
 
-    # A bucket predating the checkpoint-digest rail may name a digest no entry carries; visible
-    # here, never floored. The sidecar is read through the store seam, not a plain-file glob.
-    registered_shas = {m.get("sha256") for m in entry_list}
+    registered_shas = {m["sha256"] for m in entries}
     for bucket in prediction_bucket_dirs(root, include_cleared=True):
         sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
         if sha and sha not in registered_shas:
@@ -416,33 +375,19 @@ def check_registry(root: Path, findings: list) -> None:
                             "provenance verifiable going forward."))
 
 
-def check_provenance(root: Path, findings: list) -> None:
-    from tcip_annotation.json_io import ANNOTATIONS_KEY, UnreadableLabelDocument, load_label_document
-    from tcip_annotation.review_engine import BASELINE_DIRNAME
-    from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root
+def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
     from tcip_mcp.pipelines.model_build import SNAPSHOT_MANIFEST_STORE
 
-    ann_root = annotation_root(root)
     unstamped = 0
-    for label in ann_root.rglob(f"*{LABEL_SUFFIX}") if ann_root.is_dir() else []:
-        if BASELINE_DIRNAME in label.parts:
-            continue
-        try:
-            data = load_label_document(label)
-        except UnreadableLabelDocument as exc:
-            findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
-            continue
-        for o in data.get(ANNOTATIONS_KEY, []) if isinstance(data.get(ANNOTATIONS_KEY), list) else []:
-            if not isinstance(o, dict):
-                continue
-            if o.get("accepted_by") and not o.get("created_by"):
+    for label in map(Path, census["labels"] if census is not None else []):
+        for a in (_readable_annotations(census, label) if census is not None else None) or []:
+            if a.accepted_by and not a.created_by:
                 findings.append(("warn", f"{label.relative_to(root)}: annotation has accepted_by "
                                 "without created_by (acceptance without origin)"))
-            if not o.get("created_by"):
+            if not a.created_by:
                 unstamped += 1
     if unstamped:
-        findings.append(("info", f"{unstamped} GT annotations carry no created_by (pre-provenance "
-                        "data; fine, but new writes should always stamp)"))
+        findings.append(("info", f"{unstamped} GT annotations carry no created_by"))
 
     # Bespoke-run source snapshots: a manifest that failed to capture a declared
     # file is now self-describing rather than silently indistinguishable from a complete one.
@@ -494,134 +439,48 @@ def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -
                 findings.append(("warn", f"review shard {shard.name} references unknown image {img!r}"))
 
 
-def check_region_completeness(root: Path, findings: list) -> None:
+def check_region_completeness(root: Path, findings: list, *, census: dict | None) -> None:
     """A region-completeness attestation whose cell content has since been edited or deleted is a
     stale claim block calibration could otherwise trust silently; flag every disagreement between
-    an attested cell's stamped digest and its current annotation content."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    an attested cell's stamped digest and its current annotation content. An attestation whose
+    label the run's census (``None`` when it could not be taken) read as unreadable is skipped:
+    that is :func:`check_data_quality`'s finding."""
     from tcip_mcp.dataset_layout import (
-        REGION_COMPLETENESS_DIGEST_STORE, REGION_COMPLETENESS_STORE, bucket_subject_date,
-        normalize_region_completeness_store, region_completeness_digest_path,
-        region_completeness_path, unreadable_completeness_entries,
+        annotation_path, region_completeness_digest_key, region_completeness_digest_path,
+        region_completeness_key, region_completeness_path,
     )
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
-    raw = _load(region_completeness_path(root))
-    _note_version(
-        findings, str(region_completeness_path(root).relative_to(root)),
-        REGION_COMPLETENESS_STORE, raw,
-    )
-    unreadable = unreadable_completeness_entries(raw)
-    if unreadable:
-        findings.append(("warn", f"{len(unreadable)} region-completeness entr"
-                        f"{'y is' if len(unreadable) == 1 else 'ies are'} in a shape this reader "
-                        f"does not recognize, starting with {unreadable[:3]}"))
-
-    # Read and version-check the digest file before the no-recognized-bucket early return below,
-    # so a bumped digest shape is still reported even when the main store parses to nothing.
-    digests = _load(region_completeness_digest_path(root))
-    _note_version(
-        findings,
-        str(region_completeness_digest_path(root).relative_to(root)),
-        REGION_COMPLETENESS_DIGEST_STORE,
-        digests,
-    )
-
-    store = normalize_region_completeness_store(raw)
-    if not store:
+    # Both read before either is judged, so a digest store above this reader's version is reported
+    # even when the attestations hold no bucket.
+    store = _read_reporting_version(
+        findings, root, region_completeness_key(root), region_completeness_path(root))
+    digests = _read_reporting_version(
+        findings, root, region_completeness_digest_key(root),
+        region_completeness_digest_path(root))
+    if not store or digests is None:
         return
-    if not isinstance(digests, dict):
-        digests = {}
     for bucket, record in store.items():
-        subject = record.get("subject")
-        if not isinstance(subject, str) or not subject:
-            subject, _ = bucket_subject_date(bucket)
-        stamped = digests.get(bucket)
-        try:
-            stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
-        except UnreadableLabelDocument as exc:
-            findings.append(("error", f"region completeness for {subject!r} on "
-                            f"{record.get('stem')!r}: label file will not read: {exc}"))
+        subject = record["subject"]
+        label = annotation_path(root, record["date"], record["stem"])
+        annotations = _readable_annotations(census, label) if census is not None else None
+        if annotations is None:
             continue
+        stale = stale_cells(record, annotations, digests.get(bucket, {}), subject)
         if stale:
             findings.append(("error", f"region completeness for {subject!r} on "
-                            f"{record.get('stem')!r}: cell(s) {stale} are attested complete but "
+                            f"{record['stem']!r}: cell(s) {stale} are attested complete but "
                             "either carry no stamped digest or their annotation content has "
                             "changed since attestation; re-attest"))
 
 
-def check_retired_subject_registry(root: Path, findings: list) -> None:
-    """A dataset root still carrying the pre-rename ``classes.json`` (:func:`subject_registry.
-    retired_document`), at every root the project's own records reach, so an operator learns of
-    it without a door having to hit the write refusal first.
-
-    Enumerates the dataset roots :func:`store_catalogue.project_roots` reports (the project's own
-    registered roots and every other root a run's records name); a selection directory holds one
-    record and no registry, so only a dataset root can carry the retired document. Absent from
-    :func:`gated_stores` because the retired document is no store's document under either
-    backend: a loose file the seam does not address, so the database backend's staleness gate
-    does not apply to it, and this always reads straight off disk.
-
-    ``warn``, the level a version refusal gets: a document a reader refuses whole is the soft
-    rail, the operator's next step being a hand rename to ``subjects.json``, never a defect in
-    the project's own data. A ``classes.json`` present but not decodable as a registry is a
-    second, distinct ``warn`` line: a stray file of that name, never mistaken for the retired
-    document.
-
-    ``project_roots`` itself reads the project root's own experiments store members (each run's
-    status, selection binding, curated-artifact and lineage records) and the project's
-    registered-datasets record, no sweep manifest; a root holding those as loose records under
-    the database backend cannot be enumerated, a fact about that unrelated store, not this
-    check's own subject. This is the only check that enumerates roots through ``project_roots``,
-    reading stores none of the doctor's other checks touch, so a ``StoreError`` from that
-    enumeration is reported at the soft level with the walk stopping where it could not read,
-    rather than ending the whole doctor run.
-    """
-    from tcip_store import StoreError
-    from tcip_store.layout_claims import ROOT
-
-    from tcip_mcp.dataset_layout import RETIRED_SUBJECTS_FILENAME
-    from tcip_mcp.subject_registry import retired_document
-    from tcip_mcp.store_catalogue import project_roots
-
-    try:
-        roots = project_roots(root)
-    except StoreError as exc:
-        findings.append(("warn", f"the retired-registry check could not enumerate this "
-                         f"project's roots: {exc}"))
-        return
-
-    candidates = [Path(path) for path, layout in roots if layout == ROOT]
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = str(candidate)
-        if key in seen or not candidate.is_dir():
-            continue
-        seen.add(key)
-        retired_path = candidate / RETIRED_SUBJECTS_FILENAME
-        if not retired_path.is_file():
-            continue
-        stale = retired_document(candidate)
-        if stale is not None:
-            findings.append(("warn", f"{candidate} still carries the retired registry at "
-                            f"{stale}; rename it to subjects.json by hand to conform it"))
-        else:
-            findings.append(("warn", f"{retired_path} exists but does not decode as a subject "
-                            "registry; it is a stray file, not the retired document"))
-
-
 def check_trait_specs(root: Path, findings: list) -> None:
-    """Deliberately absent from ``gated_stores()``: this reads entirely through the storage seam
-    (``load_trait_specs_with_errors``), which resolves to whichever backend the process is bound
-    to and so can never be stale relative to itself, unlike a check that reads a raw file off
-    disk."""
+    """Flag every trait spec the store fails to read, through ``load_trait_specs_with_errors``."""
     from tcip_mcp.traits import load_trait_specs_with_errors
 
     _specs, errors = load_trait_specs_with_errors(project_root=root)
     for e in errors:
-        # A version refusal or an unconformed (pre-rename) record is the doctor's own soft rail.
-        level = "warn" if e.get("kind") in ("version_refused", "unconformed") else "error"
+        level = "warn" if e.get("kind") == "version_refused" else "error"
         findings.append((level, f"trait spec {e['file']} failed to load: {e['reason']}"))
 
 
@@ -629,24 +488,20 @@ def check_trait_spec_statements(root: Path, findings: list) -> None:
     """Every registered trait spec whose own trait-spec statement is not both confirmed and
     current, one of three states: absent (the recoverable gap ``author_trait_spec``'s own second
     write can leave when it fails partway), stale (the spec moved past what the statement
-    recorded), or current but never confirmed by the breeder. The Results tab's confirmation
-    panel reads the same three states, so this is worth surfacing rather than leaving to be
-    found only when the breeder asks why, or when ``state_trait_operationalization`` refuses.
-
-    Deliberately absent from ``gated_stores()`` for the same reason as ``check_trait_specs``:
-    it reads only through the storage seam (``load_trait_specs``/``ts.read_versioned``), never a
-    raw file, so it cannot be stale relative to the backend it is reading from."""
+    recorded), or current but never confirmed by the breeder. Reads only through the storage seam.
+    """
     import tcip_store as ts
     from tcip_store import DecodeError, SchemaVersionRefused
 
     from tcip_mcp.traits import (
-        load_trait_specs,
+        load_trait_specs_with_errors,
         trait_spec_statement_key,
         trait_spec_statement_stale,
         trait_spec_statements_scope,
     )
 
-    specs = load_trait_specs(project_root=root)
+    # A spec that did not load is check_trait_specs' own finding.
+    specs, _errors = load_trait_specs_with_errors(project_root=root)
     if not specs:
         return
     scope = trait_spec_statements_scope(root)
@@ -678,47 +533,24 @@ def check_trait_spec_statements(root: Path, findings: list) -> None:
 
 
 def check_project_record(root: Path, findings: list) -> None:
-    """A project's own site, from ``tcip_mcp.project_record``: an absent record is the accepted
-    standing state of a project that predates the field, so it warns; a damaged record or a root
-    the store refuses to read is a check that could not run, the same line ``check_registry``
-    draws between could-not-be-checked and clean, so it errors.
-
-    Deliberately absent from ``gated_stores()`` for the same reason as ``check_trait_specs``: it
-    reads entirely through the storage seam, so it cannot be stale relative to the backend it
-    reads from and needs no export to be valid.
-    """
+    """An error for a project record that is absent, damaged, or on a root the store refuses to
+    read."""
     from tcip_store import StoreError
 
     from tcip_mcp.project_record import ProjectRecordInvalid, ProjectRecordMissing, read_record
 
     try:
         read_record(root)
-    except ProjectRecordMissing as exc:
-        findings.append(("warn", str(exc)))
-    except (ProjectRecordInvalid, StoreError, OSError) as exc:
+    except (ProjectRecordMissing, ProjectRecordInvalid, StoreError, OSError) as exc:
         findings.append(("error", str(exc)))
 
 
 def check_stray_state_files(root: Path, findings: list) -> None:
-    """A file under ``.tcip/state`` no store claims (``tcip_mcp.stray_state.stray_state_files``,
-    the same predicate ``delete_stray_state_file`` refuses or admits a single path through) is an
-    info finding naming that tool as the remedy, never a warn or error: a stray costs nothing to
-    leave in place, and deleting one is a person's call, not this check's.
+    """A file under ``.tcip/state`` no store claims (``tcip_mcp.stray_state.stray_state_files``) is
+    an info finding naming ``delete_stray_state_file`` as the remedy, never a warn or error.
 
-    Deliberately absent from :func:`gated_stores`, though this reads files off disk: the
-    predicate walks the tree and matches path templates (``layout_claims.claimed_files``,
-    ``adoption.plan_root``) and never consults a database, so export lag cannot move a file
-    between the claimed and unaccounted classes. An un-exported record leaves no file on disk to
-    miscall a stray (the record isn't there to misclassify), and a stale exported file still
-    matches its store's own template and reads as claimed regardless of how current its content
-    is. This check can only under-report on a behind-database root (a store's file whose record
-    was since deleted in the database still reads as claimed, since the file itself still matches
-    the template) and never over-report, and under-reporting a deletion candidate is the safe
-    direction, unlike every check ``gated_stores`` does cover. Gating it would also fold in the
-    live-state stores that share the ``.tcip/state`` prefix (``gui_snapshot``, ``canvas_meta``,
-    ``canvas_geometry``, ``project_status``), which are not doctor inputs at all and which a
-    running GUI leaves behind its database constantly, so nearly every database-held root would
-    report this check invalid rather than run it.
+    Absent from :func:`gated_stores`: the predicate matches path templates and never consults a
+    database, so on a behind-database root it can only under-report.
     """
     from tcip_mcp.stray_state import stray_state_files
     from tcip_mcp.tools.bundle import AnchorMisplaced
@@ -739,14 +571,8 @@ def check_stray_state_files(root: Path, findings: list) -> None:
 
 
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
-    """Which database-held store each file-reading check depends on, and under which root.
-
-    Exactly what the checks above read off disk, no wider: a store the doctor never reads
-    cannot make a check it does not run report anything. Live-state stores are not doctor
-    inputs and are not here. ``check_negatives`` and ``check_data_quality`` read
-    ``image_status`` through ``read_image_status_store``, the storage seam, not the raw
-    document off disk, so a database-backed root's un-exported ``image_status.json`` never
-    makes either of them stale and neither belongs here.
+    """Which database-held store each file-reading check depends on, and under which root: exactly
+    what the checks above read off disk, no wider.
     """
     return {
         "check_status_tokens": ((root, "image_status"),),
@@ -762,10 +588,9 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
 def staleness_findings(root: Path) -> dict[str, str]:
     """Per check, why its files cannot be trusted, for the checks whose stores are behind.
 
-    A root with no database is on the file layout and every check reads the authority
-    directly. A store with no counter row was never written in its database and reads current.
-    Anything else stale is reported as this check being invalid rather than as clean, because a
-    check that read files older than the database found the state of an earlier session.
+    A root with no database is on the file layout and every check reads the authority directly. A
+    store with no counter row was never written in its database and reads current. Anything else
+    stale is reported as this check being invalid rather than as clean.
     """
     from tcip_store.errors import StoreError
     from tcip_store.export import stale_stores
@@ -812,10 +637,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     # Shared across the three checks that independently enumerate images/, so an images/ tree
     # collision or an unreadable .bandgroup manifest is reported once, not once per check.
     ambiguous_seen: set[str] = set()
-    checks_taking_seen = (check_negatives, check_data_quality, check_state)
+    census = _census(root, findings, ambiguous_seen)
+    checks_taking_census = (check_negatives, check_data_quality, check_status_tokens,
+                            check_reserved_names, check_provenance, check_region_completeness)
     for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
                  check_registry, check_provenance, check_state, check_region_completeness,
-                 check_retired_subject_registry, check_trait_specs, check_trait_spec_statements,
+                 check_trait_specs, check_trait_spec_statements,
                  check_project_record, check_stray_state_files):
         reason = invalid.get(check.__name__)
         if reason:
@@ -824,10 +651,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                             "invalid, not clean: write the files out with "
                             "'tcip export-store' and run the doctor again."))
             continue
-        if check in checks_taking_seen:
-            check(root, findings, seen=ambiguous_seen)
+        run: Callable[..., None] = check
+        if check is check_negatives:
+            run(root, findings, census=census, seen=ambiguous_seen)
+        elif check is check_state:
+            run(root, findings, seen=ambiguous_seen)
+        elif check in checks_taking_census:
+            run(root, findings, census=census)
         else:
-            check(root, findings)
+            run(root, findings)
 
     rank = {"error": 0, "warn": 1, "info": 2}
     findings.sort(key=lambda f: rank[f[0]])

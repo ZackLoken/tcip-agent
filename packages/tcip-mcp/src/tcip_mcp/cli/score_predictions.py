@@ -1,19 +1,16 @@
-"""Score on-disk predictions against on-disk ground truth (COCOeval), from the command line.
+r"""Score on-disk predictions against on-disk ground truth (COCOeval), from the command line.
 
-The demoted twin of ``annotation_tools.score_predictions``: a single image file returns
-per-box matches (plus an optional per-detection breakdown with ``detail``) for a human to read;
-a dataset directory returns aggregate metrics plus per-image TP/FP/FN. Both regimes share
-``coco_detection_metrics``. It is a command, not an MCP tool, per CLAUDE.md: it only reads, and an
-agent that already has the MCP server up calls the library function directly; this is the door
-for a harness with no MCP tool for it, or an operator scoring a batch outside any agent session.
+Wraps ``annotation_tools.score_predictions``: a single image file returns per-box matches (plus an
+optional per-detection breakdown with ``detail``); a dataset directory returns aggregate metrics
+plus per-image TP/FP/FN. Both regimes share ``coco_detection_metrics``.
 
 Usage:
     tcip score-predictions --path <image_or_dataset_dir> \
         [--project <platform_root>] [--iou-threshold 0.5] [--conf-threshold <default>] \
         [--detail] [--trait <trait_name>]
 
---project (or $TCIP_STATE_ROOT) is required only when --trait is given, since resolving a
-trait's derived localization criterion reads the project's own trait registry.
+--project (or $TCIP_STATE_ROOT) is required only when --trait is given, since resolving a trait's
+derived localization criterion reads the project's own trait registry.
 """
 
 from __future__ import annotations
@@ -53,13 +50,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     bind_default()
 
-    from tcip_mcp.tools.annotation_tools import DEFAULT_CONF, score_predictions
+    from tcip_mcp.tools.annotation_tools import score_predictions
 
-    conf_threshold = args.conf_threshold if args.conf_threshold is not None else DEFAULT_CONF
+    stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = score_predictions(
-        args.path, iou_threshold=args.iou_threshold, conf_threshold=conf_threshold,
-        detail=args.detail, trait=args.trait,
-    )
+        args.path, iou_threshold=args.iou_threshold, detail=args.detail, trait=args.trait,
+        **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

@@ -1,40 +1,17 @@
 """PreToolUse Bash guard for the fenced in-app agent terminal.
 
-The Edit/Write deny-list can't see file writes performed *through the shell*
-(`echo > packages/...`, `sed -i`, `python -c "open(...)"`). This PreToolUse hook reads
-the tool call on stdin and denies Bash commands that write into platform internals or a
-breeder's data, or that run an inline interpreter at all.
-
-Honest scope: a guardrail, not a sandbox. The one path where this guard is the sole gate is a
-write that rides an allow-listed read prefix (`cat`, `ls`, `grep`, `git diff`) through a
-redirect, which Claude Code runs with no prompt; the redirect grammar, target normalization, and
-the fail-closed rule for an unresolvable target on such a prefix are airtight for that reason.
-Every other write reaches a human approval prompt (its verb is not allow-listed), so the in-place
-writer coverage here is defense-in-depth and deliberately not exhaustive. Real isolation from a
-determined agent is the sandbox (the platform's stated next step); a `cd` into a protected
-directory then a relative write, an inherited environment variable, and a hard link to a
-protected file are accepted residuals of a command-only, cwd-blind guard. The verb enumeration
-this guard reads is likewise never complete: an unlisted or exotic writer reaches the human
-approval prompt instead of a denial, the same defense-in-depth as any other non-allow-listed verb.
-
-`ed` and `ex` are denied outright, on any invocation, regardless of arguments: an editor names
-the file it writes inside its own command script (an `-c 'w <path>'` argument, or an `e`/`w` pair
-fed through a heredoc or a pipe), never as a plain positional argument, so no argument-reading
-rule can see the target. A non-interactive agent terminal has no legitimate reason to open a
-line editor at all, which is why the rule denies the verb rather than trying to classify a
-target it cannot find. The delete and editor verbs are read from the same stripped, redirect-free
-token list the writer checks use, so a wrapped invocation (`env rm -rf`, `busybox ed`, `command
-ed`) is caught the same way a wrapped writer is; `xargs`/`find` still route their own verb
-through a raw-string regex, since their verb sits inside `xargs`'s own flags or a `-exec`/
-`-delete` clause rather than as a segment's leading token, which a segment-level check cannot
-express.
+Reads the tool call on stdin and denies Bash commands that write into platform internals or a
+breeder's data, or that run an inline interpreter at all. ``ed`` and ``ex`` are denied outright, on
+any invocation. Delete and editor verbs are read from the same stripped, redirect-free token list
+the writer checks use, so a wrapped invocation (``env rm -rf``, ``busybox ed``, ``command ed``) is
+caught the same way a wrapped writer is; ``xargs``/``find`` route their own verb through a
+raw-string regex.
 
 What is protected, how a target is normalized, and what a refusal says come from
-``agent_fence_rules``, shared with the PowerShell guard so the two shells fence one boundary.
+``agent_fence_rules``.
 
-Stdlib only, so it runs under whatever ``python`` the terminal inherits. It only ever
-denies; anything it can't classify it lets fall through to the normal permission flow
-(so a bug here fails open to prompting, never to a broken terminal).
+Stdlib only. It only ever denies; anything it can't classify falls through to the normal permission
+flow.
 """
 
 from __future__ import annotations
@@ -65,19 +42,14 @@ _CONTINUATION = re.compile(r"\\\r?\n")
 
 
 class TokenizeError(Exception):
-    """Raised when a command cannot be tokenized (an unclosed quote, a trailing
-    backslash inside quotes, an unbalanced ``$(``); the caller denies rather than guessing
-    at a partial parse."""
+    """Raised when a command cannot be tokenized (an unclosed quote, a trailing backslash inside
+    quotes, an unbalanced ``$(``).
+    """
 
 
 def _mask_substitutions(cmd: str) -> str:
-    """Replace each balanced ``$( ... )`` command substitution with one opaque word token.
-
-    Without this, shlex reads a substitution's own parentheses as segment boundaries, splitting
-    the statement that encloses it apart and hiding whatever token follows. Masking keeps the
-    substitution as one harmless token in its enclosing segment, so a destination that follows it
-    is still read and classified. Raises :class:`TokenizeError` naming a ``$(`` this scan cannot
-    pair with a closing parenthesis, rather than guessing where it would have ended.
+    """Replace each balanced ``$( ... )`` command substitution with one opaque word token. Raises
+    :class:`TokenizeError` naming a ``$(`` this scan cannot pair with a closing parenthesis.
     """
     out: list[str] = []
     i = 0
@@ -106,14 +78,11 @@ def _mask_substitutions(cmd: str) -> str:
 
 
 def tokenize(cmd: str) -> "list[str]":
-    """``cmd`` as shlex tokens: a quoted separator or redirect character stays inside its
-    own token instead of splitting the command apart, and an unquoted command tokenizes to
-    the same words a plain whitespace split would produce. A backslash immediately before a
-    newline is a line continuation, stripped before tokenizing so it is not read as a
-    statement break, and a ``$( ... )`` substitution is masked to one opaque token so its
-    internal parentheses stay inside the segment that encloses it. Raises
-    :class:`TokenizeError` naming what shlex refused, or what this function could not pair,
-    rather than letting a ``ValueError`` reach the caller unlabeled.
+    """``cmd`` as shlex tokens: a quoted separator or redirect character stays inside its own
+    token, and an unquoted command tokenizes to the same words a plain whitespace split would
+    produce. A backslash immediately before a newline is a line continuation, stripped before
+    tokenizing, and a ``$( ... )`` substitution is masked to one opaque token. Raises
+    :class:`TokenizeError` naming what shlex refused, or what this function could not pair.
     """
     cmd = _CONTINUATION.sub("", cmd)
     cmd = _mask_substitutions(cmd)
@@ -132,10 +101,9 @@ def _is_boundary(tok: str) -> bool:
 
 
 def _segments(cmd: str) -> "list[list[str]]":
-    """Statement/pipeline segments as token lists, split on the operator tokens the
-    tokenizer emits rather than on a raw character, so a quoted separator or redirect
-    character never breaks a segment apart; a subshell's or brace group's delimiters are
-    boundaries too, so the verb inside one is read as a verb rather than hidden behind it.
+    """Statement/pipeline segments as token lists, split on the operator tokens the tokenizer
+    emits, so a quoted separator or redirect character never breaks a segment apart; a subshell's
+    or brace group's delimiters are boundaries too.
     """
     segments: list[list[str]] = []
     current: list[str] = []
@@ -170,7 +138,7 @@ def _before_redirect(tokens: "list[str]") -> "list[str]":
 
 
 # A leading wrapper the shell runs the real command through unchanged, and the flags each
-# consumes first (env, nice, command, time, stdbuf); an unrecognised flag stops the strip there.
+# consumes first (env, nice, command, time, stdbuf); an unrecognized flag stops the strip there.
 _TRANSPARENT_PREFIX = ("busybox", "command", "env", "nice", "time", "stdbuf")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=.*")
 _NICE_ATTACHED = re.compile(r"^-n\d+$")
@@ -246,9 +214,9 @@ _DEST_VERBS = ("cp", "mv", "install", "rsync", "ln")
 
 
 def _leading_verb(tokens: "list[str]") -> "str | None":
-    """The verb one segment would run: its leading token once a redirect tail and a
-    transparent wrapper (``env``, ``nice``, ...) are stripped away, the same path the writer
-    checks read a destination through."""
+    """The verb one segment would run: its leading token once a redirect tail and a transparent
+    wrapper (``env``, ``nice``, ...) are stripped away.
+    """
     argv = _strip_transparent_prefix(_before_redirect(tokens))
     return argv[0] if argv else None
 

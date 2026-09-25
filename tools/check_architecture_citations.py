@@ -9,7 +9,7 @@ A citation is checked when a backticked `path:line` (or `path:a,b` / `path:a-b`)
 backticked fragment: either the fragment opens a parenthetical directly after the citation, the
 seam ledger's form, or the fragment ends within four characters before it, the form the format
 sections and the surface tables use (a comma-ended wrapped line plus a two-space indent is the
-longest such gap seen so far). A citation with no such neighbour quotes nothing to check, so it
+longest such gap seen so far). A citation with no such neighbor quotes nothing to check, so it
 is counted and reported as unanchored rather than assumed correct; citations into ``tests/`` and
 ``docs/`` are the bulk of those, pointing at evidence rather than quoting a line.
 

@@ -1,20 +1,7 @@
-"""Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus
-a plant-locations CSV.
+"""Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a
+plant-locations CSV.
 
-The map-and-deliver half of the same detect-and-persist / map-and-deliver shape
-``phenology_tools``'s ``build_plant_mapping``/``deliver_phenology_milestones`` already use for the
-per-image-EXIF case: the detect-and-persist half (tiled inference over a raster too large to load
-whole) lives in ``inference_tools.run_inference`` (its ``raster_path`` regime), so a breeder
-can review the persisted predictions (or simply trust a tens-of-minutes tiled run once) before
-re-running this comparatively cheap plant-mapping + aggregation step, or re-running it against a
-different plant CSV without repeating the raster pass.
-
-``deliver_orthomosaic_plant_counts`` reads that bucket + plant CSV(s) into a per-plant count CSV,
-gated by the same measurement-integrity door every other count delivery goes through.
-
-See ``pipelines.postprocessing.orthomosaic_mapping`` (georeferencing) for the primitive this
-composes; this tool implements no new CV capability, it wires already-built pieces together for an
-agent (or the breeder via the GUI) to actually invoke.
+``deliver_orthomosaic_plant_counts`` reads that bucket + plant CSV(s) into a per-plant count CSV.
 """
 
 from __future__ import annotations
@@ -26,7 +13,7 @@ from typing import TYPE_CHECKING
 from tcip_mcp.server import mcp
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.resolution import Acknowledgement
+    from tcip_mcp.pipelines.resolution import Acknowledgment
 
 logger = logging.getLogger(__name__)
 
@@ -45,149 +32,95 @@ def orthomosaic_plant_counts(
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
     project_root: str | Path | None = None,
-    acknowledgement: Acknowledgement | None = None,
+    acknowledgment: Acknowledgment | None = None,
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
 
-    The core the MCP tool ``deliver_orthomosaic_plant_counts`` (no ``project_root``, no
-    ``acknowledgement``: the process-pinned root, never a provisional delivery) and the web
-    results route (a guarded project root, a real breeder acknowledgement) both call. Raises
-    rather than returns an error dict: ``operationalization.OperationalizationRefused`` for an
-    unrecorded, unconfirmed, or
-    since-withdrawn ``per_plant_count_aggregate`` meaning (carrying the check, no counts);
-    ``pipelines.resolution.DeliveryRefused`` for the writer's own gate refusal (carrying the gate,
-    with this call's own counts-bearing facts attached); ``pipelines.resolution.
-    CountDeliveryRefused`` for every other refusal this door raises (a missing bucket or
-    raster, a conflicting regime, an unregistered or rewritten plant registry, an empty bucket, a
-    raster identity mismatch, a canopy-segment refusal), each carrying the same facts the tool's
-    own ``{"error": ...}`` response carries.
+    Raises rather than returns an error dict: ``operationalization.OperationalizationRefused`` for
+    an unrecorded, unconfirmed, or since-withdrawn ``per_plant_count_aggregate`` meaning (carrying
+    the check, no counts); ``pipelines.resolution.DeliveryRefused`` for the writer's own gate
+    refusal (carrying the gate, with this call's own counts-bearing facts attached);
+    ``pipelines.resolution.CountDeliveryRefused`` for every other refusal this door raises (a
+    missing bucket or raster, a conflicting regime, an unregistered or rewritten plant registry, an
+    empty bucket, a raster identity mismatch, a canopy-segment refusal), each carrying the same
+    facts the tool's own ``{"error": ...}`` response carries.
 
-    A prediction bucket here is a directory of prediction documents, not a score bin, held
-    immutable once a human reviews it.
-
-    Reads back the whole-mosaic predictions ``run_inference``'s ``raster_path`` regime
-    persisted (never re-runs the expensive tiled pass), resolves each detection's box centroid
-    to a real-world coordinate via the raster's own georeferencing tags, and, absent
-    ``canopy_subject``, matches it to the nearest plant (:func:`assign_detections_to_plants`).
-    Absent ``canopy_subject``, every in-frame geolocated plant ``plant_registry`` names (its own
-    projected position inside the raster's own recorded frame, :func:`~tcip_mcp.pipelines.postprocessing.
-    orthomosaic_mapping.plants_in_frame`) gets exactly one row in the delivered CSV: a plant with
-    one or more assigned detections gets their sum, a plant the scan covered but matched no
-    detection near gets an explicit ``0`` (a real measured absence, not a missing observation,
-    since the tiled scan covers the whole raster and so every in-frame plant's location), never a
-    fabricated value for a plant this delivery never actually covered. A registry plant outside
-    the raster's own frame gets no row under either regime and is disclosed by name
-    (``plants_outside_raster``): the raster never pictures it, so a zero there would be a
-    fabricated absence, not a measured one. A detection farther than the tolerance from every
-    in-frame plant is excluded from any plant's count (counted in ``n_unmapped``, never
-    force-assigned to the nearest plant regardless of distance); this counts detections this
-    delivery could not attribute, a different mechanism from the walked-image mapping's own
-    per-capture unattributed count (``plant_mapping.MappingBuild.unattributed``).
+    Reads back the whole-mosaic predictions ``run_inference``'s ``raster_path`` regime persisted,
+    resolves each detection's box centroid to a real-world coordinate via the raster's own
+    georeferencing tags, and, absent ``canopy_subject``, matches it to the nearest plant
+    (:func:`assign_detections_to_plants`). In that nearest-neighbor regime every in-frame
+    geolocated plant ``plant_registry`` names (its own projected position inside the raster's own
+    recorded frame, :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`)
+    gets exactly one row: a plant with assigned detections gets their sum, a plant matched by no
+    detection gets an explicit ``0``. A registry plant outside the raster's own frame gets no row
+    under either regime and is disclosed by name (``plants_outside_raster``). A detection farther
+    than the tolerance from every in-frame plant is excluded from any plant's count and counted in
+    ``n_unmapped``.
 
     ``canopy_subject`` switches the door to its segment regime: a detection is attributed by
-    containment in a canopy boundary a person has accepted into the raster's own label document
-    (:mod:`~tcip_mcp.pipelines.postprocessing.segment_attribution`), the boundary itself tied to
-    the one registry plant whose own projected position it contains, never by nearest-neighbour
-    distance. ``segment`` means the detection's box centroid fell inside a boundary a person
-    accepted, never a mask-level or area measurement, and the boundary is accepted, not validated
-    the way a detection's own confidence is: the registry position's own error is bounded by
-    nothing but the disclosed clearance
-    (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m`), so
-    a position displaced by more than its clearance places the plant in a neighbour's canopy with
-    every check here passing. The canopy document's own location is derived from the caller's
-    ``raster_path`` itself (its canonical position under a registered dataset the bucket shares,
-    via :func:`~tcip_mcp.dataset_layout.annotation_path_for_image`), never a path the caller
-    names directly; the document's identity is bound to the raster's own content, geotransform
-    and dataset id (the checks below), so two content-identical rasters registered at different
-    canonical positions under the same dataset resolve to two different label documents. A tied
-    plant whose segment's own detection also lies in another segment gets no row,
-    since its count would be an undisclosed lower bound, and is disclosed by name
-    (``plants_with_ambiguous_detections``); a tied plant whose segment holds no detection at all
-    gets an explicit ``0``; an in-frame plant inside no segment gets no row and is disclosed by
-    name (``plants_without_segment``). Stating both ``canopy_subject`` and ``nn_tolerance_m``
-    refuses: the two regimes' own match parameters are never mixed.
+    containment of its box centroid in a canopy boundary a person has accepted into the raster's
+    own label document (:mod:`~tcip_mcp.pipelines.postprocessing.segment_attribution`), the
+    boundary tied to the one registry plant whose own projected position it contains. Each tie
+    discloses its clearance
+    (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m`). The
+    canopy document's location is derived from ``raster_path`` (its canonical position under a
+    registered dataset the bucket shares, via
+    :func:`~tcip_mcp.dataset_layout.annotation_path_for_image`), and its identity is bound to the
+    raster's own content, geotransform and dataset id. A tied plant whose segment's detection also
+    lies in another segment gets no row and is disclosed (``plants_with_ambiguous_detections``); a
+    tied plant whose segment holds no detection gets an explicit ``0``; an in-frame plant inside no
+    segment gets no row and is disclosed (``plants_without_segment``). Stating both
+    ``canopy_subject`` and ``nn_tolerance_m`` refuses.
 
-    Identity door: the georeferencing that decides which plant each detection belongs to comes
-    from the caller's ``raster_path``, so a raster that is not the one the bucket was produced on
-    silently re-attributes every count (a pixel-identical copy with a moved tiepoint shifts each
-    detection onto a neighbouring plant; a far-shifted one reads every plant as zero). The supplied
-    raster is therefore checked against the identity the bucket recorded at export time, content
-    and georeferencing alike (:func:`~tcip_mcp.pipelines.raster_source.
-    georeferenced_raster_identity_mismatch`), and a bucket carrying no recorded identity is refused
-    rather than trusted: there is nothing to check against, and no per-plant attribution is
-    trustworthy without one.
+    The supplied raster is checked against the identity the bucket recorded at export time, content
+    and georeferencing alike
+    (:func:`~tcip_mcp.pipelines.raster_source.georeferenced_raster_identity_mismatch`), and a
+    bucket carrying no recorded identity refuses.
 
-    Delivery gate: the count is the phenotype, so this refuses a bare write of an unvalidated
-    count operating point (read from the bucket's own ``operating_point.json``, never trusted
-    from a caller string), reusing the identical ``export_aggregated_csv`` gate every other
-    per-plant delivery goes through, not a second implementation of it. A tiled bucket's
-    ``tile_size`` gates the same way (the tile edge scales the per-image counts the per-plant
-    value sums). ``acknowledgement`` is the breeder's own act of shipping this delivery
-    unvalidated (the web results route's per-plant count export is the one surface that builds
-    one); the MCP tool ``deliver_orthomosaic_plant_counts`` builds none, so an unvalidated
-    dimension always refuses through it, and a mosaic whose training run reserved no calibration
-    region has no route to a delivered CSV through that door alone.
+    Delivery gate: refuses a bare write of an unvalidated count operating point (read from the
+    bucket's own ``operating_point.json``) through the ``export_aggregated_csv`` gate. A tiled
+    bucket's ``tile_size`` gates the same way. ``acknowledgment`` is the breeder's own act of
+    shipping this delivery unvalidated.
 
-    Meaning door: this runs the same per-plant-count-aggregate precondition its nested writer runs,
-    and runs it first, before the raster identity is resolved or a single prediction is read. A
-    number with no confirmed meaning has nothing for a raster identity to attribute, so the
-    precondition reports on its own rather than behind a refusal about the mosaic.
+    The per-plant-count-aggregate meaning precondition runs first, before the raster identity is
+    resolved or a single prediction is read.
 
-    The producer identity this returns is read back from the tail ``export_aggregated_csv`` itself
-    returns beside the CSV path, never re-derived here: a bucket naming an experiment the store
-    cannot answer for reports its producer unknown, while a bespoke bucket carrying a real
-    checkpoint hash and no experiment keeps that hash, the one shared derivation
-    (``delivered_tail``/``delivered_provenance``) behind both the CSV's own cells and this
-    response. ``validation_record`` names the record behind a validated count, and is empty
-    otherwise.
+    The producer identity this returns is the tail ``export_aggregated_csv`` returns beside the CSV
+    path. ``validation_record`` names the record behind a validated count, and is empty otherwise.
 
-    Delivery-event disclosure: every registry CSV named above is hashed against the byte digest
-    ``register_plant_registry`` recorded for it (:func:`~tcip_mcp.pipelines.postprocessing.
-    plant_mapping.verify_registry_csv_bytes`), and a missing or rewritten file refuses by name
-    before any plant or prediction is read, so every CSV this delivery reads is verified or the
-    delivery never happens. Absent ``canopy_subject``, the delivery event this door's own
-    ``export_aggregated_csv`` call records carries a ``PlantRegistryDisclosure``
-    (``delivery_events_schema.py``): the registry it read, the raster identity every count is
-    attributed through, the matched tolerance and its source, and this delivery's own
-    unattributed-detection count, the whole-raster counterpart of the walked mapping's own
-    ``PlantMappingDisclosure`` the phenology doors record. Under ``canopy_subject``, the event
-    carries a ``CanopySegmentDisclosure`` instead: the same registry and raster identity, the
-    canopy document read and every segment tie resolved from it (each with its own clearance,
-    never a match tolerance), and the three plant-name lists this door's own response also
-    carries (``plants_outside_raster``, ``plants_without_segment``,
-    ``plants_with_ambiguous_detections``).
+    Every registry CSV is hashed against the byte digest ``register_plant_registry`` recorded for
+    it (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.verify_registry_csv_bytes`), and a
+    missing or rewritten file refuses by name before any plant or prediction is read. Absent
+    ``canopy_subject``, the delivery event carries a ``PlantRegistryDisclosure``
+    (``delivery_events_schema.py``): the registry read, the raster identity, the matched tolerance
+    and its source, and the unattributed-detection count. Under ``canopy_subject``, it carries a
+    ``CanopySegmentDisclosure``: the same registry and raster identity, the canopy document read,
+    every segment tie with its clearance, and the three plant-name lists the response also carries.
 
     Args:
         predictions_dir: The bucket ``run_inference``'s ``raster_path`` regime persisted.
-        raster_path: The same georeferenced raster the bucket's predictions were produced from
-            (needed to resolve each detection's pixel position to a real-world coordinate). Given
-            by the caller rather than taken from the sidecar's recorded ``raster_path``, which
-            names a location that may hold a different file by now, and checked against the
-            bucket's recorded raster identity before anything is resolved through it.
+        raster_path: The georeferenced raster the bucket's predictions were produced from, checked
+            against the bucket's recorded raster identity before anything is resolved through it.
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
-            against the platform state root, never the server process's cwd.
+            against the platform state root.
         delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
             to the registered trait whose spec delivers it and whose confirmed operationalization
             this delivery rests on.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
-        nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
-            the plant grid's own spacing (:func:`~tcip_mcp.pipelines.postprocessing.
-            orthomosaic_mapping.resolve_nn_tolerance_m`), never a pinned constant. Refused
-            alongside ``canopy_subject``.
+        nn_tolerance_m: Nearest-neighbor match tolerance (m). ``None`` (default) derives it from
+            the plant grid's own spacing
+            (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.resolve_nn_tolerance_m`).
+            Refused alongside ``canopy_subject``.
         canopy_subject: The subject registry's subject naming a canopy boundary in the raster's own
-            label document. Empty (default) runs the nearest-neighbour regime; set, this door
-            attributes by segment containment instead, and no model architecture is prescribed
-            for how the boundary itself was produced (a hand trace, an accepted SAM proposal, or
-            an accepted bespoke instance-segmentation output all admit the same way).
+            label document. Empty (default) runs the nearest-neighbor regime; set, this door
+            attributes by segment containment instead.
         project_root: The project this delivery's meaning-record reads and delivery event belong
-            to, and where ``plant_registry`` is looked up. ``None`` (the MCP tool) resolves
-            against this process's pinned platform root; a web route already holding its own
-            guarded, resolved root passes it explicitly.
-        acknowledgement: The breeder's own act of shipping this delivery unvalidated, or ``None``
-            for an ordinary validated export or the MCP tool, which never builds one.
+            to, and where ``plant_registry`` is looked up. ``None`` resolves against this process's
+            pinned platform root.
+        acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused
@@ -202,7 +135,7 @@ def orthomosaic_plant_counts(
     if canopy_subject and nn_tolerance_m is not None:
         raise CountDeliveryRefused(
             "canopy_subject and nn_tolerance_m are refused together: the segment regime attributes "
-            "by containment, never by nearest-neighbour distance, so it takes no match tolerance")
+            "by containment, never by nearest-neighbor distance, so it takes no match tolerance")
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         load_registry,
@@ -360,10 +293,9 @@ def orthomosaic_plant_counts(
         RotatedRasterError,
         assign_detections_to_plants,
         plants_in_frame,
-        resolve_nn_tolerance_m,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        read_plant_csv_bytes, require_named_plants,
+        NoMatchTolerance, read_plant_csv_bytes, require_named_plants, resolve_nn_tolerance_m,
     )
 
     try:
@@ -489,7 +421,10 @@ def orthomosaic_plant_counts(
             raise CountDeliveryRefused(
                 f"no registered plant lies inside this raster's frame ({raster_path}); every "
                 f"plant in {plant_csv_paths} projects outside it")
-        resolved_tolerance = resolve_nn_tolerance_m(in_frame_plants, nn_tolerance_m)
+        try:
+            resolved_tolerance = resolve_nn_tolerance_m(in_frame_plants, nn_tolerance_m)
+        except NoMatchTolerance as exc:
+            raise CountDeliveryRefused(f"delivery refused: {exc}") from exc
         detection_assignments = assign_detections_to_plants(
             detections, georef, in_frame_plants, nn_tolerance_m=resolved_tolerance["value"])
         mapped = [a for a in detection_assignments if a.plot_name is not None]
@@ -533,8 +468,8 @@ def orthomosaic_plant_counts(
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, DeliveryRefused
 
     # The raw asserted identity; export_aggregated_csv's own delivered_tail corroborates it.
-    provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
-                 "producing_experiment_id": sidecar.get("experiment_id")}
+    provenance = {"producer_model_sha256": sidecar["checkpoint_sha256"],
+                 "producing_experiment_id": sidecar["experiment_id"]}
     counts_facts = {
         "n_detections": n_detections, "n_mapped": n_mapped, "n_unmapped": n_unmapped,
     }
@@ -546,7 +481,7 @@ def orthomosaic_plant_counts(
             pred_dirs=[predictions_dir],
             door="deliver_orthomosaic_plant_counts",
             plant_mapping=plant_mapping_disclosure,
-            acknowledgement=acknowledgement, project_root=project_root,
+            acknowledgment=acknowledgment, project_root=project_root,
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
@@ -599,20 +534,16 @@ def deliver_orthomosaic_plant_counts(
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
 
-    The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract (the
-    nearest-neighbour and canopy-segment regimes, the raster-identity check, the delivery gate,
-    the meaning door, and every response field); read that function's docstring for the complete
-    picture. This door passes no ``project_root`` (the process-pinned platform root) and builds no
-    ``acknowledgement``, so an unvalidated delivery always refuses here; the web results route's
-    count export is the one surface that can acknowledge and ship this kind unvalidated.
+    The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract. This door
+    passes no ``project_root`` (the process-pinned platform root) and builds no
+    ``acknowledgment``, so an unvalidated delivery always refuses here.
 
-    Returns the core's own response dict unchanged on success. On refusal, returns
-    ``{"error": ..., **facts}``: the meaning door's own message with no facts
-    (``OperationalizationRefused``), the delivery gate's refusal with
-    ``operating_point_validated``/``unvalidated_dimensions``/``n_detections``/``n_mapped``/
-    ``n_unmapped`` (``DeliveryRefused``, its own message naming the calibration remedy and the
-    Results tab's count export), or every other refusal this door raises on, with whatever facts
-    it had in hand (``CountDeliveryRefused``).
+    Returns the core's own response dict unchanged on success. On refusal, returns ``{"error": ...,
+    **facts}``: the meaning door's own message with no facts (``OperationalizationRefused``), the
+    delivery gate's refusal with
+    ``operating_point_validated``/``unvalidated_dimensions``/``n_detections``/``n_mapped``/``n_unmapped``
+    (``DeliveryRefused``), or every other refusal this door raises on, with whatever facts it had
+    in hand (``CountDeliveryRefused``).
     """
     from tcip_mcp.operationalization import OperationalizationRefused
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
@@ -621,7 +552,7 @@ def deliver_orthomosaic_plant_counts(
         return orthomosaic_plant_counts(
             predictions_dir, raster_path, plant_registry, output_csv_path, delivered_phenotype,
             crop=crop, pipeline_version=pipeline_version, nn_tolerance_m=nn_tolerance_m,
-            canopy_subject=canopy_subject, project_root=None, acknowledgement=None,
+            canopy_subject=canopy_subject, project_root=None, acknowledgment=None,
         )
     except OperationalizationRefused as exc:
         return {"error": exc.check.message}

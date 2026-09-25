@@ -56,11 +56,14 @@ def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
 
 
 def _keep_rows(target: dict, valid: torch.Tensor) -> None:
-    """Keep the per-box rows ``valid`` marks in every per-box tensor beside ``boxes``, so a
-    transform dropping a degenerate box drops its label and crowd flag with it."""
-    for key in ("labels", "iscrowd"):
-        if torch.is_tensor(target.get(key)):
-            target[key] = target[key][valid]
+    """Keep the rows ``valid`` marks in every per-box tensor of ``target``
+    (:data:`~tcip_mcp.pipelines.data.datasets.PER_BOX_KEYS`)."""
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
+
+    for key in PER_BOX_KEYS:
+        value = target.get(key)
+        if torch.is_tensor(value) and len(value) == len(valid):
+            target[key] = value[valid]
 
 
 class RandomHorizontalFlip:
@@ -182,11 +185,8 @@ class RandomResizedCrop:
                 boxes[:, 3].clamp_(min=0, max=self.size[1])
                 # Filter out degenerate boxes
                 valid = (boxes[:, 2] - boxes[:, 0] > 1) & (boxes[:, 3] - boxes[:, 1] > 1)
-                target["boxes"] = boxes[valid]
+                target["boxes"] = boxes
                 _keep_rows(target, valid)
-                masks = target.get("masks")
-                if torch.is_tensor(masks) and masks.ndim == 3:
-                    target["masks"] = masks[valid]
 
         return img, target
 
@@ -269,20 +269,19 @@ class RandomRotation:
             nb[:, [0, 2]] = nb[:, [0, 2]].clamp(min=0, max=w)
             nb[:, [1, 3]] = nb[:, [1, 3]].clamp(min=0, max=h)
             valid = (nb[:, 2] - nb[:, 0] > 1) & (nb[:, 3] - nb[:, 1] > 1)
-            target["boxes"] = nb[valid]
-            _keep_rows(target, valid)
+            target["boxes"] = nb
             masks = target.get("masks")
-            if torch.is_tensor(masks) and masks.ndim == 3 and len(masks) == len(valid):
+            if torch.is_tensor(masks) and masks.ndim == 3 and len(masks):
                 import numpy as np
-                rotated = [
+                target["masks"] = torch.stack([
                     torch.tensor(
                         np.array(Image.fromarray(m.cpu().numpy().astype("uint8")).rotate(
                             angle, resample=Image.Resampling.NEAREST, expand=False)),
                         dtype=masks.dtype,
                     )
                     for m in masks
-                ]
-                target["masks"] = torch.stack(rotated)[valid] if rotated else masks[valid]
+                ])
+            _keep_rows(target, valid)
         masks = target.get("masks")
         if torch.is_tensor(masks) and masks.ndim == 2:
             import numpy as np
@@ -311,9 +310,7 @@ _AUGMENTATION_REGISTRY: dict[str, type] = {
 def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640)) -> dict:
     """Return a ``build_augmentation``-ready config dict for a named preset.
 
-    ``nadir_rotation`` mirrors the chestnut-burr small-object policy (training.py
-    317-320): free rotation + h/v flips + mild jitter, with mosaic/copy-paste/mixup
-    intentionally omitted (they shrink small objects / stitch unnatural composites).
+    ``nadir_rotation``: free rotation, h/v flips, mild jitter; no mosaic/copy-paste/mixup.
     """
     presets: dict[str, dict] = {
         "nadir_rotation": {
@@ -339,16 +336,9 @@ def recorded_resize(config: dict | str | None) -> tuple[int, int] | None:
     """The fixed ``(width, height)`` an augmentation config resizes every sample to, or ``None``
     when it pins no size.
 
-    Resolved by building the config's own chain (:func:`build_augmentation`, which resolves a preset
-    name string through :func:`get_augmentation_preset` and applies the same float/list/dict/bool
-    parameter conventions) and reading the last :class:`Resize` in it, never by re-reading the config
-    here: a preset name is not a ``[w, h]`` pair, and a ``resize`` entry can legitimately be a list,
-    a kwargs dict, or ``True``. An unbuildable config raises from the builder rather than being
-    reported as "no resize", so a caller about to reproduce a training input geometry hears about it.
-
-    Only the deterministic :class:`Resize` counts. :class:`RandomResizedCrop` also fixes the tensor
-    size it emits, but its per-sample crop scale is drawn at random, so the input geometry it
-    produced is not reproducible outside training and is not reported here.
+    Resolved by building the config's own chain (:func:`build_augmentation`) and reading the last
+    :class:`Resize` in it. An unbuildable config raises. :class:`RandomResizedCrop` is not
+    reported.
     """
     if not config:
         return None

@@ -169,7 +169,7 @@ class TestFullClassificationPipeline:
                 "scores": confs if isinstance(confs, list) else [confs] if confs else [],
             })
         # A genuinely validated bucket stands behind the export: the delivery gate refuses a bare
-        # unvalidated write, and this door takes no acknowledgement at all.
+        # unvalidated write, and this door takes no acknowledgment at all.
         from tests import _operationalization_fixtures as fx
         from tests._binding_fixtures import write_bound_sidecar, write_prediction
         from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

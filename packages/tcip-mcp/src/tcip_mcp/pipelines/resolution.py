@@ -1,27 +1,23 @@
-"""Runtime parameter resolution, the "derive, don't pin" currency.
+"""Runtime parameter resolution.
 
 Every result-affecting parameter that varies by dataset/model/trait is resolved at runtime into a
-``ResolvedParam`` carrying not just a value but *how it was derived* and *whether it is trustworthy*.
-The point (CLAUDE.md "Parameters: derive, don't pin"): the agent derives operating points from the
-data in hand, per dataset, and the provenance travels with every result so a phenotype can always be
-traced to the operating point that produced it.
+``ResolvedParam`` carrying a value, how it was derived and whether it is trustworthy, so a
+phenotype can be traced to the operating point that produced it.
 
-The measurement-integrity firewall lives here: a parameter that ``requires_validation`` (an operating
-point like a confidence threshold, or a physical scale) is *structurally un-consumable as a bare
-number* unless it was checked against the right kind of real-world reference for what it is.
-``.value`` raises; a caller that genuinely means to ship an unvalidated value must go through
-``unvalidated_value(...)`` and say so explicitly. This makes an unvalidated measurement value
-physically un-shippable rather than merely discouraged.
+A parameter that ``requires_validation`` (an operating point like a confidence threshold, or a
+physical scale) is un-consumable as a bare number unless it was checked against the right kind of
+real-world reference: ``.value`` raises; a caller that ships an unvalidated value goes through
+``unvalidated_value(...)``.
 
-No torch, safe to import anywhere; the storage seam (``tcip_store``) and ``tcip_annotation``'s
-``json_io`` (the sidecar filename set) are the only dependencies beyond the standard library,
-since the prediction buckets' provenance stamps are declared here.
+No torch; the storage seam (``tcip_store``) and ``tcip_annotation``'s ``json_io`` (the sidecar
+filename set) are the only dependencies beyond the standard library.
 """
 
 from __future__ import annotations
 
 import csv
 import hashlib
+import inspect
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence
@@ -120,29 +116,17 @@ def accepted_references(validation_kind: str) -> tuple[str, ...]:
 
 def cleared_reference(reference: str | None, *, validation_kind: str) -> str:
     """``reference`` when it legitimately clears ``validation_kind``, else :data:`VALIDATED_FALSE`.
-
-    The one place "did this reference clear this kind" is decided, so the reader floor
-    (:func:`_sidecar_reference`, reading a persisted stamp) and the earning gate
-    (:func:`open_validation`, reading a resolver's own live result) cannot drift into disagreeing
-    about which references count. An absent, unrecognized or wrong-kind reference floors rather
-    than being read as validated.
+    An absent, unrecognized or wrong-kind reference floors.
     """
     return reference if reference in accepted_references(validation_kind) else VALIDATED_FALSE
 
 
 def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
-    """The ``tile_size_source`` a recorded geometry reference was earned by.
-
-    The inverse of what :func:`resolve_tile_size_param` stamps, for a caller holding a persisted
-    stamp rather than a live resolution (the review-promotion path, reading a bucket's sidecar back
-    to re-resolve an operating point from it). Reading the reference, never the bare ``source``
-    field a sidecar also carries, is what stops a native-ratio tile edge (source ``"derived"``, same
-    as a real persisted geometry) from being re-read as the stronger tier: each real reference maps
-    back to its own source through the lookup. A tile size present with no accepted reference behind
-    it (a stamp nothing in the current vocabulary answers for, e.g. more than one accepted reference
-    among the buckets a review promotion reads) comes back as ``"recorded"``, kept rather than
-    dropped: the edge is real, only its reference is unrecognized. ``"default"`` is only for no tile
-    size at all.
+    """The ``tile_size_source`` a recorded geometry reference was earned by: the inverse of what
+    :func:`resolve_tile_size_param` stamps, read from the reference, never the bare ``source``
+    field a sidecar also carries (a native-ratio edge and a persisted geometry both record
+    ``"derived"``). A tile size present with no accepted reference behind it comes back as
+    ``"recorded"``; ``"default"`` is only for no tile size at all.
     """
     for source, accepted in _GEOMETRY_REFERENCE_BY_SOURCE.items():
         if reference == accepted:
@@ -168,15 +152,16 @@ DEFAULT_OVERLAP = 0.2
 DEFAULT_MAX_DETS = 1000
 # Tiles per forward batch: a throughput setting that changes no prediction.
 DEFAULT_TILE_BATCH_SIZE = 96
+# Untiled images per forward batch: a throughput setting that changes no prediction.
+DEFAULT_IMAGE_BATCH_SIZE = 16
+# The cross-tile merge when a caller names none: suppress overlaps rather than union them.
+DEFAULT_POSTPROCESS = "nms"
 
 
 def applied_operating_point(
     conf_threshold: float | None, global_nms_iou: float | None, max_dets: int | None,
 ) -> tuple[float, float, int]:
-    """The stated-vs-platform-default resolution for conf/NMS/max_dets, shared by every caller
-    that applies one directly: ``run_inference``'s ``dry_run`` preview, its verified body and its
-    raster branch (``inference_tools.py``), and the full-frame delivery-grade evaluation
-    (``run_full_frame_evaluation``), so none of them can resolve an unstated parameter differently."""
+    """The stated-vs-platform-default resolution for conf/NMS/max_dets."""
     applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
     applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
@@ -184,14 +169,11 @@ def applied_operating_point(
 
 
 class UnvalidatedOperatingPointError(RuntimeError):
-    """Raised when a param that requires validation is consumed as if it were trustworthy.
-
-    This is the firewall: it means a value that defines the measurement (a confidence threshold that
-    decides the object count, or a physical scale that decides every dimensional number) is about to
-    flow into a result without having been checked against the right kind of real-world reference. Do
-    not silence it by reaching for ``_raw``; either validate the value, or consume it via
-    ``unvalidated_value(...)`` and stamp the result ``validated=false`` so the un-trustworthiness
-    travels downstream.
+    """Raised when a param that requires validation is consumed as if it were trustworthy: a value
+    that defines the measurement (a confidence threshold that decides the object count, or a
+    physical scale that decides every dimensional number) about to flow into a result without
+    having been checked against the right kind of real-world reference. Validate the value, or
+    consume it via ``unvalidated_value(...)`` and stamp the result ``validated=false``.
     """
 
 
@@ -199,15 +181,14 @@ class UnvalidatedOperatingPointError(RuntimeError):
 class ResolvedParam:
     """One parameter, resolved from the data in hand, with provenance and a validation status.
 
-    Most parameters never need validation, a fact read from the data (``in_chans``), a statistic
+    Most parameters never need validation: a fact read from the data (``in_chans``), a statistic
     computed from this dataset's own spread (``cross_tile_nms``), or a plain configuration default
-    (``tiled``) are all trustworthy by construction (``requires_validation=False``, the default).
-    ``derived_from`` (free text) is where *how it was produced* is described, there is no separate
-    category label to learn on top of that.
+    (``tiled``) (``requires_validation=False``, the default). ``derived_from`` (free text)
+    describes how it was produced.
 
     A parameter that does need validation (a confidence threshold, a physical scale) sets
-    ``requires_validation=True`` and a real ``validation_kind`` (what kind of reference can validate
-    it, see ``VALIDATION_KINDS``); it is shippable only once ``validated_against`` names a reference
+    ``requires_validation=True`` and a real ``validation_kind`` (see ``VALIDATION_KINDS``); it is
+    shippable only once ``validated_against`` names a reference
     ``accepted_references(validation_kind)`` recognizes for that kind.
     """
 
@@ -390,32 +371,23 @@ def resolve_tile_size_param(
     tile_size: int | None, *, tiled: bool, tile_size_source: str,
     tile_size_derived_from: str | None,
 ) -> ResolvedParam:
-    """The ``tile_size`` dimension, gated the same shape ``conf`` already is, the shared
-    construction site both :func:`raw_operating_point` (here) and
-    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point` (the calibrated path) call,
-    so the two doors can't drift into disagreeing about when a tile scale is trustworthy.
+    """The ``tile_size`` dimension, gated the same shape ``conf`` is, for
+    :func:`raw_operating_point` and
+    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`.
 
-    ``tile_size_derived_from`` is required (no default) so every caller states it explicitly; it is
-    read only for ``tile_size_source == "explicit"``, where it becomes the stamped ``derived_from``
-    (see :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`, which composes it
-    from what the checkpoint's own recorded geometry says about the stated edge), never a placeholder
-    like "caller override" doing double duty inside the stamped claim.
+    ``tile_size_derived_from`` is required; it is read only for ``tile_size_source == "explicit"``,
+    where it becomes the stamped ``derived_from`` (see
+    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`).
 
-    Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays a
-    plain non-gating fact there (mirrors ``in_chans``), gating it anyway would refuse legitimate
-    untiled work over a dimension that was never operative. When tiled, the value is shippable when
-    its source names a real basis for trusting the scale, ranked strongest to weakest (see
+    Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays
+    a plain non-gating fact there. When tiled, the value is shippable when its source names a real
+    basis for trusting the scale, ranked strongest to weakest (see
     :data:`GEOMETRY_REFERENCE_STRENGTH`): the checkpoint's own persisted training geometry
-    (``"derived"``); a tile edge mechanically derived from a checkpoint's own uniform untiled
-    training frame (``"native_ratio"``), never stated by a caller; or a caller's deliberate explicit
-    override (``"explicit"``, already checked for contradiction against the checkpoint's own
-    recorded geometry by the caller before this function ever sees it, but a stated decision, not a
-    guess). ``"recorded"`` (:func:`tile_size_source_of`'s own fallback, a
-    real edge read back off a persisted stamp whose reference the current vocabulary does not
-    accept) keeps the edge, floored to unvalidated. Any other source (``"unavailable"``, no
-    persisted geometry and nothing explicit) means nothing justifies a scale at all, so ``tile_size``
-    itself is ``None``: never a fabricated number, closing the asymmetry with the delivery-gating
-    path (``run_full_frame_evaluation``), which already refuses outright for this exact case.
+    (``"derived"``); a tile edge derived from a checkpoint's own uniform untiled training frame
+    (``"native_ratio"``); or a caller's explicit override (``"explicit"``, already checked for
+    contradiction against the checkpoint's own recorded geometry). ``"recorded"``
+    (:func:`tile_size_source_of`'s fallback) keeps the edge, floored to unvalidated. Any other
+    source (``"unavailable"``) leaves ``tile_size`` itself ``None``.
     """
     if not tiled:
         return default("tile_size", None)
@@ -467,41 +439,26 @@ def raw_operating_point(
     max_dets: int | None, tile_size_source: str = "default", tile_size_derived_from: str | None = None,
     tiled_source: str = "default", conf_stated: bool = False, max_dets_stated: bool = False,
 ) -> ResolvedBundle:
-    """The operating point for raw (uncalibrated) inference, the one every caller resolves through.
+    """The operating point for raw (uncalibrated) inference.
 
-    ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation and
-    is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and the
-    caller must stamp its output ``validated=false``. This is what stops the MCP tool and the web job
-    giving a different count (the phenotype) for the same model + images by entry point.
+    ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation
+    and is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and
+    the caller stamps its output ``validated=false``.
 
-    Every caller of this function resolves ``max_dets`` to a concrete cap before reaching here
-    (the shared platform default when the caller stated nothing); an uncapped ``max_dets=None`` is
-    a different regime's own deliberate value, built by
-    :func:`block_calibrated_export_operating_point` for the block-calibrated whole-mosaic pass,
-    never by this function.
+    ``max_dets`` is a concrete cap (the shared platform default when the caller stated nothing);
+    the uncapped ``max_dets=None`` regime is :func:`block_calibrated_export_operating_point`'s.
 
-    ``conf_stated``/``max_dets_stated`` say whether the caller explicitly chose that value, mapped
-    to the same explicit-vs-default provenance vocabulary ``tile_size_source``/``tiled_source``
-    already carry for their own params: a caller-chosen value that happens to equal the platform
-    default is stamped ``"explicit"``, never silently read back as an untouched default.
+    ``conf_stated``/``max_dets_stated`` say whether the caller explicitly chose that value: a
+    caller-chosen value that equals the platform default is stamped ``"explicit"``.
 
-    ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
-    geometry, ``native_ratio`` (the checkpoint's own uniform untiled frame), ``explicit`` (caller
-    override), ``recorded`` (read back off a stamp with no accepted reference behind it), or has no
-    real basis at all (``"unavailable"``), so a train/infer scale mismatch is visible in the
-    provenance rather than silent: see :func:`resolve_tile_size_param`, a tiled run with no basis
-    at all is a real, gating-firewalled unvalidated dimension (``tile_size`` itself ``None``, never
-    a fabricated number), not silently shippable engineering trivia.
-    ``tiled_source`` is the same provenance vocabulary for the boolean itself: a caller that
-    explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed nothing gets
-    ``"default"``. Every caller of this function derives its own concrete ``tiled`` bool (no shared
-    fallback constant) before reaching here, so ``tiled`` itself is always a real bool, never ``None``.
+    ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's
+    training geometry, ``native_ratio`` (the checkpoint's own uniform untiled frame), ``explicit``
+    (caller override), ``recorded`` (read back off a stamp with no accepted reference behind it),
+    or has no real basis at all (``"unavailable"``); see :func:`resolve_tile_size_param`.
+    ``tiled_source`` is ``"explicit"`` when the caller chose to tile (or not) and ``"default"``
+    otherwise; ``tiled`` itself is always a real bool.
 
-    ``tile_size_derived_from`` is forwarded to :func:`resolve_tile_size_param` unchanged; it matters
-    only for ``tile_size_source == "explicit"``, where the caller composed it through
-    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance` against the checkpoint
-    it already checked the stated edge with :func:`~tcip_mcp.pipelines.inference.predictor.
-    resolve_tile_regime`.
+    ``tile_size_derived_from`` is forwarded to :func:`resolve_tile_size_param` unchanged.
     """
     tile_param = resolve_tile_size_param(
         tile_size, tiled=tiled, tile_size_source=tile_size_source,
@@ -538,18 +495,15 @@ def block_calibrated_export_operating_point(
     block_bundle: ResolvedBundle, *, trait: str, tile_size: int | None, tile_size_source: str,
     tile_size_derived_from: str | None = None,
 ) -> ResolvedBundle:
-    """The whole-mosaic export operating point a block-calibrated bundle ships at.
+    """The whole-mosaic export operating point a block-calibrated bundle ships at, the third regime
+    beside :func:`raw_operating_point` and
+    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`.
 
-    The third regime beside :func:`raw_operating_point` and
-    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`, resolved here rather than
-    assembled at the export door, so what carries over from a block calibration and what does not
-    is stated once. ``conf`` and ``cross_tile_nms`` carry over unchanged: those are what the mosaic's
-    reserved calibration and test bands measured. ``max_dets`` deliberately does not, and is
-    committed to ``None`` (uncapped): the block bundle's own cap is derived from the density of one
-    reserved band, and adopting it wholesale would truncate the count over the whole mosaic, which
-    is the phenotype. Tiling is always on, since a raster too large to load whole has no untiled
-    alternative, and the tile scale is gated through the same :func:`resolve_tile_size_param` every
-    other door resolves through.
+    ``conf`` and ``cross_tile_nms`` carry over unchanged: those are what the mosaic's reserved
+    calibration and test bands measured. ``max_dets`` does not, and is ``None`` (uncapped): the
+    block bundle's own cap is derived from the density of one reserved band, and adopting it would
+    truncate the count over the whole mosaic. Tiling is always on, and the tile scale is gated
+    through :func:`resolve_tile_size_param`.
     """
     return ResolvedBundle(trait=trait, dataset_hash=block_bundle.dataset_hash, params={
         "conf": block_bundle.get("conf"),
@@ -575,11 +529,10 @@ def _label_bytes(lp: Path) -> bytes:
 def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """A content-addressed hash identifying a dataset's ground truth.
 
-    Two datasets with the same labels hash equal (so a calibration is valid iff its hash matches the
-    inference dataset's). Content-based (label bytes), so it is machine-independent, a path can move
-    between machines but the GT identity does not. Missing labels are hashed as empty (they are valid
-    negatives), so their presence/absence still contributes to identity. Streams one label's bytes
-    at a time into the running hash rather than buffering the whole labels directory in memory.
+    Two datasets with the same labels hash equal, so a calibration is valid iff its hash matches
+    the inference dataset's. Content-based (label bytes), so a path can move between machines but
+    the GT identity does not. A missing label hashes as empty bytes, so its presence or absence
+    contributes to identity. Streams one label's bytes at a time into the running hash.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -601,34 +554,20 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
 
 
 def digest_bytes(b: bytes) -> str:
-    """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``.
-
-    The convention stated once, for the three callers that must agree on it: the draw that records
-    a digest per sample, the per-stem digests beside a combined dataset hash, and the delivery-time
-    check that recomputes one to see whether the reference moved.
-    """
+    """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``."""
     return hashlib.sha256(b).hexdigest()[:16]
 
 
 def ground_truth_digest(path: Path) -> str:
-    """One ground-truth file's own digest, by the same convention :func:`digest_bytes` states.
-
-    Takes the file rather than a directory and a stem, so it answers for ground truth that is not
-    a per-image label document too: the run's own recorded partition digests each member's stated
-    path through this, and the delivery-time check recomputes a reference sample's through it, so
-    the two cannot drift into hashing one file two ways.
+    """One ground-truth file's own digest, by the convention :func:`digest_bytes` states, whatever
+    shape the file is.
     """
     return digest_bytes(_label_bytes(path))
 
 
 def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
-    """Each named file's own digest, keyed by its path and read once per file however many
-    members that file answers for.
-
-    The one reading a record's writer and a record's reader share: a draw stamping a digest per
-    member, a partition recording what each member's ground truth read as at run time, and the
-    check asking whether any of them moved since all take their digests here, so one file cannot
-    be hashed twice in a pass or two ways across passes.
+    """Each named file's own digest, keyed by its path and read once per file however many members
+    that file answers for.
     """
     return {path: ground_truth_digest(Path(path)) for path in dict.fromkeys(paths)}
 
@@ -640,19 +579,10 @@ def members_moved_since(
 
     ``ground_truth`` is the record's own per-member path, the file the run actually read
     (``split.json``'s ``label_digests.ground_truth``), so the digest is recomputed over that same
-    file rather than over whatever a directory now holds under the member's name: a member whose
-    ground truth is named unlike its image, or replaced by a file of another extension, is still
-    compared against what it was, and nothing here has to know which shape it is holding. A member
-    whose file is gone digests as empty bytes, the same "a withdrawn ground truth is not an absent
-    key" convention :func:`dataset_hash` folds into its combined hash, so it reads as moved.
+    file. A member whose file is gone digests as empty bytes, so it reads as moved.
 
-    The one comparison between a run's own recorded per-member digests and what those members read
-    as now, so a calibration asking "did the ground truth move under this run" and a freeze asking
-    "may I compose a selection from this run's members" answer from one reading rather than two. A
-    member ``at_run`` does not name is not compared: the record is what says which members this
-    run held, so a name it never recorded has no recorded digest to have moved from. A member
-    ``at_run`` names and ``ground_truth`` does not refuses: the record would otherwise be asked
-    where that member's ground truth was, and it does not say.
+    A member ``at_run`` does not name is not compared. A member ``at_run`` names and
+    ``ground_truth`` does not refuses.
     """
     named = sorted(set(members) & set(at_run))
     unnamed = [member for member in named if member not in ground_truth]
@@ -670,12 +600,8 @@ def members_moved_since(
 
 
 def selection_digest(selection: Any) -> str:
-    """The one digest a selection earns: sha256 over the document it is written as.
-
-    Called at bind time (``split_construction``, stamping ``split.json``'s
-    ``selection_binding.selection_sha256``) and at calibration time (``inference_tools``'s
-    ``selection_sha256``, and the operator script that passes the same fact) so the two sides that
-    must agree on a selection's identity can never spell the digest differently.
+    """The digest a selection earns: sha256 over the document it is written as (``split.json``'s
+    ``selection_binding.selection_sha256``).
     """
     from tcip_mcp.pipelines.data.selection import selection_document
 
@@ -683,14 +609,12 @@ def selection_digest(selection: Any) -> str:
 
 
 def csv_dataset_hash(csv_path: str | Path) -> str:
-    """A content-addressed hash identifying a CSV-sourced GT identity (``OrdinalDataset``/
-    ``RegressionDataset``'s ``(stem, value)`` rows), the same content-addressed principle as
-    :func:`dataset_hash` (which is hardcoded to a directory of per-image JSON label files and is not
-    reusable as-is for a single flat CSV).
+    """A content-addressed hash identifying a CSV-sourced GT identity
+    (``OrdinalDataset``/``RegressionDataset``'s ``(stem, value)`` rows), the principle
+    :func:`dataset_hash` applies to a directory of per-image JSON label files.
 
-    Rows are sorted by stem before hashing so row order in the file doesn't spuriously change the
-    identity; two CSVs with the same (stem, value) pairs hash equal regardless of how they were
-    written.
+    Rows are sorted by stem before hashing, so two CSVs with the same (stem, value) pairs hash
+    equal regardless of row order.
     """
     rows: list[tuple[str, str]] = []
     with open(csv_path, newline="") as f:
@@ -755,16 +679,11 @@ def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:
 def _read_sidecar(pred_dir: str | Path, document: str, *, strict: bool = False) -> dict | None:
     """One bucket's stamp for one dimension, or ``None`` when absent.
 
-    At its default (``strict=False``), a stamp that will not decode also reads as ``None``: an
-    unreadable stamp floors the dimension it describes to unvalidated at every reconciler below,
-    which is the safe direction, where a raised decode error would take down a delivery gate that
-    has a well-defined answer for a stamp it cannot trust.
+    At its default (``strict=False``), a stamp that will not decode also reads as ``None``, so it
+    floors the dimension it describes to unvalidated at every reconciler below.
 
-    Under ``strict=True``, which :func:`bucket_scope` passes, the seam's own decode error
-    (``StoreError``, covering ``DecodeError`` and ``SchemaVersionRefused``) propagates instead: a
-    caller that must tell an absent stamp from a present one that will not decode cannot read the
-    second as the first, since a classified bucket whose stamp will not decode would otherwise be
-    reviewed as a bare directory and its value-keyed records accepted as object classes.
+    Under ``strict=True`` the seam's own decode error (``StoreError``, covering ``DecodeError`` and
+    ``SchemaVersionRefused``) propagates instead.
     """
     try:
         return tcip_store.read(sidecar_key(pred_dir, document), default=None)
@@ -775,11 +694,9 @@ def _read_sidecar(pred_dir: str | Path, document: str, *, strict: bool = False) 
 
 
 def well_formed_validated_by(stamp: dict | None) -> dict | None:
-    """The stamp's pointer at the validation record behind it, or ``None`` when it has no usable one.
-
-    A pointer is usable only with both halves present as non-empty strings: an experiment to look in
-    and the identity of one row inside it. Read here for the writer refusal and the reader
-    verification alike, so a shape one side accepts can never be a shape the other rejects.
+    """The stamp's pointer at the validation record behind it, or ``None`` when it has no usable
+    one: both halves (an experiment to look in and the identity of one row inside it) present as
+    non-empty strings.
     """
     pointer = (stamp or {}).get("validated_by")
     if not isinstance(pointer, dict):
@@ -794,18 +711,13 @@ def well_formed_validated_by(stamp: dict | None) -> dict | None:
 
 
 def parse_validation_reference(value: str) -> tuple[str, str] | None:
-    """The ``(experiment_id, record_digest)`` a validation reference marker names, or ``None``
-    when ``value`` does not hold one.
+    """The ``(experiment_id, record_digest)`` a validation reference marker names, or ``None`` when
+    ``value`` does not hold one.
 
-    A marker is spelled ``<experiment_id>:<record_digest>``, the same spelling the delivery
-    disclosures already use (``resolution.py``'s own ``validation_record`` column). Split at the
-    *last* colon: an experiment id refuses a path separator but never a colon
-    (``experiments.py``'s ``_member_key``), while a record digest is always exactly sixteen
-    lowercase hex characters (``experiments.py``'s ``_content_digest``) and never carries one, so
-    the last colon is the only split that can never mis-cut an id that happens to carry one of its
-    own. Answers ``None`` for a value with no colon, an empty half either side of the split, or a
-    digest half that is not sixteen lowercase hex characters: any of these names no record a
-    reader could resolve.
+    A marker is spelled ``<experiment_id>:<record_digest>`` and split at the last colon: an
+    experiment id may carry a colon, a record digest (exactly sixteen lowercase hex characters)
+    never does. ``None`` for a value with no colon, an empty half either side of the split, or a
+    digest half that is not sixteen lowercase hex characters.
     """
     if ":" not in value:
         return None
@@ -824,24 +736,14 @@ def scope_consistent_with_map(
     ``id_map``, or the reason it is not (``None`` when it is).
 
     A detector pair (``attribute`` ``None``) needs a map that is absent or keyed by exactly the
-    subject, the shape a detector run records (``subject_registry.assign_class_ids`` with no
-    attribute); a map keyed otherwise says the bucket classified. A classified pair (``attribute``
-    not ``None``) needs a map that is not keyed by the subject alone, since a run that decoded
-    along an attribute never records that shape.
+    subject (``subject_registry.assign_class_ids`` with no attribute). A classified pair
+    (``attribute`` not ``None``) needs a map that is not keyed by the subject alone.
 
-    The stamp write rail (:func:`_check_stamp_claim`) and the conform script's own rule 3 call
-    this one predicate rather than holding the rule twice.
+    An attribute declaring exactly one value whose name equals the subject records ``{subject:
+    0}``, indistinguishable here from a detector map.
 
-    The one blind spot: an attribute declaring exactly one value whose name equals the subject
-    records ``{subject: 0}``, indistinguishable here from a detector map. No registry in the two
-    projects on the share declares such a value; a caller stamping a detector pair over a one-key
-    map this way should report the case to its operator rather than trust it silently.
-
-    An empty recorded ``id_map`` (``{}``, distinct from ``None``, absent) names no vocabulary
-    either pair could agree or disagree with: refused by name under both pairs, rather than read
-    as the detector branch's "not keyed by the subject" (a reason meant for a real, non-empty,
-    differently-keyed map) or silently admitted by the classified branch, which would otherwise
-    treat naming nothing as naming a value.
+    An empty recorded ``id_map`` (``{}``, distinct from ``None``) is refused by name under both
+    pairs.
     """
     if id_map is not None and not id_map:
         return (
@@ -866,79 +768,37 @@ def scope_consistent_with_map(
     return None
 
 
-class StampScopeUnstated(ValueError):
-    """A bucket's ``operating_point.json`` decodes but carries no usable ``(subject, attribute)``
-    pair: either key absent, or one present with a type other than ``str`` or ``None``.
-
-    Raised by :func:`bucket_scope` for a stamp written before this platform recorded the pair;
-    the remedy is ``tcip repair-classified-predictions`` over the bucket, named in the
-    message every time this is raised.
-    """
-
-
-def _check_stamp_claim(
-    stamp: dict, document: str, pred_dir: str | Path, *, introduced_keys: set[str] | None = None,
-) -> None:
+def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None:
     """Refuse a stamp whose shape or claim a reader could not trust.
 
-    For the ``operating_point`` document, every top-level key this write actually introduces must
-    be declared: one of ``operating_point_stamp``'s own (:data:`STAMP_KEYS`) or a named producer
-    addition (:data:`STAMP_EXTENSION_KEYS`). ``introduced_keys`` is ``None`` for a fresh
-    :func:`write_sidecar` (the whole stamp is new, so every key is checked) and the merged-minus-
-    stored key set for :func:`update_sidecar` (a promotion over a stamp that already carries a
-    foreign top-level key, from a direct store write or a hand-authored stamp, is not refused for a
-    key it did not itself write). A producer that needs a new key declares it in
-    ``STAMP_EXTENSION_KEYS``; this rail exists so the declared union stays the one place a reader
-    can learn the whole stamp shape, rather than each producer inventing its own beside it. Other
-    documents (classifier/ordinal/regression/scale) carry no such declared shape and are not
-    checked here.
+    For the ``operating_point`` document, every top-level key the written stamp carries must be
+    declared: one of ``operating_point_stamp``'s own (:data:`STAMP_KEYS`) or a named producer
+    addition (:data:`STAMP_EXTENSION_KEYS`). Other documents (classifier/ordinal/regression/scale) carry no such
+    declared shape and are not checked here.
 
-    The same document also carries the writer-side scope rail: the body being written (the whole
-    fresh stamp, or the merged body for an update) must carry both ``subject`` and ``attribute``,
-    each a string or ``None``; an ``attribute`` that is not ``None`` needs a ``subject`` that is
-    not ``None``; and when the body also carries an ``id_map`` the pair must agree with it through
-    :func:`scope_consistent_with_map`. A fresh stamp failing this is refused naming the producer's
-    own obligation to state the pair; a merged body missing the pair is refused naming the stored
-    stamp as one written before the keys existed, and the conform script as the remedy. No live
-    producer can mint a stamp without the pair after this rail exists; the pair is provenance, not
-    claim (:data:`_CLAIM_KEYS` does not carry it), so a stamp's scope can still be edited by the
-    conform script without flooring a sealed count claim.
-
-    Both rails above hold only at :func:`write_sidecar` and :func:`update_sidecar`, the two
-    functions that call this one: a raw store write straight to a key from :func:`sidecar_key`
-    bypasses every check here. That is the seam's accepted limit, not a gap this rail closes.
+    The same document also carries the writer-side scope rail: the body being written must carry
+    both ``subject`` and ``attribute``, each a string or ``None``; an ``attribute`` that is not
+    ``None`` needs a ``subject`` that is not ``None``; and when the body also carries an ``id_map``
+    the pair must agree with it through :func:`scope_consistent_with_map`.
 
     A validated stamp also names the record it was earned from and the trait it was earned for.
-    Neither is defaultable: a pointer this writer filled in would point at nothing, and a trait it
-    guessed would be a claim nobody made. Both rails are writer-side and close nothing on their own,
-    since a file written straight to disk never passes here; they exist so a platform producer
-    cannot omit what every reader compares.
     """
     if document == "operating_point":
-        checked = set(stamp) if introduced_keys is None else introduced_keys
-        unknown = checked - STAMP_KEYS - set(STAMP_EXTENSION_KEYS)
+        unknown = set(stamp) - STAMP_KEYS - set(STAMP_EXTENSION_KEYS)
         if unknown:
             raise ValueError(
                 f"{document}.json at {str(pred_dir)!r} carries undeclared top-level key(s) "
                 f"{sorted(unknown)}. Declare a new producer addition in STAMP_EXTENSION_KEYS "
                 "(resolution.py), naming which producer writes it, before writing it here."
             )
-        fresh = introduced_keys is None
         if "subject" not in stamp or "attribute" not in stamp:
-            if fresh:
-                raise ValueError(
-                    f"{document}.json at {str(pred_dir)!r} carries no subject/attribute pair. "
-                    "Every producer must call operating_point_stamp with both: the object class "
-                    "every prediction record in this bucket is of, and the attribute each "
-                    "record's value sits under (None for a detector bucket)."
-                )
             raise ValueError(
-                f"{document}.json at {str(pred_dir)!r} has a stored stamp with no subject/"
-                "attribute pair, written before this platform recorded the pair. Run "
-                "tcip repair-classified-predictions over this bucket before merging "
-                "into its stamp."
+                f"{document}.json at {str(pred_dir)!r} carries no subject/attribute pair. "
+                "Every producer must call operating_point_stamp with both: the object class "
+                "every prediction record in this bucket is of, and the attribute each "
+                "record's value sits under (None for a detector bucket)."
             )
-        subject, attribute = stamp.get("subject"), stamp.get("attribute")
+        subject, attribute = stamp["subject"], stamp["attribute"]
         if subject is not None and not isinstance(subject, str):
             raise ValueError(
                 f"{document}.json at {str(pred_dir)!r}: subject must be a string or None, "
@@ -975,12 +835,8 @@ def _check_stamp_claim(
 
 
 def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point") -> None:
-    """Write one bucket's stamp whole, under the stamp's own lock.
-
-    A stamp is assembled by its producer, and ``operating_point_stamp`` carries a producer's
-    own extra fields through ``**fields``, so what it holds is checked here, where every
-    write through this seam passes, rather than at each producer. Leaves the write's one
-    ``stamp_written`` line.
+    """Write one bucket's stamp whole, under the stamp's own lock, checked through
+    :func:`_check_stamp_claim`. Leaves the write's one ``stamp_written`` line.
     """
     check_json_value(stamp, path="stamp")
     _check_stamp_claim(stamp, document, pred_dir)
@@ -1018,24 +874,19 @@ def update_sidecar(
     scope = bucket_dataset_root(pred_dir)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
-        current = txn.read(key, default={})
-        current = current if isinstance(current, dict) else {}
-        updated = updater(current)
+        updated = updater(txn.read(key, default={}))
         if updated is None:
             return False
         check_json_value(updated, path="stamp")
-        _check_stamp_claim(
-            updated, document, pred_dir, introduced_keys=set(updated) - set(current))
+        _check_stamp_claim(updated, document, pred_dir)
         txn.write(key, updated)
     _record_stamp_written(pred_dir, document, updated, scope)
     return True
 
 
 def fold_tile_validation(validated: bool, tile_size_validated: str | None) -> bool:
-    """The one floor a stamp's ``validated`` bit answers to: no tile-geometry claim, no validated
-    bucket, whatever the door's own dimension resolved. Called by :func:`operating_point_stamp` for
-    every fresh stamp and by a caller that merges a later claim onto one (``calibrate_count_operating_point``),
-    so the floor is applied identically wherever a bucket's overall ``validated`` bit is computed.
+    """The floor a stamp's ``validated`` bit answers to: no tile-geometry claim, no validated
+    bucket, whatever the door's own dimension resolved.
     """
     return bool(validated) and tile_size_validated != VALIDATED_FALSE
 
@@ -1062,28 +913,19 @@ def operating_point_stamp(
 ) -> dict:
     """The ``operating_point.json`` stamp every path that writes predictions records beside them.
 
-    One constructor for every producer (the agent's image and raster export doors, the GUI's own
-    inference worker), so a provenance key one path needs exists on all of them and a reader can
-    ask the same question of any bucket. Every field is required, with no default that would let a
-    door quietly omit what stands behind its counts; the per-path additions a single producer has
-    (persisted gate evidence, a mask-binarize threshold, a block calibration's own record) travel through
-    ``fields``.
+    Every field is required; the per-path additions a single producer has (persisted gate evidence,
+    a mask-binarize threshold, a block calibration's own record) travel through ``fields``.
 
-    ``subject`` and ``attribute`` are the run's own scope: the object class every prediction
-    record in the bucket is of, and the attribute each record's value sits under (``attribute``
-    ``None`` for a detector bucket). Required, with no default, the same run-scope pair the
-    training run recorded on its experiment config; every reader below resolves a bucket's scope
-    from these two fields through :func:`bucket_scope`, never from the records' own vocabulary.
+    ``subject`` and ``attribute`` are the run's own scope: the object class every prediction record
+    in the bucket is of, and the attribute each record's value sits under (``attribute`` ``None``
+    for a detector bucket). Every reader resolves a bucket's scope from these two fields through
+    :func:`bucket_scope`.
 
-    ``validated`` is the producing door's own verdict over the dimensions it resolved. The tile
-    scale is floored in here rather than at each door: a bucket whose tile geometry has no real
-    basis produced its counts at a scale nothing justifies, so it is not a validated bucket no
-    matter what the conf dimension earned.
+    ``validated`` is the producing door's own verdict over the dimensions it resolved, floored here
+    by the tile scale (:func:`fold_tile_validation`).
 
     ``validated_by`` is the pointer at the validation record the claim was earned from, the mapping
-    :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing. It has no default
-    on purpose: a producer that stamps a validated bucket must have earned a record to name, and a
-    producer that stamps an unvalidated one says so at its own call site.
+    :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing.
     """
     return {
         "trait": trait,
@@ -1107,16 +949,8 @@ def operating_point_stamp(
 
 
 def prediction_producer(checkpoint_path: str, sha256: str) -> str:
-    """The one ``created_by`` spelling for a prediction written behind a resolved checkpoint.
-
-    Every checkpoint-backed door (the image and raster export regimes, the web inference worker)
-    resolves a checkpoint's identity before it writes anything, so the hash is always in hand by
-    the time this is called; the parameter is required rather than defaulted so the bare,
-    hash-less form cannot be spelled through it, and a caller that reaches here without the hash
-    is refused by name rather than stamping a producer with no identity. ``stage_proposals``
-    writes its own producer strings, in either input regime (the caller's model name, or the
-    proposal engine), and is outside this helper by design: neither regime is backed by a
-    resolved checkpoint.
+    """The ``created_by`` spelling for a prediction written behind a resolved checkpoint.
+    ``checkpoint_sha256`` is required; a call without it refuses by name.
     """
     if not sha256:
         raise ValueError(
@@ -1125,29 +959,20 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
     return f"model:{Path(checkpoint_path).stem}@{sha256[:12]}"
 
 
-STAMP_KEYS: frozenset[str] = frozenset((
-    "trait", "dataset_hash", "operating_point", "id_map", "subject", "attribute",
-    "validated", "validated_by", "tile_size_validated", "shippable_issues", "checkpoint",
-    "checkpoint_sha256", "experiment_id", "images_dir", "raster_path", "produced_at",
-))
-"""``operating_point_stamp``'s own sixteen keys: the ones it returns unconditionally, before a
-producer's own ``**fields``. Declared literally rather than derived from the signature, since a
-parameter name matching its returned key is this constructor's own convention, not a guarantee;
-``tests/test_operating_point_sidecar_seam.py`` pins the two against each other."""
+_SKELETON_ARGS: dict[str, Any] = {
+    **dict.fromkeys(name for name, param in inspect.signature(operating_point_stamp).parameters.items()
+                    if param.kind is param.KEYWORD_ONLY),
+    "validated": False, "shippable_issues": ()}
+STAMP_KEYS: frozenset[str] = frozenset(operating_point_stamp(None, **_SKELETON_ARGS))
+"""``operating_point_stamp``'s own keys, the ones it returns before a producer's own ``**fields``,
+read off one construction of it."""
 
 STAMP_EXTENSION_KEYS: dict[str, str] = {
-    "validated_reference": "the review-promotion path (routes/review.py's _stamp_body)",
-    "validation_source": "the review-promotion path (routes/review.py's _stamp_body)",
-    "review_reference_hash": "the review-promotion path (routes/review.py's _stamp_body)",
-    "review_image_count": "the review-promotion path (routes/review.py's _stamp_body)",
-    "validated_at": "the review-promotion path (routes/review.py's _stamp_body)",
     "mask_binarize": "the one bucket publisher (inference_tools._publish_predictions), for a "
                      "bucket carrying masks",
     "claim_scope_validated": "the raster-export door's block-calibration branch",
     "block_calibration": "the raster-export door's block-calibration branch",
     "raster_content_identity": "the raster-export door, recorded for every run of that regime",
-    "calibration_curve_path": "the per-image bucket publisher (inference_tools.publish_bucket), "
-                              "for a calibrated run that persisted a curve",
     "gate_evidence_summary": "the per-image bucket publisher (inference_tools.publish_bucket), "
                              "for a calibrated run that persisted a curve, and "
                              "calibration_tools.calibrate_count_operating_point, which earns a "
@@ -1157,22 +982,16 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
                        "its source image's basename with extension",
 }
 """Every top-level key a producer adds beside ``operating_point_stamp``'s own sixteen, one entry
-per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``
-stamp whose body carries a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``;
-:func:`update_sidecar` refuses only a key the update itself introduces relative to the stored
-stamp, never one the stored stamp already carried. Either refusal names the key and this
-declaration; a new producer addition is admitted by declaring it here, not by the writer silently
-accepting whatever a caller assembled."""
+per key naming which producer writes it. :func:`write_sidecar` and :func:`update_sidecar` refuse
+an ``operating_point`` stamp whose body carries a top-level key outside
+``STAMP_KEYS | STAMP_EXTENSION_KEYS``, naming the key and this declaration."""
 
 
 def read_operating_point_sidecar(pred_dir: str | Path, *, strict: bool = False) -> dict | None:
     """The bucket's ``operating_point.json`` stamp, or ``None`` if absent (or unreadable, at the
-    default ``strict=False``, which never raises).
-
-    ``strict=True`` propagates the seam's own decode error (``StoreError``, covering
-    ``DecodeError``/``SchemaVersionRefused``) instead of folding it into ``None``, the same
-    distinction :func:`_read_sidecar` documents: a caller that must tell an absent stamp from one
-    that will not decode, such as the review-promotion route, cannot read the second as the first.
+    default ``strict=False``, which never raises). ``strict=True`` propagates the seam's own decode
+    error (``StoreError``, covering ``DecodeError``/``SchemaVersionRefused``), as
+    :func:`_read_sidecar` documents.
     """
     return _read_sidecar(pred_dir, "operating_point", strict=strict)
 
@@ -1194,26 +1013,14 @@ class BucketScope:
 
 
 def scope_of_stamp(stamp: dict, pred_dir: str | Path) -> BucketScope:
-    """The ``(subject, attribute)`` pair an already-read stamp body records, or the refusal.
-
-    The pair rule :func:`bucket_scope` applies once its own strict read has returned a stamp:
-    split out so a caller that already holds the stamp body (the review-promotion route, which
-    reads it once for several purposes) checks the same rule without a second read. Raises
-    :class:`StampScopeUnstated` for a stamp carrying no usable pair, naming the conform script,
-    the same refusal :func:`bucket_scope` raises for that case.
-    """
-    if "subject" not in stamp or "attribute" not in stamp:
-        raise StampScopeUnstated(
-            f"{pred_dir}: operating_point.json carries no subject/attribute pair. Run "
-            "tcip repair-classified-predictions over this bucket before reading its scope."
-        )
+    """The ``(subject, attribute)`` pair an already-read stamp body records. Raises
+    ``ValueError`` for a pair member that is neither a string nor ``None``."""
     subject, attribute = stamp["subject"], stamp["attribute"]
     if (subject is not None and not isinstance(subject, str)) or (
         attribute is not None and not isinstance(attribute, str)
     ):
-        raise StampScopeUnstated(
-            f"{pred_dir}: operating_point.json's subject/attribute pair is not a string or None. "
-            "Run tcip repair-classified-predictions over this bucket."
+        raise ValueError(
+            f"{pred_dir}: operating_point.json's subject/attribute pair is not a string or None."
         )
     return BucketScope(subject=subject, attribute=attribute)
 
@@ -1221,15 +1028,9 @@ def scope_of_stamp(stamp: dict, pred_dir: str | Path) -> BucketScope:
 def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
     """A prediction bucket's own recorded scope, or ``None`` for a bucket with no stamp at all.
 
-    ``None`` means a bare directory (a staged bucket, a hand-split copy, a directory under no
-    producer's own layout): its records are read under the caller's own statement, never as a
-    proven detector bucket. A stamp that decodes but carries no usable ``(subject, attribute)``
-    pair raises :class:`StampScopeUnstated` (:func:`scope_of_stamp`, the pair rule this function
-    applies over its own read), naming the conform script; a stamp that will not decode at all
-    propagates the seam's own error (the strict read, :func:`_read_sidecar`). Both are refusals
-    rather than a bare-directory read: an undecodable or pre-scope classified stamp read as a bare
-    directory would let its value-keyed records be reviewed as object classes, the laundering this
-    function exists to remove.
+    ``None`` means a bare directory: its records are read under the caller's own statement. A
+    stamp that will not decode propagates the seam's own error (the strict read,
+    :func:`_read_sidecar`).
     """
     stamp = _read_sidecar(pred_dir, "operating_point", strict=True)
     if stamp is None:
@@ -1239,56 +1040,30 @@ def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
 
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
     """The bucket's ``classifier_operating_point.json`` stamp, or ``None`` if absent/unreadable.
-
-    A file distinct from ``operating_point.json``: the classifier-validity dimension is structurally
-    independent from the count operating point's, so the two are never written to the
-    same fields a generic writer could conflate (``_sidecar_reference`` reads exactly
-    ``validated``/``operating_point.conf.validated_against``, which must stay the count dimension's
-    alone).
+    The classifier-validity dimension lives in its own file, apart from ``operating_point.json``'s
+    count dimension.
     """
     return _read_sidecar(pred_dir, "classifier_operating_point")
 
 
 def read_ordinal_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
-    """The bucket's ``ordinal_operating_point.json`` stamp, or ``None`` if absent/unreadable.
-
-    A file distinct from ``operating_point.json``/``classifier_operating_point.json``: the ordinal
-    compensating-error dimension is structurally independent from both, same reasoning as
-    :func:`read_classifier_operating_point_sidecar`, a generic writer must not conflate these
-    dimensions.
-    """
+    """The bucket's ``ordinal_operating_point.json`` stamp, or ``None`` if absent/unreadable."""
     return _read_sidecar(pred_dir, "ordinal_operating_point")
 
 
 def read_regression_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
-    """The bucket's ``regression_operating_point.json`` stamp, or ``None`` if absent/unreadable.
-
-    A file distinct from every other operating-point sidecar, same reasoning as
-    :func:`read_classifier_operating_point_sidecar`/:func:`read_ordinal_operating_point_sidecar`.
-    """
+    """The bucket's ``regression_operating_point.json`` stamp, or ``None`` if absent/unreadable."""
     return _read_sidecar(pred_dir, "regression_operating_point")
 
 
 def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
-    """The bucket's ``resolve_scale.json`` stamp, or ``None`` if absent/unreadable (never raises).
-
-    A file distinct from ``operating_point.json``: the physical-scale dimension
-    (:func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_scale`) has no production writer
-    folding it into the count operating point today, and is structurally independent from it anyway
-    (a physical scale is a fact about the imagery, not a count calibration), the same reasoning that
-    keeps ``classifier_operating_point.json`` its own file rather than a field inside this one.
-    """
+    """The bucket's ``resolve_scale.json`` stamp, or ``None`` if absent/unreadable (never raises)."""
     return _read_sidecar(pred_dir, "resolve_scale")
 
 
 def stamp_names_raster(sidecar: dict | None) -> bool:
-    """Whether a stamp names a whole-raster bucket (its own ``raster_path`` field set).
-
-    One mosaic total is not a per-image count, so a raster bucket is refused wherever a door
-    reasons over per-image predictions: shared by the per-image delivery door's own refusal
-    (``inference_tools._deliver_per_image_counts_from_bucket``) and
-    ``calibration_tools.calibrate_count_operating_point``, rather than each spelling the same
-    ``raster_path is not None`` check on its own.
+    """Whether a stamp names a whole-raster bucket (its own ``raster_path`` field set): one mosaic
+    total, not a per-image count.
     """
     return sidecar is not None and sidecar.get("raster_path") is not None
 
@@ -1299,26 +1074,16 @@ def _sidecar_reference(
     """Which reference the sidecar's named param cleared, for its ``validation_kind``, or
     ``VALIDATED_FALSE``.
 
-    Never upgrades a missing/unrecognized/wrong-kind value to a shippable reference, a param whose
-    own recorded reference is absent, or belongs to a different validation kind than this one, floors
-    to ``false`` rather than being read as validated. (Upgrading on a bare top-level ``validated``
-    bool is a laundering path: a physical-measurement reference could read back as an
-    annotation-based one purely because the sidecar's overall flag is true.) ``param_key`` lets a
-    differently-shaped sidecar (e.g. a classifier stamp's ``classifier`` param) reuse this same read.
+    A param whose own recorded reference is absent, unrecognized, or of a different validation kind
+    floors to ``false``; the sidecar's top-level ``validated`` bool is never read. ``param_key``
+    lets a differently-shaped sidecar (e.g. a classifier stamp's ``classifier`` param) reuse this
+    same read.
     """
     if not sidecar or not sidecar.get("validated"):
         return VALIDATED_FALSE
     param = (sidecar.get("operating_point") or {}).get(param_key) or {}
     return cleared_reference(param.get("validated_against"), validation_kind=validation_kind)
 
-
-_LABEL_MOVEMENT_KEYS: tuple[str, ...] = (
-    "labels_moved_draw_to_run", "labels_moved_run_to_now", "calibration_labels_moved",
-    "selection_redrawn", "calibration_labels_dir",
-)
-"""The five keys :func:`resolver_selection_disjointness` copies onto an applicable row beside
-the leak fields: presence is required there, their value is not gated on (a moved label is
-visible on the row, not a floor)."""
 
 # --- the claim a stamp asserts, and the record that has to answer for it -------------------
 
@@ -1359,14 +1124,10 @@ is never itself the measurement it states the unit of)."""
 
 
 def claim_payload(sidecar: dict | None, *, document: str) -> dict:
-    """The part of a stamp that constitutes the claim, for the document it is a stamp of.
-
-    The one extractor both sides of the binding call: :func:`seal_validation` runs it over the stamp
-    body a door is about to publish and stores the result in the validation record, and
-    :func:`verify_stamp_binding` runs it over the stamp it is reading and compares. Compared whole,
-    never field by field, so a key added to a stamp after its record was minted reads as a
-    disagreement rather than as an ignored extra. A key the stamp does not carry is absent from the
-    payload rather than defaulted, since a defaulted value is a claim nobody made.
+    """The part of a stamp that constitutes the claim, for the document it is a stamp of: what
+    :func:`seal_validation` stores in the validation record and :func:`verify_stamp_binding`
+    compares, whole. A key the stamp does not carry is absent from the payload rather than
+    defaulted.
     """
     try:
         keys = _CLAIM_KEYS[document]
@@ -1462,14 +1223,12 @@ def _resolver_value(result: Any, param_key: str) -> Any:
 
 def _disjointness_evidence(result: Any, document: str, caller: str) -> dict | None:
     """The gate evidence dict a disjointness-reading resolver checks, for one declared document
-    (:data:`_DOCUMENT_PARAM`): the document guard and the live-result-to-evidence extraction
-    :func:`resolver_train_disjointness` and :func:`resolver_selection_disjointness` both need,
-    in one place so declaring a fifth checked document, or changing how evidence is pulled out of
-    a live result, edits one function rather than two that must agree.
+    (:data:`_DOCUMENT_PARAM`), for :func:`resolver_train_disjointness` and
+    :func:`resolver_selection_disjointness`.
 
-    ``None`` for ``resolve_scale`` (no training run to check against) and for a result carrying
-    no gate evidence at all. A document neither resolver knows how to read from raises, naming
-    ``caller``, rather than silently sealing ``null`` for a check nobody ran.
+    ``None`` for ``resolve_scale`` (no training run to check against) and for a result carrying no
+    gate evidence at all. A document neither resolver knows how to read from raises, naming
+    ``caller``.
     """
     if document == "resolve_scale":
         return None
@@ -1504,11 +1263,10 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
 def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked selection-disjointness (the
     checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
-    same shape live gate evidence carries, ``applicable``, ``reason``, ``checked``, ``unresolvable``,
-    ``leaked_groups``, ``leaked_stems``, ``group_check`` and, when the calibration read a label
-    directory, the four label-movement keys plus ``calibration_labels_dir`` beside them, so the
-    row a delivery door reads carries the leak fields and the movement facts its floor and its
-    breeder sentence read, not only the pass/fail booleans.
+    same shape live gate evidence carries, ``applicable``, ``reason``, ``checked``,
+    ``unresolvable``, ``leaked_groups``, ``leaked_stems``, ``group_check`` and, when the
+    calibration read a label directory, the four label-movement keys plus
+    ``calibration_labels_dir`` beside them.
     """
     evidence = _disjointness_evidence(result, document, "resolver_selection_disjointness")
     sd = (evidence or {}).get("selection_disjointness")
@@ -1531,13 +1289,9 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
 
 
 def _relative_location(path: str | Path, dataset_root: Path) -> str:
-    """Where an input sits, expressed against the dataset root the record hangs off.
-
-    Recorded so an auditor who wants to recompute a reference can find it, which no delivery does
-    (:func:`verify_stamp_binding` compares the recorded hashes, it does not re-read the labels,
-    verdicts or lock behind them). An input outside the dataset root is legitimate work (a CSV over a
-    loose images directory), and comes back as a path stepping out of the root, or as an absolute
-    path when the two share no anchor at all.
+    """Where an input sits, expressed against the dataset root the record hangs off, for an auditor
+    recomputing a reference. An input outside the dataset root comes back as a path stepping out of
+    the root, or as an absolute path when the two share no anchor at all.
     """
     resolved = Path(path).resolve()
     try:
@@ -1632,25 +1386,21 @@ def open_validation(
 ) -> ValidationDraft:
     """Run a document's own gate over the evidence, and return the draft a record is sealed from.
 
-    The first of the two phases a validated claim is earned in. It takes the evidence, never a
-    verdict: it looks up the named resolver among those the document admits, runs it, and refuses
-    unless the resolver's own result cleared a reference ``accepted_references`` recognizes for the
-    document's kind. Nothing is written here, and a caller holding a draft holds a passed gate, not
-    a claim.
+    The first of the two phases a validated claim is earned in: look up the named resolver among
+    those the document admits, run it, and refuse unless the resolver's own result cleared a
+    reference ``accepted_references`` recognizes for the document's kind. Nothing is written here.
 
-    ``evidence`` is ``{"resolver": <name>, "inputs": {...}}``: which of the document's resolvers ran
-    the gate, and the arguments it ran over. The trait and the producing experiment are passed here
-    rather than through ``inputs``, so the trait a record is earned for is the trait the gate was
-    run for, and the run whose training split disjointness is checked is the run that produced the
-    predictions. ``inputs`` restating either is refused rather than allowed to disagree.
+    ``evidence`` is ``{"resolver": <name>, "inputs": {...}}``: which of the document's resolvers
+    ran the gate, and the arguments it ran over. The trait and the producing experiment are this
+    function's own arguments; ``inputs`` restating either is refused.
 
     ``reference_inputs`` names the evidence's own locations (see :func:`_reference_identity`), and
-    must include the ``dataset_root`` the claim, its covered buckets and its reference all hang off.
+    must include the ``dataset_root`` the claim, its covered buckets and its reference all hang
+    off.
 
     ``checkpoint_sha256`` is the identity the evidence carried, and ``producing_experiment_id`` the
-    run that produced the predictions; both may be ``None`` for a bespoke or unregistered checkpoint,
-    and both are recorded as they are rather than re-derived from a file on disk, which would prove
-    a file with that content exists somewhere and not that these predictions came from it.
+    run that produced the predictions; both may be ``None`` for a bespoke or unregistered
+    checkpoint, and both are recorded as given.
     """
     import importlib
 
@@ -1739,13 +1489,8 @@ by ``None`` for every document with no more specific sentence of its own (every 
 
 
 def bucket_relative_key(bucket: str | Path, root: str | Path, *, document: str) -> str:
-    """``bucket``'s path relative to ``root``, or refuse: the one under-root check every caller
-    that records a claim against a bucket applies.
-
-    Shared by :func:`seal_validation` (each bucket a claim covers) and
-    ``calibration_tools.calibrate_count_operating_point``'s own pre-check over ``pred_dir``, so a
-    bucket outside the dataset root is refused with one wording wherever a claim would try to
-    place it, rather than two independently-worded checks that could drift.
+    """``bucket``'s path relative to ``root``, or refuse: the under-root check every caller that
+    records a claim against a bucket applies.
     """
     resolved = Path(bucket).resolve()
     root_resolved = Path(root).resolve()
@@ -1767,32 +1512,30 @@ def seal_validation(
     bucket_dirs: list[str | Path] | tuple[str | Path, ...],
     stamp_body: dict,
     images_dir: str | Path | None = None,
-) -> tuple[str, dict]:
-    """Append the record a passed gate earned, over the files as they are now, and stamp the pointer.
+) -> dict:
+    """Append the record a passed gate earned, over the files as they are now, and stamp the
+    pointer.
 
     The second phase. It takes the content identity of every bucket the claim covers from the files
-    on disk at this moment (so the claim covers what was actually written, not what the run set out
-    to write), takes the claim itself from the stamp body about to be published, appends the row, and
-    returns the digest together with that stamp body with ``validated_by`` merged in. The caller
-    writes the returned body last.
+    on disk at this moment, takes the claim itself from the stamp body about to be published,
+    appends the row, and returns that stamp body with ``validated_by`` (the record's experiment and
+    digest) merged in. The caller writes the returned body last.
 
-    There is no transaction across the experiment store and the bucket, and none is invented: the
-    order is chosen so every partial state fails closed. A crash before this call leaves prediction
-    files with no stamp, which floors. A crash after it leaves a record no stamp names, which is
-    inert. Only a stamp that names a row a reader can find and recompute delivers.
+    There is no transaction across the experiment store and the bucket: a crash before this call
+    leaves prediction files with no stamp, which floors; a crash after it leaves a record no stamp
+    names, which is inert. Only a stamp that names a row a reader can find and recompute delivers.
 
     ``covered_buckets`` is keyed by each bucket's path relative to ``dataset_root``, so a dataset
     moved or copied whole still verifies while a bucket moved to a different place inside it does
-    not. A bucket outside the stated dataset root cannot be keyed that way and is refused here, the
-    same claim being unverifiable on the reading side.
+    not. A bucket outside the stated dataset root is refused.
 
     For the ``operating_point`` document the digest is over the bucket's prediction bytes
-    (:func:`~tcip_mcp.prediction_buckets.bucket_content_digest`), since that claim is about what was
-    predicted. For ``resolve_scale`` the digest is over the bytes of the bucket's own images, read
-    from ``images_dir`` (:func:`~tcip_mcp.prediction_buckets.bucket_stems_digest`) instead: a scale
-    claim is a fact about the bucket's imagery, not its predictions, so re-exporting predictions over
-    the same images must not floor it, while an image added to, removed from, or replaced in the
-    bucket must. ``images_dir`` is required for a ``resolve_scale`` draft, and unused otherwise.
+    (:func:`~tcip_mcp.prediction_buckets.bucket_content_digest`). For ``resolve_scale`` the digest
+    is over the bytes of the bucket's own images, read from ``images_dir``
+    (:func:`~tcip_mcp.prediction_buckets.bucket_stems_digest`): re-exporting predictions over the
+    same images leaves it standing, while an image added to, removed from, or replaced in the
+    bucket floors it. ``images_dir`` is required for a ``resolve_scale`` draft, and unused
+    otherwise.
     """
     from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
@@ -1878,10 +1621,8 @@ def seal_validation(
     appended = _append_validation(experiment_id, body)
     if "error" in appended:
         raise ValueError(f"the {draft.document} claim was not recorded: {appended['error']}")
-    record_digest = appended["record_digest"]
-    return record_digest, {**stamp_body,
-                           "validated_by": {"experiment_id": experiment_id,
-                                            "record_digest": record_digest}}
+    return {**stamp_body, "validated_by": {"experiment_id": experiment_id,
+                                           "record_digest": appended["record_digest"]}}
 
 
 @dataclass(frozen=True)
@@ -1909,31 +1650,20 @@ class StampBinding:
 def _reference_ground_truth_moved(
     selection_dir: str,
 ) -> tuple[list[str], list[str], str | None]:
-    """Which of a selection's calibration-side ground truths differ from the draw's own record.
+    """Which of a selection's calibration-side ground truths differ from the draw's own recorded
+    digests.
 
-    A calibration is measured against the labels the selection held out for it, and the selection
-    records each one's digest at draw time. Recomputing those digests now is what distinguishes a
-    claim that still answers for its reference from one whose reference moved underneath it.
+    Recomputes over each sample's own ``ground_truth`` path through :func:`ground_truth_digest`.
 
-    Recomputes over each sample's own ``ground_truth`` path through :func:`ground_truth_digest`,
-    the byte convention :func:`label_digests` recorded the draw's digests with, so the producing
-    side and the checking side cannot drift into hashing one file two ways. Reading the sample's
-    stated path rather than rebuilding a label filename from its stem keeps this answering for
-    ground truth that is not a per-image label document, since a selection names where each
-    sample's ground truth is rather than deriving it.
+    Returns ``(moved, unstated, unreadable)``: the ground-truth filenames whose digest changed, the
+    ones carrying no recorded digest to compare against, and a reason the selection could not be
+    read at all, which the caller refuses on.
 
-    Returns ``(moved, unstated, unreadable)``: the ground-truth filenames whose digest changed,
-    the ones carrying no recorded digest to compare against, and a reason the selection could not
-    be read at all. The third is an answer the caller refuses on rather than skips: a claim naming
-    a reference nobody can open is a claim whose reference cannot be confirmed, and delivering it
-    would rest a number on evidence that is no longer there to check.
-
-    Deliberately wider than the universe the sweep actually measured, in two ways, because the row
-    records a count of the stems it swept rather than their names and neither can be narrowed from
-    what is on file. A calibration sample the universe excluded (no image present) still reads as a
-    move, and a sample whose ground truth is one row of a table (``row_key``) is compared by the
-    whole file, so an edit to another row of it reads as a move too. Both refuse a reference that
-    moved rather than admit one that did not, which is the side to err on here.
+    Wider than the universe the sweep measured, in two ways, because the row records a count of the
+    stems it swept rather than their names: a calibration sample the universe excluded (no image
+    present) still reads as a move, and a sample whose ground truth is one row of a table
+    (``row_key``) is compared by the whole file, so an edit to another row of it reads as a move
+    too.
     """
     try:
         from tcip_mcp.pipelines.data.selection import read_selection
@@ -1959,36 +1689,33 @@ def verify_stamp_binding(
 ) -> StampBinding:
     """Check that a stamp's validation claim is answered for by a record it cannot itself write.
 
-    Called from inside the reconcilers rather than at each delivery door, so no door can deliver
-    without it. Every check is cheap: a stamp read, a log read, for a selection-scoped claim one
-    pass over the calibration side's own label files, and for the count and scale documents one
-    pass over the bucket's own prediction files or imagery the claim covers. No model is loaded
-    and no gate is re-run.
+    Every check is cheap: a stamp read, a log read, for a
+    selection-scoped claim one pass over the calibration side's own label files, and for the count
+    and scale documents one pass over the bucket's own prediction files or imagery the claim
+    covers. No model is loaded and no gate is re-run.
 
-    In order: the stamp's own parameter cleared a reference of the document's kind (unchanged, and
-    still first); it names an experiment and a row; that experiment exists; that row is in it and
-    still hashes to the identity the stamp committed to; the row agrees with the stamp on document,
-    reference, checkpoint identity (absence equal to absence), trait and the whole claim payload; and
-    for the count and scale documents, every bucket being read is in the covered set at its
+    In order: the stamp's own parameter cleared a reference of the document's kind; it names an
+    experiment and a row; that experiment exists; that row is in it and still hashes to the
+    identity the stamp committed to; the row agrees with the stamp on document, reference,
+    checkpoint identity (absence equal to absence), trait and the whole claim payload; and for the
+    count and scale documents, every bucket being read is in the covered set at its
     dataset-relative key with the content (or imagery) identity it was earned over, recomputed now.
     ``images_dir`` is required to reach that last check for ``resolve_scale`` and unused otherwise.
     When the reference identity carries a ``selection_dir``, the row must also carry a
     ``selection_disjointness`` that is either not-applicable (with a reason) or checked with no
-    leak; a selection-scoped reference earned before that field existed, or earned against a
-    checkpoint whose own run is unknown, floors here rather than reading as cleared. That
-    selection's calibration-side ground truth must also still be the ground truth the draw
-    recorded (:func:`_reference_ground_truth_moved`): a claim measured against labels edited
-    since, under a selection that recorded no digest to compare against, or under one that can no
-    longer be read at all, floors rather than delivering a number earned against a reference that
-    cannot now be confirmed.
+    leak; a selection-scoped reference with no such field, or earned against a checkpoint whose own
+    run is unknown, floors. That selection's calibration-side ground truth must also still be the
+    ground truth the draw recorded (:func:`_reference_ground_truth_moved`): labels edited since, a
+    selection that recorded no digest to compare against, or one that can no longer be read at all,
+    floor.
 
     Verification is per stamp file, not per parameter. One failed check floors every dimension that
     stamp carries, so a count operating point, a tile geometry, a claim scope and a review upgrade
     written into one ``operating_point.json`` stand or fall together.
 
     ``digest_memo`` is a caller-owned dict living for the span of one delivery, so a bucket several
-    reconcilers read is hashed once. There is deliberately no cache beyond it: recomputation is what
-    detects a replacement whose size and timestamp were restored.
+    reconcilers read is hashed once. There is no cache beyond it: recomputation is what detects a
+    replacement whose size and timestamp were restored.
     """
     from tcip_mcp.experiments import experiment_exists, experiments_scope, find_validation
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
@@ -2077,15 +1804,14 @@ def verify_stamp_binding(
         sd_ok = isinstance(sd, dict) and (
             (sd.get("applicable") is False and sd.get("reason"))
             or (sd_applicable and sd.get("checked") is True
-                and not sd.get("leaked_groups") and not sd.get("leaked_stems")
-                and all(k in sd for k in _LABEL_MOVEMENT_KEYS))
+                and not sd.get("leaked_groups") and not sd.get("leaked_stems"))
         )
         if not sd_ok:
             return floored(
                 f"{document}.json at {bucket!r} claims a validated reference under the selection "
                 f"at {row_selection_dir!r}, and record {record_digest!r} carries no "
                 "selection_disjointness check that is either not-applicable (with a reason) or "
-                "checked with no leak and the label-movement keys sealed. Calibrate again under "
+                "checked with no leak. Calibrate again under "
                 "the selection's calibration side with a checkpoint whose run is on record.",
                 **known)
         moved, unstated, unreadable = _reference_ground_truth_moved(row_selection_dir)
@@ -2175,20 +1901,14 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
     """The bucket's own validated count operating point, as the rule it admits a prediction score
     under, or the reason none applies.
 
-    The one reading of "this bucket's validated count operating point admits a score": answers a
-    rule only when :func:`verify_stamp_binding` answers a claim this stamp's own validation record
-    backs (``claimed`` and ``ok``) and the bound ``operating_point.conf.value`` is a finite,
-    non-boolean number, the field every count-operating-point producer stamps
-    (``calibration_tools.py``, ``inference_tools.py``, ``validation.py``, the same field
-    ``/generation_conf`` already reads). The rule's identity is the binding's own
-    ``experiment_id`` and ``record_digest``, never a value this function invents; a caller that
-    admits a prediction under the rule names that identity, never a fresh one of its own.
+    Answers a rule only when :func:`verify_stamp_binding` answers a claim this stamp's own
+    validation record backs (``claimed`` and ``ok``) and the bound ``operating_point.conf.value``
+    is a finite, non-boolean number. The rule's identity is the binding's own ``experiment_id`` and
+    ``record_digest``.
 
     Otherwise ``rule`` is ``None`` and ``reason`` names which of no stamp at all, a stamp claiming
     nothing, the binding's own floor reason, or no readable conf answers for it, each its own
-    sentence: a caller that reads the stamp strictly (the review routes do) can also route a
-    decode failure to this same ``AdmissionResolution`` shape without this function folding it
-    into the no-stamp reading.
+    sentence.
     """
     if stamp is None:
         return AdmissionResolution(
@@ -2222,13 +1942,9 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
 
 
 def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
-    """The checkpoint identity this experiment record answers for, or ``None`` when it records none.
-
-    Read from the run's own lineage, and only for a record whose status is ``completed``: a
-    file-backend crash between the lineage apply and the status apply could otherwise leave a
-    still-``running`` record carrying a digest, and a run that never completed vouches for
-    nothing. ``complete_run`` writes the digest and the terminal status together in one
-    transaction, so this is the one fact the run itself recorded of its own output.
+    """The checkpoint identity this experiment record answers for, or ``None`` when it records
+    none: read from the run's own lineage, and only for a record whose status is ``completed``
+    (``complete_run`` writes the digest and the terminal status together).
     """
     from tcip_mcp.experiments import lineage_key, read_member, status_key
 
@@ -2264,6 +1980,37 @@ def corroborated_producer(
     return checkpoint_sha256, experiment_id
 
 
+class ProducerDiffers(ValueError):
+    """The buckets of one delivery or calibration name more than one checkpoint or run."""
+
+
+def stamped_producer(buckets: Mapping[str, str]) -> dict[str, str | None]:
+    """The one producer ``{"sha256", "experiment_id"}`` the ``operating_point.json`` stamps of
+    ``buckets`` (label -> bucket directory) assert. A bucket with no stamp contributes nothing, and
+    a stamp's ``None`` identity contributes nothing for that identity; a stamp lacking either key
+    raises ``KeyError``. Raises :class:`ProducerDiffers` naming each bucket's own producer when the
+    stamps name more than one checkpoint or run."""
+    found: dict[str, dict[str, str]] = {"checkpoint": {}, "run": {}}
+    for label, bucket in buckets.items():
+        data = read_operating_point_sidecar(bucket)
+        if data is None:
+            continue
+        for kind, key in (("checkpoint", "checkpoint_sha256"), ("run", "experiment_id")):
+            if data[key] is not None:
+                found[kind][label] = str(data[key])
+    one: dict[str, str | None] = {}
+    for kind, key in (("checkpoint", "sha256"), ("run", "experiment_id")):
+        values = set(found[kind].values())
+        if len(values) > 1:
+            raise ProducerDiffers(
+                f"the buckets were produced by more than one {kind}: "
+                f"{dict(sorted(found[kind].items()))}. One measurement names one producer; use "
+                "the buckets one producer covers, or re-run inference so every bucket names the "
+                "same one.")
+        one[key] = next(iter(values)) if values else None
+    return one
+
+
 def delivered_provenance(
     asserted: Mapping[str, Any] | None,
     bindings: Mapping[str, StampBinding],
@@ -2272,21 +2019,16 @@ def delivered_provenance(
 ) -> dict[str, Any]:
     """The provenance cells a delivered CSV carries, for one door's own column list.
 
-    The one builder behind every delivered producer column, so two deliverables with different
-    column lists cannot disagree on what a given column holds. ``bindings`` is one entry per bucket
-    the delivery read, as the reconciler verified them; ``asserted`` is what the stamps and the
-    producing call claimed, which is a starting point and never the last word.
+    ``bindings`` is one entry per bucket the delivery read, as the reconciler verified them;
+    ``asserted`` is what the stamps and the producing call claimed.
 
     ``validation_record`` names the experiment and row every bucket's claim was answered for by,
-    and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
-    that have none. ``producer_model_sha256`` and ``producing_experiment_id`` are corroborated
-    through :func:`corroborated_producer`, preferring the identity the verified records carry over
-    the identity the stamps assert. Bound buckets whose verified records name different producers
-    raise ``ValueError``: one delivery is one measurement by one producer, so the cell never
-    falls back to an asserted name or a placeholder for a spliced set. An
-    ``operating_point_validated`` named in ``columns`` passes through whatever ``asserted``
-    carried for it, unchanged; :func:`delivered_tail` is what actually stamps that column from
-    the gate.
+    and is empty unless every bucket read is bound. ``producer_model_sha256`` and
+    ``producing_experiment_id`` are corroborated through :func:`corroborated_producer`, preferring
+    the identity the verified records carry over the identity the stamps assert. Bound buckets
+    whose verified records name different producers raise :class:`ProducerDiffers`. An
+    ``operating_point_validated`` named in ``columns`` passes through whatever ``asserted`` carried
+    for it, unchanged; :func:`delivered_tail` stamps that column from the gate.
     """
     values = dict(asserted or {})
     bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
@@ -2295,7 +2037,7 @@ def delivered_provenance(
 
     identities = {(b.checkpoint_sha256, b.producing_experiment_id) for b in bindings.values()}
     if bound and len(identities) > 1:
-        raise ValueError(
+        raise ProducerDiffers(
             "the delivered buckets were produced by more than one checkpoint or run: "
             f"{ {d: (b.checkpoint_sha256, b.producing_experiment_id) for d, b in bindings.items()} }. "
             "One delivery names one producer; deliver the buckets one producer covers."
@@ -2328,26 +2070,18 @@ def delivered_tail(
 ) -> dict[str, Any]:
     """One delivered CSV row's full producer-plus-validity tail, for one door's own column list.
 
-    The one composition behind every delivered tail: producer identity and ``validation_record``
-    come from :func:`delivered_provenance`; ``produced_at`` is this call's own write time, computed
-    once here rather than accepted from ``asserted``, which is refused when it carries a real
-    (non-``None``) ``produced_at`` of its own rather than silently overridden, since the column is
-    this composition's own fact and a second source asserting it would disagree with this one: a
-    ``None``-valued key (a caller that composed ``{"produced_at": x.get(...)}`` over
-    something carrying none) is absence, not an assertion, the same convention
-    :func:`corroborated_producer` uses; and every validity column ``columns`` actually carries
+    Producer identity and ``validation_record`` come from :func:`delivered_provenance`.
+    ``produced_at`` is this call's own write time; ``asserted`` carrying a non-``None``
+    ``produced_at`` of its own is refused (a ``None``-valued key is absence, the convention
+    :func:`corroborated_producer` uses). Every validity column ``columns`` carries
     (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``, ``operating_point_validated``
-    included) is stamped through ``gate.column_stamp`` here, never left to ``delivered_provenance``,
-    with ``own_column`` derived from that same membership check, so a dimension without a column of
-    its own floors every column that does exist and no door can drift into disagreeing about what a
-    validated column means. An ``unvalidated_dimensions`` named in ``columns`` carries
-    :meth:`DeliveryGateResult.unvalidated_cell`, every gated dimension that did not validate (blank
-    when none), so a reader can always recover the gate's full outcome behind a floored validity
-    column without a second spelling of it. ``acknowledged_by``/``acknowledgement_reason`` named in
-    ``columns`` carry ``gate.acknowledged_by``/``gate.acknowledgement_reason`` verbatim (``None``
-    when nothing was acknowledged): every door whose own column list names them carries the pair,
-    the phenology writer and the two count writers (``export_detection_csv``,
-    ``export_aggregated_csv``) alike.
+    included) is stamped through ``gate.column_stamp``, with ``own_column`` derived from that same
+    membership check, so a dimension without a column of its own floors every column that does
+    exist. An ``unvalidated_dimensions`` named in ``columns`` carries
+    :meth:`DeliveryGateResult.unvalidated_cell` (blank when none).
+    ``acknowledged_by``/``acknowledgment_reason`` named in ``columns`` carry
+    ``gate.acknowledged_by``/``gate.acknowledgment_reason`` verbatim (``None`` when nothing was
+    acknowledged).
     """
     if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
@@ -2364,8 +2098,8 @@ def delivered_tail(
         values["unvalidated_dimensions"] = gate.unvalidated_cell()
     if "acknowledged_by" in columns:
         values["acknowledged_by"] = gate.acknowledged_by
-    if "acknowledgement_reason" in columns:
-        values["acknowledgement_reason"] = gate.acknowledgement_reason
+    if "acknowledgment_reason" in columns:
+        values["acknowledgment_reason"] = gate.acknowledgment_reason
     return values
 
 
@@ -2389,12 +2123,8 @@ key is written exactly once, so there is nothing to compare-and-set against)."""
 
 
 def delivery_events_scope(project_root: str | Path | None = None) -> Path:
-    """Where a project's delivery-event records live: ``<root>/.tcip/state``.
-
-    Scoped under the project root the same way ``operationalizations_scope`` is
-    (``operationalization.py``'s own pattern): this store is the project's enumerable document of
-    what shipped, a different concern from the dataset-scoped audit-log line
-    ``record_delivery_binding_event`` already writes below, over a scope of its own.
+    """Where a project's delivery-event records live: ``<root>/.tcip/state``, the project's
+    enumerable document of what shipped.
     """
     if project_root is not None:
         return Path(project_root) / ".tcip" / "state"
@@ -2435,8 +2165,8 @@ def delivery_supersession_key(scope: str | Path, event_id: str) -> Key:
 
 def load_delivery_supersessions(project_root: str | Path | None = None) -> dict[str, dict]:
     """Every delivery-event id under this project that carries a supersession, mapped to its own
-    stored record: the input :func:`~tcip_mcp.pipelines.delivery_events_schema.with_supersessions`
-    joins against a delivery-events listing, read once here rather than per event."""
+    stored record.
+    """
     scope = delivery_events_scope(project_root)
     out: dict[str, dict] = {}
     for key in tcip_store.keys(DELIVERY_SUPERSESSIONS_STORE, str(scope)):
@@ -2460,10 +2190,8 @@ class DeliveryEventShapeError(ValueError):
 def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) -> None:
     """Validate one stored ``delivery_events`` record against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`, raising
-    :class:`DeliveryEventShapeError` naming ``event_id`` on a shape error. The one check
-    :func:`read_delivery_events` and :func:`read_one_delivery_event` both run, so a record
-    either reader meets refuses the same way rather than one tolerating what the other would
-    refuse."""
+    :class:`DeliveryEventShapeError` naming ``event_id`` on a shape error.
+    """
     from pydantic import ValidationError
 
     from tcip_mcp.pipelines.delivery_events_schema import (
@@ -2475,10 +2203,8 @@ def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) ->
         DeliveryEventRecord.model_validate(record)
     except ValidationError as exc:
         raise DeliveryEventShapeError(
-            f"delivery event {event_id!r} under {scope} does not validate against the "
-            f"current delivery_events shape: {validation_error_detail(exc)}; no operator door "
-            "rewrites an existing delivery_events record, so this project's stored events must "
-            "be corrected to the current shape before they can be read",
+            f"delivery event {event_id!r} under {scope} does not validate as a "
+            f"DeliveryEventRecord: {validation_error_detail(exc)}",
             event_id=event_id,
         ) from exc
 
@@ -2487,13 +2213,8 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
     """Every ``delivery_events`` record stored under this project, each validated against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`.
 
-    Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id``, on the first
-    stored record that does not validate, rather than silently dropping or half-trusting it. The
-    Results tab's delivery panel (``routes/results.py``'s ``list_delivery_events``) and
-    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids` both read
-    delivery events through this one function, so a shape refusal reads the same wherever it is
-    met, and a rebuild's own citing-events check can never silently skip a record it cannot
-    decode.
+    Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id``, on the first stored
+    record that does not validate.
     """
     scope = delivery_events_scope(project_root)
     records: list[dict] = []
@@ -2506,14 +2227,10 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
 
 
 def read_one_delivery_event(project_root: str | Path | None, event_id: str) -> dict | None:
-    """One ``delivery_events`` record by its own id, validated against
-    :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord` the same way
-    :func:`read_delivery_events` validates every record it lists.
-
-    ``None`` when nothing is stored under ``event_id``; raises :class:`DeliveryEventShapeError`
-    when a stored record does not validate. ``supersede_delivery`` reads the event it supersedes
-    and any replacement event through this, so it never quietly supersedes a record the Results
-    tab's panel would refuse to list.
+    """One ``delivery_events`` record by its own id, validated the same way
+    :func:`read_delivery_events` validates every record it lists. ``None`` when nothing is stored
+    under ``event_id``; raises :class:`DeliveryEventShapeError` when a stored record does not
+    validate.
     """
     scope = delivery_events_scope(project_root)
     record = tcip_store.read(delivery_event_key(scope, event_id), default=None)
@@ -2524,18 +2241,17 @@ def read_one_delivery_event(project_root: str | Path | None, event_id: str) -> d
 
 
 def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
-    """A stable, Windows-safe id for one delivery event: a hex digest carries no colon and no
-    timestamp-collision risk a caller-supplied nonce would otherwise need, and is computed here
-    rather than accepted from a caller so no door can name its own event twice."""
+    """A stable, Windows-safe id for one delivery event: a hex digest, computed here, carrying no
+    colon.
+    """
     return hashlib.sha256(f"{door}|{output_path}|{now}".encode()).hexdigest()
 
 
 def _delivered_file_sha256(output_path: str | None) -> str | None:
-    """The delivered file's own digest, read after the writer already wrote it: ``None`` only for
-    a fileless event (the two ``phenology_measurement`` calls below, which compute a curve rather
-    than write a CSV). A stated ``output_path`` the writer just produced that cannot be read back
-    is a failed delivery, not a fileless one, and raises rather than recording a blank digest for
-    bytes that were supposedly just written."""
+    """The delivered file's own digest, read after the writer already wrote it: ``None`` only for a
+    fileless event (a phenology measurement that computes a curve rather than writing a CSV). A
+    stated ``output_path`` that cannot be read back raises.
+    """
     if not output_path:
         return None
     return hashlib.sha256(Path(output_path).read_bytes()).hexdigest()
@@ -2543,8 +2259,8 @@ def _delivered_file_sha256(output_path: str | None) -> str | None:
 
 def _render_bindings(bindings: Mapping[str, StampBinding]) -> dict:
     """A per-bucket ``StampBinding`` mapping as the stored record renders it, in ``documents`` and
-    in each ``document_reconciliations`` entry's own ``bindings``: the one rendering both sites
-    share, so a bucket's binding evidence reads the same wherever the record carries it."""
+    in each ``document_reconciliations`` entry's own ``bindings``.
+    """
     return {
         bucket: {
             "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
@@ -2603,8 +2319,7 @@ def record_delivery_binding_event(
     document_reconciliations: Mapping[str, Mapping],
     dimension_reconciliations: Mapping[str, Mapping],
     measurement_documents: Sequence[str],
-    scale_document: str | None,
-    acknowledgement: Acknowledgement | None,
+    acknowledgment: Acknowledgment | None,
     trait: str | None = None,
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
@@ -2612,95 +2327,62 @@ def record_delivery_binding_event(
 ) -> bool:
     """Record what verification found for each bucket a delivery read, in that dataset's own log.
 
-    This event is the delivery's one audit line, carrying what a later reader of a delivered number
-    needs and a door's arguments cannot: which buckets stood behind it, which of their claims were
-    answered for, and by which records. The event files against the dataset root the
-    buckets share, since it describes records that travel with the data; a delivery whose buckets
-    share no dataset root files against the platform log instead. This mutation already committed
-    (the artifact shipped before this call runs) with no tool body of its own for ``@audited`` to
-    bracket, so a dropped append raises ``AuditEntryNotWritten`` rather than passing silently,
-    per the platform's audited-mutation invariant, instead of leaving the artifact's own delivery
-    unrecorded on the platform's canonical log.
+    This event is the delivery's one audit line: which buckets stood behind it, which of their
+    claims were answered for, and by which records. The event files against the dataset root the
+    buckets share; a delivery whose buckets share no dataset root files against the platform log
+    instead. A dropped append raises ``AuditEntryNotWritten``.
 
-    Beside that dataset-scoped audit line, a project-scoped ``delivery_events`` record is also
-    written, carrying every reconciliation the delivering door's gate actually ran rather than a
-    coarse gate stamp, so a delivery can be found again by the same ``trait``/``delivery_kind``
-    vocabulary an operationalization or a trait-spec statement is found by. This second write,
-    unlike the audit line above, stays best-effort on its own terms: a delivery event is a fact
-    recorded after the artifact it describes already shipped, not a confirmation, so a lost line
-    here is a provenance gap surfaced by a warning, never a reason to make an already-completed
-    delivery look retryable.
+    Beside that audit line, a project-scoped ``delivery_events`` record is written, carrying every
+    reconciliation the delivering door's gate ran, findable by ``trait``/``delivery_kind``. This
+    second write is best-effort: a lost line is logged as a warning.
 
-    ``document_reconciliations`` and ``dimension_reconciliations`` are the ``_reconcile_validity``-
-    shaped and ``reconcile_tile_size_validity``-shaped mappings the door's own gate ran, keyed by
-    the sidecar document (``operating_point``, ``classifier_operating_point``, ...) or dimension
-    (``claim_scope``, ``tile_size``, ``scale``) each reconciled; a key is present exactly when the
-    door called that reconciler, and ``{}`` means none of that family ran. Both are required, never
-    defaulted, so a caller cannot silently omit what its own gate actually reconciled. The stored
-    ``documents`` and the audit line's ``verified_buckets``/``record_digests`` carry binding
-    integrity alone (``StampBinding.ok``, true even for a bucket with no stamp at all), while each
-    reconciliation's own ``per_bucket``/``validated`` carries the validity state that same bucket
-    can read ``false`` under; a reader of both is not left to infer why they differ. The record
-    carries what the door's gate reconciled, never what the delivered file's own columns say,
-    since a delivered column floors a dimension with no column of its own
-    (``DeliveryGateResult.owned_column_stamp``).
+    ``document_reconciliations`` and ``dimension_reconciliations`` are the
+    ``_reconcile_validity``-shaped and ``reconcile_tile_size_validity``-shaped mappings the door's
+    own gate ran, keyed by the sidecar document (``operating_point``,
+    ``classifier_operating_point``, ...) or dimension (``claim_scope``, ``tile_size``, ``scale``)
+    each reconciled; a key is present exactly when the door called that reconciler, and ``{}``
+    means none of that family ran. Both are required. The stored ``documents`` and the audit line's
+    ``verified_buckets``/``record_digests`` carry binding integrity alone (``StampBinding.ok``,
+    true even for a bucket with no stamp at all), while each reconciliation's own
+    ``per_bucket``/``validated`` carries the validity state that same bucket can read ``false``
+    under. The record carries what the door's gate reconciled, never what the delivered file's own
+    columns say.
 
-    ``project_root`` names the project this event belongs to, for a caller (a web route) whose
-    process can serve more than one project: an MCP tool leaves it unset and gets the process-pinned
-    root, correct since that process serves exactly one project, but a web route already holding its
-    own guarded, resolved root passes it explicitly, the same divergence the operationalization
-    record already closes.
+    ``project_root`` names the project this event belongs to; ``None`` gets the process-pinned
+    root.
 
-    ``measurement_documents`` names which sidecar document(s) the delivery's own gate reconciled
-    (the count-delivery door's single-element statement, or the phenology doors' fixed
-    ``["operating_point", "classifier_operating_point"]``), and ``scale_document`` names
-    ``"resolve_scale"`` when the delivery also rests on a physical scale, ``None`` otherwise. Both
-    are required, never defaulted, so a caller cannot silently omit what its own gate actually
-    reconciled. When ``pred_dirs`` is non-empty, every document named in ``measurement_documents``
-    must have an entry in ``document_reconciliations``, checked beside ``model_validate`` below
-    and before the record is written: a caller stating what it reconciled but not reconciling it
-    is a deterministic defect in the caller, never an environmental failure, so it raises
-    ``ValueError`` naming the door and the missing document, with the audit line above already on
-    the log and no record built. When ``pred_dirs`` is empty no entry is required, and
-    ``documents``, the audit line's ``verified_buckets``/``record_digests`` and every rendered
-    reconciliation are empty, as they are today from the empty stub.
+    ``measurement_documents`` names which sidecar document(s) the delivery's own gate reconciled;
+    required. When ``pred_dirs`` is non-empty, every document
+    named in ``measurement_documents`` must have an entry in ``document_reconciliations``, checked
+    before the record is written: a missing one raises ``ValueError`` naming the door and the
+    document, with the audit line already on the log. When ``pred_dirs`` is empty no entry is
+    required, and ``documents``, the audit line's ``verified_buckets``/``record_digests`` and every
+    rendered reconciliation are empty.
 
-    ``acknowledgement`` is the breeder's own act of shipping this delivery unvalidated (the same
-    ``Acknowledgement`` a passing ``check_delivery_gate`` call may have taken), or ``None`` when
-    nothing needed acknowledging. Required, never defaulted, for the same reason
-    ``measurement_documents`` is: a caller cannot silently omit whether this delivery rests on a
-    breeder's acknowledgement. Recorded as the record's own ``acknowledged_by``/
-    ``acknowledgement_reason`` fields, both present and null together when ``acknowledgement`` is
-    ``None``.
+    ``acknowledgment`` is the breeder's own act of shipping this delivery unvalidated, or ``None``
+    when nothing needed acknowledging; required. Recorded as the record's own
+    ``acknowledged_by``/``acknowledgment_reason`` fields, both null together when
+    ``acknowledgment`` is ``None``.
 
-    ``plant_mapping`` is the delivery's own plant-mapping binding, door-conditional: the phenology
-    doors always pass a walked mapping's own disclosure (name, project and dataset roots, the
-    record's digest, its per-date capture identity, and the two unverified disclosures),
-    ``deliver_per_plant_csv`` passes one only when its own caller verified a named mapping against
-    the buckets this delivery reads, ``deliver_orthomosaic_plant_counts`` passes a whole-raster
-    frame's own registry disclosure instead (no walked mapping exists for it), and every other
-    delivery door passes ``None`` since none reads a mapping or a registry.
+    ``plant_mapping`` is the delivery's own plant-mapping binding: a walked mapping's disclosure
+    (name, project and dataset roots, the record's digest, its per-date capture identity, and the
+    two unverified disclosures), a whole-raster frame's registry disclosure, or ``None`` for a
+    delivery that reads no mapping or registry.
 
-    The assembled record is validated against ``DeliveryEventRecord`` (``delivery_events_schema.py``,
-    the same shape ``list_delivery_events`` reads back through) before the write. A shape violation
-    is a deterministic defect in the caller, never an environmental failure the way an unwritable
-    disk is, so it raises ``pydantic.ValidationError`` to the caller instead of falling into this
-    call's own best-effort warning path below, which covers only the project-scoped store write.
+    The assembled record is validated against ``DeliveryEventRecord``
+    (``delivery_events_schema.py``) before the write; a shape violation raises
+    ``pydantic.ValidationError``.
 
-    Raises ``AuditEntryNotWritten`` (``tcip_mcp.audit``) when the dataset-scoped audit line
-    itself cannot be appended: the caller already delivered the artifact and cannot un-deliver
-    on this, but it must not read a caller-visible success out of the project-scoped record's
-    own return value below with the platform's canonical log silently missing the event.
+    Raises ``AuditEntryNotWritten`` (``tcip_mcp.audit``) when the dataset-scoped audit line itself
+    cannot be appended.
 
-    Returns whether the project-scoped ``delivery_events`` write actually landed: ``True`` on a
-    successful store write, ``False`` when that best-effort write failed (logged, never raised).
-    A delivered file already exists by the time this runs, so a caller cannot un-deliver on a
-    ``False`` here; it can only disclose the gap to whoever asked for the delivery.
+    Returns whether the project-scoped ``delivery_events`` write landed: ``True`` on a successful
+    store write, ``False`` when that best-effort write failed (logged, never raised).
     """
     from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.subject_registry import distinct_dataset_root
 
-    roots = {bucket_dataset_root(d) for d in (pred_dirs or [])}
-    scope = roots.pop() if len(roots) == 1 else None
+    scope = distinct_dataset_root(pred_dirs or [])
 
     primary_document = measurement_documents[0] if measurement_documents else None
     primary_bindings: Mapping[str, StampBinding] = (
@@ -2730,10 +2412,8 @@ def record_delivery_binding_event(
         "door": door,
         "output_path": output_path,
         "output_sha256": _delivered_file_sha256(output_path),
-        "measurement_documents": list(measurement_documents),
-        "scale_document": scale_document,
-        "acknowledged_by": acknowledgement.acknowledged_by if acknowledgement is not None else None,
-        "acknowledgement_reason": acknowledgement.reason if acknowledgement is not None else None,
+        "acknowledged_by": acknowledgment.acknowledged_by if acknowledgment is not None else None,
+        "acknowledgment_reason": acknowledgment.reason if acknowledgment is not None else None,
         "plant_mapping": plant_mapping,
         "documents": _render_bindings(primary_bindings),
         "document_reconciliations": {
@@ -2768,12 +2448,8 @@ def record_delivery_binding_event(
 
 
 def binding_notes_text(notes: Mapping[str, str]) -> str:
-    """Render a reconciler's ``binding_notes`` as one refusal-ready line naming each bucket and why.
-
-    The one join every delivery door renders a floored binding's notes through, so a refusal names
-    the failing sidecar and the reason exactly once; a door that also reconciles the same buckets
-    for its own bindings must not append a second, separately-derived copy of what another door's
-    exception already carries.
+    """Render a reconciler's ``binding_notes`` as one refusal-ready line naming each bucket and
+    why.
     """
     return " ".join(f"{bucket}: {note}" for bucket, note in sorted(notes.items()) if note)
 
@@ -2792,34 +2468,23 @@ def _reconcile_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None, document: str,
     trait: str | None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
-    """Floor a validity dimension against every bucket's on-disk sidecar, generalized.
+    """Floor a validity dimension against every bucket's on-disk sidecar: read on-disk, never trust
+    a caller string, an asserted value may only lower the result. ``document`` says which sidecar
+    is read, which parameter and which kind of reference its claim rests on.
 
-    Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity`,
-    the flooring logic (read on-disk, never trust a caller string, an asserted value may only lower
-    the result) is identical for both dimensions; only which document is read differs, threaded in by
-    the thin public wrappers below, which is also what says which parameter and which kind of
-    reference that document's claim rests on.
-
-    ``trait`` is the delivery's own registry trait, required (never defaulted) so a caller cannot
-    silently skip stating it; passed straight through to :func:`verify_stamp_binding`, which compares
-    it against the record's own trait only when it is not ``None``. Threaded through by the three
-    measurement wrappers (count/ordinal/regression); :func:`reconcile_classifier_validity` passes
-    ``None``, since the classifier's own trait comparison already runs once, in
-    :func:`bind_classifier_validity`, and duplicating it here would lose the note the delivery doors
-    render from that function's own return.
+    ``trait`` is the delivery's own registry trait, required; passed to
+    :func:`verify_stamp_binding`, which compares it against the record's own trait only when it is
+    not ``None`` (the classifier reconciler passes ``None``; :func:`bind_classifier_validity` runs
+    that comparison).
 
     A stamp whose claim no validation record answers for floors here, with the reason recorded per
-    bucket: a claim a bucket wrote for itself is not evidence, and the check lives inside this shared
-    body so no delivery door can reach a validated result without it.
+    bucket.
 
     Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, binding_notes,
-    bindings, conf, confs, per_bucket}``. ``bindings`` carries one verified result per bucket read,
-    so a delivery door stamps its provenance columns from the verification this body already ran
-    rather than repeating it. ``confs`` maps every bucket in ``pred_dirs`` to the numeric value its
-    stamp's own operating-point mapping records for this document's param, whatever the bucket's
-    own validation state (a fact about what the predictions were produced at, independent of
-    whether that value cleared a reference), or ``None`` for a missing or undecodable stamp, or one
-    whose value is not numeric.
+    bindings, conf, confs, per_bucket}``. ``bindings`` carries one verified result per bucket read.
+    ``confs`` maps every bucket in ``pred_dirs`` to the numeric value its stamp's own
+    operating-point mapping records for this document's param, whatever the bucket's own validation
+    state, or ``None`` for a missing or undecodable stamp, or one whose value is not numeric.
     """
     param_key, validation_kind = _DOCUMENT_PARAM[document]
     per_bucket: dict[str, str] = {}
@@ -2887,14 +2552,12 @@ def reconcile_operating_point_validity(
 ) -> dict:
     """Floor the count operating-point validity against every bucket's ``operating_point.json``.
 
-    The delivery gate must not trust a caller's asserted string: it reads each prediction bucket's
-    on-disk sidecar and takes the floor of asserted-vs-on-disk. A missing/unreadable sidecar, or any
-    bucket stamped ``validated=false``, floors the whole curve to ``false``, never a crash. See
-    :func:`_reconcile_validity` for the shared mechanism.
+    Takes the floor of asserted-vs-on-disk. A missing/unreadable sidecar, or any bucket stamped
+    ``validated=false``, floors the whole curve to ``false``, never a crash. See
+    :func:`_reconcile_validity`.
 
-    ``trait`` is the trait this delivery is actually being produced for, required so a count claim
-    earned for one trait cannot silently answer for a delivery of another; compared against each
-    bucket's own record via :func:`verify_stamp_binding`.
+    ``trait`` is the trait this delivery is produced for, required; compared against each bucket's
+    own record via :func:`verify_stamp_binding`.
     """
     return _reconcile_validity(
         pred_dirs, asserted=asserted, document="operating_point", trait=trait,
@@ -2906,18 +2569,9 @@ def reconcile_classifier_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
-    """Floor the classifier validity against every bucket's ``classifier_operating_point.json``.
-
-    Structurally the same reconciliation :func:`reconcile_operating_point_validity` performs for the
-    count operating point, the same function, parameterized to a different sidecar file and param
-    key, never a hand-written sibling. A bucket with no persisted classifier-calibration run floors
-    to ``false``: there is no legitimate way to earn a classifier-validated stamp without one, so this
-    never falls back to a caller-asserted string.
-
-    Threads no ``trait`` into the shared mechanism (unlike the three measurement reconcilers): the
-    classifier's own trait comparison already runs once, in :func:`bind_classifier_validity`, and
-    duplicating it here would lose the breeder-facing note the delivery doors render from that
-    function's own return.
+    """Floor the classifier validity against every bucket's ``classifier_operating_point.json``
+    (:func:`_reconcile_validity`). A bucket with no persisted classifier-calibration run floors to
+    ``false``. Threads no ``trait``; :func:`bind_classifier_validity` compares it.
     """
     return _reconcile_validity(
         pred_dirs, asserted=asserted, document="classifier_operating_point", trait=None,
@@ -2930,15 +2584,10 @@ def reconcile_ordinal_validity(
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the ordinal compensating-error validity against every bucket's
-    ``ordinal_operating_point.json``.
+    ``ordinal_operating_point.json`` (:func:`_reconcile_validity`). A bucket with no persisted
+    ordinal-calibration run floors to ``false``.
 
-    Structurally the same reconciliation :func:`reconcile_classifier_validity` performs for the
-    classifier dimension, the same shared mechanism, parameterized to a different sidecar file and
-    param key. A bucket with no persisted ordinal-calibration run floors to ``false``: there is no
-    legitimate way to earn an ordinal-validated stamp without one.
-
-    ``trait`` is required, the same measurement-reconciler trait binding
-    :func:`reconcile_operating_point_validity` performs.
+    ``trait`` is required, compared as :func:`reconcile_operating_point_validity` does.
     """
     return _reconcile_validity(
         pred_dirs, asserted=asserted, document="ordinal_operating_point", trait=trait,
@@ -2963,18 +2612,13 @@ def reconcile_regression_validity(
 def tile_size_gate_flag(operating_point: dict | None) -> str | None:
     """The tile-geometry dimension's delivery-gate flag for one resolved operating point.
 
-    ``operating_point`` is a bundle's ``to_provenance()["operating_point"]`` mapping, the same shape
-    a run returns in-memory and ``run_inference`` persists into ``operating_point.json``.
-    Returns ``None`` when tiling was not operative for that run (``resolve_tile_size_param`` only
-    sets ``requires_validation`` when ``tiled``), so an untiled run's tile_size never manufactures a
-    refusal over a dimension that was never operative. Otherwise it returns the reference the tile
-    scale actually cleared, or ``VALIDATED_FALSE``.
+    ``operating_point`` is a bundle's ``to_provenance()["operating_point"]`` mapping, the shape
+    ``run_inference`` persists into ``operating_point.json``. Returns ``None`` when tiling was not
+    operative for that run (``resolve_tile_size_param`` only sets ``requires_validation`` when
+    ``tiled``). Otherwise it returns the reference the tile scale cleared, or ``VALIDATED_FALSE``.
 
-    Reads the tile_size param's own recorded reference and nothing else: the sidecar's top-level
-    ``validated`` bool is the whole bundle's shippability, so consulting it here would report a
-    genuinely persisted tile geometry as fabricated whenever some other dimension (conf) was the
-    thing that failed. Every delivery door that gates on tile geometry resolves it through this one
-    function so the doors cannot drift into disagreeing about when a tile scale is trustworthy.
+    Reads the tile_size param's own recorded reference only, never the sidecar's top-level
+    ``validated`` bool.
     """
     prov = (operating_point or {}).get("tile_size") or {}
     if not prov.get("requires_validation"):
@@ -2986,23 +2630,18 @@ def tile_size_gate_flag(operating_point: dict | None) -> str | None:
 def reconcile_tile_size_validity(
     pred_dirs: list[str] | tuple[str, ...], *, digest_memo: dict[str, str] | None = None,
 ) -> dict:
-    """Floor the tile-geometry dimension across every prediction bucket's ``operating_point.json``.
+    """Floor the tile-geometry dimension across every prediction bucket's ``operating_point.json``,
+    the sidecar-reading counterpart of :func:`tile_size_gate_flag`.
 
-    The sidecar-reading counterpart of :func:`tile_size_gate_flag`, for the delivery doors that
-    assemble a phenotype from already-written prediction buckets rather than from a live run. A
-    delivery spanning several buckets is only as grounded as its least-grounded tiled bucket, so any
-    operative bucket whose tile scale has no real basis floors the whole dimension to
+    Any operative bucket whose tile scale has no real basis floors the whole dimension to
     ``VALIDATED_FALSE``; when the cleared references differ across buckets the weakest member of
-    :data:`GEOMETRY_REFERENCE_STRENGTH` present is what travels, never a stronger one some other
-    bucket earned.
+    :data:`GEOMETRY_REFERENCE_STRENGTH` present is what travels.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``. ``operative``
-    is False (and ``validated`` ``None``) when no bucket ran tiled, in which case the caller adds
-    nothing to its gate. A bucket with no readable sidecar contributes nothing here; that bucket's
-    missing stamp already floors the count operating point via
-    :func:`reconcile_operating_point_validity`. A tiled bucket whose stamp claims a validation no
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``.
+    ``operative`` is False (and ``validated`` ``None``) when no bucket ran tiled. A bucket with no
+    readable sidecar contributes nothing here. A tiled bucket whose stamp claims a validation no
     record answers for floors here too: the tile geometry rides in the same stamp file as the count
-    claim, so the two stand or fall together.
+    claim.
     """
     per_bucket: dict[str, str] = {}
     unvalidated: list[str] = []
@@ -3042,17 +2681,12 @@ def reconcile_claim_scope_validity(
 ) -> dict:
     """Floor the claim-scope dimension across every prediction bucket's ``operating_point.json``.
 
-    The sidecar-reading counterpart of the export-time claim-scope check, for the delivery doors
-    that assemble a phenotype from already-written buckets. A bucket whose sidecar records no
-    ``claim_scope_validated`` is skipped, the same way :func:`reconcile_tile_size_validity` skips an
-    untiled bucket: the dimension was never operative for it, so nothing here manufactures a
-    refusal over it. Once any bucket does record one, the dimension is operative for the whole
-    delivery, and a bucket whose recorded value is not a member of :data:`CLAIM_SCOPE_REFERENCES`
-    floors it to ``VALIDATED_FALSE``.
+    A bucket whose sidecar records no ``claim_scope_validated`` is skipped. Once any bucket does
+    record one, the dimension is operative for the whole delivery, and a bucket whose recorded
+    value is not a member of :data:`CLAIM_SCOPE_REFERENCES` floors it to ``VALIDATED_FALSE``.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the same
-    shape :func:`reconcile_tile_size_validity` returns, and floors on an unanswered-for stamp for the
-    same reason: the claim scope rides in the same stamp file as the count claim.
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the shape
+    :func:`reconcile_tile_size_validity` returns, and floors on an unanswered-for stamp.
     """
     per_bucket: dict[str, str] = {}
     unvalidated: list[str] = []
@@ -3088,45 +2722,25 @@ def reconcile_scale_validity(
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the physical-scale dimension across every prediction bucket's ``resolve_scale.json``.
+    A bucket with no readable ``resolve_scale.json`` floors the dimension.
 
-    Structurally the sidecar-reading counterpart of :func:`reconcile_tile_size_validity`, but the two
-    dimensions differ in what "not operative" means: tiling is legitimately absent from an untiled
-    run (that bucket's own ``operating_point.json`` records it as non-gating, read straight from a
-    file every bucket always has), so an untiled bucket is skipped rather than floored. A physical
-    scale has no such always-present file to read "not applicable" from: whether it is relevant at
-    all is a fact about the *trait* (does the delivery carry a dimensional value), which only the
-    caller (holding the results) can know. A caller that calls this at all has already decided the
-    dimension is relevant, so once called, a bucket with no readable ``resolve_scale.json`` floors
-    the whole dimension exactly as a missing ``operating_point.json`` floors the count operating
-    point, never silently skipped the way an untiled bucket's tile_size is.
-
-    ``capture_id``, when given, is the delivery's own requested scope. A bucket's recorded scale may
-    itself be scoped to a single capture (``resolve_scale``'s own ``capture_id``, real for a handheld
-    standoff that varies image to image within one dataset): a caller-supplied ``capture_id`` that
-    disagrees with a bucket's recorded one must not silently validate, the same principle
-    :func:`bind_classifier_validity` applies to a trait mismatch, so that bucket floors to
-    ``VALIDATED_FALSE`` even though its own sidecar says validated. A bucket whose scale was never
-    capture-scoped (recorded ``capture_id`` is ``None``) applies to any capture, since nothing in it
-    claims to be capture-specific. A caller that passes no ``capture_id`` is not asking for
-    cross-capture scoping to be checked at all, so no bucket is floored on this basis.
+    ``capture_id``, when given, is the delivery's own requested scope: a bucket whose recorded
+    scale is scoped to a different capture (``resolve_scale``'s own ``capture_id``) floors to
+    ``VALIDATED_FALSE``. A bucket whose scale was never capture-scoped applies to any capture. No
+    ``capture_id`` checks no capture scoping.
 
     ``unit`` is the linear basis the delivery's own value_key implies
     (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.unit_from_value_key`'s second element): a
-    bucket whose stamped ``operating_point.scale.unit`` differs floors, naming both, so a scale
-    stamped in centimetres cannot clear a delivery in millimetres. ``trait`` is the delivery's own
-    registry trait, threaded into :func:`verify_stamp_binding` the same way the three measurement
-    reconcilers thread it, so a scale earned for another trait floors. ``images_dir`` is the
-    delivery's own images directory, threaded into :func:`verify_stamp_binding` to recompute the
-    imagery digest a scale claim's covered bucket names.
+    bucket whose stamped ``operating_point.scale.unit`` differs floors, naming both. ``trait`` is
+    the delivery's own registry trait, threaded into :func:`verify_stamp_binding`. ``images_dir``
+    is the delivery's own images directory, threaded into :func:`verify_stamp_binding` to recompute
+    the imagery digest.
 
-    ``asserted``, mirroring :func:`reconcile_operating_point_validity`, may only lower the on-disk
-    result, never raise it: a caller string can never launder an ungrounded scale into a shippable one.
+    ``asserted`` may only lower the on-disk result, never raise it.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the same
-    shape :func:`reconcile_tile_size_validity` returns. ``operative`` is False (``validated``
-    ``None``) only when ``pred_dirs`` itself is empty, there is nothing to reconcile against. A
-    bucket whose ``resolve_scale.json`` no validation record answers for floors here, whether the
-    stamp was hand-authored or produced by :func:`~tcip_mcp.tools.scale_tools.calibrate_physical_scale`.
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``.
+    ``operative`` is False (``validated`` ``None``) only when ``pred_dirs`` itself is empty. A
+    bucket whose ``resolve_scale.json`` no validation record answers for floors here.
     """
     if not pred_dirs:
         return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": [],
@@ -3182,29 +2796,18 @@ def bind_classifier_validity(
     trait: str,
     digest_memo: dict[str, str] | None = None,
 ) -> tuple[str | None, str]:
-    """Floor a reconciled classifier stamp to the delivery it is being used to validate.
-
-    Unlike the count dimension (which reconciles from the same buckets it delivers),
-    :func:`reconcile_classifier_validity` alone cannot see whether a genuinely-validated stamp was
-    calibrated for an unrelated model or trait, it reads only the validity field. What the stamp must
-    agree with is checked through :func:`verify_stamp_binding`, so the trait comparison is the same
-    one every document gets and the run being compared is the run each stamp's own record names.
+    """Floor a reconciled classifier stamp to the delivery it is being used to validate, checked
+    through :func:`verify_stamp_binding` against the trait and the run each stamp's own record
+    names.
 
     The producing runs are taken from the count buckets' verified bindings, never from what those
-    sidecars declare for themselves: an id a bucket wrote beside its own predictions is the id
-    whoever wrote the bucket chose, so a set built from it would let one file decide what the other
-    is checked against. A bucket whose binding does not hold contributes no id at all.
+    sidecars declare for themselves. A bucket whose binding does not hold contributes no id at all.
 
-    Both sides recording no producing run is agreement, not a gap to be tolerated: a bespoke or
-    unregistered checkpoint has no run to name, and its documents legitimately live in calibration
-    experiments of their own.
+    Both sides recording no producing run is agreement: a bespoke or unregistered checkpoint has no
+    run to name.
 
     Returns ``(state, note)``, ``state`` floored to ``VALIDATED_FALSE`` on a mismatch, and a
     breeder-readable ``note`` naming which sidecar failed and why (empty when nothing was floored).
-
-    Every delivery door must call this after reconciling, not just the one that first needed it:
-    ``deliver_phenology_milestones`` and the web Results doors share it rather than each composing the flag,
-    so the two surfaces cannot disagree about what a classifier stamp means.
     """
     if classifier_state in (None, VALIDATED_FALSE):
         return classifier_state, ""
@@ -3234,18 +2837,10 @@ def bind_classifier_validity(
 # --- the delivery gate (one refuse-or-stamp check shared by every phenotype-delivery door) ---
 
 @dataclass(frozen=True)
-class Acknowledgement:
+class Acknowledgment:
     """The breeder's own act of shipping an unvalidated delivery: who did it and why.
-
-    In production, this is built only by the web results routes
-    (``tcip_web.routes.results.export_csv`` and ``export_count_csv``) once a request names a real
-    user; an agent acknowledging its own unvalidated output would be attesting to a breeder's
-    judgment it never obtained. That is a convention at this Python seam, not a rail the type enforces: nothing here
-    stops another caller from constructing one. Whoever builds an ``Acknowledgement`` is recorded
-    by name and reason regardless, so a caller outside the web route still leaves an attributed
-    trail rather than a silent bare number. ``acknowledged_by`` and ``reason`` are both required
-    non-empty: ``acknowledged_by`` is the one thing the record carries that says who, ``reason``
-    the one thing that says why.
+    ``acknowledged_by`` and ``reason`` are both required non-empty; the type does not restrict who
+    builds one.
     """
 
     acknowledged_by: str
@@ -3254,12 +2849,12 @@ class Acknowledgement:
     def __post_init__(self) -> None:
         if not self.acknowledged_by.strip():
             raise ValueError(
-                "Acknowledgement.acknowledged_by is required non-empty: it is the one thing the "
+                "Acknowledgment.acknowledged_by is required non-empty: it is the one thing the "
                 "record carries that says who."
             )
         if not self.reason.strip():
             raise ValueError(
-                "Acknowledgement.reason is required non-empty: it is the one thing the record "
+                "Acknowledgment.reason is required non-empty: it is the one thing the record "
                 "carries that says why."
             )
 
@@ -3272,23 +2867,16 @@ class DeliveryGateResult:
     unvalidated: tuple[str, ...]  # dimensions whose validity is not a shippable reference
     stamp: dict[str, str]  # per-dimension validity to stamp onto the deliverable
     reason: str = ""  # generic refusal message when not ok
-    acknowledged_by: str | None = None  # who acknowledged, when an Acknowledgement cleared this gate
-    acknowledgement_reason: str | None = None  # why, from that same Acknowledgement
+    acknowledged_by: str | None = None  # who acknowledged, when an Acknowledgment cleared this gate
+    acknowledgment_reason: str | None = None  # why, from that same Acknowledgment
 
     def column_stamp(self, dimension: str, *, own_column: tuple[str, ...] = ()) -> str:
         """The value the deliverable's column for ``dimension`` carries.
 
-        Not the same thing as ``stamp[dimension]``, which is only that one dimension's own cleared
-        reference. A column stands for the trustworthiness of the number beside it, and an
-        acknowledgement (or a staging escape) still lets an ungrounded dimension reach the writer,
-        so stamping this dimension's own (possibly real) reference alone would report a partly
-        acknowledged provisional delivery as fully validated. Every gated dimension without a
-        column of its own therefore floors this one. Name in ``own_column`` the dimensions the
-        deliverable does stamp into columns of their own; those report themselves and never floor
-        this one.
-
-        Owned here rather than re-derived per door so the doors cannot drift into disagreeing about
-        what a validated column means.
+        Not ``stamp[dimension]``, that one dimension's own cleared reference: every gated dimension
+        without a column of its own floors this one. Name in ``own_column`` the dimensions the
+        deliverable stamps into columns of their own; those report themselves and never floor this
+        one.
         """
         if any(name not in own_column for name in self.unvalidated):
             return VALIDATED_FALSE
@@ -3296,47 +2884,32 @@ class DeliveryGateResult:
 
     def owned_column_stamp(self) -> dict[str, str]:
         """Every dimension's ``column_stamp``, using :data:`_DIMENSION_TO_COLUMN`'s own membership
-        as ``own_column``: exactly what a delivered tail carrying a column for every one of those
-        dimensions would show per dimension. For a reader with no CSV columns of its own (the
-        Results tab), this is the one way to show a per-dimension validity that cannot read
-        stronger than the file the same gate result would produce.
+        as ``own_column``: what a delivered tail carrying a column for every one of those
+        dimensions would show per dimension.
         """
         owned = tuple(_DIMENSION_TO_COLUMN)
         return {dim: self.column_stamp(dim, own_column=owned) for dim in self.stamp}
 
-    def effective_acknowledgement(self) -> Acknowledgement | None:
-        """The acknowledgement this gate result actually applied, or ``None`` when every dimension
-        validated and nothing needed one, regardless of what a caller passed in.
-
-        Built from ``acknowledged_by``/``acknowledgement_reason`` (already ``None``/``None`` when
-        the gate discarded a caller's acknowledgement as unneeded) rather than from a caller's own
-        ``Acknowledgement`` object, so a writer recording the delivery event and a writer composing
-        the CSV tail from the same gate result can never disagree about whether this delivery
-        rested on one.
+    def effective_acknowledgment(self) -> Acknowledgment | None:
+        """The acknowledgment this gate result applied, or ``None`` when every dimension validated
+        and nothing needed one, built from ``acknowledged_by``/``acknowledgment_reason``.
         """
         if self.acknowledged_by is None:
             return None
-        return Acknowledgement(
-            acknowledged_by=self.acknowledged_by, reason=self.acknowledgement_reason or "")
+        return Acknowledgment(
+            acknowledged_by=self.acknowledged_by, reason=self.acknowledgment_reason or "")
 
     def unvalidated_cell(self) -> str:
-        """Every gated dimension that did not validate, in the platform's delivered-list-cell
-        convention (``;``-joined, blank when none): the one rendering a delivered tail's own
-        ``unvalidated_dimensions`` column and a door's refusal response share, so the two never
-        spell the same join two different ways."""
+        """Every gated dimension that did not validate, ``;``-joined, blank when none."""
         return ";".join(self.unvalidated)
 
 
 class DeliveryRefused(ValueError):
     """A writer's delivery-gate refusal, carrying the ``DeliveryGateResult`` it refused on.
 
-    A door composing its own counts-bearing refusal response needs to tell this refusal apart
-    from the writer's other, count-free raises (a withdrawn operationalization): a bare
-    ``ValueError`` cannot be told apart without a second classification of the same writer's own
-    raises, drifting from it the moment either changes. ``str(self)`` is the gate's reason plus
-    every gated dimension's own reconciler's binding notes, for a caller content to just log or
-    propagate the message. ``facts`` starts empty and is set by a count-delivery core once it
-    catches this raise, to the counts-bearing facts the core already had in hand.
+    ``str(self)`` is the gate's reason plus every gated dimension's own reconciler's binding notes.
+    ``facts`` starts empty and is set by a count-delivery core once it catches this raise, to the
+    counts-bearing facts the core had in hand.
     """
 
     def __init__(self, gate: DeliveryGateResult, notes: str = "") -> None:
@@ -3351,9 +2924,8 @@ class CountDeliveryRefused(ValueError):
     """A count-delivery core's own refusal for anything other than the delivery gate
     (:class:`DeliveryRefused`) or the meaning door
     (``operationalization.OperationalizationRefused``): a missing or malformed bucket, a mismatched
-    stamp, an unreadable plant registry, a raster identity mismatch. Carries whatever counts-bearing
-    facts the core already had in hand at the point it refused, named the same way the tool's own
-    ``{"error": ...}`` response and the web route's own structured detail body both name them.
+    stamp, an unreadable plant registry, a raster identity mismatch. Carries whatever
+    counts-bearing facts the core had in hand at the point it refused.
     """
 
     def __init__(self, message: str, **facts: Any) -> None:
@@ -3363,12 +2935,12 @@ class CountDeliveryRefused(ValueError):
 
 STAGING_DIMENSIONS: tuple[str, ...] = ("tile_size", "claim_scope")
 """The dimensions ``allow_unvalidated_staging`` may clear on their own, with no breeder
-acknowledgement: the two ``run_inference`` (and the doors that share its publish bracket) gates
+acknowledgment: the two ``run_inference`` (and the doors that share its publish bracket) gates
 before an expensive tiled pass, never a dimension a phenotype's own delivered value rests on
 directly. Persisting a raw, honestly-stamped bucket at an unproven tile scale or claim scope is a
 different act from delivering a phenotype from one; the flag exists for the former and never
 reaches ``export_detection_csv``/``export_aggregated_csv``/the phenology writer, whose own
-dimensions clear only through a real reference or a breeder's ``Acknowledgement``."""
+dimensions clear only through a real reference or a breeder's ``Acknowledgment``."""
 
 _DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
     "operating_point": _ACCEPTED_REFERENCES["annotations"],
@@ -3392,35 +2964,29 @@ documentation of a mechanism a future floor-only dimension can use, not a live a
 
 def check_delivery_gate(
     flags: dict[str, str | None], *,
-    acknowledgement: Acknowledgement | None = None,
+    acknowledgment: Acknowledgment | None = None,
     allow_unvalidated_staging: bool = False,
 ) -> DeliveryGateResult:
     """Refuse-or-stamp a phenotype delivery against the validity of each dimension it rests on.
 
-    ``flags`` maps each dimension the deliverable depends on (e.g. ``"operating_point"``, the
-    sole dimension for a continuous/ordinal trait with no conf op-point, or ``"classifier"``) to
-    its reconciled validity state. A dimension clears only on a reference
-    ``_DIMENSION_REFERENCES`` accepts for that dimension; any other value (a wrong-kind reference
-    included: a raster-scope identity says nothing about a count) is treated as unvalidated. A
-    dimension name the mapping does not know raises rather than judging it against a vocabulary
-    the gate does not have; a new door's dimension gets a mapping row stating what clears it.
-    Read the on-disk state before calling; the gate does not trust a caller-asserted string on
-    its own.
+    ``flags`` maps each dimension the deliverable depends on (e.g. ``"operating_point"``, the sole
+    dimension for a continuous/ordinal trait with no conf op-point, or ``"classifier"``) to its
+    reconciled validity state. A dimension clears only on a reference ``_DIMENSION_REFERENCES``
+    accepts for that dimension; any other value (a wrong-kind reference included: a raster-scope
+    identity says nothing about a count) is treated as unvalidated. A dimension name the mapping
+    does not know raises. Read the on-disk state before calling.
 
     Every dimension validated -> the gate passes. Any not -> two independent escapes, neither
     trusting the other's dimension:
 
-    - ``acknowledgement``, a real :class:`Acknowledgement` naming who and why, clears every
-      unvalidated dimension: the breeder's own act of shipping a clearly-flagged phenotype
-      unvalidated, stamped ``false`` so the un-trustworthiness travels downstream, and recorded on
-      the result's own ``acknowledged_by``/``acknowledgement_reason``.
+    - ``acknowledgment``, a real :class:`Acknowledgment` naming who and why, clears every
+      unvalidated dimension, stamped ``false`` and recorded on the result's own
+      ``acknowledged_by``/``acknowledgment_reason``.
     - ``allow_unvalidated_staging=True`` clears only :data:`STAGING_DIMENSIONS` (``tile_size``,
       ``claim_scope``): the pre-pass gate a raw prediction bucket is written under, never a
-      phenotype's own delivered dimensions (``operating_point``, ``classifier``, ``scale``), which
-      it cannot clear no matter what the caller states.
+      phenotype's own delivered dimensions (``operating_point``, ``classifier``, ``scale``).
 
-    Any dimension neither escape covers still refuses. The refusal targets a *silent bare number*,
-    not an honestly-acknowledged provisional deliverable. ``stamp`` records, per dimension, the
+    Any dimension neither escape covers still refuses. ``stamp`` records, per dimension, the
     reference it cleared (or ``false``), regardless of which escape (if any) let the gate pass.
     """
     unknown = sorted(name for name in flags if name not in _DIMENSION_REFERENCES)
@@ -3437,7 +3003,7 @@ def check_delivery_gate(
     covered: set[str] = set()
     if allow_unvalidated_staging:
         covered |= {name for name in unvalidated if name in STAGING_DIMENSIONS}
-    if acknowledgement is not None:
+    if acknowledgment is not None:
         covered |= set(unvalidated)
     blocking = tuple(name for name in unvalidated if name not in covered)
     if blocking:
@@ -3454,11 +3020,11 @@ def check_delivery_gate(
                 f"its own kind ({clears})."
             ),
         )
-    acknowledged_by = acknowledgement.acknowledged_by if (unvalidated and acknowledgement) else None
-    acknowledgement_reason = acknowledgement.reason if (unvalidated and acknowledgement) else None
+    acknowledged_by = acknowledgment.acknowledged_by if (unvalidated and acknowledgment) else None
+    acknowledgment_reason = acknowledgment.reason if (unvalidated and acknowledgment) else None
     return DeliveryGateResult(
         ok=True, unvalidated=unvalidated, stamp=stamp,
-        acknowledged_by=acknowledged_by, acknowledgement_reason=acknowledgement_reason,
+        acknowledged_by=acknowledged_by, acknowledgment_reason=acknowledgment_reason,
     )
 
 
@@ -3474,21 +3040,16 @@ def validate_resolved_bundle(
 ) -> list[str]:
     """Return human-readable issues for a resolved bundle (empty list = valid).
 
-    Live checks (each guards a real failure mode):
+    Checks:
     - ``in_chans`` must equal the probed raster band count (mismatch trains/infers channel-wrong).
     - a calibration operating point with ``validated=false`` must not feed an export/delivery.
     - the eval operating point must equal the inference operating point on the same dataset
       (select@0.25 / ship@0.5 divergence).
     - a dataset-scoped calibration must not be inherited across a different dataset hash.
 
-    ``max_dets`` is an intentional, standing exemption from the ``inference_bundle`` equality
-    check for one specific comparison: a block-calibrated bundle against its own whole-raster
-    export bundle (``inference_tools._export_predictions_raster``). Those two bundles' ``max_dets``
-    are deliberately different by design (the export pass commits to ``None``, uncapped, never the
-    block bundle's own band-scoped density-derived value), so a caller comparing exactly that pair
-    must exclude ``"max_dets"`` before calling this, not treat a mismatch there as the select/ship
-    divergence this check exists to catch. No caller does that comparison today, so this check's
-    own general logic stays untouched here rather than special-cased for a pairing nothing calls.
+    A block-calibrated bundle and its own whole-raster export bundle differ in ``max_dets`` by
+    design (the export pass is uncapped); a caller comparing that pair excludes ``"max_dets"``
+    first.
     """
     issues: list[str] = []
 

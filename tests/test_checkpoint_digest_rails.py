@@ -107,7 +107,7 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path
 
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    r = evaluate_model(ckpt, str(images_dir), str(images_dir), task="detection")
+    r = evaluate_model(ckpt, str(images_dir), str(images_dir))
     assert "error" in r
     assert "register_model" in r["error"]
 
@@ -552,7 +552,7 @@ def test_a_registration_that_committed_nothing_at_completion_leaves_no_line(
     from tcip_mcp.audit import audit_log_key
 
     before = list(tcip_store.read_log(audit_log_key(tmp_path)).records)
-    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt), task="detection")
     _finalize_run(ctx)
 
     assert list(tcip_store.read_log(audit_log_key(tmp_path)).records) == before
@@ -625,7 +625,7 @@ def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_
     from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-3")
-    ctx = TrainContext(run=run, train_loader=None)
+    ctx = TrainContext(run=run, train_loader=None, task="detection")
 
     with pytest.raises(ValueError, match="schema_version"):
         ctx.save_checkpoint({"model_state_dict": {}, "schema_version": 2})
@@ -638,7 +638,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, mon
     from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-4")
-    ctx = TrainContext(run=run, train_loader=None)
+    ctx = TrainContext(run=run, train_loader=None, task="detection")
 
     path = ctx.save_checkpoint({"model_state_dict": {}})
     assert Path(path).is_file()

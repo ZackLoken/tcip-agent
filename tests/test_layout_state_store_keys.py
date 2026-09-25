@@ -15,7 +15,7 @@ import tcip_store as ts
 from tcip_mcp.dataset_layout import (
     bucket_subject_date,
     image_status_key,
-    normalize_status_store,
+    status_tokens,
     status_bucket,
     status_records,
     view_coverage_key,
@@ -93,7 +93,7 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
     })
     assert resp.status_code == 200, resp.text
 
-    stored = normalize_status_store(ts.read(image_status_key(root)))
+    stored = status_tokens(ts.read(image_status_key(root)))
     assert stored.get(bucket, {}).get("plot.tif") == "negative"
     assert stored.get(bucket, {}).get("other.tif") == "complete"
 
