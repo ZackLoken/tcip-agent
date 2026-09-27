@@ -59,7 +59,9 @@ def test_every_declared_step_runs_or_is_skipped_by_the_stated_rule():
     skipped_by_run_prefix = [
         "mypy:Install CPU-only torch", "mypy:Install packages",
         "python:Install CPU-only torch [sqlite]", "python:Install packages [sqlite]",
+        "python:Install the system libraries the opencv-python wheel links (libGL, GLib) [sqlite]",
         "python:Install CPU-only torch [file]", "python:Install packages [file]",
+        "python:Install the system libraries the opencv-python wheel links (libGL, GLib) [file]",
         "typescript:Install frontend dependencies",
     ]
     run_steps = [

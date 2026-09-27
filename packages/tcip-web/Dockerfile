@@ -11,10 +11,10 @@ RUN npm run build
 FROM python:3.13-slim
 WORKDIR /app
 
-# rasterio's bundled GDAL needs libexpat; torch's OpenMP runtime needs libgomp. Neither ships
-# in python:3.13-slim.
+# rasterio's bundled GDAL needs libexpat; torch's OpenMP runtime needs libgomp; the opencv-python
+# wheel sahi declares needs libGL and, for its bundled Qt, GLib. None ships in python:3.13-slim.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libexpat1 libgomp1 \
+    libexpat1 libgomp1 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only torch, the way .github/workflows/ci.yml installs it.

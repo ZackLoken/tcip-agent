@@ -339,7 +339,7 @@ class SegmentAssignment:
 
 
 def assign_detections_to_segments(detections: dict, tie: SegmentTie) -> list[SegmentAssignment]:
-    """One :class:`SegmentAssignment` per box in a ``predict_tiled``-shaped ``detections`` result
+    """One :class:`SegmentAssignment` per box in a ``predict_sliced``-shaped ``detections`` result
     (the same ``{"boxes": [[x1, y1, x2, y2], ...]}`` shape
     :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.assign_detections_to_plants`
     reads), taking only ``tie`` (never the plant registry or the raster directly): every candidate

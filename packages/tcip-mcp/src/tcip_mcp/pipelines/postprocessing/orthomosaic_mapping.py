@@ -261,7 +261,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (  # noqa: E402
 class DetectionAssignment:
     """The plant a single detection resolves to, by nearest-neighbor GPS distance.
 
-    ``detection_index`` is the detection's position in the source ``predict_tiled``-shaped result's
+    ``detection_index`` is the detection's position in the source ``predict_sliced``-shaped result's
     ``boxes``/``scores``/``labels`` lists; ``pixel_x``/``pixel_y`` (the box centroid, in the same
     full-mosaic pixel space) is carried alongside.
 
@@ -320,7 +320,7 @@ def assign_detections_to_plants(
     *,
     nn_tolerance_m: float,
 ) -> list[DetectionAssignment]:
-    """One :class:`DetectionAssignment` per box in a ``predict_tiled``-shaped ``detections`` result
+    """One :class:`DetectionAssignment` per box in a ``predict_sliced``-shaped ``detections`` result
     (``{"boxes": [[x1, y1, x2, y2], ...], ...}`` in full-mosaic pixel space).
 
     Each detection's :func:`detection_location` is resolved to (lat, lon) via

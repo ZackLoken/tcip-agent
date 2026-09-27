@@ -59,7 +59,7 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "filtered at, so the check has nothing to reconcile the picked confidence against, whether "
      "that is a generation cutoff or review filter this route could not read, or a bespoke model "
      "whose module exposes no operating-point knob under a recognized name: the platform looks "
-     "for score_thresh, nms_thresh or detections_per_img on the module itself, its "
+     "for score_thresh or detections_per_img on the module itself, its "
      "detector.roi_heads, or its detector. Review a bucket whose staging floor is known."),
     (("insufficient_adjudication_coverage",),
      'Not yet. At least one of these reviewed images shows no evidence that missed objects were '
@@ -409,12 +409,11 @@ def resolve_operating_point_from_review(
     bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
+    slicing: dict | None,
+    cross_tile_nms: dict | None = None,
     tile_size: int | None = None,
     tile_size_source: str = "default",
     tile_size_derived_from: str | None = None,
-    tiled: bool | None = None,
-    tiled_source: str = "default",
-    cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
@@ -447,7 +446,8 @@ def resolve_operating_point_from_review(
     ``max(generation_conf, review_conf_threshold)``, computed by the caller and passed through to
     ``resolve_operating_point``.
 
-    ``tile_size_derived_from`` is the caller's own fact, read off the sidecar's stamp and forwarded
+    ``slicing``, ``cross_tile_nms`` (the merge threshold's provenance) and
+    ``tile_size_derived_from`` are the reviewed bucket's own, read off its stamp and forwarded
     unchanged.
 
     ``resolve_locked_cal_holdout_split``'s ``ValueError`` (a lock referencing a stem no longer
@@ -489,7 +489,7 @@ def resolve_operating_point_from_review(
         holdout_records=hold_records or None,
         tile_size=tile_size, tile_size_source=tile_size_source,
         tile_size_derived_from=tile_size_derived_from,
-        tiled=tiled, tiled_source=tiled_source, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
+        slicing=slicing, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
         experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
         adjudication_covered=lambda r: bool(r.get("adjudication_covered")),

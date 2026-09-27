@@ -564,7 +564,7 @@ class TestTrainingToolOutputSchema:
 
 class TestInferenceToolOutputSchema:
     def test_run_inference_reports_back_the_operating_point_it_was_handed(
-        self, tmp_path: Path,
+        self, tmp_path: Path, monkeypatch,
     ) -> None:
         """A dry run reports the operating point a real pass would measure at, each dimension as
         the caller named it.
@@ -572,27 +572,36 @@ class TestInferenceToolOutputSchema:
         Every value here is distinct, so a dimension reported in another's place is visible rather
         than hidden behind two fields that happen to share a default.
         """
-        from tcip_mcp.tools.inference_tools import run_inference
+        import torch
 
+        from tcip_mcp.pipelines.model_build import build_model
+        from tcip_mcp.tools.inference_tools import run_inference
+        from tcip_mcp.tools.model_tools import register_model
+
+        monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+        model_source = {"builder": "tests.bespoke_models:build_bright_blob_detector",
+                        "builder_kwargs": {"in_chans": 3}, "task": "detection"}
         ckpt = tmp_path / "detector.pt"
-        ckpt.write_bytes(b"a dry run never loads the weights")
+        torch.save({"model_source": model_source,
+                    "model_state_dict": build_model({"model_source": model_source}).state_dict()},
+                   str(ckpt))
+        assert "error" not in register_model(name="blob", checkpoint_path=str(ckpt), config={},
+                                             project_path=str(tmp_path))
         res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
                             dry_run=True, tile=True,
                             tile_size=512, overlap=0.35, conf_threshold=0.17, max_dets=37,
-                            global_nms_iou=0.55, postprocess="nmm")
+                            cross_tile_nms=0.55, postprocess="nmm")
 
         assert "error" not in res, res
         assert res["dry_run"] is True
-        assert res["checkpoint_path"] == str(ckpt)
         op = res["operating_point"]
-        assert op["conf"] == 0.17
-        assert op["tile_size"] == 512
-        assert op["overlap"] == 0.35
-        assert op["max_dets"] == 37
-        assert op["cross_tile_nms"] == 0.55
-        assert op["postprocess"] == "nmm"
-        assert op["tiled"] is True
-        assert op["tiled_source"] == "explicit"
+        assert op["conf"]["value"] == 0.17
+        assert op["tile_size"]["value"] == 512
+        assert res["slicing"]["overlap"] == 0.35
+        assert op["max_dets"]["value"] == 37
+        assert op["cross_tile_nms"]["value"] == 0.55
+        assert res["slicing"]["postprocess"] == "nmm"
+        assert op["cross_tile_nms"]["source"] == "explicit"
 
     def test_run_inference_writes_one_file_per_image_carrying_that_images_detections(
         self, tmp_path: Path, monkeypatch, seed_bud_trait_spec,
@@ -623,7 +632,7 @@ class TestInferenceToolOutputSchema:
         sha = "0f1e2d3c4b5a"
         monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
             results=results,
-            **calibrated_run_fields(labels_dir=tmp_path, tiled=False, checkpoint_sha256=sha)))
+            **calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256=sha)))
         monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 

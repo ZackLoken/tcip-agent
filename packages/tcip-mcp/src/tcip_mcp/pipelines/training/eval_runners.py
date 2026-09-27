@@ -9,7 +9,9 @@ from pathlib import Path
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_POSTPROCESS
+from tcip_mcp.pipelines.resolution import (
+    DEFAULT_CONF, DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE,
+)
 
 _RESULTS_DOC = RootedFileLocator(suffix=".json")
 
@@ -59,7 +61,7 @@ def _producer_identity(checkpoint) -> dict:
 # Pinned by name and presence only; a regime's own fields travel in the writer's `extra` instead.
 _COMMON_EVAL_FIELDS = (
     "model_path", "task", "model_sha256", "experiment_id", "iou_type",
-    "iou_threshold", "conf_threshold", "max_dets", "tiled", "eval_regime",
+    "iou_threshold", "conf_threshold", "max_dets", "eval_regime",
 )
 
 
@@ -123,7 +125,6 @@ def run_test_evaluation(
         "model_sha256": producer["model_sha256"], "experiment_id": producer["experiment_id"],
         "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
-        "tiled": tiled,
         "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
     }
     extra = dict(metrics)
@@ -140,24 +141,21 @@ def run_full_frame_evaluation(
     subject: str | None = None, attribute: str | None = None,
     conf_threshold: float | None = None, iou_threshold: float = 0.5,
     tile_size: int | None = None, overlap: float | None = None,
-    global_nms_iou: float | None = None,
+    cross_tile_nms: float | None = None,
     max_dets: int | None = None, postprocess: str = DEFAULT_POSTPROCESS, device: str | None = None,
     trait: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame, matched to
     full-frame GT.
 
-    Exercises the cross-tile merge and scores against un-fragmented GT, so it answers how well the
-    shipped full-frame count matches ground truth. Tile-level (``run_test_evaluation`` with
-    ``tiling``) is a diagnostic; it must not be reported as the delivery metric. For a checkpoint
-    trained without tiling, ``evaluate_model``'s default (``use_tiled_inference=False``) full-frame
-    path is the delivery gate.
+    Exercises the cross-tile merge and scores against un-fragmented GT. Tile-level
+    (``run_test_evaluation`` with ``tiling``) is a diagnostic, never the delivery metric; for a
+    checkpoint trained without tiling the untiled full-frame path is the delivery gate.
 
-    ``tile_size``/``overlap`` are resolved by precedence, explicit > the checkpoint's own persisted
-    training geometry > a native-ratio tier (a checkpoint's own recorded uniform untiled training
-    frame) > no real basis at all, via ``resolve_tile_regime``, and ``tile_size`` is gated through
-    ``resolve_tile_size_param``: an ``"unavailable"`` scale raises. ``overlap`` alone falling back
-    to a default does not raise.
+    ``tile_size``/``overlap`` resolve through
+    :func:`~tcip_mcp.pipelines.inference.predictor.resolve_tile_geometry`, and ``tile_size`` is
+    gated through ``resolve_tile_size_param``: an ``"unavailable"`` scale raises. ``overlap``
+    alone falling back to a default does not raise.
 
     The measured set is the detection loader a run over ``images_dir``/``labels_dir`` would build,
     over the platform's own admission: the capture date whose confirmed negatives count is the one
@@ -166,20 +164,22 @@ def run_full_frame_evaluation(
     by name.
 
     A box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
-    (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
+    (``predict_sliced(require_masks=False)``), so an instance_seg checkpoint is gated here on its
     boxes/counts, never on its masks.
 
-    ``conf_threshold``, ``global_nms_iou`` and ``max_dets`` resolve a stated-or-default value
-    through ``resolution.applied_operating_point``. The written record's own flat
-    ``conf_threshold``, ``max_dets``, ``tiled`` and ``tile_size`` are this evaluation's identity
-    tuple; ``extra["operating_point"]`` is their provenance, the mapping vocabulary a prediction
-    bucket's sidecar carries.
+    ``conf_threshold`` and ``max_dets`` resolve a stated-or-default value through
+    ``resolution.applied_operating_point``, and ``cross_tile_nms`` through
+    ``resolution.resolve_cross_tile_nms``. The written record's own flat ``conf_threshold``,
+    ``max_dets`` and ``tile_size`` are this evaluation's identity tuple;
+    ``extra["operating_point"]`` is their provenance, the mapping vocabulary a prediction bucket's
+    sidecar carries.
     """
-    from tcip_mcp.pipelines.inference.predictor import (
-        build_predictor, explicit_edge_provenance, resolve_tile_regime,
-    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_geometry
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
-    from tcip_mcp.pipelines.resolution import applied_operating_point, raw_operating_point
+    from tcip_mcp.pipelines.resolution import (
+        applied_operating_point, raw_operating_point, resolve_cross_tile_nms,
+    )
+    from tcip_mcp.pipelines.slicing import slicing_record
     from tcip_mcp.pipelines.training.evaluation import (
         build_coco_image_record, coco_detection_metrics, detection_record, governing_counts,
         gt_records, resolve_match_criterion,
@@ -189,28 +189,19 @@ def run_full_frame_evaluation(
     # builds further down is their provenance, composed from these same locals in one function.
     conf_stated = conf_threshold is not None
     max_dets_stated = max_dets is not None
-    conf_threshold, global_nms_iou, max_dets = applied_operating_point(
-        conf_threshold, global_nms_iou, max_dets)
+    conf_threshold, max_dets = applied_operating_point(conf_threshold, max_dets)
 
     predictor = build_predictor(
-        checkpoint, device=device,
-        score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
+        checkpoint, device=device, score_threshold=conf_threshold, max_dets=max_dets)
 
     # A stated edge contradicting the checkpoint's own recorded geometry raises here and propagates
     # to this function's own caller, the same as every other refusal on this delivery-gating path.
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
-        resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
-    tile_size_derived_from = (
-        explicit_edge_provenance(predictor, resolved_tile)
-        if tile_size_source == "explicit" and resolved_tile is not None else None)
-    # The raw regime every other measurement door resolves through, built once right after the
-    # tile regime above: this path always tiles, the caller's own choice of regime (never a default).
+    geometry = resolve_tile_geometry(predictor, tiled=True, tile_size=tile_size, overlap=overlap)
+    slicing = slicing_record(geometry.overlap, geometry.tile_resize, postprocess)
+    merge = resolve_cross_tile_nms(cross_tile_nms, slicing)
     op_bundle = raw_operating_point(
-        conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
-        max_dets=max_dets, tile_size_source=tile_size_source,
-        tile_size_derived_from=tile_size_derived_from, tiled_source="explicit",
-        conf_stated=conf_stated, max_dets_stated=max_dets_stated,
-    )
+        conf=conf_threshold, conf_stated=conf_stated, max_dets=max_dets,
+        max_dets_stated=max_dets_stated, geometry=geometry, slicing=slicing, cross_tile_nms=merge)
     # The shared gate every other door resolves through, read off the bundle above instead of a
     # second, separately-built tuple of source labels: resolve_tile_size_param runs once.
     tile_param = op_bundle.get("tile_size")
@@ -228,7 +219,7 @@ def run_full_frame_evaluation(
             "via the tiling= dict (and overlap, if known); it is not cross-checked against the "
             "checkpoint's actual training scale, so state it deliberately, not as a guess."
         )
-    tile_size, overlap = tile_param.value, resolved_overlap
+    tile_size = tile_param.value
 
     # The loader a run over this same ground truth builds, over the samples the producer admits.
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset, resolve_sizes
@@ -250,10 +241,11 @@ def run_full_frame_evaluation(
         gt = gt_records(measured.det_targets(key))
         # require_masks=False: this gate matches boxes to full-frame GT and never reads masks, so
         # a tile-trained instance_seg checkpoint evaluates exactly as a detector does here.
-        r = predictor.predict_tiled(measured.sample_sources[key], tile_size=tile_size,
-                                    overlap=overlap, global_nms_iou=global_nms_iou,
-                                    postprocess=postprocess,
-                                    require_masks=False, tile_resize=tile_resize)
+        r = predictor.predict_sliced(measured.sample_sources[key], tile_size=tile_size,
+                                     overlap=geometry.overlap, postprocess=postprocess,
+                                     cross_tile_nms=merge.value,
+                                     tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
+                                     tile_resize=geometry.tile_resize, require_masks=False)
         w, h = int(r["width"]), int(r["height"])
         dt = [detection_record(b, lab, s) for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=measured.member_of(key))
@@ -274,22 +266,22 @@ def run_full_frame_evaluation(
         "iou_type": "bbox",
         "model_sha256": producer["model_sha256"], "experiment_id": producer["experiment_id"],
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
-        "tiled": True, "eval_regime": "full-frame-tiled-inference",
+        "eval_regime": "full-frame-tiled-inference",
     }
     # scored_images/sample_counts: which images this number was computed over and which the
     # admission held out, so a reviewer can reconstruct the denominator.
     extra: dict = {
         **{k: m[k] for k in keys},
         "max_dets_cap_saturated_frac": _cap_saturated_frac(per_image),
-        "tile_size": tile_size, "tile_size_source": tile_size_source,
-        "overlap": overlap, "overlap_source": overlap_source,
+        "tile_size": tile_size, "tile_size_source": geometry.tile_size_source,
+        "overlap": geometry.overlap, "overlap_source": geometry.overlap_source,
         "scored_images": len(per_image), "sample_counts": admitted.counts,
         # Names recorded negative whose label file now holds subject content; scored on that
         # content, not filtered out, but the stale confirmation needs re-review.
         "contradicted_negatives": sorted(contradicted_negatives),
-        # The merge this evaluation ran at (also op_bundle's cross_tile_nms), and the operating
-        # point mapping a bucket stamp carries; never itself a stamp a delivery gate reads.
-        "global_nms_iou": global_nms_iou, "postprocess": postprocess,
+        # The merge this evaluation ran at and the operating point mapping a bucket stamp carries,
+        # its cross_tile_nms the merge threshold; never itself a stamp a delivery gate reads.
+        "postprocess": postprocess,
         "operating_point": op_bundle.to_provenance()["operating_point"],
     }
     # For a count trait, the delivery-grade count that gates the phenotype is the derived

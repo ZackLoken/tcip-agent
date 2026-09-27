@@ -3,9 +3,7 @@ via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing r
 scoring at an ungrounded scale when nothing is resolvable), honors ``max_dets`` verbatim on both
 regimes with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and
 resolves its own operating point through the same raw resolution (``resolution.raw_operating_point``)
-``run_inference`` resolves through, recording ``tiled``'s provenance to distinguish an explicit
-caller choice from a documented default, mirroring the existing ``tile_size``/``tile_size_source``
-pattern. See ``test_detection_measurement_integrity.py`` for the geometry-resolution and
+``run_inference`` resolves through. See ``test_detection_measurement_integrity.py`` for the geometry-resolution and
 calibrated-bundle integration tests; this file covers the ``evaluate_model`` wrapper's
 passthrough + refusal handling and the runner's own recorded merge and operating point.
 """
@@ -13,6 +11,8 @@ passthrough + refusal handling and the runner's own recorded merge and operating
 from __future__ import annotations
 
 import pytest
+
+from tests._regime_fixtures import tiled_regime
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -105,7 +105,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured.update(kw)
-        return {"tiled": False, "eval_regime": "tile-level"}
+        return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -126,7 +126,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured.update(kw)
-        return {"tiled": False, "eval_regime": "tile-level"}
+        return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -246,9 +246,9 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
         train_overlap = 0.2
         in_chans = 3
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             # 5 detections returned; max_dets below will cap the caller intentionally at 2.
-            # cap_hit=True: what the real predict_tiled would stamp here, now read directly.
+            # cap_hit=True: what the real predict_sliced would stamp here, now read directly.
             boxes = [[10, 10, 30, 30], [50, 50, 70, 70], [90, 90, 110, 110],
                      [130, 130, 150, 150], [170, 170, 190, 190]]
             return {"image": path, "width": 200, "height": 200, "boxes": boxes,
@@ -294,7 +294,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
         train_overlap = 0.2
         in_chans = 1
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [[10, 10, 40, 40]],
                     "scores": [0.9], "labels": [1], "count": 1, "cap_hit": False}
 
@@ -311,11 +311,11 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
 
 
 def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
-    """The raw regime through the runner: the record carries global_nms_iou, postprocess and an
-    operating_point mapping whose conf/max_dets read source "explicit" when stated (a stated
-    value equal to the default included) and "default" when not, tiled always explicit, conf's
-    validated_against false, and cross_tile_nms.value equal to the flat global_nms_iou; a direct
-    call stating max_dets=2 records 2 as explicit."""
+    """The raw regime through the runner: the record carries postprocess and an operating_point
+    mapping whose conf/max_dets/cross_tile_nms read source "explicit" when stated (a stated value
+    equal to the default included) and "default" when not, conf's validated_against false, and
+    cross_tile_nms.value the merge threshold the pass ran at; a direct call stating max_dets=2
+    records 2 as explicit."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
@@ -329,10 +329,12 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
         train_overlap = 0.2
         in_chans = 3
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
+            merges.append(kw["cross_tile_nms"])
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
+    merges: list[float] = []
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
@@ -352,23 +354,22 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
             subject="bud")
         r_stated = run_full_frame_evaluation(
             checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "stated"),
-            subject="bud", conf_threshold=0.5, global_nms_iou=0.3, max_dets=2)
+            subject="bud", conf_threshold=0.5, cross_tile_nms=0.3, max_dets=2)
     finally:
         predictor_mod.build_predictor = build_predictor_orig
 
+    assert merges == [0.3, 0.3]
     for r in (r_default, r_stated):
-        assert r["global_nms_iou"] == 0.3
+        assert "global_nms_iou" not in r
         assert r["postprocess"] == "nms"
         op = r["operating_point"]
-        assert op["tiled"]["source"] == "explicit"
         assert op["conf"]["validated_against"] == "false"
-        assert op["cross_tile_nms"]["value"] == r["global_nms_iou"]
+        assert op["cross_tile_nms"]["value"] == 0.3
 
-    assert r_default["operating_point"]["conf"]["source"] == "default"
-    assert r_default["operating_point"]["max_dets"]["source"] == "default"
-    # A stated value equal to the platform default is still recorded as explicit.
-    assert r_stated["operating_point"]["conf"]["source"] == "explicit"
-    assert r_stated["operating_point"]["max_dets"]["source"] == "explicit"
+    for name in ("conf", "max_dets", "cross_tile_nms"):
+        assert r_default["operating_point"][name]["source"] == "default"
+        # A stated value equal to the platform default is still recorded as explicit.
+        assert r_stated["operating_point"][name]["source"] == "explicit"
     assert r_stated["max_dets"] == 2
 
 
@@ -398,7 +399,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
         train_overlap = 0.2
         in_chans = 3
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
@@ -443,7 +444,7 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
         train_overlap = 0.2
         in_chans = 3
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
@@ -460,25 +461,6 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
         predictor_mod.build_predictor = build_predictor_orig
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# tiled provenance distinguishes explicit from default
-# ══════════════════════════════════════════════════════════════════════════
-
-def test_raw_operating_point_tiled_source_explicit_vs_default():
-    from tcip_mcp.pipelines.resolution import raw_operating_point
-
-    explicit_bundle = raw_operating_point(
-        conf=0.5, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=100,
-        tiled_source="explicit",
-    )
-    assert explicit_bundle.get("tiled").source == "explicit"
-
-    default_bundle = raw_operating_point(
-        conf=0.5, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=100,
-    )
-    assert default_bundle.get("tiled").source == "default"
-
-
 def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
     """`tile_size`'s source is never inferred from truthiness: a truthy value alone, even a
     fabricated fallback the caller never actually derived, must not be stamped "derived". The
@@ -486,27 +468,15 @@ def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness()
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # A truthy tile_size with no source claim defaults to "default", not silently "derived".
-    b_default = resolve_operating_point("bud_opening", tiled=True, dataset_hash=None, tile_size=640)
+    b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None, tile_size=640)
     assert b_default.get("tile_size").source == "default"
 
     b_derived = resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash=None, tile_size=224, tile_size_source="derived")
+        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=224, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size")._raw == 224
 
     b_explicit = resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512, tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     assert b_explicit.get("tile_size").source == "explicit"
-
-
-def test_resolve_operating_point_tiled_source_explicit_vs_default():
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    b_default = resolve_operating_point("bud_opening", dataset_hash=None, tiled=True)
-    assert b_default.get("tiled").source == "default"
-
-    b_explicit = resolve_operating_point(
-        "bud_opening", dataset_hash=None, tiled=False, tiled_source="explicit")
-    assert b_explicit.get("tiled").source == "explicit"
-    assert b_explicit.get("tiled")._raw is False

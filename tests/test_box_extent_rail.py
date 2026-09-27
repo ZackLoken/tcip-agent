@@ -37,11 +37,15 @@ def test_a_count_before_the_write_counts_what_the_write_stores(tmp_path: Path):
     import numpy as np
 
     from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import positive_detections, write_predictions_json
 
-    blob = np.zeros((40, 40), dtype=np.float32)
-    blob[5:30, 5:30] = 1.0
-    past_the_edge = {"mask_patch": blob, "offset_x": 100, "offset_y": 0}  # clipped to one column
+    solid = np.zeros((40, 40), dtype=np.uint8)
+    solid[5:30, 5:30] = 1
+    blob = {"segmentation": [[c for point in ring for c in point]
+                             for ring in mask_to_polygon_rings(solid)]}
+    # A merged sliced polygon wholly past the right edge clips to one column.
+    past_the_edge = {"segmentation": [[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]}
 
     def result() -> dict:
         return {"width": 40, "height": 40, "labels": [1, 1, 1], "scores": [0.9, 0.8, 0.7],

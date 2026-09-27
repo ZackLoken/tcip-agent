@@ -44,6 +44,7 @@ from tests._binding_fixtures import (  # noqa: E402
 )
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
+from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
@@ -139,11 +140,11 @@ def test_golden_resolve_operating_point_validated_conf():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = good_cal_holdout()
-    # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
+    # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                tiled=False, staged_conf_floor=0.01)
+                                slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf.requires_validation is True and conf.validation_kind == "annotations"
@@ -253,7 +254,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 
 # raw_operating_point (no trait/dataset resolution) carries no localization_tolerance_frac; only
 # resolve_operating_point (trait-aware) derives and stamps it.
-_OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tiled", "tile_size", "max_dets"}
+_OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tile_size", "max_dets"}
 _RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac", "count_objective"}
 _PARAM_PROVENANCE_KEYS = {
     "name", "value", "source", "derived_from",
@@ -274,11 +275,11 @@ def test_golden_stamp_shape_calibrated_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = good_cal_holdout()
-    # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
+    # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                tiled=False, staged_conf_floor=0.01)
+                                slicing=None, staged_conf_floor=0.01)
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
     assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
     assert stamp["validated"] is True  # held-out calibration passed
@@ -297,10 +298,14 @@ def test_golden_stamp_shape_calibrated_validated():
 
 
 def test_golden_stamp_shape_raw_uncalibrated_is_false():
-    from tcip_mcp.pipelines.resolution import raw_operating_point
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import raw_operating_point, resolve_cross_tile_nms
 
-    b = raw_operating_point(conf=0.5, cross_tile_nms=0.3, tiled=True,
-                            tile_size=640, max_dets=1000)
+    slicing = tiled_regime()["slicing"]
+    b = raw_operating_point(
+        conf=0.5, conf_stated=False, max_dets=1000, max_dets_stated=False,
+        geometry=TileGeometry(None, "unavailable", None, 0.2, "default", None), slicing=slicing,
+        cross_tile_nms=resolve_cross_tile_nms(0.3, slicing))
     # Raw inference always stamps validated=False (no per-dataset held-out calibration).
     assert b.is_shippable is False
     stamp = _stamp(b, validated=False, issues=[])
@@ -321,7 +326,7 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # Calibrated but never held-out-measured -> validated=false, not shippable.
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=_sweep_records("c"))
     assert b.get("conf").validated_against == "false"
     assert b.is_shippable is False
@@ -335,7 +340,7 @@ def test_golden_content_shared_holdout_is_false():
     """
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=_sweep_records("c"),
                                 holdout_records=_sweep_records("h"))
     conf = b.get("conf")
@@ -375,21 +380,20 @@ def test_golden_consolidated_operating_point_defaults():
     assert not hasattr(OP, "_DEFAULT_TILE_SIZE")
     assert not hasattr(OP, "DEFAULT_TILE_SIZE")
     assert OP.DEFAULT_MAX_DETS is R.DEFAULT_MAX_DETS
-    assert OP.DEFAULT_NMS_IOU is R.DEFAULT_NMS_IOU
 
     # The consolidated fallbacks flow through a resolved bundle with no calibration/overrides.
     # tile_size has no fallback to flow through at all here (no explicit/derived basis): None.
-    b = OP.resolve_operating_point("bud_opening", tiled=True, dataset_hash=None)
+    b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None)
     assert b.get("cross_tile_nms")._raw == R.DEFAULT_NMS_IOU  # 0.3, was 0.5
     assert b.get("max_dets")._raw == R.DEFAULT_MAX_DETS        # 1000, was 300
     assert b.get("tile_size")._raw is None
-    assert b.get("tiled")._raw is True
+    assert b.slicing is not None
 
-    # generic_predictor's own tiling primitive fabricates no tile_size default either (None,
-    # caller must resolve a real basis first); NMS still shares the platform default.
-    gp_sig = inspect.signature(GP.GenericPredictor.predict_tiled)
-    assert gp_sig.parameters["tile_size"].default is None
-    assert gp_sig.parameters["global_nms_iou"].default == R.DEFAULT_NMS_IOU
+    # generic_predictor's sliced primitive defaults no slice parameter: the caller states each.
+    gp_sig = inspect.signature(GP.GenericPredictor.predict_sliced)
+    for name in ("tile_size", "overlap", "postprocess", "cross_tile_nms", "tile_batch_size",
+                 "tile_resize", "require_masks"):
+        assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
     # training_tools.evaluate_model: max_dets is no longer a plain 100 default
     # shared by both eval regimes via a rescuing ">100 else 1000" sentinel (which collided with
@@ -401,7 +405,7 @@ def test_golden_consolidated_operating_point_defaults():
     assert ev_sig.parameters["max_dets"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
     # Honest None sentinels, resolved once through applied_operating_point ahead of the split.
-    assert ev_sig.parameters["global_nms_iou"].default is None
+    assert ev_sig.parameters["cross_tile_nms"].default is None
     assert ev_sig.parameters["conf_threshold"].default is None
 
     # evaluation.py surfaces: pinned so a metrics-default change is visible too.
@@ -412,7 +416,7 @@ def test_golden_consolidated_operating_point_defaults():
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
     # Also None sentinels, resolved inside the runner itself through applied_operating_point.
     assert ff_sig.parameters["conf_threshold"].default is None
-    assert ff_sig.parameters["global_nms_iou"].default is None
+    assert ff_sig.parameters["cross_tile_nms"].default is None
     assert ff_sig.parameters["max_dets"].default is None
     # tile_size/overlap are no longer pinned constants (640/0.2): an honest None
     # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
@@ -436,7 +440,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
 
     def _fake_diagnostic(ckpt, model, loader, device, output_dir, **kw):
         captured["diagnostic_max_dets"] = kw.get("max_dets")
-        return {"tiled": False, "eval_regime": "tile-level"}
+        return {"eval_regime": "tile-level"}
 
     orig_diag = runners.run_test_evaluation
     try:
@@ -500,7 +504,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         in_chans = 3
         model = _DummyModel()
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

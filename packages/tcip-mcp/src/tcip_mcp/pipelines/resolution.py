@@ -24,7 +24,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import tcip_store
 from tcip_annotation.json_io import SIDECAR_FILENAMES as _SIDECAR_FILENAMES
@@ -40,6 +40,9 @@ from tcip_store import (
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.dataset_layout import bucket_dataset_root
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -156,16 +159,62 @@ DEFAULT_TILE_BATCH_SIZE = 96
 DEFAULT_IMAGE_BATCH_SIZE = 16
 # The cross-tile merge when a caller names none: suppress overlaps rather than union them.
 DEFAULT_POSTPROCESS = "nms"
+CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
+    "nms": ("NMS", "IOU"), "nmm": ("NMM", "IOS"), "greedynmm": ("GREEDYNMM", "IOS"),
+}
+"""Every cross-tile merge a caller may name, as the SAHI postprocess type it runs and the match
+metric that type compares over (intersection over union, or over the smaller box)."""
+
+
+def cross_tile_merge_rule(postprocess: str) -> tuple[str, str]:
+    """The ``(SAHI postprocess type, match metric)`` ``postprocess`` names; any other name refuses
+    with the vocabulary."""
+    try:
+        return CROSS_TILE_MERGES[postprocess]
+    except KeyError:
+        raise ValueError(
+            f"postprocess {postprocess!r} names no cross-tile merge; choose one of "
+            f"{sorted(CROSS_TILE_MERGES)}") from None
 
 
 def applied_operating_point(
-    conf_threshold: float | None, global_nms_iou: float | None, max_dets: int | None,
-) -> tuple[float, float, int]:
-    """The stated-vs-platform-default resolution for conf/NMS/max_dets."""
-    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
+    conf_threshold: float | None, max_dets: int | None,
+) -> tuple[float, int]:
+    """The stated-vs-platform-default resolution for conf and max_dets."""
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
     applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
-    return applied_conf, applied_nms_iou, applied_max_dets
+    return applied_conf, applied_max_dets
+
+
+def resolve_cross_tile_nms(
+    stated: float | None, slicing: dict | None,
+    gt_boxes_per_image: list[list[list[float]]] | None = None,
+) -> ResolvedParam:
+    """The threshold a pass's cross-tile merge joins two detections above, in the metric its
+    ``slicing`` record names (:func:`~tcip_mcp.pipelines.slicing.slicing_record`).
+
+    ``None`` for an untiled pass (``slicing`` ``None``); a ``stated`` value as an explicit
+    override; else the ground truth's neighbor-overlap tail in that metric
+    (:func:`~tcip_mcp.pipelines.derivations.derive_cross_tile_nms`, ``gt_boxes_per_image`` one list
+    of xywh boxes per image) under its
+    :data:`~tcip_mcp.pipelines.derivations.CROSS_TILE_NMS_DERIVATIONS` label; else
+    ``DEFAULT_NMS_IOU`` as a documented default.
+    """
+    if slicing is None:
+        return default("cross_tile_nms", None)
+    if stated is not None:
+        return ResolvedParam("cross_tile_nms", float(stated), source="explicit",
+                             derived_from="caller override")
+    if gt_boxes_per_image:
+        from tcip_mcp.pipelines.derivations import (
+            CROSS_TILE_NMS_DERIVATIONS, derive_cross_tile_nms,
+        )
+
+        metric = slicing["match_metric"]
+        value = derive_cross_tile_nms(gt_boxes_per_image, metric=metric)
+        if value is not None:
+            return derived("cross_tile_nms", value, derived_from=CROSS_TILE_NMS_DERIVATIONS[metric])
+    return default("cross_tile_nms", DEFAULT_NMS_IOU)
 
 
 class UnvalidatedOperatingPointError(RuntimeError):
@@ -281,6 +330,18 @@ class ResolvedParam:
             "has_gate_evidence": self.gate_evidence is not None,
         }
 
+    @classmethod
+    def from_provenance(cls, record: Mapping[str, Any]) -> ResolvedParam:
+        """The parameter a :meth:`to_provenance` record states, less the gate evidence it keeps
+        only a marker of."""
+        return cls(
+            name=record["name"], _raw=record["value"], source=record["source"],
+            derived_from=record["derived_from"], requires_validation=record["requires_validation"],
+            validation_kind=record["validation_kind"],
+            validated_against=record["validated_against"],
+            dataset_scoped=record["dataset_scoped"], dataset_hash=record["dataset_hash"],
+            capture_scoped=record["capture_scoped"], capture_id=record["capture_id"])
+
 
 def derived(name: str, value: Any, *, derived_from: str,
             requires_validation: bool = False, validation_kind: str | None = None,
@@ -306,8 +367,10 @@ def default(name: str, value: Any, *, derived_from: str = "documented default") 
 class ResolvedBundle:
     """The phenotype-gating operating point for one (trait, dataset, checkpoint), fully resolved.
 
-    Holds the operating-point params (conf, cross_tile_nms, tiled, tile_size, max_dets) plus the
+    Holds the operating-point params (conf, cross_tile_nms, tile_size, max_dets) plus the
     structural facts (in_chans, num_classes) and the produced count / classifier-validation status.
+    ``slicing`` is the record of how the pass its predictions came from sliced and merged
+    (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` for an untiled pass.
     Stamped into the immutable experiment config and every prediction/CSV.
     """
 
@@ -315,6 +378,7 @@ class ResolvedBundle:
     dataset_hash: str | None
     params: dict[str, ResolvedParam] = field(default_factory=dict)
     classifier_validated_vs_gt: str | None = None  # for a trait's positive-class classifier
+    slicing: dict | None = None
 
     def get(self, name: str) -> ResolvedParam:
         return self.params[name]
@@ -364,6 +428,7 @@ class ResolvedBundle:
             "dataset_hash": self.dataset_hash,
             "classifier_validated_vs_gt": self.classifier_validated_vs_gt,
             "operating_point": {name: p.to_provenance() for name, p in self.params.items()},
+            "slicing": self.slicing,
         }
 
 
@@ -371,23 +436,13 @@ def resolve_tile_size_param(
     tile_size: int | None, *, tiled: bool, tile_size_source: str,
     tile_size_derived_from: str | None,
 ) -> ResolvedParam:
-    """The ``tile_size`` dimension, gated the same shape ``conf`` is, for
-    :func:`raw_operating_point` and
-    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`.
+    """The ``tile_size`` dimension, gated the same shape ``conf`` is.
 
-    ``tile_size_derived_from`` is required; it is read only for ``tile_size_source == "explicit"``,
-    where it becomes the stamped ``derived_from`` (see
-    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`).
-
-    Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays
-    a plain non-gating fact there. When tiled, the value is shippable when its source names a real
-    basis for trusting the scale, ranked strongest to weakest (see
-    :data:`GEOMETRY_REFERENCE_STRENGTH`): the checkpoint's own persisted training geometry
-    (``"derived"``); a tile edge derived from a checkpoint's own uniform untiled training frame
-    (``"native_ratio"``); or a caller's explicit override (``"explicit"``, already checked for
-    contradiction against the checkpoint's own recorded geometry). ``"recorded"``
-    (:func:`tile_size_source_of`'s fallback) keeps the edge, floored to unvalidated. Any other
-    source (``"unavailable"``) leaves ``tile_size`` itself ``None``.
+    Untiled, a plain ``None`` default. Tiled, shippable when ``tile_size_source`` names a basis
+    for trusting the scale (:data:`GEOMETRY_REFERENCE_STRENGTH`): ``"derived"`` (the checkpoint's
+    persisted training geometry), ``"native_ratio"`` (its uniform untiled training frame) or
+    ``"explicit"``, stamped with ``tile_size_derived_from``, which it requires. ``"recorded"``
+    keeps the edge floored to unvalidated; any other source leaves ``tile_size`` ``None``.
     """
     if not tiled:
         return default("tile_size", None)
@@ -435,38 +490,20 @@ def resolve_tile_size_param(
 
 
 def raw_operating_point(
-    *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
-    max_dets: int | None, tile_size_source: str = "default", tile_size_derived_from: str | None = None,
-    tiled_source: str = "default", conf_stated: bool = False, max_dets_stated: bool = False,
+    *, conf: float, conf_stated: bool, max_dets: int | None, max_dets_stated: bool,
+    geometry: TileGeometry, slicing: dict | None, cross_tile_nms: ResolvedParam,
 ) -> ResolvedBundle:
-    """The operating point for raw (uncalibrated) inference.
+    """The operating point for raw (uncalibrated) inference, over the pass ``slicing`` records.
 
-    ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation
-    and is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and
-    the caller stamps its output ``validated=false``.
-
-    ``max_dets`` is a concrete cap (the shared platform default when the caller stated nothing);
-    the uncapped ``max_dets=None`` regime is :func:`block_calibrated_export_operating_point`'s.
-
-    ``conf_stated``/``max_dets_stated`` say whether the caller explicitly chose that value: a
-    caller-chosen value that equals the platform default is stamped ``"explicit"``.
-
-    ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's
-    training geometry, ``native_ratio`` (the checkpoint's own uniform untiled frame), ``explicit``
-    (caller override), ``recorded`` (read back off a stamp with no accepted reference behind it),
-    or has no real basis at all (``"unavailable"``); see :func:`resolve_tile_size_param`.
-    ``tiled_source`` is ``"explicit"`` when the caller chose to tile (or not) and ``"default"``
-    otherwise; ``tiled`` itself is always a real bool.
-
-    ``tile_size_derived_from`` is forwarded to :func:`resolve_tile_size_param` unchanged.
+    ``conf`` has no per-dataset GT behind it, so it requires validation and is stamped
+    ``validated_against=false``; it and the concrete cap ``max_dets`` are stamped ``"explicit"``
+    when the caller stated them (``conf_stated``/``max_dets_stated``), ``"default"`` otherwise. The
+    tile edge is ``geometry``'s, gated by :func:`resolve_tile_size_param`; ``cross_tile_nms`` is
+    the pass's own resolved merge threshold (:func:`resolve_cross_tile_nms`), kept whole.
     """
     tile_param = resolve_tile_size_param(
-        tile_size, tiled=tiled, tile_size_source=tile_size_source,
-        tile_size_derived_from=tile_size_derived_from)
-    if tiled_source == "explicit":
-        tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
-    else:
-        tiled_param = default("tiled", tiled)
+        geometry.tile_size, tiled=slicing is not None, tile_size_source=geometry.tile_size_source,
+        tile_size_derived_from=geometry.tile_size_derived_from)
     if conf_stated:
         conf_param = ResolvedParam(
             "conf", conf, source="explicit", derived_from="caller override",
@@ -482,40 +519,35 @@ def raw_operating_point(
             "max_dets", max_dets, source="explicit", derived_from="caller override")
     else:
         max_dets_param = default("max_dets", max_dets)
-    return ResolvedBundle(trait="", dataset_hash=None, params={
+    return ResolvedBundle(trait="", dataset_hash=None, slicing=slicing, params={
         "conf": conf_param,
-        "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None),
-        "tiled": tiled_param,
+        "cross_tile_nms": cross_tile_nms,
         "tile_size": tile_param,
         "max_dets": max_dets_param,
     })
 
 
 def block_calibrated_export_operating_point(
-    block_bundle: ResolvedBundle, *, trait: str, tile_size: int | None, tile_size_source: str,
-    tile_size_derived_from: str | None = None,
+    block_bundle: ResolvedBundle, *, trait: str, geometry: TileGeometry,
 ) -> ResolvedBundle:
-    """The whole-mosaic export operating point a block-calibrated bundle ships at, the third regime
-    beside :func:`raw_operating_point` and
-    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`.
+    """The whole-mosaic export operating point a block-calibrated bundle ships at.
 
-    ``conf`` and ``cross_tile_nms`` carry over unchanged: those are what the mosaic's reserved
-    calibration and test bands measured. ``max_dets`` does not, and is ``None`` (uncapped): the
-    block bundle's own cap is derived from the density of one reserved band, and adopting it would
-    truncate the count over the whole mosaic. Tiling is always on, and the tile scale is gated
-    through :func:`resolve_tile_size_param`.
+    ``conf``, ``cross_tile_nms`` and the slicing record carry over unchanged: those are what the
+    mosaic's reserved calibration and test bands measured. ``max_dets`` is ``None`` (uncapped),
+    since the block bundle's own cap is one reserved band's density. The tile edge is
+    ``geometry``'s, gated through :func:`resolve_tile_size_param`.
     """
-    return ResolvedBundle(trait=trait, dataset_hash=block_bundle.dataset_hash, params={
-        "conf": block_bundle.get("conf"),
-        "cross_tile_nms": block_bundle.get("cross_tile_nms"),
-        "tiled": default("tiled", True),
-        "tile_size": resolve_tile_size_param(
-            tile_size, tiled=True, tile_size_source=tile_size_source,
-            tile_size_derived_from=tile_size_derived_from),
-        "max_dets": default(
-            "max_dets", None,
-            derived_from="block calibration: not transferred, uncapped for the whole-mosaic pass"),
-    })
+    return ResolvedBundle(
+        trait=trait, dataset_hash=block_bundle.dataset_hash, slicing=block_bundle.slicing, params={
+            "conf": block_bundle.get("conf"),
+            "cross_tile_nms": block_bundle.get("cross_tile_nms"),
+            "tile_size": resolve_tile_size_param(
+                geometry.tile_size, tiled=True, tile_size_source=geometry.tile_size_source,
+                tile_size_derived_from=geometry.tile_size_derived_from),
+            "max_dets": default(
+                "max_dets", None, derived_from="block calibration: not transferred, uncapped for "
+                                               "the whole-mosaic pass"),
+        })
 
 
 # --- dataset identity -----------------------------------------------------
@@ -660,12 +692,7 @@ enumeration of them here."""
 
 
 def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:
-    """One prediction bucket's provenance stamp for one measurement dimension.
-
-    ``cas`` on every one of them: the review-promotion path merges its own validation fields into a
-    stamp the producing run already wrote, from a different process, so an unconditional replace
-    there would drop the producer's own record of what made the predictions.
-    """
+    """One prediction bucket's provenance stamp for one measurement dimension, a ``cas`` record."""
     try:
         store = _SIDECAR_STORES[document]
     except KeyError:
@@ -894,6 +921,7 @@ def fold_tile_validation(validated: bool, tile_size_validated: str | None) -> bo
 def operating_point_stamp(
     operating_point: dict | None,
     *,
+    slicing: dict | None,
     validated: bool,
     validated_by: dict | None,
     tile_size_validated: str | None,
@@ -926,11 +954,15 @@ def operating_point_stamp(
 
     ``validated_by`` is the pointer at the validation record the claim was earned from, the mapping
     :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing.
+
+    ``slicing`` is what a tiled pass ran beside ``operating_point``'s tile edge and
+    ``cross_tile_nms`` (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` untiled.
     """
     return {
         "trait": trait,
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
+        "slicing": slicing,
         "id_map": id_map,
         "subject": subject,
         "attribute": attribute,
@@ -981,7 +1013,7 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
                        "raster buckets alike: each written prediction document's stem mapped to "
                        "its source image's basename with extension",
 }
-"""Every top-level key a producer adds beside ``operating_point_stamp``'s own sixteen, one entry
+"""Every top-level key a producer adds beside ``operating_point_stamp``'s own seventeen, one entry
 per key naming which producer writes it. :func:`write_sidecar` and :func:`update_sidecar` refuse
 an ``operating_point`` stamp whose body carries a top-level key outside
 ``STAMP_KEYS | STAMP_EXTENSION_KEYS``, naming the key and this declaration."""
@@ -1088,8 +1120,8 @@ def _sidecar_reference(
 # --- the claim a stamp asserts, and the record that has to answer for it -------------------
 
 _CLAIM_KEYS: dict[str, tuple[str, ...]] = {
-    "operating_point": ("operating_point", "tile_size_validated", "claim_scope_validated",
-                        "shippable_issues", "id_map", "mask_binarize"),
+    "operating_point": ("operating_point", "slicing", "tile_size_validated",
+                        "claim_scope_validated", "shippable_issues", "id_map", "mask_binarize"),
     "classifier_operating_point": ("operating_point",),
     "ordinal_operating_point": ("operating_point",),
     "regression_operating_point": ("operating_point",),
@@ -1124,9 +1156,8 @@ is never itself the measurement it states the unit of)."""
 
 
 def claim_payload(sidecar: dict | None, *, document: str) -> dict:
-    """The part of a stamp that constitutes the claim, for the document it is a stamp of: what
-    :func:`seal_validation` stores in the validation record and :func:`verify_stamp_binding`
-    compares, whole. A key the stamp does not carry is absent from the payload rather than
+    """The part of a stamp that constitutes the claim, for the document it is a stamp of (its
+    :data:`_CLAIM_KEYS`). A key the stamp does not carry is absent from the payload rather than
     defaulted.
     """
     try:
@@ -1222,13 +1253,9 @@ def _resolver_value(result: Any, param_key: str) -> Any:
 
 
 def _disjointness_evidence(result: Any, document: str, caller: str) -> dict | None:
-    """The gate evidence dict a disjointness-reading resolver checks, for one declared document
-    (:data:`_DOCUMENT_PARAM`), for :func:`resolver_train_disjointness` and
-    :func:`resolver_selection_disjointness`.
-
-    ``None`` for ``resolve_scale`` (no training run to check against) and for a result carrying no
-    gate evidence at all. A document neither resolver knows how to read from raises, naming
-    ``caller``.
+    """The gate evidence dict a resolver's ``result`` carries for one declared document
+    (:data:`_DOCUMENT_PARAM`): ``None`` for ``resolve_scale`` and for a result carrying no gate
+    evidence at all. A document without disjointness evidence raises, naming ``caller``.
     """
     if document == "resolve_scale":
         return None
@@ -1505,6 +1532,33 @@ def bucket_relative_key(bucket: str | Path, root: str | Path, *, document: str) 
         ) from None
 
 
+_REGIME_PARAMS = ("tile_size", "cross_tile_nms")
+"""The operating-point parameters that, beside the slicing record, state how a count's predictions
+were sliced and merged."""
+
+
+def _require_calibrated_regime(claim: dict, result: ResolvedBundle) -> None:
+    """Refuse a count claim whose slicing record or tile edge and merge threshold is absent, or
+    differs from the one the calibration's own predictions were collected under, naming each."""
+    stated_op = claim.get("operating_point") or {}
+    absent = ([] if "slicing" in claim else ["slicing"]) + [
+        name for name in _REGIME_PARAMS if "value" not in (stated_op.get(name) or {})]
+    if absent:
+        raise ValueError(
+            f"the operating_point stamp states no {absent}: a count claim names the slicing and "
+            "merge its predictions ran under, and a regime the stamp leaves out is one the record "
+            "could never be checked against.")
+    ran = {"slicing": result.slicing, **{name: result.get(name)._raw for name in _REGIME_PARAMS}}
+    stated = {"slicing": claim["slicing"], **{name: stated_op[name]["value"] for name in _REGIME_PARAMS}}
+    differing = sorted(name for name in ran if stated[name] != ran[name])
+    if differing:
+        raise ValueError(
+            f"the operating_point stamp states {differing} as {[stated[n] for n in differing]}, "
+            f"while its calibration collected its predictions under "
+            f"{[ran[n] for n in differing]}: a count claim is earned only for the regime its "
+            "calibration measured. Publish the bucket through the pass its calibration ran.")
+
+
 def seal_validation(
     draft: ValidationDraft,
     *,
@@ -1597,6 +1651,8 @@ def seal_validation(
             f"the {draft.document} stamp records {param_key}={stamped.get('value')!r} while the gate "
             f"resolved {resolved_value!r}; a record cannot answer for a value its gate never saw."
         )
+    if draft.document == "operating_point":
+        _require_calibrated_regime(claim, draft.result)
 
     experiment_id = draft.producing_experiment_id or ensure_calibration_experiment(
         document=draft.document, checkpoint_sha256=draft.checkpoint_sha256,
@@ -1790,10 +1846,12 @@ def verify_stamp_binding(
         return floored(
             f"record {record_digest!r} behind {document}.json at {bucket!r} was earned for trait "
             f"{row.get('trait')!r}, not {trait!r}. Re-calibrate for the delivered trait.", **known)
-    if claim_payload(stamp, document=document) != row.get("claim"):
+    claimed, earned = claim_payload(stamp, document=document), row.get("claim")
+    if claimed != earned:
+        differing = [k for k in _CLAIM_KEYS[document] if claimed.get(k) != (earned or {}).get(k)]
         return floored(
             f"{document}.json at {bucket!r} asserts a claim record {record_digest!r} was not earned "
-            f"for: the stamp's {', '.join(_CLAIM_KEYS[document])} disagree with the values the gate "
+            f"for: the stamp's {', '.join(differing)} disagree with the values the gate "
             "was run over. Re-calibrate to earn a record for the values being delivered.", **known)
 
     row_selection_dir = (row.get("reference_identity") or {}).get(
@@ -2028,7 +2086,7 @@ def delivered_provenance(
     the identity the verified records carry over the identity the stamps assert. Bound buckets
     whose verified records name different producers raise :class:`ProducerDiffers`. An
     ``operating_point_validated`` named in ``columns`` passes through whatever ``asserted`` carried
-    for it, unchanged; :func:`delivered_tail` stamps that column from the gate.
+    for it, unchanged.
     """
     values = dict(asserted or {})
     bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
@@ -2273,13 +2331,10 @@ def _render_bindings(bindings: Mapping[str, StampBinding]) -> dict:
 
 
 def _render_reconciled_document(entry: Mapping) -> dict:
-    """One ``_reconcile_validity``-shaped mapping rendered to plain JSON values, run before
-    ``model_validate`` and the store write: ``_reconcile_validity`` admits any number for ``conf``
-    and ``confs`` (a hand-authored ``NaN`` a reader can decode but the canonical codec refuses),
-    so both pass through :func:`~tcip_store.finite_or_none` here rather than reach the codec.
-    Every key the reconciler always returns is read as required, so an entry that dropped one
-    raises ``KeyError`` here rather than recording an empty value that reads as a reconciliation
-    of nothing; only the classifier entry's two delivery-level keys are optional."""
+    """One ``_reconcile_validity``-shaped mapping rendered to plain JSON values, ``conf`` and
+    ``confs`` through :func:`~tcip_store.finite_or_none`. Every key the reconciler always returns
+    is required (``KeyError`` otherwise); only the classifier entry's two delivery-level keys are
+    optional."""
     rendered = {
         "validated": entry["validated"],
         "on_disk_validated": entry["on_disk_validated"],
@@ -2300,8 +2355,8 @@ def _render_reconciled_document(entry: Mapping) -> dict:
 
 def _render_reconciled_dimension(entry: Mapping) -> dict:
     """One ``reconcile_tile_size_validity``/``reconcile_claim_scope_validity``/
-    ``reconcile_scale_validity``-shaped mapping rendered to plain JSON values, every key read as
-    required for the same reason as :func:`_render_reconciled_document`'s."""
+    ``reconcile_scale_validity``-shaped mapping rendered to plain JSON values, every key required
+    (``KeyError`` otherwise)."""
     return {
         "operative": entry["operative"],
         "validated": entry["validated"],
@@ -2456,9 +2511,8 @@ def binding_notes_text(notes: Mapping[str, str]) -> str:
 
 def _validity_rank(state: str | None, accepted: tuple[str, ...]) -> int:
     """Floor ordering: unvalidated (0) < a reference ``accepted`` recognizes for the dimension
-    being reconciled (1). ``None`` = no assertion (never lowers). Kind-aware on purpose: a
-    wrong-kind asserted string is not a real assertion about this dimension, so it floors the
-    result rather than being silently ignored as if it outranked the on-disk state."""
+    being reconciled (1). ``None`` = no assertion (never lowers); a wrong-kind asserted string
+    ranks unvalidated."""
     if state is None:
         return 99
     return 1 if state in accepted else 0

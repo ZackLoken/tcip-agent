@@ -40,7 +40,7 @@ def _job(job_id, images_dir, out_dir, ckpt, platform_root):
 
     return InferenceJob(
         job_id=job_id, checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
         platform_root=str(platform_root), dataset_root=bucket_dataset_root(out_dir),
     )
@@ -104,7 +104,7 @@ def test_the_gui_worker_and_the_mcp_pass_prepare_the_same_run(tmp_path, monkeypa
     _worker(job)
     assert job.status == "completed", job.error
     mcp = run_inference_verified(ckpt, images_dir=str(images_dir), conf_threshold=job.conf,
-                                 global_nms_iou=job.iou, tile=job.tile, overlap=job.overlap)
+                                 cross_tile_nms=job.cross_tile_nms, tile=job.tile, overlap=job.overlap)
 
     outcome = {"results", "image_count", "total_detections", "produced_at"}
     (gui,) = handed

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -46,8 +48,8 @@ def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
     # overlapping dense objects aren't merged; sparse boxes (offset 16px -> IoU ~0.111) sit lower.
     dense = [[(0, 0, 20, 20), (4, 0, 20, 20), (8, 0, 20, 20), (12, 0, 20, 20)]]
     sparse = [[(0, 0, 20, 20), (16, 0, 20, 20), (32, 0, 20, 20)]]
-    t_dense = derive_cross_tile_nms(dense)
-    t_sparse = derive_cross_tile_nms(sparse)
+    t_dense = derive_cross_tile_nms(dense, metric="IOU")
+    t_sparse = derive_cross_tile_nms(sparse, metric="IOU")
     assert t_dense is not None and t_sparse is not None
     assert t_dense > t_sparse
     assert 0.2 <= t_sparse <= 0.8 and 0.2 <= t_dense <= 0.8
@@ -57,14 +59,21 @@ def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
 def test_derive_cross_tile_nms_no_overlap_returns_none():
     # No genuine neighbor overlap anywhere -> underivable -> caller must fall back to an honest default.
     boxes = [[(0, 0, 20, 20), (100, 100, 20, 20)], [(0, 0, 20, 20)]]
-    assert derive_cross_tile_nms(boxes) is None
-    assert derive_cross_tile_nms([]) is None
+    assert derive_cross_tile_nms(boxes, metric="IOU") is None
+    assert derive_cross_tile_nms([], metric="IOS") is None
 
 
 def test_derive_cross_tile_nms_clamped_to_upper_bound():
     # Near-duplicate boxes (IoU ~0.90) would exceed the range; the result is clamped to the ceiling.
     boxes = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
-    assert derive_cross_tile_nms(boxes) == pytest.approx(0.8)
+    assert derive_cross_tile_nms(boxes, metric="IOU") == pytest.approx(0.8)
+
+
+def test_derive_cross_tile_nms_reads_the_tail_in_the_merges_own_metric():
+    # A box nested in another: IoU 0.25, IoS 1. The two metrics' tails derive different thresholds.
+    nested = [[(0, 0, 20, 20), (5, 5, 10, 10)]]
+    assert derive_cross_tile_nms(nested, metric="IOU") == pytest.approx(0.25 + 0.05)
+    assert derive_cross_tile_nms(nested, metric="IOS") == pytest.approx(0.8)
 
 
 def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
@@ -173,7 +182,7 @@ def test_derive_iou_match_threshold_no_boxes_returns_none():
 
 @pytest.mark.parametrize("fn", [
     derive_localization_tolerance_frac, derive_localization_kind,
-    derive_iou_match_threshold, derive_cross_tile_nms,
+    derive_iou_match_threshold, functools.partial(derive_cross_tile_nms, metric="IOU"),
 ])
 def test_derive_box_functions_raise_valueerror_on_malformed_gt_boxes(fn):
     # A bare Python operation on malformed input raises whatever exception type it happens to hit
@@ -424,37 +433,6 @@ def test_write_subject_registry_no_labels(tmp_path):
     res = write_subject_registry(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
     assert "error" in res
 
-
-def test_run_inference_dry_run_reports_operating_point(tmp_path):
-    from tcip_mcp.tools.inference_tools import run_inference
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")  # dry_run never loads it
-    res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
-                        dry_run=True, tile=True, tile_size=640)
-    assert res["dry_run"] is True
-    op = res["operating_point"]
-    assert op["conf"] == 0.5  # DEFAULT_CONF (one shared source)
-    assert op["cross_tile_nms"] == 0.3  # DEFAULT_NMS_IOU, tiled
-    assert op["tiled"] is True and op["tile_size"] == 640
-
-
-def test_run_inference_dry_run_unset_tile_is_pending_not_a_default(tmp_path):
-    """Once tiled also derives from the checkpoint's own training geometry, an unset ``tile`` in a
-    dry run (which never loads the checkpoint) can't be resolved to a concrete bool: it must report
-    a genuine pending derivation, the same convention tile_size/overlap already use for the
-    checkpoint-derived dimensions, never a fabricated True/False."""
-    from tcip_mcp.tools.inference_tools import run_inference
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")  # dry_run never loads it
-    res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
-                        dry_run=True)
-    assert res["dry_run"] is True
-    op = res["operating_point"]
-    assert op["tiled"] == "pending-checkpoint-derivation"
-    assert op["tiled_source"] == "pending-checkpoint-derivation"
-    assert op["cross_tile_nms"] == "pending-checkpoint-derivation"
-    assert op["tile_size"] == "pending-checkpoint-derivation"
-    assert op["overlap"] == "pending-checkpoint-derivation"
 
 
 def test_write_subject_registry_defaults_into_the_dataset(tmp_path):

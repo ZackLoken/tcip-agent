@@ -70,16 +70,14 @@ def _unvalidated_run_result(*, experiment_id=None, stem="a"):
         experiment_id=experiment_id, validated=False, conf_source="default")
 
 
-def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, tiled=False, tile_size=None,
-                       tile_size_source="default", stem="a"):
+def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, stem="a"):
     """A stand-in live-run result that left behind real evidence, so a bucket published from it
     earns a genuine validation record (the same shape test_delivery_gate.py's own helper builds)."""
     return run_result(
         results=[{"image": f"{stem}.png", "width": 100, "height": 100,
                   "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                   "count": 1}],
-        **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
-                                tiled=tiled, tile_size=tile_size, tile_size_source=tile_size_source))
+        **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef"))
 
 
 # ── exactly one source, or refuse naming both regimes ──────────────────────
@@ -113,7 +111,7 @@ def test_no_output_path_refuses(tmp_path):
 
 @pytest.mark.parametrize("name, value", [
     ("conf_threshold", 0.5), ("device", "cpu"), ("tile", True), ("tile_size", 320),
-    ("overlap", 0.2), ("global_nms_iou", 0.4), ("max_dets", 50),
+    ("overlap", 0.2), ("cross_tile_nms", 0.4), ("max_dets", 50),
     ("calibration_labels_dir", "labels"), ("calibration_images_dir", "images"),
     ("selection_dir", "manifest"), ("experiment_id", "exp-live-only"),
     ("postprocess", "nmm"), ("tile_batch_size", 32),
@@ -571,7 +569,7 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _earned_run_result(tmp_path, tiled=False))
+                        lambda *a, **kw: _earned_run_result(tmp_path))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
     live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
@@ -616,7 +614,7 @@ def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch)
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _earned_run_result(tmp_path, tiled=False))
+                        lambda *a, **kw: _earned_run_result(tmp_path))
     root = tmp_path / "ds"
     bucket = root / "predictions" / "baseline" / "2026-01-01"
     live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
@@ -895,14 +893,15 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "H", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01,
-                             "tiled": False}},
+                             "slicing": None}},
         trait=fx.COUNT_TRAIT, checkpoint_sha256="deadbeef", producing_experiment_id=None,
         reference_inputs={"dataset_root": str(dataset_root),
                           "label_dirs": {"calibration": str(tmp_path)},
                           "stated_values": {"split_identity": "cleared-delivery-floor"}},
     )
     earned_body = operating_point_stamp(
-        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
+        validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
         id_map={fx.COUNT_SUBJECT: 0}, subject=fx.COUNT_SUBJECT, attribute=None,
         trait=fx.COUNT_TRAIT, dataset_hash="H", checkpoint="best", checkpoint_sha256="deadbeef",

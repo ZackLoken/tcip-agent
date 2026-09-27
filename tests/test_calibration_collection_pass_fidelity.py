@@ -25,6 +25,8 @@ pytest.importorskip("pycocotools")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
+from tests._regime_fixtures import stub_pass  # noqa: E402
+
 # A deliberately non-square frame: a defect that swaps an axis produces a different number here.
 IMG_W, IMG_H = 600, 400
 GRID_COLS, GRID_ROWS = 10, 8
@@ -135,9 +137,7 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     stub = _HesitantDetectorStub()
 
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         group_by="stem", seed=3, holdout_ratio=0.5,
     )
 
@@ -250,9 +250,7 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
     monkeypatch.setattr(operating_point, "resolve_operating_point", _capturing_resolve)
 
     calibration.calibrate_operating_point(
-        _TwoClassStub(), "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(_TwoClassStub()), "bud_opening", str(labels_dir), str(images_dir),
         group_by="stem", seed=5, holdout_ratio=0.5,
     )
 
@@ -310,9 +308,7 @@ def test_calibration_records_carry_each_ground_truth_records_crowd_flag(tmp_path
         for p in paths]
 
     calibration.calibrate_operating_point(
-        stub, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         group_by="stem", seed=5, holdout_ratio=0.5,
     )
 

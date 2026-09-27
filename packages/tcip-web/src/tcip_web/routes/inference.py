@@ -4,8 +4,8 @@ Jobs run on a background thread. Each job writes per-image JSON predictions (one
 per image, pixel-xyxy boxes + per-object score) to ``output_dir``.
 
 Inference goes through ``build_predictor``, which dispatches on the checkpoint's model kind and
-runs the tcip composed-model checkpoint through its own native SAHI-style tiling. The operating
-point (conf / NMS IoU / tiling / max_dets) is resolved through the ``raw_operating_point`` bundle,
+runs the tcip composed-model checkpoint through SAHI's tiling. The operating point (conf /
+``cross_tile_nms`` / tiling / max_dets) is resolved through the ``raw_operating_point`` bundle,
 and the run publishes through ``inference_tools.publish_bucket``: its gates refuse before any image
 is predicted, and the documents, the stamp and the publication's line are written one image at a
 time as the publisher consumes the predictions.
@@ -58,12 +58,12 @@ class InferenceJob:
     # The launch's own stated values, ``None`` where it stated nothing: the pass resolves each
     # one exactly as run_inference resolves its own arguments (inference_tools._prepare_pass).
     conf: Optional[float] = None
-    iou: Optional[float] = None
+    cross_tile_nms: Optional[float] = None
     tile: Optional[bool] = None
     tile_size: Optional[int] = None
     overlap: Optional[float] = None
     max_dets: Optional[int] = None
-    postprocess: str = DEFAULT_POSTPROCESS  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
+    postprocess: str = DEFAULT_POSTPROCESS  # cross-tile merge, one of CROSS_TILE_MERGES
     total: int = 0
     done: int = 0
     status: JobStatus = "pending"
@@ -180,7 +180,7 @@ def _worker(job: InferenceJob) -> None:
         prepared = _prepare_pass(
             checkpoint, images_dir=job.images_dir, conf_threshold=job.conf, device=None,
             tile=job.tile, tile_size=job.tile_size, overlap=job.overlap,
-            global_nms_iou=job.iou, max_dets=job.max_dets,
+            cross_tile_nms=job.cross_tile_nms, max_dets=job.max_dets,
             postprocess=job.postprocess, experiment_id=None,
             tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
         if isinstance(prepared, str):
@@ -242,7 +242,7 @@ class LaunchInferencePayload(BaseModel):
     tile: bool | None = None
     # None where omitted: the pass derives the value rather than reading a frozen literal.
     conf: float | None = None
-    iou: float | None = None
+    cross_tile_nms: float | None = None
     tile_size: int | None = None
     overlap: float | None = None
     max_dets: int | None = None
@@ -341,7 +341,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         date=payload.date,
         tile=payload.tile,
         conf=payload.conf,
-        iou=payload.iou,
+        cross_tile_nms=payload.cross_tile_nms,
         tile_size=payload.tile_size,
         overlap=payload.overlap,
         max_dets=payload.max_dets,

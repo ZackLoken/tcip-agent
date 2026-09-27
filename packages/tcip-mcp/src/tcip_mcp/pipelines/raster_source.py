@@ -20,7 +20,7 @@ import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -125,6 +125,22 @@ class Rect:
         return self.y1 - self.y0
 
 
+def rect_contains_rect(
+    outer: tuple[int, int, int, int], inner: tuple[int, int, int, int],
+) -> bool:
+    """Whether half-open pixel rect ``inner`` lies fully inside half-open pixel rect ``outer``."""
+    ox0, oy0, ox1, oy1 = outer
+    ix0, iy0, ix1, iy1 = inner
+    return ox0 <= ix0 and oy0 <= iy0 and ix1 <= ox1 and iy1 <= oy1
+
+
+def rects_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    """Whether two half-open pixel rects share any pixel; sharing only an edge does not count."""
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
 @dataclass(frozen=True)
 class WindowSampling:
     """Exactly which pixels a sampled statistic was read from.
@@ -152,10 +168,8 @@ def sample_windows(width: int, height: int, *, seed: int, window_size: int,
 
     The raster is divided into a grid of ``window_size`` squares (edge cells are short, never
     padded and never overlapped) and ``max_windows`` of those cells are drawn without replacement
-    from ``seed``, returned in row-major order. Grid cells rather than free-floating rectangles, so
-    no pixel is ever counted twice and a ``max_windows`` at or above the grid's own cell count
-    returns every pixel exactly once: a statistic over that sample is the statistic over a full
-    decode, which is what lets a sampled reader be checked against an exact one.
+    from ``seed``, returned in row-major order; a ``max_windows`` at or above the grid's own cell
+    count returns every cell, so every pixel exactly once.
     """
     import numpy as np
 
@@ -195,8 +209,8 @@ class RasterSource(Protocol):
     :meth:`read_region` returns ``([H, W, C] pixels, ReadSpec)`` for a rectangle lying inside the
     raster; an empty or out-of-bounds rectangle raises ``ValueError`` rather than returning a
     silently clipped array, so a caller that wants an edge tile clips to the raster's own bounds
-    and pads the result itself (``image_utils.pad_tile``). The pixels are always a copy: mutating
-    them can never corrupt what a later read returns.
+    itself. The pixels are always a copy: mutating them can never corrupt what a later read
+    returns.
 
     ``target_size`` (output ``(width, height)``) serves the same rectangle resampled to that size;
     it must preserve the rectangle's aspect ratio to within the rounding of fitting either edge
@@ -237,21 +251,15 @@ class _ClosableSource:
             self._release()
 
     def _release(self) -> None:
-        """Drop whatever this backend holds open. Called once, by :meth:`close`."""
+        """Drop whatever this backend holds open, once."""
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, "ReadSpec"]:
-        """Return ``([H, W, C] pixels, ReadSpec)`` for ``rect``. Every subclass provides its own;
-        declared here only so :meth:`read_window` can call it through ``self``."""
+        """Return ``([H, W, C] pixels, ReadSpec)`` for ``rect``; every subclass provides its own."""
         raise NotImplementedError
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
-        """The pixel window ``[y0:y1, x0:x1]``, in the row-first argument order the tiled
-        inference loop uses.
-
-        ``read_window`` orders rows first while :class:`Rect` orders x first; the flip between the
-        two conventions happens exactly here and nowhere else.
-        """
+        """The pixel window ``[y0:y1, x0:x1]``, rows first."""
         region, _spec = self.read_region(Rect(x0, y0, x1, y1))
         return region
 
@@ -314,9 +322,7 @@ def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, i
     """Validate a ``(width, height)`` output size against ``rect`` and return it as ints.
 
     The target must preserve the region's aspect ratio to within the rounding of fitting either
-    edge; a distorting target raises ``ValueError``, since a resample here must never silently
-    change a raster's geometry (a caller that wants a distortion resizes the returned pixels
-    itself).
+    edge; a distorting target raises ``ValueError``.
     """
     out_w, out_h = int(target_size[0]), int(target_size[1])
     if out_w <= 0 or out_h <= 0:
@@ -336,8 +342,7 @@ def _area_downsample(region: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
     ``INTER_AREA``, the one area resampler used for every backend that resamples in memory."""
     import cv2
 
-    out = cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA)
-    return out if out.ndim == 3 else out[:, :, None]
+    return hwc_array(cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA))
 
 
 def _serve_region(region: np.ndarray, rect: Rect, backend: str,
@@ -369,11 +374,15 @@ def _channel_last(arr: np.ndarray, num_channels: int) -> np.ndarray:
     reshapes its pixels.
     """
     arr = np.asarray(arr)
-    if arr.ndim == 2:
-        return arr[:, :, None]
     if arr.ndim == 3 and channel_first_reinterpreted(arr.shape, num_channels):
         return np.transpose(arr, (1, 2, 0))
-    return arr
+    return hwc_array(arr)
+
+
+def hwc_array(img: Any) -> np.ndarray:
+    """A decoded PIL image or array as ``[H, W, C]``: a 2-D one gains a trailing axis of 1."""
+    arr = np.asarray(img)
+    return arr[:, :, None] if arr.ndim == 2 else arr
 
 
 def _tiff_series_probe(path: str | Path) -> tuple[tuple[int, ...], str] | None:
@@ -503,22 +512,15 @@ class PhotographicSource(_ClosableSource):
 
     @property
     def resident_bytes(self) -> int:
-        """The peak this source can hold: the PIL frame plus the ndarray copy
-        :meth:`read_region` materializes from it on first use.
-
-        The pool records this value once, at insert, so it must never understate what the
-        source may later hold; counting both frames up front keeps the accounting honest
-        even when :meth:`read_region` is never called, where a value that grew after a
-        first read would silently exceed what the pool recorded.
-        """
+        """The peak this source can hold, stated before any read: the PIL frame plus the ndarray
+        copy :meth:`read_region` materializes from it on first use."""
         return int(2 * self.width * self.height * self.num_channels * self.dtype.itemsize)
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
         _check_region(rect, self.height, self.width)
         if self._frame is None:
-            frame = np.asarray(self.image)
-            self._frame = frame[:, :, None] if frame.ndim == 2 else frame
+            self._frame = hwc_array(self.image)
         region = np.array(self._frame[rect.y0:rect.y1, rect.x0:rect.x1])
         return _serve_region(region, rect, "photographic", target_size)
 
@@ -578,9 +580,7 @@ class BandGroupSource(_ClosableSource):
     would alone; a region is every member's own region concatenated on the channel axis, in the
     manifest's declared band order, and a ``target_size`` read is each member's own resampled read
     (the returned spec carries the members' scale and resampling). The group's frame is its first
-    band's, the same frame ``image_utils.image_dimensions`` reports for a group; a member covering
-    a different extent is refused at open rather than cropped or resampled to fit, since the
-    pixels of a group whose bands disagree on the frame cannot be stacked into one raster.
+    band's; a member covering a different extent is refused at open.
     """
 
     def __init__(self, ref: BandGroupRef, num_channels: int):
@@ -790,8 +790,7 @@ def open_array_source(source: "str | Path | BandGroupRef", num_channels: int) ->
     """Open ``source`` as a plain ``[H, W, C]`` array raster: a band group, a numpy container, or a
     TIFF.
 
-    A photographic container (any other extension) is refused at every channel count, since a
-    caller here wants band data and a PIL frame is :func:`open_raster`'s business.
+    A photographic container (any other extension) is refused at every channel count.
     """
     if isinstance(source, BandGroupRef):
         return BandGroupSource(source, num_channels)
@@ -910,9 +909,8 @@ def _stat_identity(path: Path) -> tuple[int, int]:
 
 
 def source_pool_key(source: "str | Path | BandGroupRef", num_channels: int) -> tuple:
-    """The identity :func:`pooled_source` pools an open source under: the file's path, modification
-    time and size, and the channel count it was opened at, so an edited file never serves stale
-    pixels and a source opened at one count is never handed to a caller asking for another.
+    """The identity an open source is pooled under: the file's path, modification time and size,
+    and the channel count it was opened at.
 
     A band group is keyed on its manifest plus every member's own name, modification time and size:
     the manifest can sit untouched while a member is rewritten.

@@ -62,8 +62,13 @@ def test_a_caller_picked_conf_is_firewalled_exactly_like_the_documented_default(
     """A raw inference run's threshold has no per-dataset reference behind it whichever number it
     is: a caller who picked one deliberately has not thereby checked it against anything, so the
     value stays readable only through the acknowledging accessor and the delivery gate refuses."""
-    bundle = raw_operating_point(conf=conf, cross_tile_nms=0.35, tiled=False, tile_size=None,
-                                 max_dets=750)
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+
+    bundle = raw_operating_point(
+        conf=conf, conf_stated=True, max_dets=750, max_dets_stated=True,
+        geometry=TileGeometry(None, "unavailable", None, 0.2, "default", None), slicing=None,
+        cross_tile_nms=resolve_cross_tile_nms(0.35, None))
     param = bundle.get("conf")
     assert param.requires_validation is True
     assert param.validated_against == VALIDATED_FALSE

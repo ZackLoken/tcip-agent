@@ -301,7 +301,7 @@ def test_refusal_classified_scope(
         "checkpoint_sha256": "sha-classified", "experiment_id": None, "validated": True,
         "validated_by": {"experiment_id": "exp-classified", "record_digest": "0" * 16},
         "id_map": {"open": 0, "closed": 1}, "subject": "bud", "attribute": "state",
-        "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.1}},
+        "slicing": None, "operating_point": {"conf": {"value": 0.1}},
     }, expect=tcip_store.Version.ABSENT)
 
     payload = {

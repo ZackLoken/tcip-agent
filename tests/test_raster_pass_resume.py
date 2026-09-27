@@ -26,10 +26,13 @@ def test_a_recorded_identity_lacking_its_trait_differs_from_one_recording_no_tra
         _raster_pass_identity_body, _raster_pass_identity_mismatches,
     )
 
+    from types import SimpleNamespace
+
+    prepared = SimpleNamespace(
+        identity={"sha256": "c" * 64, "experiment_id": None}, tile_batch_size=1)
+    result = {"operating_point": {"conf": {"value": 0.5}}, "slicing": {"overlap": 0.0}}
     current = _raster_pass_identity_body(
-        raster_identity={"digest": "d"}, checkpoint_sha256="c" * 64, trait=None,
-        experiment_id=None, tile_batch_size=1, conf=0.5, cross_tile_nms=None, max_dets=None,
-        tile_size=TILE, overlap=0.0, tile_resize=None, postprocess="nms", require_masks=False)
+        result, prepared, raster_identity={"digest": "d"}, trait=None, require_masks=False)
     recorded = {key: value for key, value in current.items() if key != "trait"}
 
     assert _raster_pass_identity_mismatches(current, current) == []
@@ -124,17 +127,34 @@ def test_resume_refuses_with_no_recorded_progress(tmp_path, monkeypatch):
     assert not out.exists()
 
 
-def test_resume_refuses_a_mask_bearing_pass(tmp_path, monkeypatch):
+def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_masks(
+    tmp_path, monkeypatch,
+):
+    """The recorded progress carries each slice's shifted predictions whole, polygons included,
+    so the resumed pass merges the seeded masks exactly as the uninterrupted pass does."""
+    import json
+
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path, height=64, width=64)
     ckpt = _instance_seg_checkpoint(tmp_path)
-    out = tmp_path / "preds"
+    interrupted_out, uninterrupted_out = tmp_path / "interrupted", tmp_path / "uninterrupted"
 
-    result = _run(ckpt, raster_path, out, resume=True, require_masks=True)
+    baseline = _run(ckpt, raster_path, uninterrupted_out, require_masks=True)
+    assert "error" not in baseline, baseline
+    _interrupt_after_one_batch(monkeypatch)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _run(ckpt, raster_path, interrupted_out, require_masks=True)
+    resumed = _run(ckpt, raster_path, interrupted_out, resume=True, require_masks=True)
+    assert "error" not in resumed, resumed
 
-    assert "error" in result and "mask-bearing" in result["error"]
-    assert not out.exists()
+    def _as_produced(out: Path) -> list[dict]:
+        doc = json.loads((out / "mosaic.json").read_text())
+        return [{k: v for k, v in a.items() if k != "created_at"} for a in doc["annotations"]]
+
+    baseline_annotations = _as_produced(uninterrupted_out)
+    assert any(a.get("segmentation") for a in baseline_annotations)
+    assert _as_produced(interrupted_out) == baseline_annotations
 
 
 def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record(tmp_path, monkeypatch):

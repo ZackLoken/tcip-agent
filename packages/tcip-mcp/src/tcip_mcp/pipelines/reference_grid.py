@@ -1,14 +1,7 @@
-"""Named reference grid over a raster's native pixel frame.
-
-Consumers exchange the serializable geometry dict (:func:`grid_geometry`) and recompute cells
-deterministically from it via :func:`reference_cells`; cell lists are never shipped between agent
-tool calls.
-
-Cell names are spreadsheet-style: a bijective base-26 column letter plus a 1-based row number
-("B3"). The letter scheme is ``tcip_annotation.sam_wrapper``'s ``column_label`` / ``column_index``.
-Resolving a name back against a cell list is that module's ``grid_to_rect`` (``grid_to_pixel`` for
-the cell's center).
-"""
+"""Named reference grid over a raster's native pixel frame: cells recomputed from the serializable
+geometry dict (:func:`grid_geometry`) by :func:`reference_cells`, each named spreadsheet-style, a
+bijective base-26 column letter plus a 1-based row number ("B3", ``tcip_annotation.sam_wrapper``'s
+``column_label``)."""
 
 from __future__ import annotations
 
@@ -17,17 +10,13 @@ from dataclasses import dataclass
 
 from tcip_annotation.sam_wrapper import column_label
 
-from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
 
 POINTING_LEGIBLE_EDGE = 46
-"""Smallest rendered cell edge, in artifact pixels, at which the overlay's cell labels
-read comfortably. Measured, not designed: render ``render_grid_overlay`` on any textured
-frame at the artifact bound with cell edges of 32, 40, 46, 51, 64, 79, 93 and 128 px and
-read the artifacts back; at 32 the wide (two-letter, two-digit) labels collide and run
-together, at 40 every label reads but covers most of its cell, and at 46 and above labels
-read clearly with most of the cell content visible. The renders are session artifacts,
-not repo files; the procedure above re-derives the value."""
+"""Smallest rendered cell edge, in artifact pixels, at which the overlay's cell labels read
+clearly with most of the cell visible, measured by rendering ``render_grid_overlay`` at the
+artifact bound over cell edges 32 to 128: at 32 two-letter, two-digit labels collide, at 40 they
+cover most of the cell."""
 
 @dataclass(frozen=True)
 class Cell:
@@ -59,17 +48,12 @@ def reference_cells(
 ) -> list[Cell]:
     """Named square cells of ``tile_size`` native pixels over a ``width`` x ``height`` frame.
 
-    Built on the training tiler's ``compute_stride``/``tile_positions``, so a reference
-    grid and a training tiling of the same frame agree on tile origins by construction.
-    ``clamp=False`` keeps the tiler's own semantics: rects may run past the extent and
-    callers pad, exactly what training does. ``clamp=True`` clips each rect to the extent
-    (edge cells truncate, never shift), so with ``overlap`` 0 the cells are an exact
-    partition: every pixel belongs to exactly one cell.
-
-    Known bounded behaviors, inherited from sharing the tiler: an extreme aspect ratio
-    can leave sliver edge cells (a clamped edge cell keeps whatever remainder the extent
-    leaves, down to one pixel), and the cell count is not always minimal (a dimension just
-    over a multiple of ``tile_size`` adds one mostly-empty row or column).
+    Cell origins step by ``int(tile_size * (1 - overlap))`` (at least 1) from 0 while they lie
+    inside the frame, so with ``overlap`` 0 they sit at multiples of ``tile_size``; this grid is
+    its own, not the tiled-inference lattice. ``clamp=False`` lets a far-edge rect run past the
+    extent; ``clamp=True`` clips each rect to the extent (edge cells truncate, never shift), so
+    with ``overlap`` 0 the cells are an exact partition: every pixel belongs to exactly one cell.
+    A clamped edge cell keeps whatever remainder the extent leaves, down to one pixel.
     """
     if width < 1 or height < 1:
         raise ValueError(f"frame must be at least 1x1, got {width}x{height}")
@@ -78,18 +62,15 @@ def reference_cells(
     if not 0.0 <= overlap < 1.0:
         raise ValueError(f"overlap is a fraction of tile_size in [0, 1), got {overlap}")
 
-    stride = compute_stride(tile_size, overlap)
-    positions = tile_positions(height, width, tile_size, stride)
-    col_of = {x: i for i, x in enumerate(sorted({tx for tx, _ in positions}))}
-    row_of = {y: i for i, y in enumerate(sorted({ty for _, ty in positions}))}
+    stride = max(1, int(tile_size * (1.0 - overlap)))
     cells = []
-    for tx, ty in positions:
-        x1, y1 = tx + tile_size, ty + tile_size
-        if clamp:
-            x1, y1 = min(x1, width), min(y1, height)
-        col, row = col_of[tx], row_of[ty]
-        cells.append(Cell(name=f"{column_label(col)}{row + 1}", col=col, row=row,
-                          x0=tx, y0=ty, x1=x1, y1=y1))
+    for row, ty in enumerate(range(0, height, stride)):
+        for col, tx in enumerate(range(0, width, stride)):
+            x1, y1 = tx + tile_size, ty + tile_size
+            if clamp:
+                x1, y1 = min(x1, width), min(y1, height)
+            cells.append(Cell(name=f"{column_label(col)}{row + 1}", col=col, row=row,
+                              x0=tx, y0=ty, x1=x1, y1=y1))
     return cells
 
 
@@ -110,14 +91,9 @@ def derive_serving_tile_size(width: int, height: int) -> int:
 
 def derive_lattice_tile_size(viewport_w: int, viewport_h: int, zoom: float) -> int:
     """Cell edge for the coverage lattice at the breeder's own set inspection zoom: one
-    screenful of native pixels at that zoom, on the canvas host as measured when the grid was
-    fetched.
-
-    ``ceil(min(viewport_w, viewport_h) / zoom)``: the short viewport dimension is what limits
-    how much native content one screen actually holds at that zoom, so the cell edge is sized
-    off it rather than the long one, and the far-edge remainder cell (a viewport that does not
-    divide the raster evenly) is accepted rather than redistributed. One rule for a photograph
-    and an orthomosaic alike: nothing here branches on raster size or georeferencing.
+    screenful of native pixels at that zoom, ``ceil(min(viewport_w, viewport_h) / zoom)``, on the
+    canvas host as measured when the grid was fetched. Refuses a non-positive zoom or a viewport
+    under 1x1.
     """
     if zoom <= 0:
         raise ValueError(f"zoom must be positive, got {zoom}")

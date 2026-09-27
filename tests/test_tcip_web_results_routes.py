@@ -1827,7 +1827,7 @@ def test_inference_list_jobs_carries_each_jobs_warning(client: TestClient) -> No
 
     job = inference_routes.InferenceJob(
         job_id="inf-warn-test", checkpoint_path="", images_dir="", output_dir="",
-        conf=0.25, iou=0.5, overlap=0.0,
+        conf=0.25, cross_tile_nms=0.5, overlap=0.0,
         warning="3 images carried no readable capture date",
     )
     inference_routes._register(job)
@@ -1859,7 +1859,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
 
     job = inference_routes.InferenceJob(
         job_id="inf-retired-test", checkpoint_path="", images_dir="", output_dir="",
-        conf=0.25, iou=0.5, overlap=0.0,
+        conf=0.25, cross_tile_nms=0.5, overlap=0.0,
     )
     inference_routes._register(job)
     try:

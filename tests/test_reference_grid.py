@@ -37,17 +37,24 @@ class TestReferenceCells:
                 assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], \
                     f"cells overlap: {a} and {b}"
 
-    def test_unclamped_overlap_keeps_training_semantics(self):
-        """overlap > 0 under clamp=False reproduces the training tiler's own origins and
-        full-size rects, so a caller composing training-style tiles is admitted as-is."""
-        from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions
-
+    def test_unclamped_overlap_steps_origins_and_keeps_full_size_rects(self):
+        """overlap > 0 under clamp=False steps origins by the overlapped stride while they lie
+        in the frame, and every rect keeps the full cell edge, past the extent at the far side."""
         width, height, tile, overlap = 500, 300, 224, 0.2
-        stride = compute_stride(tile, overlap)
         cells = reference_cells(width, height, tile, overlap)
-        assert [(c.x0, c.y0) for c in cells] == tile_positions(height, width, tile, stride)
+        assert sorted({(c.x0, c.y0) for c in cells}) == [
+            (0, 0), (0, 179), (179, 0), (179, 179), (358, 0), (358, 179)]
         assert all(c.x1 - c.x0 == tile and c.y1 - c.y0 == tile for c in cells)
         assert any(c.x1 > width or c.y1 > height for c in cells)
+
+    def test_clamped_overlapping_cells_cover_the_whole_frame(self):
+        """Origins step while they lie inside the frame, so a stride that does not divide the
+        frame still places a last origin before the far edge: 200px at 100 and 0.2 steps 0, 80,
+        160, and the clamped cells reach 200 on both axes."""
+        cells = reference_cells(200, 200, 100, 0.2, clamp=True)
+
+        assert sorted({c.x0 for c in cells}) == sorted({c.y0 for c in cells}) == [0, 80, 160]
+        assert max(c.x1 for c in cells) == max(c.y1 for c in cells) == 200
 
     def test_names_are_column_letter_plus_row(self):
         from tcip_annotation.sam_wrapper import column_index, column_label

@@ -84,7 +84,7 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     """A four-way split's reserved calibration band reaches ``split.json`` as its own geometry,
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
     what was actually persisted there as clean while still catching one drawn from train."""
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     images_dir, labels_dir, stem = _single_source_mosaic(tmp_path / "ds")

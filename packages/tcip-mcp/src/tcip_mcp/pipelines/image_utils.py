@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "bucket_logical_identities", "capture_kind", "crop_pad_tile", "display_source_path",
+    "bucket_logical_identities", "capture_kind", "display_source_path",
     "flat_image_key", "image_dimensions", "list_logical_images", "load_image", "load_multiband",
-    "logical_image_name", "pad_tile", "pil_to_tensor", "place_logical_image",
+    "logical_image_name", "pil_to_tensor", "pixel_array", "place_logical_image",
     "refuse_incomplete_band_group", "resolve_image_source", "stem_collision_key", "stem_of",
     "to_pil_if_faithful",
 ]
@@ -41,7 +41,7 @@ class AmbiguousImageStem(ValueError):
     """A directory holds more than one logical identity under one case-folded stem
     (:func:`stem_collision_key`): two raw files (``foo.jpg``, ``foo.png``, or a same-key case
     variant such as ``Foo.jpg``), or a raw file and a ``.bandgroup`` manifest recorded under a
-    different exact stem than its own. Raised from :func:`list_logical_images`.
+    different exact stem than its own.
     """
 
 # ``.npy``/``.npz`` are a multi-band raster; ``.bandgroup`` a manifest standing in for the image it
@@ -344,33 +344,13 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
     return int(arr.shape[1]), int(arr.shape[0])
 
 
-def pad_tile(crop, tile_size: int):
-    """Zero-pad an already-cropped tile up to ``tile_size`` x ``tile_size``. Channel-generic: PIL
-    for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters.
-    """
-    if isinstance(crop, Image.Image):
-        if crop.size != (tile_size, tile_size):
-            padded = Image.new(crop.mode, (tile_size, tile_size))  # 0-fill for the image's mode
-            padded.paste(crop, (0, 0))
-            crop = padded
-        return crop
-    ph, pw = tile_size - crop.shape[0], tile_size - crop.shape[1]
-    if ph or pw:
-        pad_width = [(0, ph), (0, pw)] + ([(0, 0)] if crop.ndim == 3 else [])
-        crop = np.pad(crop, pad_width, mode="constant")
-    return crop
-
-
-def crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
-    """Crop a ``tile_size`` window at (x, y) and zero-pad short (edge) tiles through
-    :func:`pad_tile`.
-
-    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters
-    (which have no ``.crop``).
-    """
-    x2, y2 = min(x + tile_size, w), min(y + tile_size, h)
-    crop = img.crop((x, y, x2, y2)) if isinstance(img, Image.Image) else img[y:y2, x:x2]
-    return pad_tile(crop, tile_size)
+def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
+    """A decoded image (:func:`load_image`'s return) as the ``[H, W, C]`` array slices are cut
+    from, with the band interpretations that let :func:`to_pil_if_faithful` rebuild a slice's PIL
+    mode: a PIL ``RGBA`` image names its 4th band alpha, anything else names none."""
+    interpretations = (("red", "green", "blue", "alpha")
+                       if isinstance(img, Image.Image) and img.mode == "RGBA" else None)
+    return raster_source.hwc_array(img), interpretations
 
 
 def to_pil_if_faithful(arr, *, band_interpretations: "tuple[str, ...] | None" = None):
@@ -401,9 +381,7 @@ def pil_to_tensor(img) -> torch.Tensor:
     """
     import torch
 
-    arr = np.asarray(img)
-    if arr.ndim == 2:  # grayscale [H, W] -> [H, W, 1]
-        arr = arr[:, :, None]
+    arr = raster_source.hwc_array(img)
     if np.issubdtype(arr.dtype, np.integer):
         arr = arr.astype(np.float32) / float(np.iinfo(arr.dtype).max)
     else:

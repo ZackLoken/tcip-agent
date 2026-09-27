@@ -38,9 +38,10 @@ dependencies:
       - torch>=2.2
       - torchvision>=0.17
       - timm>=1.0
-      - opencv-python-headless>=4.5  # the platform is headless; the GUI wheel needs X libraries a fresh Linux machine lacks
+      - opencv-python>=4.12.0.88  # sahi's own OpenCV; on Linux it imports libGL (libgl1)
       - scikit-image>=0.22
       - pycocotools>=2.0.7
+      - sahi>=0.12.6  # tiled inference: slice lattice, detection-model wrapper, cross-tile merge
       - psutil>=5.9  # read-only host CPU/RAM visibility for scripts/inspect_compute_resources.py
       # --- web backend ---
       - fastapi>=0.115.0

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import (  # noqa: E402
@@ -68,7 +70,7 @@ def test_resolved_max_dets_covers_the_densest_calibration_image():
     densest = max(len(r["gt"]) for r in recs)
     assert densest == 300  # the fixture really is skewed, not uniform
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", calibration_records=recs)
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", calibration_records=recs)
     max_dets = b.params["max_dets"]
 
     assert max_dets._raw == 411

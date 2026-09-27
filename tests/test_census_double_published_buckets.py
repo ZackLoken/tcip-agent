@@ -50,7 +50,7 @@ def _project(tmp_path: Path, monkeypatch) -> Path:
 
 def _stamp(bucket: Path, named: list[str]) -> None:
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
         attribute=None, trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
@@ -215,7 +215,7 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_is_unjudgeable(tmp_
     project = _project(tmp_path, monkeypatch)
     bucket = _bucket(project, "baseline", ["a", "b"])
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
         attribute=None, trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
@@ -244,7 +244,7 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_and_holds_no_docume
     project = _project(tmp_path, monkeypatch)
     bucket = _bucket(project, "baseline", [])
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
         attribute=None, trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,

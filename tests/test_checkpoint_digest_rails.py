@@ -122,7 +122,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
     out_dir = tmp_path / "out"
 
     job = InferenceJob(job_id="rail1", checkpoint_path=ckpt, images_dir=str(images_dir),
-                       output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+                       output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
                        overlap=0.2)
     _worker(job)
     assert job.status == "failed"
@@ -675,7 +675,7 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
         "holdout_records": dense_records(n_images=n_images, objects_per_image=objects,
                                          id_prefix="h", shift=5.0, fp_pattern=[1] * n_images,
                                          score=0.9, fp_score=0.05),
-        "tiled": False, "tile_size": None, "tile_size_source": "default",
+        "slicing": None, "tile_size": None, "tile_size_source": "default",
         "staged_conf_floor": 0.01,
     }
     bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)

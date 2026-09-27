@@ -75,7 +75,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
                   ─► carry genotype/accession through to the deliverable
 ```
 
-- Detection at scale: `run_inference` already supports tiled sliding-window (SAHI-style)
+- Detection at scale: `run_inference` already supports tiled sliding-window (SAHI)
   inference; compose it, don't re-script tiling. Whether and how to tile (tile size, overlap)
   is a data-derived choice: derive it from the imagery resolution and catkin size at runtime,
   and defer the how to the `pipeline-design` / `evaluation` skills.

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import resolve_operating_point  # noqa: E402
@@ -62,7 +64,7 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
@@ -86,7 +88,7 @@ def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_s
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
@@ -110,7 +112,7 @@ def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("no_floor_trait", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("no_floor_trait", **tiled_regime(), dataset_hash="h",
                                 staged_conf_floor=0.05, calibration_records=cal,
                                 holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
@@ -126,7 +128,7 @@ def test_an_authored_floor_the_holdout_does_not_clear_refuses():
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 

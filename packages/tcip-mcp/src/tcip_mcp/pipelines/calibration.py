@@ -27,16 +27,55 @@ def calibration_reference_inputs(resolver_inputs: dict, locked: dict, stems: lis
             "stated_values": stated}
 
 
-def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
-                               tile, tile_size, overlap, tile_batch_size,
-                               global_nms_iou, postprocess, cross_tile_nms, max_dets,
-                               tile_resize=None,
-                               tile_size_source="default", tile_size_derived_from=None,
-                               tiled_source="default",
+def pass_resolver_inputs(p) -> dict:
+    """The execution regime a prepared pass ``p`` collects under, as ``resolve_operating_point``
+    takes it: the slicing record, the merge threshold's provenance, the tile edge with its source
+    and derivation, and the stated cap (``None`` for one the calibration derives)."""
+    return {
+        "slicing": p.slicing, "cross_tile_nms": p.cross_tile_nms.to_provenance(),
+        "tile_size": p.geometry.tile_size, "tile_size_source": p.geometry.tile_size_source,
+        "tile_size_derived_from": p.geometry.tile_size_derived_from,
+        "max_dets": p.max_dets if p.max_dets_stated else None,
+    }
+
+
+def resolve_pass_merge(p, calibration_gt: list[list[dict]]) -> None:
+    """Set on ``p`` the merge threshold it collects and exports at: its stated one, else the one
+    the calibration side's ground truth derives (``calibration_gt``, evaluation GT records per
+    image; :func:`~tcip_mcp.pipelines.resolution.resolve_cross_tile_nms`)."""
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tcip_mcp.pipelines.training.evaluation import gt_objects
+
+    if p.cross_tile_nms.source != "explicit":
+        p.cross_tile_nms = resolve_cross_tile_nms(None, p.slicing, [
+            [a["bbox"] for a in gt_objects({"gt": gt})] for gt in calibration_gt])
+
+
+def collect_calibration_records(p, cal_stems, hold_stems, source_of, gt_of):
+    """``p``'s predictions over the calibration and holdout stems, each paired with its ground
+    truth (``gt_of``, evaluation GT records per stem) into one COCO-shaped record, ``source_of``
+    naming each stem's image, both collected at the merge threshold :func:`resolve_pass_merge`
+    sets first. Returns ``(calibration_records, holdout_records)``."""
+    from tcip_mcp.pipelines.training.evaluation import build_coco_image_record, detection_record
+
+    resolve_pass_merge(p, [gt_of[s] for s in cal_stems])
+
+    def records(stems):
+        results = p.predict([source_of[s] for s in stems]) if stems else []
+        return [build_coco_image_record(
+            int(r["width"]), int(r["height"]), gt_of[s],
+            [detection_record(b, lab, sc) for b, sc, lab in zip(r["boxes"], r["scores"], r["labels"])],
+            image_id=s) for s, r in zip(stems, results)]
+
+    return records(cal_stems), records(hold_stems)
+
+
+def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
                                group_by=None, group_key_map=None, experiment_id=None,
                                seed=DEFAULT_CAL_SEED, holdout_ratio=DEFAULT_HOLDOUT_RATIO,
                                selection_dir=None):
-    """Resolve a per-dataset operating point from a labeled split.
+    """Resolve a per-dataset operating point from a labeled split, over the prepared pass ``p``
+    (``inference_tools._PreparedPass``) a delivery runs.
 
     Returns ``(bundle, hash, n_excluded_incomplete_attribute, evidence)``. The third value is the
     count of cal/holdout stems dropped whole because an instance was unlabeled for ``attribute``;
@@ -47,20 +86,16 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``stated_values.selection_dir`` under a selection, plus ``calibration_stems`` and, under a
     selection, ``excluded``.
 
-    The count-unbiased center-match curve and held-out bias check run the predictor path the
-    delivery will use (same tile/tile_size/tile_resize/overlap/nms/postprocess) at a floor conf,
-    over a disjoint cal/holdout split of the labeled dir locked on its first draw
-    (``resolve_locked_cal_holdout_split``); ``seed``/``holdout_ratio`` only take effect on that
-    locking draw. The lock is scoped to the labeled dir's own root (``cal_holdout_scope_root``),
-    which ``redraw_calibration_holdout`` states to address it.
+    The count-unbiased center-match curve and held-out bias check run ``p`` at a floor conf
+    (:func:`collect_calibration_records`) over a disjoint cal/holdout split of the labeled dir
+    locked on its first draw (``resolve_locked_cal_holdout_split``); ``seed``/``holdout_ratio``
+    only take effect on that locking draw. The lock is scoped to the labeled dir's own root
+    (``cal_holdout_scope_root``), which ``redraw_calibration_holdout`` states to address it.
 
     Raises ``ValueError`` when the lock references a stem whose image/label no longer exists or its
     lock file is corrupt; when the run's recorded scope (``run_scope``) names no subject; when an
     attribute run resolves no id map; and through ``json_io.require_reference_ground_truth`` when
     ``labels_dir`` is not an admissible reference.
-
-    ``tile_size_source``/``tiled_source``/``tile_size_derived_from`` are the caller's resolved
-    provenance for ``tile_size``/``tile``, forwarded into ``resolve_operating_point``.
 
     ``selection_dir`` restricts the calibration universe to the ``calibration`` samples of a
     selection whose label documents live under ``labels_dir``. A checkpoint bound to a different
@@ -81,13 +116,12 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         derive_max_dets_from_counts, resolve_operating_point,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.pipelines.training.evaluation import (
-        build_coco_image_record, detection_record, gt_records,
-    )
+    from tcip_mcp.pipelines.training.evaluation import gt_records
     from tcip_mcp.tools.inference_tools import (
         resolve_decode_id_map, run_scope, unmapped_classified_run,
     )
 
+    predictor = p.predictor
     # The run's own recorded class space, through the one reader of it: calibration GT reads
     # under the same scope the training targets did, so the swept count cannot diverge from it.
     _checkpoint_scope = run_scope(predictor)
@@ -180,41 +214,20 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     applied, applied_attribute_path = apply_operating_point(
         predictor, STAGED_CONF_FLOOR, density_cap)
 
-    n_excluded_incomplete_attribute = 0
-
-    def _records(sub_stems):
-        nonlocal n_excluded_incomplete_attribute
-        if not sub_stems:
-            return []
-        results = predictor.predict_batch(
-            [stem_to_image[s] for s in sub_stems], tile=tile, tile_size=tile_size,
-            overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
-            postprocess=postprocess, tile_resize=tile_resize,
-        )
-        recs = []
-        for s, r in zip(sub_stems, results):
-            dt = [detection_record(b, lab, sc)
-                  for b, sc, lab in zip(r["boxes"], r["scores"], r["labels"])]
-            # GT lifted to the predictor's 1-indexed labels via the loader-side reader (subject +
-            # id map), the same reading the run's training targets took.
-            target, n_unlabeled = json_det_targets(gt_path_of[s], _subject, _attribute, _cal_id_map)
-            # An image with any instance unlabeled for `attribute` is dropped whole from the
-            # record set (the missing-label-file precedent), counted rather than silently filtered.
-            if n_unlabeled:
-                n_excluded_incomplete_attribute += 1
-                continue
-            recs.append(build_coco_image_record(int(r["width"]), int(r["height"]),
-                                                gt_records(target), dt, image_id=s))
-        return recs
-
-    cal_records = _records(cal_stems)
-    hold_records = _records(hold_stems)
+    # GT read the way the run's training targets were; a stem with an unlabeled instance is counted.
+    gt_of = {}
+    for s in cal_stems + hold_stems:
+        target, n_unlabeled = json_det_targets(gt_path_of[s], _subject, _attribute, _cal_id_map)
+        if not n_unlabeled:
+            gt_of[s] = gt_records(target)
+    n_excluded_incomplete_attribute = len(cal_stems) + len(hold_stems) - len(gt_of)
+    cal_records, hold_records = collect_calibration_records(
+        p, [s for s in cal_stems if s in gt_of], [s for s in hold_stems if s in gt_of],
+        stem_to_image, gt_of)
     resolver_inputs = {
+        **pass_resolver_inputs(p),
         "dataset_hash": dh, "calibration_records": cal_records,
-        "holdout_records": hold_records or None, "tile_size": tile_size,
-        "tile_size_source": tile_size_source, "tile_size_derived_from": tile_size_derived_from,
-        "tiled": tile, "tiled_source": tiled_source,
-        "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
+        "holdout_records": hold_records or None,
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
         "selection_dir": selection_dir,

@@ -44,8 +44,8 @@ def _count_stamp(**overrides) -> dict:
     from tcip_mcp.pipelines.resolution import operating_point_stamp
 
     fields = dict(
-        validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map=None, trait=TRAIT, dataset_hash="h1", checkpoint="best",
+        slicing=None, validated=True, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map=None, trait=TRAIT, dataset_hash="h1", checkpoint="best",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id=PRODUCING_RUN, images_dir=None,
         raster_path=None, produced_at="2026-03-04T12:00:00+00:00",
         subject=TRAIT, attribute=None,
@@ -530,14 +530,15 @@ def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "h1", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01,
-                             "tiled": False}},
+                             "slicing": None}},
         trait=TRAIT, checkpoint_sha256=CHECKPOINT_SHA, producing_experiment_id=None,
         reference_inputs={"dataset_root": str(root), "label_dirs": {"calibration": labels_dir},
                           "stated_values": {"split_identity": "d41d8cd98f00b204"}},
     )
     pred_dir = _bucket(root, stems=stems)
     body = operating_point_stamp(
-        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
+        validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
         trait=TRAIT, dataset_hash="h1", checkpoint="best", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id=None, images_dir=None, raster_path=None,

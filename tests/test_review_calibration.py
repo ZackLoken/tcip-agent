@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")  # operating_point imports evaluation which imports torch
 
 from tcip_mcp.pipelines.feedback import (  # noqa: E402
@@ -230,10 +232,10 @@ def test_review_only_completed_images():
 def test_review_confirmed_stamps_when_the_same_gate_passes(tmp_path):
     # staged_conf_floor simulates what the review-path threading computes and passes (threaded
     # from routes/review.py); the seam here is a caller-supplied value.
-    # tiled=False: this test is about conf-calibration shippability, not tiling; tile_size only
+    # slicing=None: this test is about conf-calibration shippability, not tiling; tile_size only
     # gates a bundle when tiled.
     b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", staged_conf_floor=0.01,
-                                            tiled=False, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
+                                            slicing=None, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
     # from VALIDATED_HELD_OUT so provenance records which reference validated) and is shippable.
@@ -248,7 +250,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
     # With no staged_conf_floor asserted, even a geometrically perfect reference cannot validate:
     # the honest default, not a silent pass. Same fixture as the passing case above.
     b = resolve_operating_point_from_review(_good_review_state(), "bud_opening",
-                                            tiled=True, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
+                                            **tiled_regime(), bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
@@ -259,7 +261,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
 def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor(tmp_path):
     # The asserted floor sits at the picked conf: the sweep could not have seen anything below
     # it, so it must refuse even though the split is disjoint and the counts genuinely agree.
-    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", tiled=True, staged_conf_floor=0.95,
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", **tiled_regime(), staged_conf_floor=0.95,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -489,7 +491,7 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate(tmp_
     # tolerance.
     state = _dense_review_state(gt_preexisting=False, miss_pattern=[1] * N_IMAGES,
                                 fp_pattern=[2] * N_IMAGES, objects_per_image=250)
-    b = resolve_operating_point_from_review(state, "bud_opening", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "bud_opening", **tiled_regime(), staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
@@ -501,7 +503,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tm
     # object, must fail with an honest reason naming the new tool rather than falling through to
     # the generic "counts didn't agree" message.
     state = _dense_review_state(gt_preexisting=False, fp_pattern=[1] * N_IMAGES)
-    b = resolve_operating_point_from_review(state, "bud_opening", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "bud_opening", **tiled_regime(), staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -511,7 +513,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tm
 def test_gt_backed_session_passes_unaffected_by_the_coverage_gate(tmp_path):
     # A genuinely GT-backed review session (gt_preexisting=True, the default) must still pass,
     # unaffected by the adjudication-coverage gate.
-    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", **tiled_regime(), staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED

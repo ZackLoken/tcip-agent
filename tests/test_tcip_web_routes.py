@@ -1955,6 +1955,7 @@ def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
     bucket = prediction_dir(Path(dataset_root), "baseline", date)
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}},
+        slicing=None,
         validated=False,
         validated_by=None,
         tile_size_validated=None,

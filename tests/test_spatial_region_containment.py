@@ -46,7 +46,7 @@ def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak(tmp_path):
     })
 
     gap_rect = (440, 100, 560, 300)
-    from tcip_mcp.pipelines.data.tiling import rect_contains_rect, rects_overlap
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
     assert not rects_overlap((0, 0, 400, 1000), gap_rect)          # genuinely clear of train
     assert not rect_contains_rect((600, 0, 1000, 1000), gap_rect)  # and attested by nothing
 
@@ -128,7 +128,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     assert clean["leaked_groups"] == []
 
     beyond_extent = (MOSAIC_W + 1000, 100, MOSAIC_W + 2000, 300)
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
     assert all(not rects_overlap(tuple(tr), beyond_extent) for tr in spatial["train_region"])
 
     leaked = _train_disjointness("exp_four_way", set(), {stem},

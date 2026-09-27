@@ -260,9 +260,9 @@ def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_pa
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
-    assert manifest["train_region"] == [(1020, 0, 3086, 3000)]
-    assert manifest["val_region"] == [(0, 0, 842, 3000)]
-    assert manifest["test_region"] == [(3264, 0, 3902, 3000)]
+    assert manifest["train_region"] == [(1030, 0, 3218, 3000)]
+    assert manifest["val_region"] == [(0, 0, 849, 3000)]
+    assert manifest["test_region"] == [(3399, 0, 4000, 3000)]
     assert "seed" not in manifest
 
 
@@ -282,8 +282,8 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
-    assert manifest["calibration_region"] == [(0, 0, 638, 3000)]
-    assert manifest["test_region"] == [(3468, 0, 3902, 3000)]
+    assert manifest["calibration_region"] == [(0, 0, 643, 3000)]
+    assert manifest["test_region"] == [(3605, 0, 4000, 3000)]
     assert "seed" not in manifest
 
 
@@ -302,9 +302,9 @@ def test_spatial_manifest_pins_train_val_and_test_regions_for_distinct_fractions
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
-    assert manifest["train_region"] == [(1224, 0, 3494, 3000)]
-    assert manifest["val_region"] == [(0, 0, 1046, 3000)]
-    assert manifest["test_region"] == [(3672, 0, 3902, 3000)]
+    assert manifest["train_region"] == [(1236, 0, 3630, 3000)]
+    assert manifest["val_region"] == [(0, 0, 1055, 3000)]
+    assert manifest["test_region"] == [(3811, 0, 4000, 3000)]
 
 
 def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
@@ -586,7 +586,7 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
     def _rects(region):
         return [tuple(r) for r in region]
 
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
 
     cal_rects = _rects(manifest["calibration_region"])
     for other_key in ("train_region", "val_region", "test_region"):

@@ -174,7 +174,7 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
     def _job(job_id: str) -> inference.InferenceJob:
         return inference.InferenceJob(
             job_id=job_id, checkpoint_path="c", images_dir="i", output_dir="o",
-            tile=False, conf=0.25, iou=0.7, overlap=0.2,
+            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         )
 
     job_a = _job("a1")
@@ -209,7 +209,7 @@ def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkey
 
     job = inference.InferenceJob(
         job_id="j-dropped", checkpoint_path="c", images_dir="i", output_dir="o",
-        tile=False, conf=0.25, iou=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
     )
     job.status = "completed"
     job.dropped_boxes = 3
@@ -231,7 +231,7 @@ def test_inference_rehydrate_restores_audit_warning(tmp_path, monkeypatch):
 
     job = inference.InferenceJob(
         job_id="j-audit-warn", checkpoint_path="c", images_dir="i", output_dir="o",
-        tile=False, conf=0.25, iou=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
     )
     job.status = "completed"
     job.audit_warning = "stamp_written completed and its audit entry could not be written"
@@ -399,7 +399,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(job_id="j1", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-                       output_dir=str(tmp_path / "out"), tile=False, conf=0.25, iou=0.7,
+                       output_dir=str(tmp_path / "out"), tile=False, conf=0.25, cross_tile_nms=0.7,
                        overlap=0.2)
     _register(job)
 
@@ -459,7 +459,7 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(tmp_path, monk
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-audit", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-                       output_dir=str(output_dir), tile=False, conf=0.25, iou=0.7,
+                       output_dir=str(output_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
                        overlap=0.2)
     _register(job)
 
@@ -501,7 +501,7 @@ def test_inference_worker_healthy_run_serves_audit_warning_none(tmp_path, monkey
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-healthy", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-                       output_dir=str(output_dir), tile=False, conf=0.25, iou=0.7,
+                       output_dir=str(output_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
                        overlap=0.2)
     _register(job)
 
@@ -559,7 +559,7 @@ def test_inference_stream_final_frame_never_precedes_the_audit_attempt(tmp_path,
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-stream-order", checkpoint_path=str(ckpt),
                        images_dir=str(images_dir), output_dir=str(output_dir), tile=False,
-                       conf=0.25, iou=0.7, overlap=0.2)
+                       conf=0.25, cross_tile_nms=0.7, overlap=0.2)
     _register(job)
 
     worker_thread = threading.Thread(target=_worker, args=(job,))
@@ -601,7 +601,7 @@ def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path,
 
     job = InferenceJob(
         job_id="launched-under-a", checkpoint_path="c", images_dir="i", output_dir="o",
-        tile=False, conf=0.25, iou=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
     )
     _register(job)
 
@@ -695,7 +695,7 @@ def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, 
 
     job_a = inference.InferenceJob(
         job_id="live-a", checkpoint_path="c", images_dir="i", output_dir="o",
-        tile=False, conf=0.25, iou=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
     )
     job_a.status = "running"
     job_a.done, job_a.total = 2, 5
@@ -708,7 +708,7 @@ def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, 
 
         job_b = inference.InferenceJob(
             job_id="done-b", checkpoint_path="c", images_dir="i", output_dir="o",
-            tile=False, conf=0.25, iou=0.7, overlap=0.2,
+            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         )
         job_b.status = "completed"
         inference._register(job_b)

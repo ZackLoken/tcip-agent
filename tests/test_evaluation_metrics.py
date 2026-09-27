@@ -791,13 +791,13 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
 
     common_fields = {
         "model_path", "task", "model_sha256", "experiment_id", "iou_type",
-        "iou_threshold", "conf_threshold", "max_dets", "tiled", "eval_regime",
+        "iou_threshold", "conf_threshold", "max_dets", "eval_regime",
     }
     test_only_fields = {"selection_dir", "evaluated_stem_count"}
     full_frame_only_fields = {
         "tile_size", "tile_size_source", "overlap", "overlap_source", "scored_images",
         "sample_counts", "contradicted_negatives",
-        "max_dets_cap_saturated_frac", "global_nms_iou", "postprocess", "operating_point",
+        "max_dets_cap_saturated_frac", "postprocess", "operating_point",
     }
 
     class _DummyModel:
@@ -829,7 +829,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         task = "detection"
         in_chans = 3
 
-        def predict_tiled(self, path, **kw):
+        def predict_sliced(self, path, **kw):
             return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": []}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
@@ -854,7 +854,7 @@ def test_write_evaluation_result_refuses_a_key_extra_shares_with_common(tmp_path
     common = {
         "model_path": "m.pt", "task": "detection", "model_sha256": "abc", "experiment_id": "e1",
         "iou_type": "bbox", "iou_threshold": 0.5, "conf_threshold": 0.3, "max_dets": 100,
-        "tiled": False, "eval_regime": "full-frame-single-pass",
+        "eval_regime": "full-frame-single-pass",
     }
     extra = {"precision": 0.9, "task": "classification"}
     with pytest.raises(ValueError, match="task"):

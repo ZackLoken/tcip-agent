@@ -15,18 +15,17 @@ import hashlib
 import json
 import math
 import statistics
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from tcip_store import non_finite_state, stored_number
 
 from tcip_annotation.json_io import xywh
 
 from tcip_mcp.pipelines.data.splits import same_directory
-from tcip_mcp.pipelines.derivations import derive_cross_tile_nms, derive_localization_tolerance_frac
+from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
-    DEFAULT_NMS_IOU,
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_REVIEW_CONFIRMED,
@@ -36,6 +35,7 @@ from tcip_mcp.pipelines.resolution import (
     default,
     derived,
     members_moved_since,
+    resolve_cross_tile_nms,
     resolve_tile_size_param,
 )
 from tcip_mcp.pipelines.training.evaluation import (
@@ -55,9 +55,6 @@ from tcip_mcp.pipelines.training.evaluation import (
     r_squared,
 )
 from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE, get_trait
-
-# The non-count operating-point fallbacks resolve to resolution.py's single source of truth
-# (DEFAULT_NMS_IOU / DEFAULT_MAX_DETS / DEFAULT_CONF); tile_size/tiled carry no such constant.
 
 # Count-objective -> (picker, derivation label), the currently implemented capability catalog, not
 # a closed vocabulary (traits._spec_from_config does not validate count_objective against this; a
@@ -177,8 +174,8 @@ def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: flo
     return abs(mean) + _EQUIVALENCE_Z * se <= tolerance
 
 
-OPERATING_POINT_ATTRS = ("score_thresh", "nms_thresh", "detections_per_img")
-"""The three knobs the detection operating point governs, wherever a module holds them."""
+OPERATING_POINT_ATTRS = ("score_thresh", "detections_per_img")
+"""The two knobs the detection operating point governs, wherever a module holds them."""
 
 
 def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
@@ -186,7 +183,7 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
     Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
     itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
-    Returns ``(None, None)`` when no candidate exposes any of the three.
+    Returns ``(None, None)`` when no candidate exposes either.
 
     Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob.
     """
@@ -205,7 +202,6 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
-                                 nms_thresh: float | None = None,
                                  detections_per_img: int | None = None,
                                  ) -> tuple[dict, str | None]:
     """Set the in-model torchvision thresholds so the operating point governs which boxes exist.
@@ -217,8 +213,7 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
     target, path = detector_operating_point_holder(model)
     applied: dict = {}
     if target is not None:
-        for attr, val in (("score_thresh", score_thresh), ("nms_thresh", nms_thresh),
-                          ("detections_per_img", detections_per_img)):
+        for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img)):
             if val is not None and hasattr(target, attr):
                 setattr(target, attr, val)
                 applied[attr] = val
@@ -378,7 +373,7 @@ def _spatial_strip_geometric_disjointness(
     that spills into the reserved train area from a source stem whose name never matches the
     training stem's own.
     """
-    from tcip_mcp.pipelines.data.tiling import rect_contains_rect, rects_overlap
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
 
     train_regions = [tuple(r) for r in spatial.get("train_region", [])]
     non_train_regions = ([tuple(r) for r in spatial.get("val_region", [])]
@@ -463,9 +458,8 @@ def _train_disjointness(
     provenance; allowed through. Only a known ``experiment_id`` whose provenance can't be read
     fails closed.
 
-    Two cases stay ``unresolvable: True`` (fail-closed, blocks ``passed`` in
-    ``resolve_operating_point``): ``split.json`` is missing/unreadable, or it is readable but
-    records no training stems at all.
+    Two cases stay ``unresolvable: True`` (fail-closed): ``split.json`` is missing/unreadable, or
+    it is readable but records no training stems at all.
 
     Otherwise group-level resolution is attempted per stem:
 
@@ -788,12 +782,11 @@ def resolve_operating_point(
     dataset_hash: str | None,
     calibration_records: list[dict] | None = None,
     holdout_records: list[dict] | None = None,
+    slicing: dict | None,
+    cross_tile_nms: Mapping[str, Any] | None = None,
     tile_size: int | None = None,
     tile_size_source: str = "default",
     tile_size_derived_from: str | None = None,
-    tiled: bool | None = None,
-    tiled_source: str = "default",
-    cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     max_dets_derived_from: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
@@ -817,9 +810,13 @@ def resolve_operating_point(
     own words; a caller-supplied cap without it is stamped "caller override". Ignored when
     ``max_dets`` is ``None``, since the cap is then derived and labeled here.
 
-    ``tile_size_source``/``tiled_source`` are the caller's own resolution of whether each value was
-    an explicit override, derived from the checkpoint's persisted training geometry, or a
-    documented default.
+    ``slicing`` is the record of how the pass that produced the records sliced and merged
+    (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` for an untiled pass, and
+    ``cross_tile_nms`` the provenance of the merge threshold a tiled pass ran at
+    (:func:`~tcip_mcp.pipelines.resolution.resolve_cross_tile_nms`), required for one and refused
+    by name when absent; both are carried onto the bundle as they ran. ``tile_size_source`` is the
+    caller's own resolution of whether the edge was an explicit override, derived from the
+    checkpoint's persisted training geometry, or a documented default.
 
     ``validated_reference`` is the stamp a passing held-out gate earns: ``VALIDATED_HELD_OUT`` when
     the records came from GT annotations (default), ``VALIDATED_REVIEW_CONFIRMED`` when they were
@@ -854,13 +851,6 @@ def resolve_operating_point(
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
-    if tiled is None:
-        raise ValueError(
-            "resolve_operating_point requires an explicit tiled=<bool>: this function is pure over "
-            "records and carries no predictor to derive it from. The caller (which has a predictor "
-            "in scope) must resolve it first, typically `predictor.train_tile_size is not None`, "
-            "and pass that concrete bool here; never a silently-defaulted value."
-        )
     trait = get_trait(trait_name)
     # "not yet authored for this trait" falls back to the platform's interim default fraction,
     # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
@@ -1198,34 +1188,18 @@ def resolve_operating_point(
             derived_from="trait default (no GT for this dataset)")
 
     # --- structural facts / distribution statistics / documented-default params ---
-    # tile_size uses the same shared resolve_tile_size_param() raw_operating_point also calls.
-    resolved_tiled = bool(tiled)  # already a concrete bool: the None-check above raised otherwise
     params["tile_size"] = resolve_tile_size_param(
-        tile_size, tiled=resolved_tiled, tile_size_source=tile_size_source,
+        tile_size, tiled=slicing is not None, tile_size_source=tile_size_source,
         tile_size_derived_from=tile_size_derived_from)
-    if tiled_source == "explicit":
-        params["tiled"] = ResolvedParam(
-            "tiled", resolved_tiled, source="explicit", derived_from="caller override")
+    if slicing is None:
+        params["cross_tile_nms"] = resolve_cross_tile_nms(None, None)
+    elif cross_tile_nms is None:
+        raise ValueError(
+            "resolve_operating_point was handed a tiled pass's records with no cross_tile_nms: "
+            "state the merge threshold the pass ran at (resolution.resolve_cross_tile_nms), "
+            "since the records mean nothing apart from it.")
     else:
-        params["tiled"] = default("tiled", resolved_tiled)
-    # cross_tile_nms: an explicit override wins and is stamped as such; otherwise derive it from the
-    # calibration GT's neighbor-IoU distribution; failing that (no GT / no genuine overlaps) an honest
-    # default, never a derivation label on a number no derivation produced.
-    if cross_tile_nms is not None:
-        params["cross_tile_nms"] = ResolvedParam(
-            "cross_tile_nms", float(cross_tile_nms), source="explicit",
-            derived_from="caller override")
-    else:
-        nms = None
-        if calibration_records:
-            nms = derive_cross_tile_nms([[a["bbox"] for a in gt_objects(rec)]
-                                         for rec in calibration_records])
-        params["cross_tile_nms"] = (
-            derived("cross_tile_nms", nms,
-                    derived_from="GT neighbor-IoU distribution (p99 + margin)")
-            if nms is not None
-            else default("cross_tile_nms", DEFAULT_NMS_IOU)
-        )
+        params["cross_tile_nms"] = ResolvedParam.from_provenance(cross_tile_nms)
     if max_dets is None:
         params["max_dets"] = default("max_dets", DEFAULT_MAX_DETS)
     elif max_dets_derived_from:
@@ -1234,7 +1208,8 @@ def resolve_operating_point(
     else:
         params["max_dets"] = ResolvedParam("max_dets", int(max_dets), source="explicit",
                                            derived_from="caller override")
-    return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params)
+    return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params,
+                          slicing=slicing)
 
 
 def _classification_kappa(items: list[dict]) -> float | None:
@@ -1456,14 +1431,11 @@ def _resolve_scalar_operating_point(
     validated_reference: str,
     calibration_labels_dir: str | None = None,
 ) -> dict:
-    """Shared calibration-gate mechanics for :func:`resolve_ordinal_operating_point` and
-    :func:`resolve_regression_operating_point`.
-
-    Both validate a per-image scalar prediction (one rank or one continuous value per image, one
-    CSV row per image stem) against a locked cal/holdout split: disjointness, train-disjointness,
-    then a derived compensating-error floor on the holdout-only criterion score, differing only in
-    which criterion toolkit (``criteria``, ``ORDINAL_CRITERIA`` or ``REGRESSION_CRITERIA``) and
-    which ``TraitSpec`` floor field apply. ``criterion`` must already be a key of ``criteria``.
+    """The calibration gate for a per-image scalar prediction (one rank or one continuous value
+    per image, one CSV row per image stem) against a locked cal/holdout split: disjointness,
+    train-disjointness, then a derived compensating-error floor on the holdout-only criterion
+    score, under the criterion toolkit ``criteria`` and the ``TraitSpec`` floor field named.
+    ``criterion`` must already be a key of ``criteria``.
 
     The criterion score is computed on holdout only. A holdout of fewer than 2 items still gets a
     score attempt and fails through ``insufficient_holdout_items``/``criterion_undefined``.

@@ -577,11 +577,12 @@ def test_dry_run_previews_the_both_sources_refusal(tmp_path):
     assert "error" in result and "not both" in result["error"]
 
 
-def test_dry_run_names_the_bucket_it_would_write_to_and_writes_nothing(tmp_path):
+def test_dry_run_names_the_bucket_it_would_write_to_and_writes_nothing(tmp_path, monkeypatch):
     """dry_run needs neither images_dir nor raster_path: it previews the bucket a real write would
     resolve to and the operating point it would run at, without touching disk."""
     from tcip_mcp.tools.inference_tools import run_inference
 
+    _fake_predictor(monkeypatch)
     out = tmp_path / "out"
 
     result = run_inference(_ckpt(tmp_path), output_dir=str(out), dry_run=True)

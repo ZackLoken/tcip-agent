@@ -22,6 +22,8 @@ dependencies = [
     # tcip shp-to-plant-csv command built over it.
     "fiona>=1.9",
     "pycocotools>=2.0.7",
+    # Tiled inference: the slice lattice, the detection-model wrapper and the cross-tile merge.
+    "sahi>=0.12.6",
     "pydantic>=2",
     "tcip-store",
     "tcip-annotation",

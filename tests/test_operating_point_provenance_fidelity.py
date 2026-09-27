@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")
 
 import tcip_mcp.pipelines.operating_point as OP  # noqa: E402
@@ -54,7 +56,7 @@ def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
     is visible rather than hidden behind two fields that happen to agree. The enrichment must also
     leave the resolved value and its validation stamp exactly as the gate produced them.
     """
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     value_before, stamp_before = conf._raw, conf.validated_against
@@ -84,7 +86,7 @@ def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
     partition is placed by declared order and share alone, so no seed governs it: a residual
     ``seed`` key in the input manifest is not carried into the written policy.
     """
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     attach_spatial_split_kind_provenance(b, {"seed": 3, "tile_size": 512, "overlap": 0.25})
@@ -114,7 +116,7 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
                          delivers=("leaf_out_50per_date",))
         monkeypatch.setattr(OP, "get_trait", lambda name, s=spec: s)
         for reference in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
-            b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
+            b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                         calibration_records=recs, validated_reference=reference)
             labels.add(b.params["conf"].derived_from)
 
@@ -132,7 +134,7 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     import tcip_mcp.pipelines.resolution as resolution_mod
 
     native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                 tile_size=300, tile_size_source="native_ratio")
     p = b.params["tile_size"]
     assert p._raw == 300
@@ -140,7 +142,7 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     assert p.validated_against == native_ref
     assert p.is_shippable is True
 
-    no_basis = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
+    no_basis = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                        tile_size=300, tile_size_source="unavailable")
     assert no_basis.params["tile_size"]._raw is None  # the case native_ratio is not
 
@@ -157,7 +159,7 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
     hold = _records("h", 100000.0)
     hold[0]["dt"].append({"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05})
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 
@@ -181,7 +183,7 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
     hold[0]["gt"] = [dict(a) for a in cal[0]["gt"]]  # one image of genuinely shared content
     hold[0]["dt"] = [dict(d) for d in cal[0]["dt"]]
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 

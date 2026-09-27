@@ -70,7 +70,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
 
     job = InferenceJob(
         job_id="stamp1", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
     )
     _worker(job)
@@ -114,7 +114,7 @@ def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never
 
     bundle = resolve_operating_point(
         "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]),
-        tiled=False, max_dets=250)
+        slicing=None, max_dets=250)
     cap = bundle.get("max_dets")
 
     assert cap.value == 250
@@ -129,7 +129,7 @@ def test_a_cap_the_resolver_derives_itself_still_says_how(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]), tiled=False)
+        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]), slicing=None)
     cap = bundle.get("max_dets")
 
     assert cap.source == "derived"
@@ -138,18 +138,21 @@ def test_a_cap_the_resolver_derives_itself_still_says_how(tmp_path):
 
 def test_full_frame_evaluation_leaves_nms_and_cap_unstated_for_the_shared_resolution():
     """The select-point must equal the ship-point: the delivery-grade eval binds no cross-tile NMS
-    or detection cap of its own, leaving both unstated (``None``) so ``applied_operating_point``,
-    the one resolution ``run_inference`` also calls, supplies the platform defaults. Coverage of
-    the signature and of the shared resolution's own defaults; the agreement itself holds by
-    construction, one function called from both doors."""
+    or detection cap of its own, leaving both unstated (``None``) so ``applied_operating_point``
+    and ``resolve_cross_tile_nms``, the resolutions ``run_inference`` also calls, supply the
+    platform defaults. Coverage of the signature and of the shared resolutions' own defaults; the
+    agreement itself holds by construction, one function called from both doors."""
     import inspect
 
     from tcip_mcp.pipelines.resolution import (
         DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU, applied_operating_point,
+        resolve_cross_tile_nms,
     )
+    from tcip_mcp.pipelines.slicing import slicing_record
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     params = inspect.signature(run_full_frame_evaluation).parameters
-    assert params["global_nms_iou"].default is None
+    assert params["cross_tile_nms"].default is None
     assert params["max_dets"].default is None
-    assert applied_operating_point(None, None, None) == (DEFAULT_CONF, DEFAULT_NMS_IOU, DEFAULT_MAX_DETS)
+    assert applied_operating_point(None, None) == (DEFAULT_CONF, DEFAULT_MAX_DETS)
+    assert resolve_cross_tile_nms(None, slicing_record(0.2, None, "nms")).value == DEFAULT_NMS_IOU

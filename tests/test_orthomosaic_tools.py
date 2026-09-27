@@ -241,7 +241,7 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
     """Two raster exports into one bucket, with no experiment and no verdict: the second refuses
     naming the document count and a suggested fresh bucket, and the first bucket's own document is
     unchanged (byte-identical, which proves that one file alone, not the bucket's stamp or any
-    other artifact). A spy on predict_tiled fails the test if the refused call reaches the pass.
+    other artifact). A spy on predict_sliced fails the test if the refused call reaches the pass.
     The suggested bucket, once written into, admits a real re-run."""
     from pathlib import Path
 
@@ -262,19 +262,19 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
     assert "error" not in r1, r1
     first_doc = (out / "mosaic.json").read_bytes()
 
-    real_predict_tiled = GenericPredictor.predict_tiled
+    real_predict_sliced = GenericPredictor.predict_sliced
 
     def _fail_if_reached(self, *a, **kw):
-        raise AssertionError("predict_tiled must not run on a refused publish")
+        raise AssertionError("predict_sliced must not run on a refused publish")
 
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", _fail_if_reached)
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", _fail_if_reached)
     r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" in r2
     assert r2["document_stem_count"] == 1
     assert (out / "mosaic.json").read_bytes() == first_doc
 
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", real_predict_tiled)
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", real_predict_sliced)
     r3 = run_inference(ckpt, output_dir=str(r2["suggested_bucket"]), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" not in r3, r3

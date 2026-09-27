@@ -201,7 +201,7 @@ class TileLocalitySampler(Sampler):
     Once a lane exhausts it leaves the rotation, so alignment loosens over the epoch's tail
     chunks; every earlier batch lands on its lane's worker.
 
-    Requires a dataset exposing ``tile_entries`` (index-ordered ``(stem, tile_x, tile_y)``)
+    Requires a dataset exposing ``tile_entries`` (index-ordered ``(stem, (x0, y0, x1, y1))``)
     and ``source_frames`` (per-stem frame facts including ``windowed``), at least one
     windowed source, and the loader context: ``num_workers`` always, ``batch_size`` when
     ``num_workers > 1`` (the lane interleaving is defined in batches).
@@ -256,8 +256,8 @@ class TileLocalitySampler(Sampler):
         max_row_bytes = max(row_costs.values())
 
         rows_by_stem: dict[str, dict[int, list[int]]] = {}
-        for idx, (stem, _tile_x, tile_y) in enumerate(tile_entries):
-            rows_by_stem.setdefault(stem, {}).setdefault(int(tile_y), []).append(idx)
+        for idx, (stem, box) in enumerate(tile_entries):
+            rows_by_stem.setdefault(stem, {}).setdefault(int(box[1]), []).append(idx)
         pitches: list[int] = []
         for rows in rows_by_stem.values():
             ys = sorted(rows)

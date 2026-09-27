@@ -1410,7 +1410,7 @@ def test_refuses_a_non_terminal_inference_job_then_admits_once_terminal(client, 
     open_project, target = _seed(ws)
     job = InferenceJob(
         job_id="j1", checkpoint_path="model.pt", images_dir="images/2026-03-04",
-        output_dir="predictions/live/2026-03-04", conf=0.5, iou=0.5,
+        output_dir="predictions/live/2026-03-04", conf=0.5, cross_tile_nms=0.5,
         overlap=0.2, status="running", platform_root=str(target),
     )
     _registry.register(job.job_id, job, job_root=job.platform_root)

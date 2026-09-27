@@ -56,7 +56,7 @@ def _stage(dataset_root: Path, *, value: str) -> dict:
 
 def _stamp_bucket(bucket: Path) -> None:
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[], id_map=ID_MAP,
         subject=SUBJECT, attribute=ATTRIBUTE, trait=ATTRIBUTE, dataset_hash="H",
         checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,

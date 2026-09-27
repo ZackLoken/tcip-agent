@@ -213,10 +213,9 @@ Working now:
   reads a GeoTIFF's own tags to turn a pixel into a real-world coordinate, refusing on a rotated
   raster or one whose CRS it can't determine. `raster_source.GdalSource` serves windowed reads
   through GDAL's budgeted block cache (overview-aware when the raster carries an `.ovr` pyramid)
-  so the raster is never decoded whole. `GenericPredictor.predict_tiled`'s windowed-reader source
-  kind runs the same tiled-inference core the per-photo path uses, including `instance_seg` masks
-  kept as small tile-local patches with a full-raster offset rather than one full-raster-sized
-  array per detection.
+  so the raster is never decoded whole. `GenericPredictor.predict_sliced` reads such a raster
+  window by window over the same SAHI slice lattice and merge the per-photo path uses, with
+  `instance_seg` masks carried as polygons in full-raster pixels and merged across seams.
 - Each detection resolves to a real-world coordinate and is matched to the nearest plant in a
   plant-locations CSV (`assign_detections_to_plants`, which records each detection's `source`
   and `distance_m` and no confidence value); an unmatched detection stays unmatched. Two MCP
@@ -241,8 +240,8 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   best-model objective (blends loss, F1, mAP50) instead of raw `val_loss`.
 - Progressive unfreezing: multi-stage training with optimizer-momentum handoff
   between stages, optional inter-stage LR warmup, and effective-batch LR scaling.
-- Small objects: opt-in SAHI-style sliding-window tiling at train and inference
-  time (core-region reconstruction + global NMS), plus an FCOS/RetinaNet anchor-free
+- Small objects: SAHI's slice lattice at train and inference time, with SAHI's cross-tile
+  merge at inference, plus an FCOS/RetinaNet anchor-free
   detector option and an extra high-resolution (P2) pyramid level.
 - Splits: group-aware, annotation-stratified train/val/calibration splitting
   (no source-image leakage) with automatic validation loaders; the calibration side is

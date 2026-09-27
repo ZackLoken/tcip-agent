@@ -90,14 +90,18 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     that way (a 3-channel predictor could silently "work" on a bad path by
     broadcasting/re-normalizing, masking the bug)."""
     from tcip_mcp.pipelines.calibration import calibrate_operating_point
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.tools.inference_tools import _prepare_pass
 
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     images_dir, labels_dir = _grouped_dataset(tmp_path)
     ckpt = _detection_checkpoint(tmp_path)
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
-    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
+    p = _prepare_pass(
+        checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=False,
+        tile_size=None, overlap=None, cross_tile_nms=None, max_dets=100, postprocess="nms",
+        experiment_id=None, tile_batch_size=8)
+    assert not isinstance(p, str), p
 
     seen_sources = []
     from tcip_mcp.pipelines import raster_source
@@ -110,9 +114,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
     bundle, dataset_hash, n_excluded, _evidence = calibrate_operating_point(
-        predictor, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=TILE, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.5, postprocess="nms", cross_tile_nms=None, max_dets=100,
+        p, "bud_opening", str(labels_dir), str(images_dir),
         holdout_ratio=0.0,  # both stems land in calibration -> one predict_batch call sees both
     )
 

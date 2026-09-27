@@ -80,16 +80,13 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-_CAL_KWARGS = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8, global_nms_iou=0.3,
-                   postprocess="nms", cross_tile_nms=None, max_dets=None, group_by="stem",
-                   seed=0, holdout_ratio=0.5)
-
-
 def _calibrate(labels_dir, images_dir):
     import tcip_mcp.pipelines.calibration as calibration
+    from tests._regime_fixtures import stub_pass
 
     return calibration.calibrate_operating_point(
-        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), **_CAL_KWARGS)
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
+        group_by="stem", seed=0, holdout_ratio=0.5)
 
 
 def _classification_items(gt_dir, pred_dir):
@@ -439,7 +436,7 @@ def _floor_mismatched_bundle():
         "holdout_records": dense_records(
             n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
             miss_pattern=miss, fp_pattern=fp, score=0.9),
-        "tiled": False, "staged_conf_floor": 0.001,
+        "slicing": None, "staged_conf_floor": 0.001,
     }
     return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
 
@@ -508,7 +505,7 @@ def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkey
         "holdout_records": dense_records(
             n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
-        "tiled": False, "staged_conf_floor": 0.01,
+        "slicing": None, "staged_conf_floor": 0.01,
     }
     bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is False

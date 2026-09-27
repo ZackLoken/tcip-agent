@@ -1,108 +1,45 @@
-"""Sliding-window tiling geometry + TiledDetectionDataset wrapper.
+"""TiledDetectionDataset: SAHI's lattice over each image, labels clipped to each slice.
 
-The geometry tests are pure numpy (no torch). The wrapper tests skip if torch is
-absent (they go through ``build_dataset``).
+The label tests are pure numpy (no torch). The wrapper tests skip if torch is absent (they go
+through ``build_dataset``).
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from tcip_mcp.pipelines.data import tiling
+from tcip_mcp.pipelines.data.datasets import clip_boxes_to_tile, dedup_boxes
 from tests._producer_fixtures import dataset_over  # noqa: E402
-
-
-# --------------------------------------------------------------------------
-# Pure geometry
-# --------------------------------------------------------------------------
-
-def test_tile_positions_pad_and_stride():
-    assert tiling.compute_stride(224, 0.2) == 179
-    pos = set(tiling.tile_positions(300, 300, 224, 179))
-    assert pos == {(0, 0), (179, 0), (0, 179), (179, 179)}
-    assert all(tx < 300 and ty < 300 for tx, ty in pos)  # no pure-padding origin
 
 
 def test_clip_boxes_to_tile_sliver_drop_and_remap():
     # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
     # Fully-inside box -> always kept, remapped to tile-local (minus origin 200,200).
-    tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb, tl = clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert tb.shape == (1, 4)
     assert np.allclose(tb[0], [10, 10, 30, 30])
     # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> kept.
-    tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb2, _ = clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb2) == 1
     # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
-    tb3, _ = tiling.clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb3, _ = clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb3) == 0
     # Non-overlapping box -> no output.
-    tb4, _ = tiling.clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
+    tb4, _ = clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb4) == 0
 
 
 def test_dedup_boxes_class_aware():
     boxes = np.array([[0., 0., 20., 20.], [1., 1., 19., 19.]])  # IoU 0.81, same label
-    assert tiling.dedup_boxes(boxes, np.array([1, 1]), 0.8) == [0]  # larger kept
+    assert dedup_boxes(boxes, np.array([1, 1]), 0.8) == [0]  # larger kept
     distinct = np.array([[0., 0., 10., 10.], [50., 50., 60., 60.]])
-    assert tiling.dedup_boxes(distinct, np.array([1, 1]), 0.8) == [0, 1]  # both survive
+    assert dedup_boxes(distinct, np.array([1, 1]), 0.8) == [0, 1]  # both survive
     # same geometry, different labels -> both survive
-    assert tiling.dedup_boxes(boxes, np.array([1, 2]), 0.8, class_aware=True) == [0, 1]
-    assert tiling.dedup_boxes(boxes, np.array([1, 1]), 1.0) == [0, 1]  # iou_thresh >= 1.0: no-op
-
-
-def test_reconstruct_core_dedup_seam():
-    tile_size, img_w, img_h = 64, 120, 64
-    stride = tiling.compute_stride(64, 0.2)  # 51, margin 6.5
-    # Same object at full-image center x=55: its center is in tile A's core, not tile B's.
-    per_tile_boxes = [np.array([[50., 20., 60., 40.]]), np.array([[-1., 20., 9., 40.]])]
-    per_tile_scores = [np.array([0.9]), np.array([0.8])]
-    per_tile_labels = [np.array([1]), np.array([1])]
-    tile_info = [
-        {"tile_x": 0, "tile_y": 0, "original_width": img_w, "original_height": img_h},
-        {"tile_x": 51, "tile_y": 0, "original_width": img_w, "original_height": img_h},
-    ]
-    b, s, ll = tiling.reconstruct_core(per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride)
-    assert len(b) == 1
-    assert np.allclose(b[0], [50, 20, 60, 40])
-    assert s[0] == pytest.approx(0.9) and ll[0] == 1
-
-
-def test_region_halo_expands_by_ceil_margin_and_clips_to_mosaic():
-    haloed, inner = tiling.region_halo((100, 100, 300, 300), 1000, 800, 224, 0.2)
-    assert inner == (100, 100, 300, 300)
-    assert haloed == (77, 77, 323, 323)  # halo=ceil((224-179)/2)=23 on every side
-
-
-def test_region_halo_clips_to_mosaic_bounds_at_an_edge():
-    haloed, inner = tiling.region_halo((0, 0, 200, 50), 1000, 60, 224, 0.2)
-    assert inner == (0, 0, 200, 50)
-    assert haloed == (0, 0, 223, 60)  # y1 clips at the mosaic's own height (60), not 50+23=73
-
-
-def test_region_halo_is_bounded_by_half_the_tile_for_every_overlap():
-    """halo <= tile_size/2 for every overlap in [0, 1) (equality only at stride=1, even
-    tile_size): well inside a spatial_strip_split buffer (>= tile_size), the invariant that
-    guarantees a haloed region never reaches into a genuinely different split's tiles."""
-    for tile_size in (64, 100, 224, 512):
-        for overlap in (0.0, 0.1, 0.2, 0.5, 0.75, 0.99):
-            stride = tiling.compute_stride(tile_size, overlap)
-            halo = math.ceil((tile_size - stride) / 2.0)
-            assert halo <= tile_size / 2.0
-            haloed, inner = tiling.region_halo(
-                (0, 0, tile_size, tile_size), tile_size * 4, tile_size * 4, tile_size, overlap)
-            assert inner == (0, 0, tile_size, tile_size)
-            assert haloed == (0, 0, tile_size + halo, tile_size + halo)
-
-
-def test_global_nms_collapses_duplicates():
-    boxes = np.array([[0., 0., 20., 20.], [1., 1., 21., 21.], [100., 100., 120., 120.]])
-    keep = tiling.global_nms(boxes, np.array([0.9, 0.8, 0.95]), np.array([1, 1, 1]), 0.3)
-    kept = set(int(i) for i in keep)
-    assert len(kept) == 2 and 0 in kept and 2 in kept and 1 not in kept  # higher score of overlap kept
+    assert dedup_boxes(boxes, np.array([1, 2]), 0.8, class_aware=True) == [0, 1]
+    assert dedup_boxes(boxes, np.array([1, 1]), 1.0) == [0, 1]  # iou_thresh >= 1.0: no-op
 
 
 # --------------------------------------------------------------------------
@@ -240,16 +177,8 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
 # TiledDetectionDataset keep_regions
 # --------------------------------------------------------------------------
 
-def test_tile_within_extent_and_rect_contains_tile():
-    assert tiling.tile_within_extent(0, 0, 64, 100, 100) is True
-    assert tiling.tile_within_extent(50, 0, 64, 100, 100) is False  # 50+64 > 100
-    assert tiling.rect_contains_tile((0, 0, 128, 128), 0, 0, 64) is True
-    assert tiling.rect_contains_tile((0, 0, 128, 128), 100, 0, 64) is False  # 100+64 > 128
-
-
-def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
-    """The default (no keep_regions) builds the exact same index as before this parameter
-    existed: every current caller of TiledDetectionDataset omits it."""
+def test_keep_regions_none_indexes_every_slice(tmp_path):
+    """No keep_regions and keep_regions=None build the same index, every slice of the lattice."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
@@ -257,7 +186,10 @@ def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
     plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
     explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=None)
+    from tcip_mcp.pipelines.slicing import slice_lattice
+
     assert plain.tile_entries == explicit_none.tile_entries
+    assert [box for _s, box in plain.tile_entries] == slice_lattice(256, 256, 64, 0.2)
     assert plain.tiles_dropped_past_extent == explicit_none.tiles_dropped_past_extent == 0
     assert plain.tiles_dropped_outside_regions == explicit_none.tiles_dropped_outside_regions == 0
 
@@ -272,10 +204,10 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
 
     assert 0 < left_half.num_samples < full.num_samples
-    for _stem, tx, ty in left_half.tile_entries:
-        assert tx + 64 <= 128  # fully inside the left-half region, never straddling it
+    for _stem, box in left_half.tile_entries:
+        assert box[2] <= 128  # fully inside the left-half region, never straddling it
     assert left_half.tiles_dropped_outside_regions == full.num_samples - left_half.num_samples
-    assert left_half.tiles_dropped_past_extent == 0  # every tile in a 256x256 image is in-extent
+    assert left_half.tiles_dropped_past_extent == 0  # every slice of a 256x256 image is full
 
 
 def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path):

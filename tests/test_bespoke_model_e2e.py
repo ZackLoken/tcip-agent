@@ -37,6 +37,7 @@ from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 IMG = 64
 
@@ -171,7 +172,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert overfit["passed"], overfit["issue"]
 
     records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")
-    bundle = resolve_operating_point("bud_opening", tiled=True, dataset_hash="test",
+    bundle = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="test",
                                      calibration_records=records, holdout_records=records)
     assert "conf" in bundle.params                          # operating point resolved over bespoke outputs
 

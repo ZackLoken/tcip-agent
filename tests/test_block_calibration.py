@@ -22,7 +22,28 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 TILE = 32
+OVERLAP = 0.2
 WIDTH, HEIGHT = 3200, 200
+
+
+def _export_pass(exp: dict, project_path: Path, *, tile_size: int = TILE,
+                 overlap: float = OVERLAP, postprocess: str = "nms",
+                 cross_tile_nms: float | None = None, conf_threshold: float = 0.01):
+    """The pass a whole-mosaic export of ``exp``'s checkpoint prepares
+    (``inference_tools._prepare_pass``), at the training overlap unless stated."""
+    from tcip_mcp import model_registry
+    from tcip_mcp.tools.inference_tools import _prepare_pass
+
+    checkpoint = model_registry.load_registered_checkpoint(
+        exp["checkpoint_path"], project_path=str(project_path))
+    p = _prepare_pass(
+        checkpoint, images_dir=None, conf_threshold=conf_threshold, device="cpu", tile=True,
+        tile_size=tile_size, overlap=overlap, cross_tile_nms=cross_tile_nms, max_dets=1000,
+        postprocess=postprocess, experiment_id=exp["experiment_id"], tile_batch_size=96)
+    assert not isinstance(p, str), p
+    return p
+
+
 BOX_STEP = 40
 
 
@@ -138,7 +159,7 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
     from tcip_mcp.dataset_layout import (
         annotation_path, region_completeness_digest_key, region_completeness_key, status_bucket,
     )
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
     from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
     from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
     from tcip_store import transaction
@@ -175,16 +196,12 @@ def test_block_calibration_refuses_when_regions_unattested(tmp_path: Path):
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     with pytest.raises(BlockCalibrationRefused, match="not fully attested complete"):
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening",
+            experiment_id=exp["experiment_id"])
 
 
 def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Path):
@@ -197,16 +214,12 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, k_cal=40, k_test=40, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening",
+            experiment_id=exp["experiment_id"], k_cal=40, k_test=40)
     msg = str(exc_info.value)
     assert "not fully attested complete" in msg
     assert "leaves only" not in msg  # the feasibility message never gets a chance to fire
@@ -221,19 +234,44 @@ def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(t
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path, tile_size=TILE * 2)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE * 2)
+            export_pass, trait_name="bud_opening", experiment_id=exp["experiment_id"])
     msg = str(exc_info.value)
     assert f"{TILE}px" in msg and f"{TILE * 2}px" in msg
     assert "not fully attested complete" not in msg  # the tile-size check runs first
+
+
+def test_every_band_pass_runs_under_the_export_pass_slicing(tmp_path: Path, monkeypatch):
+    """The claim is measured under the slicing and merge the exported bucket is stamped with, never
+    the training partition's own overlap, and at the merge threshold the export runs at."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+
+    export_pass = _export_pass(exp, tmp_path, overlap=0.25, postprocess="greedynmm")
+    passes: list[dict] = []
+    real = export_pass.predictor.predict_sliced
+
+    def recorded(view, **kwargs):
+        passes.append(kwargs)
+        return real(view, **kwargs)
+
+    monkeypatch.setattr(export_pass.predictor, "predict_sliced", recorded)
+
+    bundle, _prov, _evidence = resolve_block_calibration_records(
+        export_pass, trait_name="bud_opening", experiment_id=exp["experiment_id"])
+
+    ran = [(p["overlap"], p["postprocess"], p["cross_tile_nms"]) for p in passes]
+    exported = export_pass.cross_tile_nms.value
+    assert ran and ran == [(0.25, "greedynmm", exported)] * len(ran)
+    assert bundle.get("cross_tile_nms").value == exported
+    assert bundle.slicing == export_pass.slicing
 
 
 def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
@@ -248,15 +286,11 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     conf = bundle.get("conf")
     assert conf.gate_evidence is not None
@@ -281,32 +315,25 @@ def test_block_calibration_refuses_a_run_that_recorded_no_subject(tmp_path: Path
     from tcip_store import store
 
     from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.pipelines.data.split_construction import persist_run_partition
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     exp = _build_experiment(tmp_path)
     data_cfg = {**store.read(config_key(exp["experiment_id"]))["data"], "subject": ""}
     create_experiment("exp_no_subject", {"data": data_cfg})
     persist_run_partition("exp_no_subject", data_cfg)
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
 
     with pytest.raises(ValueError, match="experiment 'exp_no_subject' records no subject"):
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening", experiment_id="exp_no_subject",
-            global_nms_iou=0.3, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening", experiment_id="exp_no_subject")
 
 
 def test_block_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path):
     """The same mosaic resolved twice, its boxes plain and then every other one marked a crowd
     region: the bands count fewer objects and the objects' spacing widens, since a crowd region
     is no object to count or to space."""
-    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     from tcip_mcp.pipelines.training.evaluation import gt_objects
 
@@ -324,12 +351,9 @@ def test_block_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path:
         manifest = exp["spatial_manifest"]
         _attest_regions_complete(
             exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
-        checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(run_dir))
-        predictor = build_predictor(checkpoint, device="cpu",
-                                    score_threshold=0.01, nms_iou=0.3, max_dets=1000)
         _bundle, prov, evidence = resolve_block_calibration_records(
-            predictor, trait_name="bud_opening", experiment_id=exp["experiment_id"],
-            global_nms_iou=0.3, export_tile_size=TILE)
+            _export_pass(exp, run_dir), trait_name="bud_opening",
+            experiment_id=exp["experiment_id"])
         provenance.append(prov)
         records.append(evidence["inputs"]["calibration_records"]
                        + evidence["inputs"]["holdout_records"])
@@ -354,15 +378,11 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     assert prov["block_scale_source"].startswith("plant grid pitch"), prov["block_scale_source"]
 
@@ -376,15 +396,11 @@ def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     assert prov["block_scale_source"].startswith("GT object-spacing"), prov["block_scale_source"]
 
@@ -411,15 +427,11 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
     monkeypatch.setattr(operating_point_module, "derive_max_dets_from_counts", lambda *a, **k: 1)
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     conf = bundle.get("conf")
     assert conf.gate_evidence is not None
@@ -458,16 +470,12 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_ra
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening",
+            experiment_id=exp["experiment_id"])
 
 
 def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_the_real_raster(
@@ -487,16 +495,12 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_t
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening",
+            experiment_id=exp["experiment_id"])
 
 
 def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: Path):
@@ -511,24 +515,20 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
     label_path = exp["labels_dir"] / f"{exp['stem']}.json"
     existing = json_io.read_annotations(str(label_path))
     tx0, _ty0, tx1, _ty1 = manifest["test_region"][0]
-    dense = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110))
-            for x in range(int(tx0) + 5, int(tx1) - 20, 2)]
+    dense = [Annotation(subject="bud", geometry=BBox(x, y, x + 15, y + 30))
+             for x in range(int(tx0) + 5, int(tx1) - 20, 2) for y in (40, 80, 120)]
     json_io.write_annotations(str(label_path), existing + dense, WIDTH, HEIGHT, keep_empty=True)
 
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import derive_max_dets_from_counts
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     density_cap = derive_max_dets_from_counts(
         list(prov["cal_gt_counts"].values()) + list(prov["test_gt_counts"].values()))
@@ -593,21 +593,24 @@ def test_run_inference_raster_earns_the_record_behind_a_validated_block_calibrat
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+    from tcip_mcp.pipelines.calibration import pass_resolver_inputs
+
     real_resolve = block_calibration_module.resolve_block_calibration_records
     n_images = 20
-    inputs = {
-        "dataset_hash": "H",
-        "calibration_records": dense_records(n_images=n_images, objects_per_image=80,
-                                             id_prefix="c", fp_pattern=[1] * n_images, score=0.9,
-                                             fp_score=0.05),
-        "holdout_records": dense_records(n_images=n_images, objects_per_image=80, id_prefix="h",
-                                         shift=5.0, fp_pattern=[1] * n_images, score=0.9,
-                                         fp_score=0.05),
-        "tiled": True, "staged_conf_floor": 0.01,
-    }
 
-    def _held_out_block_calibration(*args, **kwargs):
-        _bundle, prov, _evidence = real_resolve(*args, **kwargs)
+    def _held_out_block_calibration(p, **kwargs):
+        _bundle, prov, _evidence = real_resolve(p, **kwargs)
+        inputs = {
+            **pass_resolver_inputs(p),
+            "dataset_hash": "H",
+            "calibration_records": dense_records(
+                n_images=n_images, objects_per_image=80, id_prefix="c",
+                fp_pattern=[1] * n_images, score=0.9, fp_score=0.05),
+            "holdout_records": dense_records(
+                n_images=n_images, objects_per_image=80, id_prefix="h", shift=5.0,
+                fp_pattern=[1] * n_images, score=0.9, fp_score=0.05),
+            "staged_conf_floor": 0.01,
+        }
         bundle = resolve_operating_point("bud_opening", experiment_id=exp["experiment_id"], **inputs)
         evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                     "reference_inputs": {"label_dirs": {"reserved_regions": str(exp["labels_dir"])},
@@ -637,62 +640,46 @@ def test_run_inference_raster_earns_the_record_behind_a_validated_block_calibrat
         [str(out_dir)], trait="bud_opening")["validated"] == VALIDATED_HELD_OUT
 
 
-def test_run_inference_raster_applies_a_legitimate_zero_cross_tile_nms(
+def test_the_bands_and_the_whole_mosaic_merge_at_the_threshold_the_stamp_records(
     tmp_path: Path, monkeypatch,
 ):
-    """A block-calibrated cross_tile_nms of exactly 0.0 is a real, legitimate value (never None by
-    construction, see resolve_operating_point), so the raster export pass must use it verbatim, not
-    silently fall back to global_nms_iou because 0.0 reads as falsy. Deriving a genuine 0.0 through
-    the real GT neighbor-IoU pipeline is not possible (derive_cross_tile_nms clamps to [0.2, 0.8]),
-    so this forces the block bundle's own cross_tile_nms param to 0.0 directly, the same shape
-    resolve_operating_point actually constructs it in (requires_validation=False)."""
+    """An unstated merge threshold is resolved from the calibration bands' own GT before any band
+    is predicted, and that one value merges every band, merges the whole-mosaic pass, and is the
+    value the bucket's stamp records."""
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
+    # Each object gains an overlapping neighbor, so the GT tail derives a threshold (about 0.43)
+    # the documented default (0.3) is not.
+    label = exp["labels_dir"] / f"{exp['stem']}.json"
+    json_io.write_annotations(str(label), [
+        Annotation(subject="bud", geometry=BBox(x + dx, 80 + dx, x + 15 + dx, 110 + dx))
+        for x in range(10, WIDTH - 20, BOX_STEP) for dx in (0, 5)], WIDTH, HEIGHT, keep_empty=True)
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
-    import tcip_mcp.pipelines.block_calibration as block_calibration_module
-    from tcip_mcp.pipelines.resolution import ResolvedParam
-
-    real_resolve = block_calibration_module.resolve_block_calibration_records
-
-    def _zeroed_cross_tile_nms(*args, **kwargs):
-        bundle, prov, evidence = real_resolve(*args, **kwargs)
-        bundle.params["cross_tile_nms"] = ResolvedParam(
-            "cross_tile_nms", 0.0, source="derived", derived_from="test override: forced zero",
-            requires_validation=False)
-        return bundle, prov, evidence
-
-    monkeypatch.setattr(
-        block_calibration_module, "resolve_block_calibration_records", _zeroed_cross_tile_nms)
-
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    real_predict_tiled = GenericPredictor.predict_tiled
-    captured: dict = {}
-
-    def _capture_predict_tiled(self, source, **kwargs):
-        captured["global_nms_iou"] = kwargs.get("global_nms_iou")
-        return real_predict_tiled(self, source, **kwargs)
-
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_predict_tiled)
-
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.inference_tools import run_inference
+
+    real_predict_sliced = GenericPredictor.predict_sliced
+    merged_at: list[float] = []
+
+    def _capture_predict_sliced(self, source, **kwargs):
+        merged_at.append(kwargs["cross_tile_nms"])
+        return real_predict_sliced(self, source, **kwargs)
+
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture_predict_sliced)
 
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
-    # The last predict_tiled call is the raster export's own final full-mosaic pass (the band
-    # passes inside resolve_block_calibration_records all run first).
-    assert captured["global_nms_iou"] == 0.0
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    sidecar = read_operating_point_sidecar(out_dir)
-    assert sidecar["operating_point"]["cross_tile_nms"]["value"] == 0.0
+    stamped = read_operating_point_sidecar(out_dir)["operating_point"]["cross_tile_nms"]
+    assert stamped["source"] != "default"  # the bands' GT derived it; no default stood in
+    assert len(merged_at) > 1 and set(merged_at) == {stamped["value"]}
 
 
 def test_run_inference_raster_claim_scope_refuses_cross_mosaic(tmp_path: Path):
@@ -928,7 +915,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
 
     class _OneDetection:
-        def predict_tiled(self, view, **kwargs):
+        def predict_sliced(self, view, **kwargs):
             return {"boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1]}
 
     label = tmp_path / "mosaic.json"
@@ -940,10 +927,12 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
     gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
           "labels": np.asarray(target["labels"], dtype=np.int64),
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
+    from tests._regime_fixtures import stub_pass
+
     records, _rects = _band_records(
         SimpleNamespace(height=200, width=200, num_channels=3), {"a": (0, 0, 200, 200)},
-        200, 200, 64, 0.2, _OneDetection(), tile_batch_size=1, global_nms_iou=0.3,
-        postprocess="nms", gt=gt, stem="mosaic")
+        200, 200, stub_pass(_OneDetection(), tile_size=64, postprocess="nms", cross_tile_nms=0.3),
+        gt=gt, stem="mosaic")
     assert [g["iscrowd"] for g in records[0]["gt"]] == [0, 1]
     assert records[0]["gt"][0]["bbox"] == [20.3, 20.7, 19.8, 40.2]
     assert [d["bbox"] for d in records[0]["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
@@ -1007,7 +996,7 @@ def test_feasibility_counts_only_bands_that_carry_ground_truth():
 
 def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path, monkeypatch):
     """The cap the bundle carries must be the cap its own evidence was collected under, on both
-    surfaces that can truncate a band: the in-model ``detections_per_img`` and ``predict_tiled``'s
+    surfaces that can truncate a band: the in-model ``detections_per_img`` and ``predict_sliced``'s
     own post-merge cap. A bundle stamping a cap no band pass ran under describes a run that never
     happened, and the density-derived cap here is deliberately not the one the predictor was
     constructed with, so agreement cannot come from the construction default."""
@@ -1018,27 +1007,22 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import _current_detections_cap
 
-    real_predict_tiled = GenericPredictor.predict_tiled
+    real_predict_sliced = GenericPredictor.predict_sliced
     caps: list[tuple[int | None, int | None]] = []
 
     def _capture_caps(self, source, **kwargs):
         caps.append((_current_detections_cap(self.model), self.max_dets))
-        return real_predict_tiled(self, source, **kwargs)
+        return real_predict_sliced(self, source, **kwargs)
 
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_caps)
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture_caps)
 
-    constructed_max_dets = 1000
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3,
-                                max_dets=constructed_max_dets)
+    constructed_max_dets = 1000  # the cap _export_pass builds its predictor at
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     stamped = bundle.get("max_dets")._raw
     assert len(caps) == prov["k_cal"] + prov["k_test"]
@@ -1062,25 +1046,21 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    real_predict_tiled = GenericPredictor.predict_tiled
+    real_predict_sliced = GenericPredictor.predict_sliced
     floors: list[float] = []
 
     def _capture_floor(self, source, **kwargs):
         floors.append(self.score_threshold)
-        return real_predict_tiled(self, source, **kwargs)
+        return real_predict_sliced(self, source, **kwargs)
 
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_floor)
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture_floor)
 
     constructed_threshold = 0.4
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path, conf_threshold=constructed_threshold)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     recorded_floor = bundle.get("conf").gate_evidence["staged_conf_floor"]
     assert len(floors) == prov["k_cal"] + prov["k_test"]
@@ -1179,20 +1159,16 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
 
     from tcip_mcp.subject_registry import assign_class_ids, read_registry
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     live_id_map = assign_class_ids(read_registry(exp["root"] / "subjects.json"), "bud", "stage")
     recorded_category = exp["recorded_id_map"]["open"] + 1
     live_category = live_id_map["open"] + 1
     assert recorded_category != live_category
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, _prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     per_class = bundle.get("conf").gate_evidence["holdout_bias"]["per_class"]
     recorded_entry = per_class.get(str(recorded_category))
@@ -1228,19 +1204,22 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
     _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"], project_root=tmp_path)
     (exp["root"] / "subjects.json").unlink()
 
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
-    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tests._regime_fixtures import stub_pass
 
+    # The export door's own pass preparation refuses this run earlier, having no images_dir to
+    # decode through; block calibration's refusal is reached with the reserved labels in hand.
     checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = stub_pass(build_predictor(checkpoint, device="cpu", score_threshold=0.01),
+                            tile_size=TILE, postprocess="nms")
     with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
         resolve_block_calibration_records(
-            predictor, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+            export_pass, trait_name="bud_opening",
+            experiment_id=exp["experiment_id"])
 
 
 def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tmp_path: Path):
@@ -1256,15 +1235,11 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
     (exp["root"] / "subjects.json").unlink()
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     assert sum(prov["cal_gt_counts"].values()) > 0
     assert bundle.get("conf").gate_evidence["calibration_image_ids"]
@@ -1279,7 +1254,7 @@ def _attest_regions_complete_through_the_coverage_route(
     cell names. The grid posted is the one the grid route serves, the same lattice the browser
     draws, with the cell list and derivation line split off the way the browser's grid hook
     splits them before posting."""
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
 
     grid_resp = client.get("/api/coverage/grid", params={"path": image_path, "tile_size": TILE})
     assert grid_resp.status_code == 200, grid_resp.text
@@ -1319,20 +1294,16 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
     assert attested
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
 
     for region in (manifest["calibration_region"], manifest["test_region"]):
         assert incomplete_cells_for_rect(
             str(exp["root"]), "bud", exp["stem"], tuple(region[0])) == []
 
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    predictor = build_predictor(checkpoint, device="cpu",
-                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    export_pass = _export_pass(exp, tmp_path)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="bud_opening",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
+        export_pass, trait_name="bud_opening",
+        experiment_id=exp["experiment_id"])
 
     assert sum(prov["cal_gt_counts"].values()) > 0
     assert bundle.get("conf").gate_evidence["calibration_image_ids"]

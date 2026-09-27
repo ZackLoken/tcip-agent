@@ -213,8 +213,10 @@ class TrainContext:
     def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
         """Resolve the trait's operating point (conf/tile/max_dets) from record gate evidence. Pass
         calibration_records/holdout_records; kwargs mirror ``resolve_operating_point``, including
-        ``tiled``, which is required (whether the pass that produced your records tiled).
-        ``experiment_id`` defaults to this run's own id; a caller-supplied one wins.
+        the required ``slicing`` (the slicing record of the pass that produced your records,
+        ``None`` untiled) and ``cross_tile_nms`` (the provenance of the merge threshold it ran at,
+        ``resolution.resolve_cross_tile_nms``). ``experiment_id`` defaults to this run's own id; a
+        caller-supplied one wins.
 
         ``staged_conf_floor`` (pass it, or this can never validate): the confidence threshold your
             own inference pass floored detections to when it produced

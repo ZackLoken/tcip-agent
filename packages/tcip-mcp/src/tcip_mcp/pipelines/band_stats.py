@@ -59,11 +59,9 @@ class SampledBandRanges:
 
 def band_ranges(pixels) -> list[BandRange]:
     """Exact per-band min/max of an ``[H, W, C]`` array (or of one 2-D band), in its dtype units."""
-    import numpy as np
+    from tcip_mcp.pipelines.raster_source import hwc_array
 
-    arr = np.asarray(pixels)
-    if arr.ndim == 2:
-        arr = arr[:, :, None]
+    arr = hwc_array(pixels)
     return [BandRange(float(arr[:, :, i].min()), float(arr[:, :, i].max()))
             for i in range(arr.shape[-1])]
 
@@ -162,9 +160,9 @@ def composite_display_rgb(pixels, band_indices, stretch: str,
     """
     import numpy as np
 
-    arr = np.asarray(pixels)
-    if arr.ndim == 2:
-        arr = arr[:, :, None]
+    from tcip_mcp.pipelines.raster_source import hwc_array
+
+    arr = hwc_array(pixels)
     idxs = [int(i) for i in band_indices]
     if len(idxs) != 3:
         raise ValueError(f"a display composite is 3 bands, got {len(idxs)}")
@@ -243,9 +241,7 @@ def sampled_band_ranges(source: "str | Path | BandGroupRef", num_channels: int, 
         seen = 0
         covered = 0
         for rect in windows:
-            region = np.asarray(src.read_region(rect)[0])
-            if region.ndim == 2:
-                region = region[:, :, None]
+            region = raster_source.hwc_array(src.read_region(rect)[0])
             flat = region.reshape(-1, region.shape[-1])
             band_lo = flat.min(axis=0).astype(np.float64)
             band_hi = flat.max(axis=0).astype(np.float64)

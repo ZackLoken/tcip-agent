@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.data.splits import (
     spatial_strip_split,
     stem_of_spatial_identity,
 )
-from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions, tile_within_extent
+from tcip_mcp.pipelines.slicing import slice_lattice
 
 
 def test_default_group_key_strips_tile_offset():
@@ -300,15 +300,12 @@ def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
 def _kept_tiles(split, width, height):
     """Every kept tile's rect, tagged with the side it was assigned to via ``split_name_for``,
     recomputed independently of the split's own kept-tile counters."""
-    stride = compute_stride(split.tile_size, split.overlap)
-    lattice = tile_positions(height, width, split.tile_size, stride)
-    in_extent = [(tx, ty) for tx, ty in lattice
-                if tile_within_extent(tx, ty, split.tile_size, width, height)]
+    lattice = slice_lattice(height, width, split.tile_size, split.overlap)
     by_name: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in split.regions}
-    for tx, ty in in_extent:
-        name = split.split_name_for(tx, ty)
+    for box in lattice:
+        name = split.split_name_for(box)
         if name is not None:
-            by_name[name].append((tx, ty, tx + split.tile_size, ty + split.tile_size))
+            by_name[name].append(box)
     return by_name
 
 
@@ -363,9 +360,10 @@ def test_spatial_strip_split_tied_shares_place_by_declared_order():
     the declared ``split_names`` order, so permuting which of the two tied names comes second
     swaps which cardinal side that name lands on, mirroring the swap in the declared order, and
     the returned split carries no ``seed`` field."""
-    forward = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
+    # 4160 = 320 + 15 * 256: the lattice ends flush, so no pulled-back slice crowds an edge side.
+    forward = spatial_strip_split(4160, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
                                    split_names=("train", "val", "test"))
-    swapped = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
+    swapped = spatial_strip_split(4160, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
                                    split_names=("train", "test", "val"))
     assert forward.regions["val"] != forward.regions["test"]
     assert forward.regions["val"] == swapped.regions["test"]

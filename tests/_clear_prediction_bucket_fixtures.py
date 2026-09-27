@@ -173,7 +173,7 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "h1", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01,
-                             "tiled": False}},
+                             "slicing": None}},
         trait=trait, checkpoint_sha256=stored.get("checkpoint_sha256"),
         producing_experiment_id=None,
         reference_inputs={"dataset_root": str(dataset_root),
@@ -181,7 +181,8 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
                           "stated_values": {"split_identity": "clear-bucket-admitting"}},
     )
     earned_body = operating_point_stamp(
-        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
+        validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
         subject=stored.get("subject"), attribute=stored.get("attribute"), trait=trait,
         dataset_hash="h1", checkpoint=stored.get("checkpoint"),

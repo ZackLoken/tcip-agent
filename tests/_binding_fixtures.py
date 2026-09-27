@@ -319,7 +319,7 @@ def calibrated_run_fields(
     *,
     checkpoint_sha256: str,
     labels_dir: str | Path,
-    tiled: bool = False,
+    postprocess: str | None = None,
     tile_size: int | None = None,
     tile_size_source: str = "default",
 ) -> dict:
@@ -327,17 +327,19 @@ def calibrated_run_fields(
 
     A test standing in for the inference pass still has to leave behind what the door reopens the
     gate over, or the door has nothing to earn with and says so. This resolves a real held-out
-    operating point over a dense synthetic reference, files the record under its own identity
-    (``calibration_curve_identity``, the same key a real run's write and a delivery door's read
-    agree on) exactly where a calibrated run files it, and hands back the result fields that carry
-    it. The producing experiment is ``None``, the ordinary bespoke-checkpoint case, so the door
-    earns through a created calibration experiment.
+    operating point over a dense synthetic reference, collected untiled or, with ``postprocess``
+    named, under a tiled regime merging by it (``tiled_regime``), files the record under its own
+    identity (``calibration_curve_identity``, the same key a real run's write and a delivery door's
+    read agree on) exactly where a calibrated run files it, and hands back the result fields that
+    carry it, its ``slicing`` record included. The producing experiment is ``None``, the ordinary
+    bespoke-checkpoint case, so the door earns through a created calibration experiment.
     """
     from tcip_store import store
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.tools.inference_tools import calibration_curve_identity, calibration_curve_key
     from tests._dense_op_fixtures import dense_records
+    from tests._regime_fixtures import tiled_regime
 
     n_images, objects = 20, 80
     inputs = {
@@ -348,7 +350,7 @@ def calibrated_run_fields(
         "holdout_records": dense_records(n_images=n_images, objects_per_image=objects,
                                          id_prefix="h", shift=5.0, fp_pattern=[1] * n_images,
                                          score=0.9, fp_score=0.05),
-        "tiled": tiled,
+        **(tiled_regime(postprocess=postprocess) if postprocess else {"slicing": None}),
         "tile_size": tile_size,
         "tile_size_source": tile_size_source,
         "staged_conf_floor": 0.01,
@@ -361,10 +363,6 @@ def calibrated_run_fields(
         "trait": trait,
         "dataset_hash": "H",
         "checkpoint_sha256": checkpoint_sha256,
-        "predictor_path": {
-            "tile": tiled, "tile_size": tile_size, "overlap": None,
-            "postprocess": "nms", "global_nms_iou": None, "max_dets": None,
-        },
         "gate_evidence": bundle.get("conf").gate_evidence,
         "calibration_evidence": evidence,
     }
@@ -372,6 +370,7 @@ def calibrated_run_fields(
     store.replace(calibration_curve_key(identity), body)
     return {
         "operating_point": bundle.to_provenance()["operating_point"],
+        "slicing": bundle.slicing,
         "validated": True,
         "conf_source": "calibration",
         "dataset_hash": "H",
@@ -386,6 +385,7 @@ def run_result(
     operating_point: dict,
     results: list[dict],
     *,
+    slicing: dict | None = None,
     checkpoint_sha256: str = "deadbeef",
     experiment_id: str | None = None,
     subject: str | None = None,
@@ -395,17 +395,15 @@ def run_result(
     **fields: Any,
 ) -> dict:
     """A run's own facts built through the pass' own skeleton (``_PreparedPass.result``), for a
-    test standing in for the inference pass: ``fields`` are the run's calibrated or raw extras
-    (``validated``, ``conf_source`` and the like), ``results`` its per-image predictions."""
+    test standing in for the inference pass: ``operating_point`` and ``slicing`` are what its
+    bundle states, ``fields`` the run's calibrated or raw extras (``validated``, ``conf_source``
+    and the like), ``results`` its per-image predictions."""
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.tools.inference_tools import _PreparedPass
+    from tests._regime_fixtures import stub_pass
 
-    prepared = _PreparedPass(
-        checkpoint_path="model_best.pt", predictor=None, images_dir=images_dir, paths=[],
-        identity={"sha256": checkpoint_sha256, "experiment_id": experiment_id},
-        scope=ClassScope(subject=subject, attribute=attribute), id_map=id_map, tiled=False,
-        tiled_source="default", tile_size=None, tile_size_source="default",
-        tile_size_derived_from=None, overlap=0.2, tile_resize=None, conf=0.5, nms_iou=0.3,
-        max_dets=1000, conf_stated=False, max_dets_stated=False, tile_batch_size=96,
-        postprocess="nms")
-    return {**prepared.result(operating_point, fields), "results": results}
+    prepared = stub_pass(None)
+    prepared.checkpoint_path, prepared.images_dir = "model_best.pt", images_dir
+    prepared.identity = {"sha256": checkpoint_sha256, "experiment_id": experiment_id}
+    prepared.scope, prepared.id_map = ClassScope(subject=subject, attribute=attribute), id_map
+    return {**prepared.result({"operating_point": operating_point, "slicing": slicing}, fields),
+            "results": results}

@@ -39,37 +39,14 @@ class _BucketStub:
                 for p in paths]
 
 
-def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
-                          tile_size_source: str = "default",
-                          tile_size_derived_from: str | None = None):
-    """The calibrated bundle plus the resolver arguments behind it, the pair a real calibration
-    hands its caller so a delivery door can reopen the same gate."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._dense_op_fixtures import dense_records
-
-    n_images, objects_per_image = 20, 80
-    miss, fp = [0] * n_images, [1] * n_images
-    inputs = {
-        "dataset_hash": "H",
-        "calibration_records": dense_records(
-            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-            miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE, fp_score=0.05),
-        "holdout_records": dense_records(
-            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
-            miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE, fp_score=0.05),
-        "tiled": tiled,
-        "tile_size": tile_size,
-        "tile_size_source": tile_size_source,
-        "tile_size_derived_from": tile_size_derived_from,
-        "staged_conf_floor": 0.01,
-    }
-    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
-
-
-def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
+def _export(tmp_path, monkeypatch, *, tile, tile_size=None):
+    """Run a calibrated export whose calibration collection is a dense held-out reference,
+    resolved under the regime of the pass the delivery prepared."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tests._dense_op_fixtures import dense_records
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     from PIL import Image
@@ -79,11 +56,24 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     images_dir.mkdir(parents=True)
     Image.new("RGB", (160, 120), color=(70, 90, 110)).save(images_dir / "capture_a.png")
 
-    bundle, inputs = calibration
-    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
-                "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, "H", 0, evidence))
+    n_images, objects_per_image = 20, 80
+    miss, fp = [0] * n_images, [1] * n_images
+    reference = {
+        side: dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix=side[0],
+            shift=shift, miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE,
+            fp_score=0.05)
+        for side, shift in (("calibration_records", 0.0), ("holdout_records", 5.0))}
+
+    def _calibrate(p, *a, **k):
+        inputs = {**calibration_pipeline.pass_resolver_inputs(p), **reference,
+                  "dataset_hash": "H", "staged_conf_floor": 0.01}
+        bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+        evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                    "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
+        return bundle, "H", 0, evidence
+
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _calibrate)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
@@ -103,8 +93,7 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
         VALIDATED_HELD_OUT, read_operating_point_sidecar, reconcile_operating_point_validity,
     )
 
-    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
-                     tile=False)
+    result = _export(tmp_path, monkeypatch, tile=False)
     bucket = result["output_dir"]
 
     assert read_operating_point_sidecar(bucket) is not None
@@ -125,8 +114,7 @@ def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_cla
         read_operating_point_sidecar, verify_stamp_binding, well_formed_validated_by,
     )
 
-    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
-                     tile=False)
+    result = _export(tmp_path, monkeypatch, tile=False)
     bucket = result["output_dir"]
 
     stamp = read_operating_point_sidecar(bucket)
@@ -149,8 +137,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
     from tcip_mcp.experiments import experiment_exists, find_validation
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
-                     tile=False)
+    result = _export(tmp_path, monkeypatch, tile=False)
     bucket = Path(result["output_dir"])
 
     assert (bucket / "capture_a.json").is_file()  # written once the registered checkpoint admits
@@ -174,7 +161,7 @@ def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_pat
 
     monkeypatch.setattr(resolution, "seal_validation", _die)
     with pytest.raises(RuntimeError):
-        _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False), tile=False)
+        _export(tmp_path, monkeypatch, tile=False)
 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert (bucket / "capture_a.json").is_file()
@@ -200,7 +187,7 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
 
     monkeypatch.setattr(resolution, "seal_validation", _seal_then_die)
     with pytest.raises(RuntimeError):
-        _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False), tile=False)
+        _export(tmp_path, monkeypatch, tile=False)
 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert find_validation(sealed["experiment_id"], sealed["record_digest"]) is not None
@@ -215,10 +202,7 @@ def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monk
         VALIDATED_EXPLICIT_GEOMETRY, reconcile_tile_size_validity,
     )
 
-    calibration = _held_out_calibration(
-        tiled=True, tile_size=64, tile_size_source="explicit",
-        tile_size_derived_from="stated on a checkpoint that records no tile geometry")
-    result = _export(tmp_path, monkeypatch, calibration=calibration, tile=True, tile_size=64)
+    result = _export(tmp_path, monkeypatch, tile=True, tile_size=64)
     bucket = result["output_dir"]
 
     reconciled = reconcile_tile_size_validity([bucket])

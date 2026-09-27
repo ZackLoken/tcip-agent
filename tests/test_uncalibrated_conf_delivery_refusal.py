@@ -73,7 +73,7 @@ def _held_out_bundle():
         "holdout_records": dense_records(
             n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
-        "tiled": False, "staged_conf_floor": 0.01,
+        "slicing": None, "staged_conf_floor": 0.01,
     }
     return resolve_operating_point(fx.COUNT_TRAIT, experiment_id=None, **inputs), inputs
 

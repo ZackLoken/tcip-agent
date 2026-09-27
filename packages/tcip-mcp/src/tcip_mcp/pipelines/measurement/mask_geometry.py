@@ -28,8 +28,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from tcip_annotation.mask_contours import DEFAULT_EPSILON_FRAC
-
 # The mask-binarization threshold is a dimensional-phenotype knob: 0.5 is an honest engineering
 # default, not a validated derivation. A calibrated mask-area measurement should derive it against
 # validated masks (measured area vs GT); until then its provenance must travel as validated=false so
@@ -99,12 +97,7 @@ def _perimeter_px(binary) -> float:
 
 def _axes_from_points(pts):
     """PCA over a raw ``(x, y)`` point cloud -> ``(centroid_xy, principal, secondary,
-    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction.
-
-    The shared core behind :func:`_axes` (which adds the rasterized-mask +1 convention on top of
-    this) and :func:`principal_axis_extent_of_points` (which does not, since a bare coordinate
-    list has no pixel grid to be inclusive over).
-    """
+    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction."""
     import numpy as np
 
     centroid = pts.mean(axis=0)
@@ -278,19 +271,6 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
     if scale is not None:
         _attach_physical(result, scale, unit)
     return result
-
-
-def mask_to_polygon_points(
-    mask: Any, *, threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
-    epsilon_frac: float = DEFAULT_EPSILON_FRAC,
-) -> list[list[tuple[float, float]]]:
-    """Binary/soft mask -> one simplified polygon ring per connected component (pixel coords),
-    through :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, with the tensor->numpy hop
-    and the platform's mask-binarization threshold default.
-    """
-    from tcip_annotation.mask_contours import mask_to_polygon_rings
-
-    return mask_to_polygon_rings(_to_numpy(mask), threshold=threshold, epsilon_frac=epsilon_frac)
 
 
 def instance_geometries(masks: Any, *, scale: float | None = None, unit: str,

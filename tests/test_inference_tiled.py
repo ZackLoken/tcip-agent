@@ -1,4 +1,4 @@
-"""Tiled inference: GenericPredictor.predict_tiled + the verified pass at tile=True."""
+"""Tiled inference: GenericPredictor.predict_sliced + the verified pass at tile=True."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ pytest.importorskip("torchvision")
 from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
 
 TILE = 64
+SLICED = dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
+              tile_batch_size=8, tile_resize=None, require_masks=True)
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
@@ -40,7 +42,7 @@ def _image(tmp_path: Path, size: int = 128) -> str:
     return str(p)
 
 
-def test_predict_tiled_shape_and_bounds(tmp_path):
+def test_predict_sliced_shape_and_bounds(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -48,18 +50,18 @@ def test_predict_tiled_shape_and_bounds(tmp_path):
     img = _image(tmp_path)
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    r = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    r = pred.predict_sliced(img, **SLICED)
 
     assert {"image", "width", "height", "boxes", "scores", "labels", "count"} <= set(r)
     assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
-    assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ grid
+    assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice
     for b in r["boxes"]:
         assert 0 <= b[0] <= r["width"] and 0 <= b[2] <= r["width"]
         assert 0 <= b[1] <= r["height"] and 0 <= b[3] <= r["height"]
 
 
-def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
-    """``predict_tiled``'s post-merge full-frame cap truncates a dense result (``self.max_dets``)
+def test_predict_sliced_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
+    """``predict_sliced``'s post-merge full-frame cap truncates a dense result (``self.max_dets``)
     and stamps ``cap_hit``, computed from the pre-truncation count, so a caller building its own
     records (block calibration's ``_band_records``) can surface cap saturation as provenance."""
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -69,29 +71,29 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
     img = _image(tmp_path)
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    uncapped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    uncapped = pred.predict_sliced(img, **SLICED)
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
         "for this test to force a real truncation, not merely assert an untested edge"
 
     pred.max_dets = uncapped["count"] - 1
-    capped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    capped = pred.predict_sliced(img, **SLICED)
     assert capped["cap_hit"] is True
     assert capped["count"] == uncapped["count"] - 1
 
     # Exactly at the cap: no slicing occurs, but cap_hit still reads True (matching
     # records_from_detector's own >= convention: sitting at the ceiling is still uncertain).
     pred.max_dets = uncapped["count"]
-    at_cap = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    at_cap = pred.predict_sliced(img, **SLICED)
     assert at_cap["cap_hit"] is True
     assert at_cap["count"] == uncapped["count"]
 
     pred.max_dets = uncapped["count"] + 1
-    not_capped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    not_capped = pred.predict_sliced(img, **SLICED)
     assert not_capped["cap_hit"] is False
     assert not_capped["count"] == uncapped["count"]
 
 
-def test_predict_tiled_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
+def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
     """``prior``/``progress`` only apply to the windowed-reader resume seam; a whole-decode source
     (a plain path or ``BandGroupRef``) has no resume seam to feed them into, and silently dropping
     them would let a caller believe a whole-decode pass resumed when it quietly started over."""
@@ -102,12 +104,12 @@ def test_predict_tiled_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
     img = _image(tmp_path)
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    empty_prior = {"tile_info": [], "boxes": [], "scores": [], "labels": []}
+    empty_prior = {"slices": [], "boxes": [], "scores": [], "labels": []}
 
     with pytest.raises(ValueError, match="resume seam"):
-        pred.predict_tiled(img, tile_size=TILE, overlap=0.2, prior=empty_prior)
+        pred.predict_sliced(img, **SLICED, prior=empty_prior)
     with pytest.raises(ValueError, match="resume seam"):
-        pred.predict_tiled(img, tile_size=TILE, overlap=0.2, progress=lambda *a: None)
+        pred.predict_sliced(img, **SLICED, progress=lambda *a: None)
 
 
 def test_run_inference_tile_flag(tmp_path, monkeypatch):
@@ -118,24 +120,23 @@ def test_run_inference_tile_flag(tmp_path, monkeypatch):
     img = _image(tmp_path)
 
     r = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=True, tile_size=TILE, conf_threshold=0.0)
-    assert r["operating_point"]["tiled"]["value"] is True
+    assert r["slicing"] is not None
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
     assert r["operating_point"]["conf"]["validated_against"] == "false"
 
     r2 = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=False, conf_threshold=0.0)
-    assert r2["operating_point"]["tiled"]["value"] is False
+    assert r2["slicing"] is None
     assert len(r2["results"]) == 1  # non-tiled path still works
 
 
-def test_predict_tiled_whole_decode_channel_mismatch_refuses(tmp_path):
-    """The channel-count refusal on the whole-decode path (:class:`predict_tiled`'s path/
-    ``BandGroupRef`` source kind, not only the windowed-reader kind) is built on
+def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
+    """The channel-count refusal on the whole-decode path is built on
     ``derivations.probe_channels`` (the file's own real band count, independently probed), never on
     ``load_image``'s output: ``load_image(path, self.in_chans)`` is told what channel count to
     coerce toward before it returns anything, so comparing against its own output would never
     catch a mismatch. A real 5-band ``.npy`` file against a 3-``in_chans`` predictor raises before
-    any tile is read, never silently routing or coercing the file to 3 bands."""
+    any slice is read, never silently routing or coercing the file to 3 bands."""
     import numpy as np
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -150,10 +151,10 @@ def test_predict_tiled_whole_decode_channel_mismatch_refuses(tmp_path):
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="channel"):
-        p.predict_tiled(str(path), tile_size=TILE)
+        p.predict_sliced(str(path), **SLICED)
 
 
-def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(tmp_path):
+def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(tmp_path):
     """The rail must admit valid work, not only reject invalid work: an ordinary RGBA PNG (any
     photo with an alpha channel, common) has no real 4-vs-3 mismatch, since ``load_image``'s own
     PIL conversion coerces it to RGB before the model ever sees it, the same as the untiled
@@ -171,7 +172,7 @@ def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_
 
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    result = pred.predict_tiled(str(path), tile_size=TILE)
+    result = pred.predict_sliced(str(path), **SLICED)
     assert result["width"] == 128 and result["height"] == 128
 
 

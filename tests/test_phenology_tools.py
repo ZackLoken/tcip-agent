@@ -1858,7 +1858,8 @@ def test_classification_items_refuses_a_classified_bucket_with_no_map_and_no_reg
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     _write_pair(gt_dir, pred_dir, gt_value="open")
     stamp = operating_point_stamp(
-        {}, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        {}, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[],
         id_map=None, subject="bud", attribute="opening", trait=None, dataset_hash=None,
         checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None,
@@ -1914,7 +1915,8 @@ def test_classification_items_refuses_an_id_map_not_declaring_the_positive_value
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     _write_pair(gt_dir, pred_dir, gt_value="closed", pred_value="closed")
     stamp = operating_point_stamp(
-        {}, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        {}, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[],
         id_map={"closed": 0, "other": 1}, subject="bud", attribute="opening", trait=None,
         dataset_hash=None, checkpoint=None, checkpoint_sha256=None, experiment_id=None,
         images_dir=None, raster_path=None, produced_at=None,

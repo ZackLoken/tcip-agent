@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")
 
 import tcip_store  # noqa: E402
@@ -55,7 +57,7 @@ def _write_split(experiment_id: str, train_stems: list[str]) -> None:
 
 def _resolve(experiment_id: str):
     return resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         experiment_id=experiment_id, calibration_labels_dir=LABELS_DIR,
         calibration_records=_records(CAL_STEMS, 0.0),
         holdout_records=_records(HOLD_STEMS, 100000.0))

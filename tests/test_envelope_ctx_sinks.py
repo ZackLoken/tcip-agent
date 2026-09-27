@@ -215,7 +215,7 @@ def test_calibration_defaults_to_the_experiment_this_run_belongs_to(tmp_path, mo
     run = create_run(dict(CONFIG), str(tmp_path / "out"), id="auto-run-96")
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expOwn", task="detection")
 
-    ctx.calibrate("bud_opening", calibration_records=[], holdout_records=[], tiled=False,
+    ctx.calibrate("bud_opening", calibration_records=[], holdout_records=[], slicing=None,
                   staged_conf_floor=0.05)
 
     assert seen["trait_name"] == "bud_opening"
@@ -230,7 +230,7 @@ def test_calibration_keeps_an_experiment_the_caller_named(tmp_path, monkeypatch)
     ctx = TrainContext(run=run, train_loader=None, experiment_id="expOwn", task="detection")
 
     ctx.calibrate("bud_opening", experiment_id="expOther", calibration_records=[], holdout_records=[],
-                  tiled=False, staged_conf_floor=0.05)
+                  slicing=None, staged_conf_floor=0.05)
 
     assert seen["experiment_id"] == "expOther"
 
