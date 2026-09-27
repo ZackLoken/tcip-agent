@@ -21,6 +21,7 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
+from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 SUBJECT = "bur"
 IMG = 100
@@ -356,7 +357,11 @@ def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: 
     objects of the calibration reference: stacked crowd regions beside them move neither."""
     from tests import _operationalization_fixtures as fx
 
+    from types import SimpleNamespace
+
+    from tcip_mcp.pipelines.calibration import resolve_pass_merge
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     fx.write_spec(tmp_path, fx.COUNT_SPEC)
@@ -374,10 +379,18 @@ def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: 
                                                width=IMG, height=IMG)[1])
         return out
 
-    resolved = [resolve_operating_point(fx.COUNT_TRAIT, dataset_hash="h", tiled=True,
+    resolved = [resolve_operating_point(fx.COUNT_TRAIT, dataset_hash="h", **tiled_regime(),
                                         calibration_records=records(crowd))
                 for crowd in (True, False)]
-    for name in ("localization_tolerance_frac", "cross_tile_nms"):
-        with_crowd, without = (bundle.get(name) for bundle in resolved)
-        assert without.source == "derived", (name, without)
-        assert with_crowd.value == without.value, name
+    with_crowd, without = (bundle.get("localization_tolerance_frac") for bundle in resolved)
+    assert without.source == "derived", without
+    assert with_crowd.value == without.value
+
+    slicing = tiled_regime()["slicing"]
+    merges = []
+    for crowd in (True, False):
+        p = SimpleNamespace(slicing=slicing, cross_tile_nms=resolve_cross_tile_nms(None, slicing))
+        resolve_pass_merge(p, [record["gt"] for record in records(crowd)])
+        merges.append(p.cross_tile_nms)
+    assert merges[1].source == "derived", merges[1]
+    assert merges[0].value == merges[1].value

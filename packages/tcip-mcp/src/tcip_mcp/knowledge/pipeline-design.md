@@ -18,8 +18,10 @@ Derive it by measuring the dataset, not by classifying the trait:
 - `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object elongation that
   actually occurs here, rather than an assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
-  them. `pipelines.derivations.derive_cross_tile_nms` returns `None` when the GT gives no basis
-  for a threshold; that `None` is expected, not a failure.
+  them. `pipelines.derivations.derive_cross_tile_nms` reads the GT's neighbor-overlap tail in the
+  metric your cross-tile merge compares over (IoU for `nms`, IoS for `nmm`/`greedynmm`, the IoS
+  derivation provisional until validated), and returns `None` when the GT gives no basis for a
+  threshold; that `None` is expected, not a failure.
 - Capture-date bucketing from `ingest_images`: whether a time series exists at all, and at what
   cadence.
 

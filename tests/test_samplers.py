@@ -39,8 +39,9 @@ def _frame(width=10000, channels=3, itemsize=1, windowed=True):
             "dtype_itemsize": itemsize, "windowed": windowed}
 
 
-def _lattice_entries(stems, tile_ys=(0, 512, 1024, 1536), tile_xs=(0, 512, 1024)):
-    return [(stem, tx, ty) for stem in stems for ty in tile_ys for tx in tile_xs]
+def _lattice_entries(stems, tile_ys=(0, 512, 1024, 1536), tile_xs=(0, 512, 1024), tile=512):
+    return [(stem, (tx, ty, tx + tile, ty + tile))
+            for stem in stems for ty in tile_ys for tx in tile_xs]
 
 
 def _two_source_dataset():
@@ -52,9 +53,9 @@ def _two_source_dataset():
 
 def _band_key(dataset, sampler, idx):
     """(stem, band ordinal) for a tile index, from the lattice and the derived band height."""
-    stem, _tx, ty = dataset.tile_entries[idx]
-    ys = sorted({y for s, _x, y in dataset.tile_entries if s == stem})
-    return stem, ys.index(ty) // sampler.band_tile_rows
+    stem, box = dataset.tile_entries[idx]
+    ys = sorted({b[1] for s, b in dataset.tile_entries if s == stem})
+    return stem, ys.index(box[1]) // sampler.band_tile_rows
 
 
 def _assert_contiguous_bands(dataset, sampler, indices):

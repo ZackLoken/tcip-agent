@@ -174,7 +174,7 @@ def check_model_contract(
 
     ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None,
     "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
-    score_thresh/nms_thresh/detections_per_img the model exposes wherever it holds them
+    score_thresh/detections_per_img the model exposes wherever it holds them
     (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), for a detection
     or instance segmentation task; ``None`` for every other task.
 
@@ -188,7 +188,7 @@ def check_model_contract(
                               "eval_output_type": None, "not_smokeable": None,
                               "gradient_magnitudes": None, "operating_point_knobs": None}
     if task in _DETECTION_TASKS:
-        # Which of score_thresh/nms_thresh/detections_per_img the model exposes, wherever it holds
+        # Which of score_thresh/detections_per_img the model exposes, wherever it holds
         # them (detector_operating_point_holder), a fact beside the smoke's own pass/fail verdict.
         from tcip_mcp.pipelines.operating_point import (
             OPERATING_POINT_ATTRS, detector_operating_point_holder,

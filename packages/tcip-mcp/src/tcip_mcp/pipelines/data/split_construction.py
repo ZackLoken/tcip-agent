@@ -148,9 +148,9 @@ def spatial_single_source_split(
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` either way.
     """
     from tcip_mcp.pipelines.data.datasets import (
-        TILE_OVERLAP, TILE_SIZE, DetectionDataset, TiledDetectionDataset, build_dataset,
-        tile_kwargs_from_tiling,
+        TILE_SIZE, DetectionDataset, TiledDetectionDataset, build_dataset, tile_kwargs_from_tiling,
     )
+    from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP
     from tcip_mcp.pipelines.data.splits import (
         DEFAULT_VAL_RATIO, label_document_extent, spatial_strip_split,
     )
@@ -180,7 +180,7 @@ def spatial_single_source_split(
     # The tiler's own defaults, so the geometry derived here and the datasets built below resolve
     # to one lattice.
     tile_size = tile_kwargs.get("tile_size", TILE_SIZE)
-    overlap = tile_kwargs.get("overlap", TILE_OVERLAP)
+    overlap = tile_kwargs.get("overlap", DEFAULT_OVERLAP)
     val_ratio = float(split_cfg.get("val_ratio", DEFAULT_VAL_RATIO))
     test_ratio = float(split_cfg.get("test_ratio", 0.1))
     if reserve_cal:
@@ -240,8 +240,7 @@ def spatial_single_source_split(
     def _identities(ds) -> list[str]:
         # Through the dataset's own member stem: a tile is keyed by the sample it was cut from,
         # and a region identity names the bare stem every consumer of this manifest joins on.
-        raw = {spatial.identity_for(ds.member_of(key), tx, ty)
-               for key, tx, ty in ds.tile_entries}
+        raw = {spatial.identity_for(ds.member_of(key), box) for key, box in ds.tile_entries}
         return sorted(name for name in raw if name is not None)
 
     split_cfg["resolved_group_by"] = "spatial_strip"

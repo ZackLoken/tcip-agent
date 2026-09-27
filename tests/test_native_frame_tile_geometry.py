@@ -62,23 +62,11 @@ class _MiddleHalfDetector(torch.nn.Module):
         return self.transform.postprocess(results, image_list.image_sizes, original_sizes)
 
 
-class _MiddleHalfMaskDetector(_MiddleHalfDetector):
-    """The same, plus one soft mask per detection at the size of the tensor handed in, the shape a
-    torchvision Mask R-CNN's own ``masks`` come back at."""
-
-    def forward(self, images):
-        results = super().forward(images)
-        for im, res in zip(images, results):
-            h, w = int(im.shape[-2]), int(im.shape[-1])
-            res["masks"] = torch.full((1, 1, h, w), 0.75)
-        return results
-
-
-def _geometry(stub, *, tile_size=None, overlap=None) -> tuple:
+def _geometry(stub, *, tile_size=None, overlap=None, tiled=True) -> tuple:
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
-    edge, source, _, _ = resolve_tile_geometry(stub, tile_size=tile_size, overlap=overlap)
-    return edge, source
+    g = resolve_tile_geometry(stub, tiled=tiled, tile_size=tile_size, overlap=overlap)
+    return g.tile_size, g.tile_size_source
 
 
 def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
@@ -99,6 +87,13 @@ def _image(tmp_path: Path, size: int = IMAGE) -> str:
     p = tmp_path / "img.png"
     Image.new("RGB", (size, size), (120, 120, 120)).save(p)
     return str(p)
+
+
+def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
+    """``predict_sliced`` at this module's lattice: ``TILE`` edge, no overlap, NMS at 0.3."""
+    return pred.predict_sliced(
+        source, tile_size=TILE, overlap=0.0, postprocess="nms", cross_tile_nms=0.3,
+        tile_batch_size=8, tile_resize=tile_resize, require_masks=True, **kwargs)
 
 
 def _expected_middle_half_boxes() -> set[tuple[float, float, float, float]]:
@@ -131,9 +126,11 @@ def test_persisted_tile_geometry_outranks_the_native_frame():
 
 
 def test_explicit_tile_size_outranks_the_native_frame():
+    """On an untiled pass a stated edge is a fact the resolver records as stated; a tiled pass
+    checks it against the native frame instead (the contradiction tests below)."""
     stub = _GeometryStub(train_native_size=[512, 512])
 
-    assert _geometry(stub, tile_size=320) == (320, "explicit")
+    assert _geometry(stub, tile_size=320, tiled=False) == (320, "explicit")
 
 
 @pytest.mark.parametrize("stamp", [None, [512], [0, 0], ["wide", "tall"], 512, [-4, -4]])
@@ -188,14 +185,20 @@ def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(
 def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     """An explicit or persisted-geometry tile edge means the tile as it stands, which is what every
     count already produced at those tiers was measured at."""
-    from tcip_mcp.pipelines.inference.predictor import native_ratio_tile_resize
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
-    stub = _GeometryStub(train_native_size=[512, 512], train_augmentation={"resize": [640, 640]})
+    augmentation = {"resize": [640, 640]}
+    native = _GeometryStub(train_native_size=[512, 512], train_augmentation=augmentation)
+    persisted = _GeometryStub(train_tile_size=512, train_augmentation=augmentation)
 
-    assert native_ratio_tile_resize(stub, "native_ratio") == (640, 640)
-    assert native_ratio_tile_resize(stub, "derived") is None
-    assert native_ratio_tile_resize(stub, "explicit") is None
-    assert native_ratio_tile_resize(stub, "unavailable") is None
+    def resize(stub, **kw):
+        return resolve_tile_geometry(stub, overlap=None, **kw).tile_resize
+
+    assert resize(native, tiled=True, tile_size=None) == (640, 640)
+    assert resize(native, tiled=False, tile_size=None) is None
+    assert resize(persisted, tiled=True, tile_size=None) is None
+    assert resize(native, tiled=True, tile_size=512) is None
+    assert resize(_GeometryStub(train_augmentation=augmentation), tiled=True, tile_size=None) is None
 
 
 def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
@@ -232,7 +235,7 @@ def test_tiles_at_native_size_with_no_recorded_resize(tmp_path):
     size and nothing else. Boxes land in image pixel space untouched by any rescale."""
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    r = pred.predict_tiled(_image(tmp_path), tile_size=TILE, overlap=0.0, tile_resize=None)
+    r = _sliced(pred, _image(tmp_path), tile_resize=None)
 
     assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
 
@@ -245,7 +248,7 @@ def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detector
     one scalar factor instead of two would displace every y coordinate."""
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    r = pred.predict_tiled(_image(tmp_path), tile_size=TILE, overlap=0.0, tile_resize=(128, 96))
+    r = _sliced(pred, _image(tmp_path), tile_resize=(128, 96))
 
     boxes = sorted(tuple(round(v, 4) for v in b) for b in r["boxes"])
     assert boxes == sorted(_expected_middle_half_boxes())
@@ -268,8 +271,7 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
 
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    r = pred.predict_tiled(_Reader(), tile_size=TILE, overlap=0.0, tile_resize=(128, 96),
-                           source_label="raster")
+    r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
 
@@ -301,8 +303,7 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplo
     pred.in_chans = 4
 
     with caplog.at_level(logging.WARNING):
-        r = pred.predict_tiled(_Reader(), tile_size=TILE, overlap=0.0, tile_resize=(128, 96),
-                               source_label="raster")
+        r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
     assert not any("recorded train-time resize" in m for m in caplog.messages)
@@ -328,26 +329,10 @@ def test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels(caplog):
     pred.in_chans = 4
 
     with caplog.at_level(logging.WARNING):
-        r = pred.predict_tiled(_Reader(), tile_size=TILE, overlap=0.0, tile_resize=(128, 96),
-                               source_label="raster")
+        r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
     assert any("recorded train-time resize" in m for m in caplog.messages)
-
-
-def test_mask_patches_come_back_at_the_native_tile_size(tmp_path):
-    """A mask arrives at the resized tile's size; ``reconstruct_core`` places patches by the tile's
-    own origin in native pixels, so a patch left at the resized size would be offset into the wrong
-    pixels."""
-    pred = _stub_predictor(_MiddleHalfMaskDetector(min_size=800, max_size=1333),
-                           task="instance_seg")
-
-    r = pred.predict_tiled(_image(tmp_path), tile_size=TILE, overlap=0.0, tile_resize=(128, 96))
-
-    assert r["masks"], "instance_seg tiled inference carries mask patches by default"
-    for m in r["masks"]:
-        patch = m["mask_patch"]
-        assert (len(patch), len(patch[0])) == (TILE, TILE)
 
 
 def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
@@ -364,7 +349,7 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
     with caplog.at_level(logging.WARNING):
-        r = pred.predict_tiled(str(path), tile_size=TILE, overlap=0.0, tile_resize=(128, 96))
+        r = _sliced(pred, str(path), tile_resize=(128, 96))
 
     assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
     assert any("recorded train-time resize" in m for m in caplog.messages)
@@ -412,7 +397,7 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
                                    conf_threshold=0.0)
 
     assert "error" not in r
-    assert r["operating_point"]["tiled"]["value"] is True and len(r["results"]) == 1
+    assert r["slicing"] is not None and len(r["results"]) == 1
     tile_param = r["operating_point"]["tile_size"]
     assert tile_param["value"] == TILE
     assert tile_param["validated_against"] != "false"
@@ -434,7 +419,7 @@ def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp
 
     r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", conf_threshold=0.0)
 
-    assert r["operating_point"]["tiled"]["value"] is False
+    assert r["slicing"] is None
     assert r["operating_point"]["tile_size"]["value"] is None
 
 
@@ -453,7 +438,7 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
 
     r = run_inference_verified(ckpt, images_dir=str(Path(_image(tmp_path)).parent), device="cpu", conf_threshold=0.0)
 
-    assert "error" not in r and r["operating_point"]["tiled"]["value"] is False and len(r["results"]) == 1
+    assert "error" not in r and r["slicing"] is None and len(r["results"]) == 1
 
 
 def _native_frame_gt(images_dir: Path, labels_dir: Path) -> None:
@@ -499,7 +484,7 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     its recorded augmentation chain pins a real resize the native-frame regime alone must run each
     tile through and undo, so the two runs are not merely two identical no-resize calls."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
@@ -535,23 +520,22 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     # match": run the exact geometry each regime resolved directly and compare coordinates.
     persisted_predictor, native_predictor = (
         _persisted_regime_predictor(), _native_frame_regime_predictor())
-    p_tile, _, p_overlap, _, p_resize = resolve_tile_regime(
-        persisted_predictor, tiled=True, tile_size=None, overlap=None)
-    n_tile, _, n_overlap, _, n_resize = resolve_tile_regime(
-        native_predictor, tiled=True, tile_size=None, overlap=None)
-    assert n_resize == (TILE * 2, TILE * 2)
-    r_p = persisted_predictor.predict_tiled(str(images_dir / "a.png"), tile_size=p_tile,
-                                            overlap=p_overlap, tile_resize=p_resize,
-                                            require_masks=False)
-    r_n = native_predictor.predict_tiled(str(images_dir / "a.png"), tile_size=n_tile,
-                                         overlap=n_overlap, tile_resize=n_resize,
-                                         require_masks=False)
+    p_geo = resolve_tile_geometry(persisted_predictor, tiled=True, tile_size=None, overlap=None)
+    n_geo = resolve_tile_geometry(native_predictor, tiled=True, tile_size=None, overlap=None)
+    assert n_geo.tile_resize == (TILE * 2, TILE * 2)
+    common = dict(postprocess="nms", cross_tile_nms=0.3, tile_batch_size=8, require_masks=False)
+    r_p = persisted_predictor.predict_sliced(str(images_dir / "a.png"), tile_size=p_geo.tile_size,
+                                             overlap=p_geo.overlap, tile_resize=p_geo.tile_resize,
+                                             **common)
+    r_n = native_predictor.predict_sliced(str(images_dir / "a.png"), tile_size=n_geo.tile_size,
+                                          overlap=n_geo.overlap, tile_resize=n_geo.tile_resize,
+                                          **common)
     assert ({tuple(b) for b in r_p["boxes"]} == {tuple(b) for b in r_n["boxes"]}
             == _expected_middle_half_boxes())
 
 
-def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_tiled(tmp_path):
-    """A native-frame checkpoint whose recorded chain pins a resize reaches ``predict_tiled``
+def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_sliced(tmp_path):
+    """A native-frame checkpoint whose recorded chain pins a resize reaches ``predict_sliced``
     with it, so the evaluation door never silently runs each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
@@ -566,13 +550,13 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     def _spy_predictor(*a, **kw):
         p = _native_frame_regime_predictor()
-        real_predict_tiled = p.predict_tiled
+        real_predict_sliced = p.predict_sliced
 
         def _spy(*a, **kwargs):
             captured.update(kwargs)
-            return real_predict_tiled(*a, **kwargs)
+            return real_predict_sliced(*a, **kwargs)
 
-        p.predict_tiled = _spy
+        p.predict_sliced = _spy
         return p
 
     build = predictor_mod.build_predictor
@@ -591,12 +575,12 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
 
 def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
-    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
     with pytest.raises(TileEdgeContradiction) as exc_info:
-        resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
+        resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
     assert str(exc_info.value) == (
         "stated tile_size 64 contradicts this checkpoint's own persisted training tile geometry "
         "of 128. Pass tile_size 128 to match the checkpoint, or leave tile_size unset to derive "
@@ -605,12 +589,12 @@ def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
 
 
 def test_an_explicit_edge_contradicting_the_native_frame_refuses():
-    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_geometry
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
     with pytest.raises(TileEdgeContradiction) as exc_info:
-        resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
+        resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
     assert str(exc_info.value) == (
         "stated tile_size 64 contradicts this checkpoint's own recorded untiled training frame "
         "of 512. Pass tile_size 512 to match the checkpoint, or leave tile_size unset to derive "
@@ -620,66 +604,47 @@ def test_an_explicit_edge_contradicting_the_native_frame_refuses():
 
 def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
     """The edge never governs a count when the run doesn't tile, so it is never checked."""
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
-    edge, source = resolve_tile_regime(stub, tiled=False, tile_size=64, overlap=None)[:2]
+    g = resolve_tile_geometry(stub, tiled=False, tile_size=64, overlap=None)
 
-    assert (edge, source) == (64, "explicit")
+    assert (g.tile_size, g.tile_size_source, g.tile_size_derived_from) == (64, "explicit", None)
 
 
 def test_an_explicit_edge_equal_to_persisted_geometry_clears():
-    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
 
-    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=128, overlap=None)[:2]
+    g = resolve_tile_geometry(stub, tiled=True, tile_size=128, overlap=None)
 
-    assert (edge, source) == (128, "explicit")
-    assert explicit_edge_provenance(stub, 128) == (
-        "equal to the checkpoint's persisted training tile geometry")
+    assert (g.tile_size, g.tile_size_source) == (128, "explicit")
+    assert g.tile_size_derived_from == "equal to the checkpoint's persisted training tile geometry"
 
 
 def test_an_explicit_edge_equal_to_the_native_frame_clears():
-    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
-    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=512, overlap=None)[:2]
+    g = resolve_tile_geometry(stub, tiled=True, tile_size=512, overlap=None)
 
-    assert (edge, source) == (512, "explicit")
-    assert "recorded untiled training frame" in explicit_edge_provenance(stub, 512)
+    assert (g.tile_size, g.tile_size_source) == (512, "explicit")
+    assert "recorded untiled training frame" in g.tile_size_derived_from
 
 
 def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
     """The foreign-checkpoint case: nothing to contradict, so any stated edge stands."""
-    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
     stub = _GeometryStub()
 
-    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)[:2]
+    g = resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
 
-    assert (edge, source) == (64, "explicit")
-    assert explicit_edge_provenance(stub, 64) == "stated on a checkpoint that records no tile geometry"
-
-
-def test_explicit_edge_provenance_refuses_to_describe_a_contradicting_edge():
-    """An edge that differs from geometry the checkpoint does record is a contradiction, never a
-    checkpoint that records no tile geometry: the helper must not describe it that way."""
-    from tcip_mcp.pipelines.inference.predictor import (
-        TileEdgeContradiction, explicit_edge_provenance,
-    )
-
-    stub = _GeometryStub(train_tile_size=128)
-
-    with pytest.raises(TileEdgeContradiction) as exc_info:
-        explicit_edge_provenance(stub, 64)
-    assert str(exc_info.value) == (
-        "stated tile_size 64 contradicts this checkpoint's own persisted training tile geometry "
-        "of 128. Pass tile_size 128 to match the checkpoint, or leave tile_size unset to derive "
-        "it from the checkpoint."
-    )
+    assert (g.tile_size, g.tile_size_source) == (64, "explicit")
+    assert g.tile_size_derived_from == "stated on a checkpoint that records no tile geometry"
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:

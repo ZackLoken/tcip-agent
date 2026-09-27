@@ -34,6 +34,7 @@ from tcip_mcp.pipelines.resolution import (
 
 def _stamp(*, validated_by=None, **overrides) -> dict:
     fields = dict(
+        slicing=None,
         validated=True,
         tile_size_validated=None,
         shippable_issues=[],
@@ -393,24 +394,33 @@ def test_geometry_reference_strength_matches_the_mapping_it_is_defined_beside():
 # --- the block-calibrated whole-mosaic regime ---
 
 def _block_bundle() -> ResolvedBundle:
-    return ResolvedBundle(trait="bud_opening", dataset_hash="mosaic1", params={
+    from tests._regime_fixtures import tiled_regime
+
+    return ResolvedBundle(trait="bud_opening", dataset_hash="mosaic1",
+                          slicing=tiled_regime()["slicing"], params={
         "conf": ResolvedParam("conf", 0.42, source="derived", derived_from="count-unbiased",
                               requires_validation=True, validation_kind="annotations",
                               validated_against=VALIDATED_HELD_OUT),
         "cross_tile_nms": default("cross_tile_nms", 0.25),
-        "tiled": default("tiled", True),
         "tile_size": default("tile_size", 640),
         "max_dets": ResolvedParam("max_dets", 37, source="derived", derived_from="band density"),
     })
 
 
+def _persisted_geometry():
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+
+    return TileGeometry(640, "derived", None, 0.2, "derived", None)
+
+
 def test_block_calibrated_export_ships_at_what_the_reserved_bands_measured():
     block = _block_bundle()
     export = block_calibrated_export_operating_point(
-        block, trait="bud_opening", tile_size=640, tile_size_source="derived")
+        block, trait="bud_opening", geometry=_persisted_geometry())
 
     assert export.get("conf") is block.get("conf")
     assert export.get("cross_tile_nms") is block.get("cross_tile_nms")
+    assert export.slicing == block.slicing
     assert export.dataset_hash == "mosaic1"
 
 
@@ -418,7 +428,7 @@ def test_block_calibrated_export_does_not_inherit_the_band_scoped_detection_cap(
     """The block bundle's cap is one reserved band's density; adopting it would truncate the count
     over the whole mosaic, which is the phenotype."""
     export = block_calibrated_export_operating_point(
-        _block_bundle(), trait="bud_opening", tile_size=640, tile_size_source="derived")
+        _block_bundle(), trait="bud_opening", geometry=_persisted_geometry())
 
     assert export.get("max_dets").value is None
     assert "not transferred" in export.get("max_dets").derived_from
@@ -426,9 +436,8 @@ def test_block_calibrated_export_does_not_inherit_the_band_scoped_detection_cap(
 
 def test_block_calibrated_export_gates_its_tile_scale_like_every_other_door():
     export = block_calibrated_export_operating_point(
-        _block_bundle(), trait="bud_opening", tile_size=640, tile_size_source="derived")
+        _block_bundle(), trait="bud_opening", geometry=_persisted_geometry())
     tile = export.get("tile_size")
 
     assert tile.requires_validation is True
     assert tile.validated_against == VALIDATED_PERSISTED_GEOMETRY
-    assert export.get("tiled").value is True

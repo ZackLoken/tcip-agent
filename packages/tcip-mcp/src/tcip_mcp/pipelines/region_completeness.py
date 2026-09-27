@@ -73,8 +73,9 @@ def _bin_annotations(
     """Every one of ``annotations`` whose center falls in one of ``cells``, in one pass over
     ``annotations``: O(annotations + cells). No subject filter.
 
-    ``overlap == 0.0`` bins by direct ``tile_size`` floor-division of each annotation's center, the
-    origin math :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` uses. A non-zero overlap
+    ``cells`` are a reference grid's (:func:`~tcip_mcp.pipelines.reference_grid.reference_cells`),
+    never the tiled-inference lattice: at ``overlap == 0.0`` their origins sit at multiples of
+    ``tile_size``, so each annotation's center bins by direct floor-division. A non-zero overlap
     falls back to per-cell containment.
     """
     buckets: dict[str, list[Annotation]] = {c.name: [] for c in cells}
@@ -129,10 +130,8 @@ def cell_annotation_digests(
     annotations: list[Annotation], subject: str, cells: list[Cell], tile_size: int,
     overlap: float = 0.0,
 ) -> dict[str, str]:
-    """:func:`cell_annotation_digest` for every cell in ``cells`` at once, via
-    :func:`annotations_by_cell`'s shared one-pass binning rather than one digest computation per
-    cell.
-    """
+    """:func:`cell_annotation_digest` for every cell in ``cells``, over
+    :func:`annotations_by_cell`'s binning."""
     by_cell = annotations_by_cell(annotations, subject, cells, tile_size, overlap)
     return {name: _digest_of_records([stored_content(a) for a in anns])
             for name, anns in by_cell.items()}
@@ -204,7 +203,7 @@ def incomplete_cells_for_rect(
     from tcip_mcp.dataset_layout import (
         region_completeness_digest_key, region_completeness_key, status_bucket,
     )
-    from tcip_mcp.pipelines.data.tiling import rects_overlap
+    from tcip_mcp.pipelines.raster_source import rects_overlap
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     bucket = status_bucket(subject, stem)

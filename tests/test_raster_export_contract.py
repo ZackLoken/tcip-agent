@@ -34,15 +34,15 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
 
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
-    real_predict_tiled = GenericPredictor.predict_tiled
+    real_predict_sliced = GenericPredictor.predict_sliced
     passes: list[dict] = []
 
-    def _capture_predict_tiled(self, source, **kwargs):
-        result = real_predict_tiled(self, source, **kwargs)
+    def _capture_predict_sliced(self, source, **kwargs):
+        result = real_predict_sliced(self, source, **kwargs)
         passes.append({"max_dets": self.max_dets, "count": result.get("count")})
         return result
 
-    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_predict_tiled)
+    monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture_predict_sliced)
 
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -101,7 +101,7 @@ def test_the_raster_door_runs_at_the_operating_point_its_prepared_pass_states(tm
 
     prepared = _prepare_pass(
         load_registered_checkpoint(exp["checkpoint_path"]), images_dir=None, conf_threshold=0.0,
-        device=None, tile=True, tile_size=TILE, overlap=0.2, global_nms_iou=None,
+        device=None, tile=True, tile_size=TILE, overlap=0.2, cross_tile_nms=None,
         max_dets=None, postprocess="nms", experiment_id=None,
         tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
     assert not isinstance(prepared, str), prepared

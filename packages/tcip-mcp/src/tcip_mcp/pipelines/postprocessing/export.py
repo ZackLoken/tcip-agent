@@ -98,16 +98,11 @@ def write_predictions_json(
     cannot decode. ``keep_empty=True`` so a processed image with zero detections still yields an
     ``{"annotations": []}`` file. ``created_by`` stamps the producing model on every prediction.
 
-    When ``result`` carries ``masks`` (``instance_seg``), each mask is binarized via
-    :func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold` and converted
-    to a ``Polygon`` with one ring per connected component. A mask that binarizes to nothing falls
-    back to the detection's ``BBox`` (a warning is logged). Each entry is either a dense ``[H, W]``
-    array already in full-image coordinates (the untiled predictors' shape) or a ``{"mask_patch",
-    "offset_x", "offset_y"}`` dict (the tiled predictors' shape); the offset, when present, is
-    added to every ring point, clipped to the image's own ``width``/``height``.
-
-    The threshold is an unvalidated run constant recorded in the run's ``operating_point.json``
-    through :func:`mask_binarize_provenance`, not on each annotation.
+    When ``result`` carries ``masks`` (``instance_seg``), each is a ``{"segmentation"}`` dict of
+    flat polygons in full-image pixels, binarized by the predictor at the threshold the result's
+    own ``mask_binarize`` records, and becomes a ``Polygon`` with one ring per polygon. A mask
+    that binarized to nothing falls back to the detection's ``BBox`` (a warning is logged). The
+    threshold is recorded once in the run's ``operating_point.json``, not on each annotation.
 
     A detection whose box or mask-derived box has no extent is dropped. Returns the number dropped.
     Mutates ``result`` in place to drop the same entries from its
@@ -180,54 +175,26 @@ def write_predictions_json(
     return dropped
 
 
-def mask_binarize_provenance() -> dict:
-    """The run-constant unvalidated binarize threshold ``_mask_geometry_for_export`` actually used,
-    as a stamp for the caller's own ``operating_point.json``, never a per-annotation attribute (see
-    :func:`write_predictions_json`'s docstring). Call once per run, when ``masks`` were present."""
-    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
-
-    return resolve_binarize_threshold().to_provenance()
-
-
 def _mask_geometry_for_export(
-    mask, bbox_xyxy: tuple[float, float, float, float], subject: str, *,
+    mask: dict, bbox_xyxy: tuple[float, float, float, float], subject: str, *,
     image_size: tuple[int, int] | None = None,
 ) -> BBox | Polygon:
-    """One detection's soft mask -> a real (possibly multi-ring) Polygon, or BBox if empty.
+    """One detection's mask -> a real (possibly multi-ring) Polygon, or BBox if empty.
 
-    ``mask`` is either a dense array already in full-image coordinates (the untiled predictors'
-    shape) or a ``{"mask_patch", "offset_x", "offset_y"}`` dict (the tiled predictors' shape, see
-    :meth:`tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor._tiled_infer_core`): the
-    contour is extracted from the patch in its own local coordinates, then every ring point is
-    shifted by the patch's offset and clipped to ``image_size`` (``(width, height)``), so a patch
-    drawn from a zero-padded boundary tile can never place a stored point outside the image.
+    ``mask`` is a ``{"segmentation"}`` dict of flat ``[x0, y0, x1, y1, ...]`` polygons in
+    full-image pixels (the record
+    :meth:`tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor._detection_record`
+    builds), each polygon one ring with every point clipped to ``image_size`` (``(width,
+    height)``).
     """
     from tcip_annotation.state import BBox, Polygon
-    from tcip_mcp.pipelines.measurement.mask_geometry import (
-        mask_to_polygon_points, resolve_binarize_threshold,
-    )
 
-    offset_x = offset_y = 0
-    patch = mask
-    if isinstance(mask, dict):
-        patch = mask["mask_patch"]
-        offset_x, offset_y = int(mask["offset_x"]), int(mask["offset_y"])
-
-    threshold = resolve_binarize_threshold().unvalidated_value(acknowledge_unvalidated=True)
-    rings = mask_to_polygon_points(patch, threshold=threshold)
-    if offset_x or offset_y:
-        max_x = image_size[0] if image_size else None
-        max_y = image_size[1] if image_size else None
-        rings = [
-            [(_clip(x + offset_x, max_x), _clip(y + offset_y, max_y)) for x, y in ring]
-            for ring in rings
-        ]
+    max_x, max_y = image_size if image_size else (None, None)
+    rings = [[(_clip(flat[i], max_x), _clip(flat[i + 1], max_y))
+              for i in range(0, len(flat) - 1, 2)] for flat in mask["segmentation"]]
     if rings:
         return Polygon(rings=rings)
-    logger.warning(
-        "%s: mask binarized to nothing at threshold=%.3f, exporting BBox (no contour to store).",
-        subject, threshold,
-    )
+    logger.warning("%s: mask binarized to nothing, exporting BBox (no contour to store).", subject)
     x1, y1, x2, y2 = bbox_xyxy
     return BBox(x1, y1, x2, y2)
 

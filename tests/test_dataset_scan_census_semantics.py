@@ -77,7 +77,7 @@ def test_operating_point_stamp_is_not_counted_as_a_prediction(tmp_path: Path):
             96, 64,
         )
     (pred_dir / "operating_point.json").write_text(
-        json.dumps({"conf": 0.41, "nms_iou": 0.5}), encoding="utf-8"
+        json.dumps({"conf": 0.41, "cross_tile_nms": 0.5}), encoding="utf-8"
     )
 
     result = scan_dataset(str(root))

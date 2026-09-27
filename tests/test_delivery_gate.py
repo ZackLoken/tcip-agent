@@ -852,7 +852,7 @@ def test_deliver_per_image_counts_ships_when_tile_size_has_a_real_basis(tmp_path
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
-        tmp_path, trait=fx.COUNT_TRAIT, tiled=True, tile_size=224, tile_size_source="derived"))
+        tmp_path, trait=fx.COUNT_TRAIT, postprocess="nms", tile_size=224, tile_size_source="derived"))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
@@ -871,7 +871,7 @@ def test_deliver_per_image_counts_never_gates_tile_size_when_untiled(tmp_path, m
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
-                            tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
+                            tmp_path, trait=fx.COUNT_TRAIT))
     r = itools.deliver_per_image_counts(
         _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(tmp_path),
@@ -891,7 +891,7 @@ def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_cs
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
-                            tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
+                            tmp_path, trait=fx.COUNT_TRAIT))
     refused = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
@@ -993,7 +993,7 @@ def test_run_inference_ships_when_tile_size_has_a_real_basis(
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
-        tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
+        tmp_path, postprocess="nms", tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
@@ -1014,7 +1014,7 @@ def test_run_inference_never_gates_tile_size_when_untiled(
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _earned_run_inference_result(tmp_path, tiled=False))
+                        lambda *a, **kw: _earned_run_inference_result(tmp_path))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
@@ -1135,7 +1135,7 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
     out_dir = tmp_path / "out"
     job = InferenceJob(
         job_id="gate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=tile, conf=0.25, iou=0.7, tile_size=tile_size,
+        output_dir=str(out_dir), tile=tile, conf=0.25, cross_tile_nms=0.7, tile_size=tile_size,
     )
     _worker(job)
     return job, out_dir
@@ -1209,8 +1209,7 @@ def test_gui_launch_with_no_tile_field_derives_from_the_checkpoint_not_a_default
     assert (out_dir / "img.json").exists()
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    op = read_operating_point_sidecar(out_dir)["operating_point"]
-    assert op["tiled"]["value"] is True
+    assert read_operating_point_sidecar(out_dir)["slicing"] is not None
     assert _sidecar_tile_reference(out_dir) == VALIDATED_PERSISTED_GEOMETRY
 
 
@@ -1224,8 +1223,7 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
     assert (out_dir / "img.json").exists()
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    op = read_operating_point_sidecar(out_dir)["operating_point"]
-    assert op["tiled"]["value"] is False
+    assert read_operating_point_sidecar(out_dir)["slicing"] is None
     assert _sidecar_tile_reference(out_dir) is None  # never entered the gate at all
 
 
@@ -1918,7 +1916,7 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
-        tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
+        tmp_path, trait=fx.COUNT_TRAIT))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
 
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),

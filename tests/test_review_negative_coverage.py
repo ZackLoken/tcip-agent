@@ -163,7 +163,8 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
         IMG_W, IMG_H,
     )
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
+        tile_size_validated=None,
         shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
@@ -198,7 +199,8 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
         IMG_W, IMG_H,
     )
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
+        tile_size_validated=None,
         shippable_issues=[], id_map={"leaf": 0}, trait="leaf", dataset_hash="H", checkpoint="m",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
         raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="leaf", attribute=None,
@@ -231,7 +233,8 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0070.json"), [], IMG_W, IMG_H, keep_empty=True)
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
+        tile_size_validated=None,
         shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
@@ -295,7 +298,8 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
+        tile_size_validated=None,
         shippable_issues=[], id_map={"bud": 0}, trait="bud", dataset_hash="H", checkpoint="m",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
         raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="bud", attribute=None,

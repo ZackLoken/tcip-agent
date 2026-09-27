@@ -213,7 +213,7 @@ def main() -> int:
                 # The bucket's own recorded scope and id_map, the shape run_inference stamps,
                 # written through the store so a database-bound backend's reader can see it.
                 stamp = operating_point_stamp(
-                    {"conf": {"value": 0.5, "source": "default"}},
+                    {"conf": {"value": 0.5, "source": "default"}}, slicing=None,
                     validated=False, validated_by=None, tile_size_validated=None,
                     shippable_issues=[], id_map=ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE,
                     trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,

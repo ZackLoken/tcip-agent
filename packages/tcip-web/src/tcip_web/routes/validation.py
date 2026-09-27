@@ -209,7 +209,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     )
 
     tile_size_prov = stamped_op.get("tile_size") or {}
-    tiled_prov = stamped_op.get("tiled") or {}
     review_tile_size = tile_size_prov.get("value")
     # From validated_against, not the bare source field, which a native-ratio edge shares with a
     # real persisted one: reading source alone would silently re-validate native-ratio on review.
@@ -218,10 +217,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         tile_size=review_tile_size)
     review_tile_size_derived_from = (
         tile_size_prov.get("derived_from") if review_tile_size is not None else None)
-    review_tiled = tiled_prov.get("value")
-    recorded_tiled_source = tiled_prov.get("source") if review_tiled is not None else None
-    review_tiled_source = (
-        recorded_tiled_source if isinstance(recorded_tiled_source, str) else "default")
 
     if review_tile_size_source == "explicit" and review_tile_size_derived_from is None:
         raise HTTPException(
@@ -240,8 +235,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "tile_size": review_tile_size,
         "tile_size_source": review_tile_size_source,
         "tile_size_derived_from": review_tile_size_derived_from,
-        "tiled": review_tiled,
-        "tiled_source": review_tiled_source,
+        # The pass the reviewed predictions came from, as the bucket's own stamp records it.
+        "slicing": sidecar["slicing"],
+        "cross_tile_nms": stamped_op.get("cross_tile_nms"),
         # The root the verdict store was opened on, so the split lock travels with the verdicts.
         "scope_root": req.dataset_root,
         # Where the reviewed images' own ground truth lives: a bound checkpoint's selection check

@@ -78,14 +78,12 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
-                        lambda *a, samples=None, **kw: SimpleNamespace(
-                            stems=list(samples) if samples is not None else ["a", "b"]))
+                        lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        lambda model, loader, device, task: [])
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
+                        lambda *a: ([], []))
 
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
@@ -144,17 +142,15 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
-                        lambda *a, samples=None, **kw: SimpleNamespace(
-                            stems=list(samples) if samples is not None else ["a", "b"]))
+                        lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
 
     def _resolve_locked(stems, **kw):
         return {"calibration": ["a"], "holdout": ["b"]}
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split", _resolve_locked)
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        lambda model, loader, device, task: [])
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
+                        lambda *a: ([], []))
 
     def _resolve_op(trait_name, **kw):
         calls["resolve_operating_point_kwargs"] = kw
@@ -180,11 +176,9 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     # The applied score_thresh (0.01) is threaded through as staged_conf_floor, not a bare
     # literal re-typed a third time.
     assert calls["resolve_operating_point_kwargs"]["staged_conf_floor"] == pytest.approx(0.01)
-    # This script's own pass (_records) is always untiled (a plain DataLoader, never
-    # predict_tiled); tiled=False must be stated explicitly, or resolve_operating_point's
-    # tiled=True default would wrongly gate (or falsely validate) a tile_size dimension that was
-    # never actually operative for this untiled calibration pass.
-    assert calls["resolve_operating_point_kwargs"]["tiled"] is False
+    # The script calibrates through the pass the checkpoint's own regime prepares: this
+    # checkpoint records no tile geometry, so the pass is untiled and states so.
+    assert calls["resolve_operating_point_kwargs"]["slicing"] is None
 
 
 def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypatch, tmp_path):
@@ -213,16 +207,14 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
-                        lambda *a, samples=None, **kw: SimpleNamespace(
-                            stems=list(samples) if samples is not None else ["a", "b"]))
+                        lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
     # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
     # DEFAULT_MAX_DETS (1000), a real, visible difference from the flat constant.
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 2)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        lambda model, loader, device, task: [])
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
+                        lambda *a: ([], []))
 
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
@@ -266,14 +258,12 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
-                        lambda *a, samples=None, **kw: SimpleNamespace(
-                            stems=list(samples) if samples is not None else ["a", "b"]))
+                        lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        lambda model, loader, device, task: [])
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
+                        lambda *a: ([], []))
 
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived

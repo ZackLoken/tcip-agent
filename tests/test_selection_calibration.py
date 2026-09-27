@@ -18,6 +18,7 @@ pytest.importorskip("pycocotools")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import recorded_side  # noqa: E402
+from tests._regime_fixtures import stub_pass  # noqa: E402
 
 IMG = 32
 SUBJECT = "bud"
@@ -211,7 +212,7 @@ def test_a_calibration_door_refuses_a_selections_recorded_rect(tmp_path: Path):
 
     with pytest.raises(ValueError, match="pixel rect"):
         calibration.calibrate_operating_point(
-            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]),
+            stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
 
 
@@ -360,8 +361,7 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-_CAL_KWARGS = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8, global_nms_iou=0.3,
-                   postprocess="nms", cross_tile_nms=None, max_dets=None, seed=0, holdout_ratio=0.5)
+_CAL_KWARGS = dict(seed=0, holdout_ratio=0.5)
 
 
 def test_calibrate_operating_point_binds_to_the_selections_calibration_side(tmp_path: Path):
@@ -372,7 +372,7 @@ def test_calibrate_operating_point_binds_to_the_selections_calibration_side(tmp_
     drawn = _draw(root, out)
 
     bundle, dh, _n_excl, evidence = calibration.calibrate_operating_point(
-        _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]),
+        stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
         str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
 
     calibration_this_date = set(_calibration_this_date(drawn))
@@ -403,7 +403,7 @@ def test_calibrate_operating_point_refuses_a_checkpoint_trained_for_another_clas
 
     with pytest.raises(ValueError, match="training vocabulary"):
         calibration.calibrate_operating_point(
-            _CalStub(subject="a_different_subject"), "bud_opening",
+            stub_pass(_CalStub(subject="a_different_subject")), "bud_opening",
             str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
             selection_dir=str(out), **_CAL_KWARGS)
 
@@ -417,7 +417,7 @@ def test_calibrate_operating_point_selection_conflicts_with_group_by(tmp_path: P
 
     with pytest.raises(ValueError, match="group_by"):
         calibration.calibrate_operating_point(
-            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]),
+            stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), selection_dir=str(out), group_by="stem",
             **_CAL_KWARGS)
 
@@ -438,7 +438,7 @@ def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_sel
 
     with pytest.raises(ValueError, match="bound to the selection"):
         calibration.calibrate_operating_point(
-            bound, "bud_opening", str(root / "annotations" / DATES[0]),
+            stub_pass(bound), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
 
 
@@ -465,7 +465,7 @@ def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selec
         respellings = [str(out) + os.sep, str(out).replace(os.sep, "/"), os.path.relpath(out)]
         for spelling in respellings:
             _bundle, _dh, _n_excl, evidence = calibration.calibrate_operating_point(
-                bound, "bud_opening", str(root / "annotations" / DATES[0]),
+                stub_pass(bound), "bud_opening", str(root / "annotations" / DATES[0]),
                 str(root / "images" / DATES[0]), selection_dir=spelling, **_CAL_KWARGS)
             assert evidence["reference_inputs"]["stated_values"]["selection_dir"] == spelling
     finally:
@@ -718,7 +718,7 @@ def _dense_inputs(dh: str, **extra) -> dict:
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
     return {
-        "dataset_hash": dh, "tiled": False, "staged_conf_floor": 0.01,
+        "dataset_hash": dh, "slicing": None, "staged_conf_floor": 0.01,
         "calibration_records": dense_records(
             n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),

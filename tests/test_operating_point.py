@@ -10,6 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._regime_fixtures import tiled_regime  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
     pick_count_unbiased,
@@ -135,19 +136,19 @@ def test_set_detector_operating_point_two_stage():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     m = _two_stage()
     applied, attribute_path = set_detector_operating_point(
-        m, score_thresh=0.4, nms_thresh=0.3, detections_per_img=300)
+        m, score_thresh=0.4, detections_per_img=300)
     assert m.detector.roi_heads.score_thresh == 0.4
-    assert m.detector.roi_heads.nms_thresh == 0.3
+    assert m.detector.roi_heads.nms_thresh == 0.5  # the builder's own NMS, never set here
     assert m.detector.roi_heads.detections_per_img == 300
-    assert applied == {"score_thresh": 0.4, "nms_thresh": 0.3, "detections_per_img": 300}
+    assert applied == {"score_thresh": 0.4, "detections_per_img": 300}
     assert attribute_path == "detector.roi_heads"
 
 
 def test_set_detector_operating_point_one_stage():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     m = _one_stage()
-    set_detector_operating_point(m, score_thresh=0.4, nms_thresh=0.35)
-    assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.35
+    set_detector_operating_point(m, score_thresh=0.4)
+    assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
 
 
 def test_max_dets_from_density_scales_above_floor():
@@ -183,11 +184,11 @@ def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to()
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     cal, hold = good_cal_holdout()
-    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
+    # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                tiled=False, staged_conf_floor=0.01)
+                                slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.requires_validation is True and conf.validation_kind == "annotations"
     assert conf.validated_against == "held_out_annotations"
@@ -207,7 +208,7 @@ def test_resolve_operating_point_validated_with_holdout():
 def test_resolve_operating_point_overlapping_holdout_not_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # same image ids in calibration and holdout -> not a real held-out split -> not validated
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("c"))
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -220,7 +221,7 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
     # closed) merely because empty id-sets make `disjoint` trivially True.
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=recs, holdout_records=recs)
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -234,7 +235,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
     biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
                                 shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
                                 score=0.9)
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=cal, holdout_records=biased_hold,
                                 staged_conf_floor=0.01)
     # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
@@ -245,7 +246,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
 
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=_records())
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records())
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
@@ -256,7 +257,7 @@ def test_resolve_operating_point_content_shared_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
     # the holdout can't function as an independent check; the content-overlap gate must refuse it.
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("h"))
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -282,7 +283,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
             "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}]
     hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
              "dt": [_ann(100, 100, score=0.9)]}]
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, experiment_id="exp1",
                                 calibration_labels_dir=labels_dir)
     conf = b.get("conf")
@@ -297,7 +298,7 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = good_cal_holdout()
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
@@ -322,10 +323,10 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
     cal, hold = good_cal_holdout()
-    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
+    # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("bud_opening", dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold, tiled=False,
+                                calibration_records=cal, holdout_records=hold, slicing=None,
                                 staged_conf_floor=0.01, experiment_id="exp2",
                                 calibration_labels_dir=labels_dir)
     conf = b.get("conf")
@@ -351,10 +352,10 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
     })
     cal, hold = good_cal_holdout()
 
-    omitted = resolve_operating_point("bud_opening", tiled=False, dataset_hash="h1",
+    omitted = resolve_operating_point("bud_opening", slicing=None, dataset_hash="h1",
                                       calibration_records=cal, holdout_records=hold,
                                       staged_conf_floor=0.01, experiment_id="exp_rects_noop")
-    explicit_none = resolve_operating_point("bud_opening", tiled=False, dataset_hash="h1",
+    explicit_none = resolve_operating_point("bud_opening", slicing=None, dataset_hash="h1",
                                             calibration_records=cal, holdout_records=hold,
                                             staged_conf_floor=0.01, experiment_id="exp_rects_noop",
                                             cal_rects=None, hold_rects=None)
@@ -387,7 +388,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
     cal_id = cal[0]["image_id"]
 
     leaked = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_rects_geo",
         cal_rects={cal_id: (400, 100, 600, 300)},  # straddles train/val: not fully contained
     )
@@ -463,7 +464,7 @@ def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_ch
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole",
         calibration_labels_dir=str(tmp_path / "annotations" / date),
     )
@@ -493,7 +494,7 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_manifest",
         selection_dir="some/selection",
         calibration_labels_dir=str(tmp_path / "annotations" / date),
@@ -520,7 +521,7 @@ def test_selection_disjointness_not_applicable_under_another_labels_directory(
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_other_dir",
         selection_dir="some/selection",
         calibration_labels_dir=str(tmp_path / "annotations" / "2-12-01"),
@@ -542,7 +543,7 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_spatial",
         selection_dir="some/selection",
         calibration_labels_dir=str(tmp_path / "annotations" / date),
@@ -569,7 +570,7 @@ def test_selection_disjointness_checks_a_caller_named_validation_side(tmp_path, 
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_named_val_dir",
         selection_dir="some/selection",
         calibration_labels_dir=str(tmp_path / "annotations" / date),
@@ -597,7 +598,7 @@ def test_selection_disjointness_admits_a_disjoint_caller_named_validation_side(
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_named_val_clean",
         selection_dir="some/selection",
         calibration_labels_dir=str(tmp_path / "annotations" / date),
@@ -621,7 +622,7 @@ def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(t
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_no_manifest",
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
@@ -693,7 +694,7 @@ def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stat
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", slicing=None, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id=None,
         selection_dir="some/selection", calibration_labels_dir="annotations/2-11-26",
     )
@@ -715,7 +716,7 @@ def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_w
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, tiled=True, tile_size=640,
+                                holdout_records=hold, **tiled_regime(), tile_size=640,
                                 staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"  # conf itself validates cleanly...
@@ -735,7 +736,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, tiled=True, tile_size=224,
+                                holdout_records=hold, **tiled_regime(), tile_size=224,
                                 tile_size_source="derived", staged_conf_floor=0.01)
     tile = b.get("tile_size")
     assert tile.validated_against == VALIDATED_PERSISTED_GEOMETRY
@@ -746,7 +747,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
 def test_resolve_operating_point_no_gt_placeholder_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="hX")
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="hX")
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = b.value("conf")  # firewall
     assert b.get("conf").unvalidated_value(acknowledge_unvalidated=True) == 0.5
@@ -761,10 +762,15 @@ def _overlap_records(idp="d"):
             for i in range(2)]
 
 
-def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=_overlap_records())
-    p = b.get("cross_tile_nms")
+def _gt_boxes(records):
+    return [[a["bbox"] for a in rec["gt"]] for rec in records]
+
+
+def test_resolve_cross_tile_nms_derives_from_gt():
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tcip_mcp.pipelines.slicing import slicing_record
+
+    p = resolve_cross_tile_nms(None, slicing_record(0.2, None, "nms"), _gt_boxes(_overlap_records()))
     assert p.source == "derived"
     assert p.requires_validation is False  # a statistic from this dataset's own spread needs no validation
     assert "neighbor-IoU" in p.derived_from
@@ -772,28 +778,49 @@ def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
     assert p.value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
 
 
-def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+def test_resolve_cross_tile_nms_explicit_not_labeled_derived():
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tcip_mcp.pipelines.slicing import slicing_record
+
     # An explicit override is honest even when overlapping GT was present to derive from.
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
-                                calibration_records=_overlap_records(), cross_tile_nms=0.55)
-    p = b.get("cross_tile_nms")
+    p = resolve_cross_tile_nms(0.55, slicing_record(0.2, None, "nmm"),
+                               _gt_boxes(_overlap_records()))
     assert p.source == "explicit"
     assert p.value == pytest.approx(0.55)
     assert p.derived_from == "caller override"  # not a derivation costume on a caller-supplied number
-    assert "neighbor-IoU" not in p.derived_from
 
 
-def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable():
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+def test_resolve_cross_tile_nms_honest_default_when_underivable():
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tcip_mcp.pipelines.slicing import slicing_record
+
+    slicing = slicing_record(0.2, None, "nms")
     # No GT at all -> honest default, never a derivation label on an underived number.
-    p_no_gt = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1").get("cross_tile_nms")
+    p_no_gt = resolve_cross_tile_nms(None, slicing)
     assert p_no_gt.source == "default"
-    assert "neighbor-IoU" not in p_no_gt.derived_from
+    assert "neighbor" not in p_no_gt.derived_from
     # Sparse, non-overlapping GT is likewise underivable -> still an honest default.
-    p_sparse = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
-                                       calibration_records=_records("c")).get("cross_tile_nms")
-    assert p_sparse.source == "default"
+    assert resolve_cross_tile_nms(None, slicing, _gt_boxes(_records("c"))).source == "default"
+    # An untiled pass merges nothing.
+    assert resolve_cross_tile_nms(0.4, None).value is None
+
+
+def test_resolve_operating_point_carries_the_passs_own_threshold_and_slicing():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    regime = tiled_regime(0.55, postprocess="nmm")
+    b = resolve_operating_point("bud_opening", dataset_hash="h1",
+                                calibration_records=_overlap_records(), **regime)
+    assert b.get("cross_tile_nms").to_provenance() == regime["cross_tile_nms"]
+    assert b.slicing == regime["slicing"]
+
+
+def test_resolve_operating_point_refuses_a_tiled_pass_with_no_threshold_by_name():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    with pytest.raises(ValueError, match="cross_tile_nms"):
+        resolve_operating_point("bud_opening", dataset_hash="h1",
+                                slicing=tiled_regime()["slicing"])
 
 
 def test_resolve_operating_point_tile_size_derived():
@@ -805,7 +832,7 @@ def test_resolve_operating_point_tile_size_derived():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
 
-    b_no_claim = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", tile_size=640)
+    b_no_claim = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", tile_size=640)
     assert b_no_claim.get("tile_size").source == "default"
     # A "default"-sourced tile_size, when tiled, is a firewalled unvalidated dimension: the
     # caller's raw 640 is discarded, never fabricated into a trustworthy value.
@@ -815,7 +842,7 @@ def test_resolve_operating_point_tile_size_derived():
         _ = b_no_claim.get("tile_size").value
 
     b_derived = resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash="h1", tile_size=640, tile_size_source="derived")
+        "bud_opening", **tiled_regime(), dataset_hash="h1", tile_size=640, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size").value == 640
 

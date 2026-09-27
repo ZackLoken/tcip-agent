@@ -60,7 +60,7 @@ OUT_OF_SCOPE_JOBS = {
     ),
 }
 
-_SKIP_PREFIXES = ("pip", "npm ci", "conda", "mamba")
+_SKIP_PREFIXES = ("pip", "npm ci", "conda", "mamba", "sudo apt-get")
 _MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
 _ANY_EXPR = re.compile(r"\$\{\{.*?\}\}")
 

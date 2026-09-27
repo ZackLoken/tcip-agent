@@ -22,7 +22,7 @@ packages/tcip-web/
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
       images.py         # EXIF-oriented JPEG serving (+ downsample)
-      inference.py      # SAHI-style tiled background jobs + progress WS
+      inference.py      # SAHI-tiled background jobs + progress WS
       meta.py           # crop/project metadata
       projects.py       # project open/create/list
       results.py        # plant mapping + per-plant curves + onset dates + CSV

@@ -26,12 +26,18 @@ from tcip_mcp.pipelines.resolution import (
 
 def _provenance(*, tile_size: int | None, tile_size_source: str) -> dict:
     """The operating-point mapping a tiled run stamps, built through the real resolver."""
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tests._regime_fixtures import tiled_regime
+
     derived_from = (
         "stated on a checkpoint that records no tile geometry"
         if tile_size_source == "explicit" else None)
-    bundle = raw_operating_point(conf=0.62, cross_tile_nms=0.35, tiled=True, tile_size=tile_size,
-                                 max_dets=750, tile_size_source=tile_size_source,
-                                 tile_size_derived_from=derived_from)
+    slicing = tiled_regime()["slicing"]
+    bundle = raw_operating_point(
+        conf=0.62, conf_stated=True, max_dets=750, max_dets_stated=True,
+        geometry=TileGeometry(tile_size, tile_size_source, derived_from, 0.2, "default", None),
+        slicing=slicing, cross_tile_nms=resolve_cross_tile_nms(0.35, slicing))
     return bundle.to_provenance()["operating_point"]
 
 

@@ -79,7 +79,7 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
         "images_dir": None, "conf_threshold": None, "device": None,
         "tile": None, "tile_size": None, "overlap": None,
         "tile_batch_size": door_defaults["tile_batch_size"].default,
-        "global_nms_iou": None, "max_dets": None, "postprocess": "nms", "trait": None,
+        "cross_tile_nms": None, "max_dets": None, "postprocess": "nms", "trait": None,
         "calibration_labels_dir": None, "calibration_images_dir": None, "experiment_id": None,
         "group_by": None, "group_key_map": None,
         "split_seed": door_defaults["split_seed"].default,

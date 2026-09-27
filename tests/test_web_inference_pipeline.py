@@ -92,7 +92,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
 
     job = InferenceJob(
         job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nmm",
     )
     _worker(job)
@@ -147,7 +147,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
 
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
     _worker(job)
@@ -195,7 +195,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
 
     job = InferenceJob(
         job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
     _worker(job)
@@ -253,7 +253,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
 
     job = InferenceJob(
         job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
     _worker(job)
@@ -263,8 +263,10 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     assert job.tile is True
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    # never silently overridden to "default"
-    assert read_operating_point_sidecar(out_dir)["operating_point"]["tiled"]["source"] == "explicit"
+    stamp = read_operating_point_sidecar(out_dir)
+    assert stamp["slicing"] is not None
+    # The stated merge threshold is stamped as stated, never silently overridden to "default".
+    assert stamp["operating_point"]["cross_tile_nms"]["source"] == "explicit"
 
 
 def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
@@ -304,7 +306,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
 
     job = InferenceJob(
         job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(tmp_path / "out"), tile=True, conf=0.25, iou=0.7,
+        output_dir=str(tmp_path / "out"), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
     _worker(job)
@@ -366,7 +368,7 @@ def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_def
 
     job = InferenceJob(
         job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7,
         max_dets=DEFAULT_MAX_DETS,
     )
     _worker(job)
@@ -392,7 +394,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
 
     job = InferenceJob(
         job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, iou=0.7,
+        output_dir=str(out_dir), tile=False, cross_tile_nms=0.7,
     )
     _worker(job)
 
@@ -442,7 +444,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
 
     job = InferenceJob(
         job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nmm",
     )
     _worker(job)
@@ -471,7 +473,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
 
     job = InferenceJob(
         job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(tmp_path / "out"), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(tmp_path / "out"), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
     _worker(job)

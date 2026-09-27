@@ -72,10 +72,9 @@ def declare_launcher(name: str) -> Iterator[None]:
 
 
 def _resolve_launched_by() -> dict[str, Any]:
-    """The launcher declaration ``launch_training`` stamps on the experiment it creates: the
-    declared name when :func:`declare_launcher` set one, else the connected MCP agent's identity
-    when a handshake is in force, else ``process`` for a caller with neither. Resolved once, on
-    the calling thread, before ``create_run``/``_ensure_experiment`` run.
+    """The launcher declaration a created experiment is stamped with: the declared name when
+    :func:`declare_launcher` set one, else the connected MCP agent's identity when a handshake is
+    in force, else ``process`` for a caller with neither, read on the calling thread.
     """
     from tcip_mcp import agent_identity
 
@@ -1317,9 +1316,8 @@ _CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could f
 _TRIAL_DIR_PREFIX = "trial_"
 
 def sweep_heartbeat_seconds() -> float:
-    """How often ``run_hyperparameter_search``'s driver thread restamps the sweep manifest's
-    ``heartbeat`` while ``tune_search`` runs: :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on
-    every call, divided by ten.
+    """How often a running sweep's manifest ``heartbeat`` is restamped:
+    :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on every call, divided by ten.
     """
     return TCIP_HEARTBEAT_STALE_SECONDS / 10
 
@@ -1470,14 +1468,8 @@ def _sweep_name(study_name: str) -> str:
 def sweep_manifest_key(
     study_name: str, output_dir: str = "", *, root: Path | str | None = None
 ) -> Key:
-    """The manifest a sweep is listed and read back from, keyed off the HPO root.
-
-    Two writers share this record. ``run_hyperparameter_search`` replaces the whole document at
-    each state change, re-deriving ``cancel_requested`` from the sweep's own stop file on every
-    write. ``cancel_hyperparameter_search`` read-modify-writes only ``cancel_requested`` through
-    the store's compare-and-set (``read_versioned`` plus ``replace(..., expect=version)``) and
-    never over a manifest already in a terminal status. ``concurrency="last_writer_wins"``.
-    """
+    """The manifest a sweep is listed and read back from, keyed off the HPO root, a
+    ``last_writer_wins`` record."""
     return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name), "manifest"))
 
@@ -2260,7 +2252,7 @@ def _selection_metric_axis_conflict(
 ) -> str | None:
     """The refusal reason, if any, when some point ``param_space`` could resolve a trial to picks a
     different selection metric or ranking direction than ``(hpo_metric, hpo_mode)``, the pair
-    ``run_hyperparameter_search`` resolved from ``base_config`` and fixes on the Tuner.
+    resolved from ``base_config``.
 
     Resolves every :func:`_preflight_points` point through
     ``config_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC``, so an axis that changes the
@@ -2292,7 +2284,7 @@ def _selection_metric_axis_conflict(
 
 
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
-    """``base_config`` as ``run_hyperparameter_search`` mints the sweep from: unchanged unless
+    """``base_config`` as a sweep over ``split_draws`` draws is minted from: unchanged unless
     ``split_draws`` is above 1 and the config is bound to a selection, in which case a copy carries
     ``data.split.redraw_within_selection: true`` (defaulting ``data.split.seed`` to
     ``DEFAULT_SEED`` when absent). An already-true flag or an already-set seed is left as it is.
@@ -2394,9 +2386,8 @@ def _split_draws_refusal(
     split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
     baseline_params: dict | None,
 ) -> str | None:
-    """Every reason of the paired path's own that ``run_hyperparameter_search`` refuses
-    ``split_draws`` above 1 for, checked before minting the sweep. ``None`` when nothing here
-    objects, and for one draw.
+    """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for.
+    ``None`` when nothing here objects, and for one draw.
 
     A ``base_config`` bound to a selection (already carrying ``data.split.redraw_within_selection``
     from :func:`_base_config_for_split_draws`) skips the ``auto_val`` leg and runs the selection's
@@ -2680,7 +2671,7 @@ def _first_sampled_point(param_space: dict) -> dict:
 
 
 def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
-    """Every point ``run_hyperparameter_search``'s preflight must check: the first sampled corner,
+    """Every point a sweep's preflight checks: the first sampled corner,
     plus one variant per categorical choice and one per numeric bound, each holding every other
     axis at its first sampled value.
     """
@@ -2720,7 +2711,7 @@ def _ensure_experiment(
     Every branch stamps this experiment through :func:`~tcip_mcp.experiments.stamp_run_identity`,
     one compare-and-set transaction that moves the record to ``running`` (the pristine-reuse branch
     writing its config in that same transaction). A stamp whose precondition fails falls to the
-    fork. ``launched_by`` is the one declaration ``launch_training`` resolved.
+    fork. ``launched_by`` is the run's launcher declaration.
     """
     from tcip_mcp.experiments import StampPreconditionFailed, create_experiment, stamp_run_identity
 
@@ -2792,8 +2783,8 @@ def _reserve_calibration_feasibility_issues(
     task: str, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
     run: RunPopulation, sizes: "Mapping[str, int]", smoke: bool,
 ) -> list[str]:
-    """Named ``preflight_config`` issues for an explicitly-requested
-    ``reserve_calibration_fraction`` that cannot be honored.
+    """Named issues for an explicitly-requested ``reserve_calibration_fraction`` that cannot be
+    honored.
 
     Structurally inapplicable configs (not detection, tiling disabled, a multi-member dataset) are
     always flagged from ``run``, the run's own admitted samples and class space. The single-source
@@ -2851,7 +2842,7 @@ def evaluate_model(
     max_dets: int | None = None,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
-    global_nms_iou: float | None = None,
+    cross_tile_nms: float | None = None,
     postprocess: str = DEFAULT_POSTPROCESS,
     trait: str | None = None,
     subject: str | None = None,
@@ -2901,11 +2892,10 @@ def evaluate_model(
             tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
             path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
-        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only). ``None`` (default)
+        cross_tile_nms: Cross-tile merge threshold (tiled paths only). ``None`` (default)
             resolves to the platform default (``DEFAULT_NMS_IOU``); an explicit value is honored
-            verbatim.
-        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split across a
-            tile seam.
+            verbatim. The model's own NMS stays as the checkpoint's builder constructed it.
+        postprocess: Cross-tile merge, one of ``resolution.CROSS_TILE_MERGES``.
         trait: When set, the trait's derived localization criterion (traits.py, e.g. a count
             trait's center-match) governs the reported count and the selection f1; AP@0.5
             (``iou_threshold``) is kept as a labeled comparability metric. Absent -> the IoU
@@ -2937,8 +2927,7 @@ def evaluate_model(
 
     # The tile-level/single-pass paths apply this directly below; the full-frame path resolves
     # its own sentinels internally, so its own caller passes the raw arguments through unchanged.
-    applied_conf, _applied_nms_iou, _applied_max_dets = applied_operating_point(
-        conf_threshold, global_nms_iou, None)
+    applied_conf, _applied_max_dets = applied_operating_point(conf_threshold, None)
 
     ckpt = experiment_id_or_ckpt
     run = None
@@ -2992,7 +2981,7 @@ def evaluate_model(
         selection_scope = selection.scope
         subject, attribute = selection_scope.subject, selection_scope.attribute
 
-    # Delivery-grade full-frame path: conf_threshold/global_nms_iou/max_dets pass through exactly
+    # Delivery-grade full-frame path: conf_threshold/cross_tile_nms/max_dets pass through exactly
     # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
     if use_tiled_inference and task == "detection":
         tcfg = tiling or run_tiling or {}
@@ -3006,7 +2995,7 @@ def evaluate_model(
                 subject=subject, attribute=attribute,
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
-                global_nms_iou=global_nms_iou, postprocess=postprocess,
+                cross_tile_nms=cross_tile_nms, postprocess=postprocess,
                 max_dets=max_dets, trait=trait,
             )
         except (ValueError, UnreadableLabelDocument) as exc:

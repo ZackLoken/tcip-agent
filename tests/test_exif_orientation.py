@@ -131,9 +131,9 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     # The marker (20,30,55,60) lies fully inside the origin tile [0:64, 0:64] in the upright
     # frame. Assert on that specific tile so the test discriminates a raw revert at either
     # seam: __init__ dims (get_image_dimensions) or __getitem__ pixels (load_image).
-    origin_idx = next(i for i, e in enumerate(tiled._index) if e["tile_x"] == 0 and e["tile_y"] == 0)
+    origin_idx = next(i for i, e in enumerate(tiled._index) if e["slice"][:2] == (0, 0))
     tile_t, target = tiled[origin_idx]
-    assert tile_t.shape[1:] == (64, 64)  # padded tile
+    assert tile_t.shape[1:] == (64, 64)  # a full slice
     assert len(target["boxes"]) >= 1, "origin tile lost the fully-contained marker box"
     hit = False
     for box in target["boxes"]:

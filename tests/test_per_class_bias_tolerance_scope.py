@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._regime_fixtures import tiled_regime
+
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import resolve_operating_point  # noqa: E402
@@ -57,7 +59,7 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
 
 def _resolve(*, spurious: bool):
     return resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_records("c", 0.0, spurious=spurious),
         holdout_records=_records("h", 100000.0, spurious=spurious))
 

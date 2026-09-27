@@ -97,8 +97,8 @@ def _tiled_stamp(**overrides) -> dict:
     """
     stamp = {
         "checkpoint_sha256": "sha-detector", "experiment_id": None, "validated": False,
-        "id_map": {SUBJECT: 0}, "subject": SUBJECT, "attribute": None,
-        "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.25}},
+        "id_map": {SUBJECT: 0}, "subject": SUBJECT, "attribute": None, "slicing": None,
+        "operating_point": {"conf": {"value": 0.25}},
     }
     stamp.update(overrides)
     return stamp
@@ -262,8 +262,9 @@ def test_promotion_over_a_producer_written_stamp_promotes(
     _stage(dataset_root)
     bucket = Path(prediction_dir(dataset_root, "detector", DATE))
     stamp = operating_point_stamp(
-        {"tiled": {"value": False}, "conf": {"value": 0.25}},
-        validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        {"conf": {"value": 0.25}},
+        slicing=None, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[],
         id_map={SUBJECT: 0}, subject=SUBJECT, attribute=None, trait=None, dataset_hash=None,
         checkpoint=None, checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None,

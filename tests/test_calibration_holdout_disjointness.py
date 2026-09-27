@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._regime_fixtures import stub_pass, tiled_regime
+
 # no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
 # test's pinned platform state root so trait="bud_opening" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -90,7 +92,7 @@ def test_a_record_with_no_group_policy_is_not_permanently_blocked_when_disjoint(
         str(tmp_path / "labels"): {"train": ["train_a", "train_b"], "val": []}}})
 
     cal, hold = _good_dense_op_records()
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
@@ -113,7 +115,7 @@ def test_a_record_with_no_group_policy_still_catches_a_real_leak(tmp_path, monke
     tcip_store.replace(split_key("exp_ext2"), {"members": {
         str(tmp_path / "labels"): {"train": ["c_a", "other_stem"], "val": []}}})
 
-    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=_op_records("c"),
                                 holdout_records=_op_records("h", shift=3.0),
                                 experiment_id="exp_ext2")
@@ -700,7 +702,7 @@ def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_pa
                          "detections": [_entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
-        review_state, "bud_opening", tiled=True, group_by="stem", experiment_id="exp_review",
+        review_state, "bud_opening", **tiled_regime(), group_by="stem", experiment_id="exp_review",
         bucket_identities=[_IDENTITY], scope_root=tmp_path,
         calibration_labels_dir=labels_dir)
     td = bundle.get("conf").gate_evidence["train_disjointness"]
@@ -880,15 +882,15 @@ def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
-    kwargs = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-                  global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None)
     # First call locks the split over all 4 stems.
-    calibration.calibrate_operating_point(_CalStub(), "bud_opening", str(labels_dir), str(images_dir), **kwargs)
+    calibration.calibrate_operating_point(
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir))
 
     (images_dir / "b_0_1.png").unlink()  # an image vanishes after the lock
 
     with pytest.raises(ValueError, match="no longer present"):
-        calibration.calibrate_operating_point(_CalStub(), "bud_opening", str(labels_dir), str(images_dir), **kwargs)
+        calibration.calibrate_operating_point(
+            stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir))
 
 
 def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(tmp_path, monkeypatch):
@@ -918,9 +920,7 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
     stub = _CalStub()
     stub.config = {"data": {"subject": "bud"}}
     calibration.calibrate_operating_point(
-        stub, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         seed=1, holdout_ratio=0.5,
     )
     assert captured["annotation_counts"]["b_0_1"] == 0
@@ -956,9 +956,7 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
     bundle, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
-        _CalStub(), "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
         seed=7, holdout_ratio=0.75,
     )
     policy = bundle.get("conf").gate_evidence["split_policy"]
@@ -979,19 +977,17 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
-    kwargs = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-                  global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None)
     # Each root carries the trait spec an adopted project of its own would hold.
     for root in (tmp_path / "before_adoption", tmp_path / "adopted_project"):
         shutil.copytree(tmp_path / ".tcip", root / ".tcip")
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
     first, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
-        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), seed=1, **kwargs)
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), seed=1)
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
     second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
-        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), seed=2, **kwargs)
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), seed=2)
 
     assert first.get("conf").gate_evidence["split_policy"]["seed"] == 1
     assert second.get("conf").gate_evidence["split_policy"]["seed"] == 1
@@ -1034,9 +1030,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     stub.config = {"data": {"subject": "bud", "attribute": "state"}}
 
     _bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         group_by="stem", seed=0, holdout_ratio=0.5,
     )
 
@@ -1059,9 +1053,7 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
 
     with pytest.raises(ValueError, match="subjects.json"):
         calibration.calibrate_operating_point(
-            stub, "bud_opening", str(labels_dir), str(images_dir),
-            tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-            global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+            stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
             group_by="stem", seed=0, holdout_ratio=0.5,
         )
 
@@ -1102,9 +1094,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     # No subjects.json exists for this dataset: calibrate_operating_point must still succeed,
     # using only the recorded map, never re-deriving from the registry when `subject` is set.
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "bud_opening", str(labels_dir), str(images_dir),
-        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
-        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         group_by="stem", seed=0, holdout_ratio=0.5,
     )
     assert n_excluded == 0

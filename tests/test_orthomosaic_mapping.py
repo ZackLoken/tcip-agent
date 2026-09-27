@@ -265,9 +265,17 @@ def test_pixel_to_native_returns_plain_floats(tmp_path: Path) -> None:
     assert isinstance(y, float)
 
 
-# ── Windowed tiled inference: agrees with the full-array predict_tiled path ──
+# ── Windowed sliced inference: agrees with the full-array predict_sliced path ──
 
 TILE = 32
+
+
+def _sliced(predictor, source, **kwargs) -> dict:
+    """``predict_sliced`` at this module's lattice: ``TILE`` edge, 0.2 overlap, NMS at 0.3."""
+    call = dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
+                tile_batch_size=8, tile_resize=None, require_masks=True)
+    call.update(kwargs)
+    return predictor.predict_sliced(source, **call)
 
 
 def _register_checkpoint(tmp_path: Path, ckpt_path: str, *, name: str) -> None:
@@ -324,9 +332,9 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     return str(ckpt)
 
 
-def test_predict_tiled_windowed_source_matches_full_array_predict_tiled(tmp_path: Path) -> None:
-    """The load-bearing correctness check: the windowed-read tiling path and the existing
-    full-array ``predict_tiled`` path must produce bit-identical full-mosaic-pixel-space
+def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_path: Path) -> None:
+    """The load-bearing correctness check: the windowed-read slicing path and the full-array
+    ``predict_sliced`` path must produce bit-identical full-mosaic-pixel-space
     detections for the same checkpoint and the same raster, not merely both run without error.
     """
     pytest.importorskip("torch")
@@ -341,13 +349,12 @@ def test_predict_tiled_windowed_source_matches_full_array_predict_tiled(tmp_path
 
     full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
                             device="cpu", score_threshold=0.0)
-    full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
+    full_result = _sliced(full, str(path))
 
     windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
                                 device="cpu", score_threshold=0.0)
     with open_raster(path, arr.shape[-1]) as reader:
-        win_result = windowed.predict_tiled(
-            reader, tile_size=TILE, overlap=0.2, source_label=str(path))
+        win_result = _sliced(windowed, reader, source_label=str(path))
 
     assert win_result["width"] == full_result["width"] == arr.shape[1]
     assert win_result["height"] == full_result["height"] == arr.shape[0]
@@ -375,10 +382,10 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
     return str(ckpt)
 
 
-def test_predict_tiled_windowed_source_and_predict_tiled_produce_matching_tiled_masks(tmp_path: Path) -> None:
-    """Both tiled entry points carry masks for a multi-tile instance_seg case, in the tiled
-    (tile-local-patch + full-image-offset) shape documented on ``predict_tiled``, and the windowed
-    path agrees with the full-array path detection-for-detection, masks included."""
+def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(tmp_path: Path) -> None:
+    """Both source kinds carry masks for a multi-slice instance_seg case, in the merged-polygon
+    shape documented on ``predict_sliced``, and the windowed path agrees with the full-array path
+    detection-for-detection, masks included."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -391,30 +398,27 @@ def test_predict_tiled_windowed_source_and_predict_tiled_produce_matching_tiled_
 
     full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
                             device="cpu", score_threshold=0.0)
-    full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
+    full_result = _sliced(full, str(path))
 
     windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
                                 device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        win_result = windowed.predict_tiled(
-            reader, tile_size=TILE, overlap=0.2, source_label=str(path))
+        win_result = _sliced(windowed, reader, source_label=str(path))
 
     assert "masks" in full_result and "masks" in win_result
     assert len(full_result["masks"]) == len(win_result["masks"]) == full_result["count"]
     for m in full_result["masks"] + win_result["masks"]:
-        assert set(m) == {"mask_patch", "offset_x", "offset_y"}
-        patch = np.asarray(m["mask_patch"])
-        assert patch.shape == (TILE, TILE)  # tile-local, never a full-mosaic-sized array
-        assert 0 <= m["offset_x"] <= win_result["width"]
-        assert 0 <= m["offset_y"] <= win_result["height"]
-    for fm, wm in zip(full_result["masks"], win_result["masks"]):
-        assert fm["offset_x"] == wm["offset_x"] and fm["offset_y"] == wm["offset_y"]
-        np.testing.assert_allclose(fm["mask_patch"], wm["mask_patch"], rtol=1e-5, atol=1e-6)
+        assert set(m) == {"segmentation"}
+        for flat in m["segmentation"]:
+            assert all(0 <= x <= win_result["width"] for x in flat[0::2])
+            assert all(0 <= y <= win_result["height"] for y in flat[1::2])
+    assert [m["segmentation"] for m in full_result["masks"]] == [
+        m["segmentation"] for m in win_result["masks"]]
 
 
-def test_predict_tiled_windowed_source_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
+def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
     """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
-    empty one, mirroring ``predict_tiled``'s own opt-out contract."""
+    empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -428,15 +432,14 @@ def test_predict_tiled_windowed_source_require_masks_false_carries_no_masks_key(
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        result = predictor.predict_tiled(
-            reader, tile_size=TILE, overlap=0.2, require_masks=False)
+        result = _sliced(predictor, reader, require_masks=False)
     assert "masks" not in result
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
 
 
-def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_offset(tmp_path: Path) -> None:
-    """A tiled instance_seg detection's mask round-trips through ``write_predictions_json`` to a
-    polygon positioned in full-mosaic pixel space, not left at its tile-local offset."""
+def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_path: Path) -> None:
+    """A sliced instance_seg detection's merged polygon round-trips through
+    ``write_predictions_json`` to a polygon at the same full-mosaic pixels."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_annotation import json_io
@@ -453,17 +456,12 @@ def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_off
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        result = predictor.predict_tiled(
-            reader, tile_size=TILE, overlap=0.2, source_label=str(path))
+        result = _sliced(predictor, reader, source_label=str(path))
     assert result["count"] > 0, "fixture assumes at least one surviving detection"
 
-    # A synthetic mask with a clean blob, positioned at a non-zero tile offset, replaces whatever
-    # the untrained model actually predicted: the point of this test is the offset plumbing through
-    # export, not the (meaningless, from-scratch-weights) mask content itself.
-    offset_x, offset_y = result["masks"][0]["offset_x"], result["masks"][0]["offset_y"]
-    patch = np.zeros((TILE, TILE), dtype=np.float32)
-    patch[4:10, 4:10] = 0.9
-    result["masks"][0] = {"mask_patch": patch.tolist(), "offset_x": offset_x, "offset_y": offset_y}
+    # A clean polygon past the first slice replaces whatever the untrained model predicted: the
+    # point is where export places it, not the from-scratch-weights mask content.
+    result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
 
     out = tmp_path / "pred.json"
     write_predictions_json(out, result, subject="leaf", attribute=None)
@@ -471,13 +469,10 @@ def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_off
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
     ys = [y for ring in anns[0].geometry.rings for _, y in ring]
-    # The blob sits at local [4:10, 4:10]; the exported polygon must be shifted into full-mosaic
-    # pixel space by the patch's own offset, not left at its tile-local coordinates.
-    assert min(xs) == pytest.approx(4 + offset_x, abs=1.0)
-    assert min(ys) == pytest.approx(4 + offset_y, abs=1.0)
+    assert (min(xs), min(ys), max(xs), max(ys)) == (40.0, 44.0, 46.0, 50.0)
 
 
-def test_predict_tiled_windowed_source_channel_mismatch_refuses() -> None:
+def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
     """A model's declared ``in_chans`` disagreeing with the raster's own band count must refuse
     rather than silently truncate/pad the band count the model was trained on. A bare predictor
     (no real checkpoint) is enough: the refusal happens before any tile is read or any forward
@@ -500,16 +495,16 @@ def test_predict_tiled_windowed_source_channel_mismatch_refuses() -> None:
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="channel"):
-        p.predict_tiled(_FakeReader())
+        _sliced(p, _FakeReader())
 
 
-def test_predict_tiled_windowed_source_reaches_real_tiling_for_instance_seg_with_and_without_masks() -> None:
+def test_predict_sliced_windowed_source_reaches_real_slicing_for_instance_seg_with_and_without_masks() -> None:
     """instance_seg masks thread through the windowed-read path the same as the full-array
-    ``predict_tiled`` path: neither ``require_masks=True`` (the default, masks collected) nor
-    ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real tile
+    ``predict_sliced`` path: neither ``require_masks=True`` (masks collected) nor
+    ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real slice
     loop, which then fails on the fake reader's own ``AssertionError`` rather than anything raised
-    by ``predict_tiled`` itself."""
-    pytest.importorskip("torch")
+    by ``predict_sliced`` itself."""
+    torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     class _FakeReader:
@@ -524,16 +519,18 @@ def test_predict_tiled_windowed_source_reaches_real_tiling_for_instance_seg_with
     p.max_dets = None
     p.in_chans = 3
     p.model_source = None
+    p.model = torch.nn.Identity()
+    p.device = torch.device("cpu")
 
     with pytest.raises(AssertionError):
-        p.predict_tiled(_FakeReader(), tile_size=32)
+        _sliced(p, _FakeReader())
 
     with pytest.raises(AssertionError):
-        p.predict_tiled(_FakeReader(), tile_size=32, require_masks=False)
+        _sliced(p, _FakeReader(), require_masks=False)
 
 
-def test_predict_tiled_windowed_source_refuses_non_detection_task() -> None:
-    """Unlike ``predict_tiled``, there is no untiled ``predict()`` fallback for a windowed
+def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
+    """Unlike a decoded source, there is no untiled ``predict()`` fallback for a windowed
     reader (the whole point is the raster can't be decoded whole), so a non-detection task must
     refuse outright rather than attempt one."""
     pytest.importorskip("torch")
@@ -552,7 +549,7 @@ def test_predict_tiled_windowed_source_refuses_non_detection_task() -> None:
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="detection"):
-        p.predict_tiled(_FakeReader())
+        _sliced(p, _FakeReader())
 
 
 # ── Per-detection plant assignment ───────────────────────────────────────

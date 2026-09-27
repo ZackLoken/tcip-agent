@@ -16,6 +16,7 @@ from tcip_mcp.pipelines.resolution import (
     validate_resolved_bundle,
 )
 from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
+from tests._regime_fixtures import tiled_regime
 from tests._trait_fixtures import BUD_OPENING
 
 # No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
@@ -252,12 +253,23 @@ def test_tile_size_native_ratio_is_a_real_basis_and_shippable_under_its_own_refe
     assert p.value == 300
 
 
+def _raw(*, tiled: bool, conf: float = 0.9, max_dets: int | None = 1000, stated: bool = False):
+    """``raw_operating_point`` over a pass whose 640px edge has no basis, tiled or not."""
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import raw_operating_point, resolve_cross_tile_nms
+    from tests._regime_fixtures import tiled_regime
+
+    slicing = tiled_regime()["slicing"] if tiled else None
+    return raw_operating_point(
+        conf=conf, conf_stated=stated, max_dets=max_dets, max_dets_stated=stated,
+        geometry=TileGeometry(640, "unavailable", None, 0.2, "default", None), slicing=slicing,
+        cross_tile_nms=resolve_cross_tile_nms(0.3, slicing))
+
+
 def test_raw_operating_point_no_basis_tiled_default_surfaces_its_own_shippable_issue():
     # tile_size must participate in shippable_issues() regardless of source: a no-basis fallback
     # (the caller's raw 640 is discarded either way) must not be silently shippable trivia.
-    from tcip_mcp.pipelines.resolution import raw_operating_point
-
-    b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
+    b = _raw(tiled=True)
     issues = b.shippable_issues()
     assert any(i.startswith("tile_size:") for i in issues)
     assert any(i.startswith("conf:") for i in issues)  # both dimensions gate independently
@@ -269,22 +281,19 @@ def test_raw_operating_point_untiled_never_gates_tile_size():
     # same fabricated tile_size value actually gating once tiled=True: an untiled-only assertion
     # alone would pass just as well against a broken build where tile_size never gates at all, so
     # this pins the "only when operative" boundary, not merely "untiled is fine" in isolation.
-    from tcip_mcp.pipelines.resolution import raw_operating_point
-
-    tiled = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
+    tiled = _raw(tiled=True)
     assert any(i.startswith("tile_size:") for i in tiled.shippable_issues())
 
-    untiled = raw_operating_point(conf=0.9, cross_tile_nms=None, tiled=False, tile_size=None, max_dets=1000)
+    untiled = _raw(tiled=False)
     assert not any(i.startswith("tile_size:") for i in untiled.shippable_issues())
     assert untiled.get("tile_size").requires_validation is False
+    assert untiled.get("cross_tile_nms").value is None
 
 
 def test_raw_operating_point_max_dets_none_is_a_real_uncapped_value():
     # A deliberate value (uncapped), not an unset caller, whatever source it carries: never
     # coerced into DEFAULT_MAX_DETS or refused for being falsy.
-    from tcip_mcp.pipelines.resolution import raw_operating_point
-
-    b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=64, max_dets=None)
+    b = _raw(tiled=True, max_dets=None)
     md = b.get("max_dets")
     assert md._raw is None
     assert md.requires_validation is False  # never gates a delivery on its own
@@ -445,30 +454,31 @@ def test_unknown_trait_lists_available():
 
 def test_raw_operating_point_stamps_explicit_when_the_caller_states_a_value():
     """A caller-stated value is stamped 'explicit' even when it happens to equal the platform
-    default, the same distinction tile_size_source/tiled_source already carry."""
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, raw_operating_point
+    default, the same distinction tile_size_source already carries."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
-    bundle = raw_operating_point(
-        conf=DEFAULT_CONF, cross_tile_nms=None, tiled=False, tile_size=None,
-        max_dets=DEFAULT_MAX_DETS, conf_stated=True, max_dets_stated=True,
-    )
-    assert bundle.get("conf").source == "explicit"
-    assert bundle.get("conf").derived_from == "caller override"
-    assert bundle.get("max_dets").source == "explicit"
-    assert bundle.get("max_dets").derived_from == "caller override"
+    bundle = _raw(tiled=True, conf=DEFAULT_CONF, max_dets=DEFAULT_MAX_DETS, stated=True)
+    for name in ("conf", "max_dets", "cross_tile_nms"):
+        assert bundle.get(name).source == "explicit"
+        assert bundle.get(name).derived_from == "caller override"
 
 
 def test_raw_operating_point_stamps_default_when_the_caller_states_nothing():
-    """The rail must admit the ordinary, unstated call: an omitted conf/max_dets is never
-    laundered into 'explicit'."""
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, raw_operating_point
-
-    bundle = raw_operating_point(
-        conf=DEFAULT_CONF, cross_tile_nms=None, tiled=False, tile_size=None,
-        max_dets=DEFAULT_MAX_DETS,
+    """The rail must admit the ordinary, unstated call: an omitted conf/max_dets/cross_tile_nms is
+    never laundered into 'explicit'."""
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, DEFAULT_MAX_DETS, raw_operating_point, resolve_cross_tile_nms,
     )
-    assert bundle.get("conf").source == "default"
-    assert bundle.get("max_dets").source == "default"
+    from tests._regime_fixtures import tiled_regime
+
+    slicing = tiled_regime()["slicing"]
+    bundle = raw_operating_point(
+        conf=DEFAULT_CONF, conf_stated=False, max_dets=DEFAULT_MAX_DETS, max_dets_stated=False,
+        geometry=TileGeometry(None, "unavailable", None, 0.2, "default", None), slicing=slicing,
+        cross_tile_nms=resolve_cross_tile_nms(None, slicing))
+    for name in ("conf", "max_dets", "cross_tile_nms"):
+        assert bundle.get(name).source == "default"
 
 
 # --- _reconcile_validity: a stamp earned for one trait does not answer for another ---
@@ -526,7 +536,7 @@ def test_resolve_operating_point_explicit_tile_size_with_no_text_refuses():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     with pytest.raises(ValueError, match="tile_size_derived_from"):
-        resolve_operating_point("bud_opening", tiled=True, dataset_hash=None, tile_size=512,
+        resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512,
                                 tile_size_source="explicit")
 
 
@@ -534,7 +544,8 @@ def test_resolve_operating_point_explicit_tile_size_with_text_ships():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "bud_opening", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512,
+        tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     param = bundle.get("tile_size")
     assert param.source == "explicit"

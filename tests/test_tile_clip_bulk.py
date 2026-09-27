@@ -1,4 +1,4 @@
-"""clip_boxes_to_tile and clipped_boxes_per_tile semantics.
+"""clip_boxes_to_tile and clipped_boxes_per_slice semantics.
 
 The per-box reference below restates the clip/sliver rules one box at a time, independent of
 the shipped vectorized code, so the equivalence tests catch a vectorization that drifts from
@@ -11,7 +11,8 @@ import time
 
 import numpy as np
 
-from tcip_mcp.pipelines.data import tiling
+from tcip_mcp.pipelines.data.datasets import clip_boxes_to_tile, clipped_boxes_per_slice
+from tcip_mcp.pipelines.slicing import slice_lattice
 
 
 def _clip_reference(boxes, labels, tile_x, tile_y, tile_size, min_box_size):
@@ -75,7 +76,7 @@ def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
         for dtype in (np.float32, np.float64):
             b = boxes.astype(dtype)
             labels = np.arange(1, len(b) + 1, dtype=np.int64)
-            got = tiling.clip_boxes_to_tile(b, labels, 200, 200, 64, 64, 3.0)
+            got = clip_boxes_to_tile(b, labels, 200, 200, 64, 64, 3.0)
             want = _clip_reference(b, labels, 200, 200, 64, 3.0)
             _assert_identical(got, want)
 
@@ -91,7 +92,7 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
         tile_x, tile_y = int(rng.integers(0, 300)), int(rng.integers(0, 300))
         min_box_size = float(rng.uniform(0, 20))
         for dtype in (np.float32, np.float64):
-            got = tiling.clip_boxes_to_tile(boxes.astype(dtype), labels, tile_x, tile_y, 128, 128,
+            got = clip_boxes_to_tile(boxes.astype(dtype), labels, tile_x, tile_y, 128, 128,
                                             min_box_size)
             want = _clip_reference(boxes.astype(dtype), labels, tile_x, tile_y, 128,
                                    min_box_size)
@@ -113,7 +114,7 @@ def test_clip_semantics_stated_as_properties():
         labels = np.arange(1, n + 1, dtype=np.int64)
         tx, ty = int(rng.integers(0, 250)), int(rng.integers(0, 250))
         cutoff = float(rng.uniform(0, 25))
-        out_boxes, out_labels = tiling.clip_boxes_to_tile(boxes, labels, tx, ty, tile_size,
+        out_boxes, out_labels = clip_boxes_to_tile(boxes, labels, tx, ty, tile_size,
                                                           tile_size, cutoff)
         expected = []
         for i, (bx1, by1, bx2, by2) in enumerate(boxes.tolist()):
@@ -136,11 +137,11 @@ def test_clip_semantics_stated_as_properties():
 def test_clip_boxes_to_tile_square_call_is_byte_identical_to_the_square_only_reference():
     """clip_boxes_to_tile(..., tile_w, tile_h, ...) at tile_w == tile_h == tile_size must match
     the square-only reference this function generalized from exactly: the byte-identical
-    guarantee every existing square call site (clipped_boxes_per_tile included) depends on."""
+    guarantee every square slice of a lattice depends on."""
     tile_size = 64
     boxes = np.concatenate([b for b in _ADVERSARIAL if b.size], axis=0)
     labels = np.arange(1, len(boxes) + 1, dtype=np.int64)
-    got = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, tile_size, tile_size, 3.0)
+    got = clip_boxes_to_tile(boxes, labels, 200, 200, tile_size, tile_size, 3.0)
     want = _clip_reference(boxes, labels, 200, 200, tile_size, 3.0)
     _assert_identical(got, want)
 
@@ -152,36 +153,35 @@ def test_clip_boxes_to_tile_rectangular_is_a_genuine_generalization():
     tile_x/tile_y, unclipped and always kept regardless of size."""
     boxes = np.array([[210.0, 210.0, 350.0, 250.0]])
     labels = np.array([1])
-    square = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, 64, 64, 100.0)
-    rect = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, 300, 64, 100.0)
+    square = clip_boxes_to_tile(boxes, labels, 200, 200, 64, 64, 100.0)
+    rect = clip_boxes_to_tile(boxes, labels, 200, 200, 300, 64, 100.0)
     assert len(square[0]) == 0
     assert len(rect[0]) == 1
     assert np.allclose(rect[0][0], [10.0, 10.0, 150.0, 50.0])
 
 
-def test_bulk_clip_equals_the_per_tile_calls_over_a_grid():
+def test_bulk_clip_equals_the_per_slice_calls_over_a_lattice():
     rng = np.random.default_rng(31)
     height, width, tile_size = 500, 700, 128
-    stride = tiling.compute_stride(tile_size, 0.2)
-    positions = tiling.tile_positions(height, width, tile_size, stride)
+    slices = slice_lattice(height, width, tile_size, 0.2)
     for _ in range(5):
         n = int(rng.integers(0, 150))
         xy = rng.uniform(-40, 700, size=(n, 2))
         wh = rng.uniform(0, 100, size=(n, 2))
         boxes = np.concatenate([xy, xy + wh], axis=1).astype(np.float32)
         labels = rng.integers(1, 3, size=n).astype(np.int64)
-        results = tiling.clipped_boxes_per_tile(boxes, labels, positions, tile_size, 6.0)
-        assert len(results) == len(positions)
-        for (tx, ty), got in zip(positions, results):
+        results = clipped_boxes_per_slice(boxes, labels, slices, 6.0)
+        assert len(results) == len(slices)
+        for (tx, ty, _x1, _y1), got in zip(slices, results):
             _assert_identical(got, _clip_reference(boxes, labels, tx, ty, tile_size, 6.0))
 
 
-def test_bulk_clip_returns_fresh_arrays_per_tile():
-    """Empty tiles must not share one mutable array: a caller mutating one tile's boxes must
+def test_bulk_clip_returns_fresh_arrays_per_slice():
+    """Empty slices must not share one mutable array: a caller mutating one slice's boxes must
     never see the change in another's."""
-    positions = [(0, 0), (100, 0), (0, 100)]
-    results = tiling.clipped_boxes_per_tile(
-        np.array([[10.0, 10.0, 20.0, 20.0]]), np.array([1]), positions, 64, 2.0)
+    slices = [(0, 0, 64, 64), (100, 0, 164, 64), (0, 100, 64, 164)]
+    results = clipped_boxes_per_slice(
+        np.array([[10.0, 10.0, 20.0, 20.0]]), np.array([1]), slices, 2.0)
     empties = [b for b, _lab in results if len(b) == 0]
     assert len(empties) == 2
     assert empties[0] is not empties[1]
@@ -190,12 +190,12 @@ def test_bulk_clip_returns_fresh_arrays_per_tile():
 
 
 def test_bulk_clip_cost_scales_with_incidences_not_positions_times_boxes():
-    """A generous wall-clock rail on a large geometry: the cost must follow the box-tile
-    incidences, so a dense grid over many small boxes finishes in seconds."""
+    """A generous wall-clock rail on a large geometry: the cost must follow the box-slice
+    incidences, so a dense lattice over many small boxes finishes in seconds."""
     rng = np.random.default_rng(5)
     width = height = 56_000
-    tile_size, stride = 224, 179
-    positions = tiling.tile_positions(height, width, tile_size, stride)
+    tile_size = 224
+    positions = slice_lattice(height, width, tile_size, 0.2)
     assert len(positions) > 90_000
     n = 50_000
     xy = rng.uniform(0, width - 60, size=(n, 2))
@@ -203,7 +203,7 @@ def test_bulk_clip_cost_scales_with_incidences_not_positions_times_boxes():
     boxes = np.concatenate([xy, xy + wh], axis=1).astype(np.float32)
     labels = rng.integers(1, 3, size=n).astype(np.int64)
     start = time.perf_counter()
-    results = tiling.clipped_boxes_per_tile(boxes, labels, positions, tile_size, 6.0)
+    results = clipped_boxes_per_slice(boxes, labels, positions, 6.0)
     elapsed = time.perf_counter() - start
     assert len(results) == len(positions)
     assert sum(len(lab) for _b, lab in results) >= n  # every box lands in at least one tile

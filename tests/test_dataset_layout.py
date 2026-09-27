@@ -151,7 +151,8 @@ def test_a_bucket_holding_only_its_stamp_offers_no_predictions(tmp_path: Path) -
     stamp_file = FileBackend().path_for(key)
     stamp_file.parent.mkdir(parents=True)
     stamp_file.write_bytes(ts.get_descriptor(key.store).codec.encode(operating_point_stamp(
-        None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        None, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[],
         id_map=None, subject="bud", attribute=None, trait=None, dataset_hash=None,
         checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None)))

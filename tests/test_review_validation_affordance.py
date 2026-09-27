@@ -184,7 +184,9 @@ def test_describe_conf_floor_unstated_names_the_recognized_attribute_names():
                 gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "failures": ["conf_floor_unstated"]})
     reason = describe_review_validation(b, reviewed_image_count=4)["reason"]
-    for attr in ("score_thresh", "nms_thresh", "detections_per_img"):
+    from tcip_mcp.pipelines.operating_point import OPERATING_POINT_ATTRS
+
+    for attr in OPERATING_POINT_ATTRS:
         assert attr in reason
     assert "detector.roi_heads" in reason
 
@@ -246,21 +248,26 @@ def _pred_digest(bucket_dir: Path, image_name: str) -> str | None:
 
 def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | None = None,
                    tile_size_op: dict | None = None) -> None:
-    # "tiled" is always stamped, matching a real bucket's sidecar, so the route's tiled_vals
-    # resolution has a real value to read, never None; these tests aren't about tiling.
-    op: dict = {"tiled": {"value": False}}
+    # A slicing record is always stamped, matching a real bucket's sidecar: None for an untiled
+    # pass, a tiled pass's record with its merge threshold beside a tile edge.
+    from tests._regime_fixtures import tiled_regime
+
+    op: dict = {}
+    slicing = None
     if generation_conf is not None:
         # The conf the bucket's predictions were actually generated/floored at: the route reads
         # this straight off the sidecar (never re-typed) to build staged_conf_floor.
         op["conf"] = {"value": generation_conf}
     if tile_size_op is not None:
-        op["tiled"] = {"value": True}
+        regime = tiled_regime()
+        slicing, op["cross_tile_nms"] = regime["slicing"], regime["cross_tile_nms"]
         op["tile_size"] = tile_size_op
     sidecar = {
         "checkpoint_sha256": identity["checkpoint_sha256"],
         "experiment_id": identity["experiment_id"],
         "validated": False,
         "operating_point": op,
+        "slicing": slicing,
         "subject": "bud",
         "attribute": None,
     }

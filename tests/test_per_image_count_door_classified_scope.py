@@ -31,7 +31,8 @@ def _classified_bucket(tmp_path: Path) -> Path:
     write_predictions_json(bucket / "img1.json", result, created_by="test-producer",
                            subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
     stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
+        tile_size_validated=None,
         shippable_issues=[], id_map=ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE,
         trait=fx.COUNT_TRAIT,
         dataset_hash="H", checkpoint="m", checkpoint_sha256="f" * 64, experiment_id=None,

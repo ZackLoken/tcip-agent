@@ -1,16 +1,12 @@
 """The instance_seg measurement boundary: masks reach inference and export.
 
 Locks that instance_seg's masks travel end to end instead of being silently dropped:
-``check_model_contract`` requires them for instance_seg, ``GenericPredictor._format_detection``
-carries them (soft, unbinarized, full-image coordinates) for the untiled path, tiled inference
-(``predict_tiled``, either of its two source kinds) threads them through the cross-tile
-reconstruction/merge too (see ``tests/test_orthomosaic_mapping.py`` for the tiled-shape and
-windowed-reader coverage), and ``write_predictions_json`` converts a mask (either coordinate shape)
-to a real (possibly multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second
-hardcoded threshold.
+``check_model_contract`` requires them for instance_seg, the predictor's one detection record
+carries them as SAHI polygons on the untiled and the sliced path alike (see
+``tests/test_sliced_inference.py``), and ``write_predictions_json`` converts each to a real
+(possibly multi-ring) ``Polygon``.
 
-``require_masks=False`` is a boxes-only opt-out for a caller that never reads masks (a mask
-patch per detection is real extra memory and compute across a dense tile grid), tested here
+``require_masks=False`` is a boxes-only opt-out for a caller that never reads masks, tested here
 alongside the default mask-carrying path.
 """
 
@@ -27,7 +23,6 @@ cv2 = pytest.importorskip("cv2")
 
 from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
-from tcip_mcp.pipelines.measurement.mask_geometry import mask_to_polygon_points  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
@@ -75,14 +70,9 @@ def test_contract_detection_task_unaffected_by_mask_requirement():
     assert report["ok"], report["issues"]
 
 
-# --------------------------------------------------------------------------
-# GenericPredictor._format_detection: soft masks carried, unbinarized
-# --------------------------------------------------------------------------
-
 def _bare_predictor(task: str, score_threshold: float = 0.5) -> GenericPredictor:
     """A GenericPredictor with no real checkpoint: __init__ is never called, only the attributes
-    _format_detection/predict_tiled actually read are set. Avoids loading a real model just to
-    unit-test output formatting / the tiled refusal, which both happen before any inference."""
+    predict_sliced reads before it decodes the source are set."""
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = task
     p.score_threshold = score_threshold
@@ -91,84 +81,37 @@ def _bare_predictor(task: str, score_threshold: float = 0.5) -> GenericPredictor
     return p
 
 
-def test_format_detection_carries_soft_masks_for_instance_seg():
-    p = _bare_predictor("instance_seg")
-    outputs = {
-        "boxes": torch.tensor([[0.0, 0.0, 10.0, 10.0], [1.0, 1.0, 2.0, 2.0]]),
-        "scores": torch.tensor([0.9, 0.9]),
-        "labels": torch.tensor([1, 1], dtype=torch.int64),
-        "masks": torch.rand(2, 1, 8, 8),  # torchvision MaskRCNN shape: [N, 1, H, W], soft
-    }
-    result = p._format_detection(outputs, "img.jpg", 100, 100)
-    assert "masks" in result
-    assert len(result["masks"]) == 2
-    # Squeezed to [H, W] per instance (the singleton channel dim dropped).
-    assert np.asarray(result["masks"][0]).shape == (8, 8)
-    # Kept soft, not binarized here (values other than exactly 0/1 must survive).
-    flat = np.asarray(result["masks"]).ravel()
-    assert not np.all((flat == 0.0) | (flat == 1.0))
+# predict_sliced: instance_seg and detection reach one slicing path, masks or not.
+
+def _sliced_kwargs(require_masks: bool = True) -> dict:
+    return dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
+                tile_batch_size=8, tile_resize=None, require_masks=require_masks)
 
 
-def test_format_detection_detection_task_never_gains_masks_key():
-    """Regression guard: plain detection must not pick up a masks key even if outputs somehow
-    carried one (a maskless task never asks mask_geometry/export to do anything with masks)."""
-    p = _bare_predictor("detection")
-    outputs = {
-        "boxes": torch.tensor([[0.0, 0.0, 10.0, 10.0]]),
-        "scores": torch.tensor([0.9]),
-        "labels": torch.tensor([1], dtype=torch.int64),
-        "masks": torch.rand(1, 1, 8, 8),
-    }
-    result = p._format_detection(outputs, "img.jpg", 100, 100)
-    assert "masks" not in result
-
-
-def test_format_detection_keep_mask_filters_with_scores():
-    """The score threshold that filters boxes/scores/labels must filter masks in lockstep."""
-    p = _bare_predictor("instance_seg", score_threshold=0.5)
-    outputs = {
-        "boxes": torch.tensor([[0.0, 0.0, 10.0, 10.0], [1.0, 1.0, 2.0, 2.0]]),
-        "scores": torch.tensor([0.9, 0.1]),  # second below threshold
-        "labels": torch.tensor([1, 1], dtype=torch.int64),
-        "masks": torch.stack([torch.ones(1, 8, 8), torch.zeros(1, 8, 8)]),
-    }
-    result = p._format_detection(outputs, "img.jpg", 100, 100)
-    assert result["count"] == 1
-    assert len(result["masks"]) == 1
-    assert np.asarray(result["masks"][0]).max() == pytest.approx(1.0)
-
-
-# --------------------------------------------------------------------------
-# predict_tiled: instance_seg reaches the same real tiling path detection
-# does, both with masks collected (the default) and via the boxes-only
-# require_masks=False opt-out
-# --------------------------------------------------------------------------
-
-def test_predict_tiled_instance_seg_reaches_real_tiling_path(tmp_path):
-    """instance_seg must reach real tiling logic exactly like detection does (fail on a bad image
-    path with an image-loading error), not take some separate maskless code path: masks now thread
-    through the cross-tile reconstruction/merge instead of being refused outright."""
+def test_predict_sliced_instance_seg_reaches_real_slicing_path(tmp_path):
+    """instance_seg must reach real slicing logic exactly like detection does (fail on a bad image
+    path with an image-loading error), not take some separate maskless code path."""
     p = _bare_predictor("instance_seg")
     missing = tmp_path / "missing.jpg"
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(missing), tile_size=TILE)
+        p.predict_sliced(str(missing), **_sliced_kwargs())
 
 
-def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
-    """Same real tiling logic for plain detection, so the two tasks' tiled entry points don't
+def test_predict_sliced_detection_reaches_real_slicing_path(tmp_path):
+    """Same real slicing logic for plain detection, so the two tasks' tiled entry points don't
     silently diverge."""
     p = _bare_predictor("detection")
     missing = tmp_path / "missing.jpg"
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(missing), tile_size=TILE)
+        p.predict_sliced(str(missing), **_sliced_kwargs())
 
 
-def test_predict_tiled_require_masks_false_reaches_real_tiling_path_for_instance_seg(tmp_path):
-    """``require_masks=False`` reaches the same real tiling logic as the default (masks-collecting)
+def test_predict_sliced_require_masks_false_reaches_real_slicing_path_for_instance_seg(tmp_path):
+    """``require_masks=False`` reaches the same real slicing logic as the default (masks-collecting)
     path: the boxes-only opt-out is a lighter-weight rail, not a different one."""
     p = _bare_predictor("instance_seg")
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(tmp_path / "missing.jpg"), tile_size=TILE, require_masks=False)
+        p.predict_sliced(str(tmp_path / "missing.jpg"), **_sliced_kwargs(require_masks=False))
 
 
 # --------------------------------------------------------------------------
@@ -222,7 +165,7 @@ def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
     assert "error" not in result, result
 
 
-def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
+def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
     """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
     same predictor's untiled path still carries masks (an opt-out, not a global downgrade)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -233,10 +176,10 @@ def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt,
     assert pred.task == "instance_seg"
     img = _image(tmp_path / "images")
 
-    tiled = pred.predict_tiled(img, tile_size=TILE, overlap=0.2, require_masks=False)
+    tiled = pred.predict_sliced(img, **_sliced_kwargs(require_masks=False))
     assert "masks" not in tiled
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(tiled)
-    assert tiled["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ grid, i.e. it really tiled
+    assert tiled["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice, i.e. it really sliced
     assert tiled["count"] == len(tiled["boxes"]) == len(tiled["scores"])
 
     assert "masks" in pred.predict(img)
@@ -244,22 +187,21 @@ def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt,
 
 def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
     """The fixture's own persisted training tile geometry derives an unset ``tile`` to True: instance_seg
-    behaves exactly as plain detection does (tiled inference threads masks through the cross-tile
-    merge instead of being refused outright), and each result's masks are the tiled (patch + offset)
-    shape."""
+    behaves exactly as plain detection does (sliced inference merges masks across seams), and each
+    result's masks are the sliced (merged polygon) shape."""
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["operating_point"]["tiled"]["value"] is True
-    assert r["operating_point"]["tiled"]["value"] is True
+    assert r["slicing"] is not None
+    assert r["slicing"] is not None
     assert len(r["results"]) == 1
     result = r["results"][0]
     assert "masks" in result
     if result["count"]:
-        assert set(result["masks"][0]) == {"mask_patch", "offset_x", "offset_y"}
+        assert set(result["masks"][0]) == {"segmentation"}
 
 
 def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
@@ -271,7 +213,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
     r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["operating_point"]["tiled"]["value"] is True
+    assert r["slicing"] is not None
     assert len(r["results"]) == 1
     assert "masks" in r["results"][0]
 
@@ -285,7 +227,7 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
                       device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["operating_point"]["tiled"]["value"] is True
+    assert r["slicing"] is not None
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
 
@@ -370,7 +312,7 @@ def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instan
     (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
     in operating_point.json, the same door tiled/tile_size/conf already use. Exercised on the
     tiled path (the checkpoint's own default now that instance_seg tiles like any other detection
-    task), so the tiled (patch + offset) mask shape reaches export too."""
+    task), so the sliced (merged polygon) mask shape reaches export too."""
     import json
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -384,8 +326,11 @@ def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instan
                       tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
     assert "error" not in r
     op = read_operating_point_sidecar(r["output_dir"])
+    # The threshold the predictor cut the masks at, carried on its own records.
     assert op["mask_binarize"]["name"] == "mask_binarize_threshold"
+    assert op["mask_binarize"]["value"] == pytest.approx(0.5)
     assert op["mask_binarize"]["requires_validation"] is True
+    assert op["mask_binarize"]["validated_against"] == "false"
 
     pred_json = json.loads((Path(r["output_dir"]) / "img.json").read_text())
     for ann in pred_json["annotations"]:
@@ -441,37 +386,19 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     assert r["iou_type"] == "bbox"
 
 
-# --------------------------------------------------------------------------
-# mask_geometry.mask_to_polygon_points: every connected component, own ring
-# --------------------------------------------------------------------------
+# export.py write_predictions_json: masks become a real (possibly multi-ring) Polygon.
 
-def test_mask_to_polygon_single_blob_one_ring():
-    m = np.zeros((32, 32), dtype=np.uint8)
-    m[5:20, 5:20] = 1
-    rings = mask_to_polygon_points(m)
-    assert len(rings) == 1
-    assert len(rings[0]) >= 3
+def _mask_record(mask: np.ndarray) -> dict:
+    """``mask`` as the predictor's record carries it: the shared extractor's rings of the mask
+    binarized at the platform's threshold, each flattened to SAHI's ``[x0, y0, x1, y1, ...]``."""
+    from tcip_annotation.mask_contours import mask_to_polygon_rings
 
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
 
-def test_mask_to_polygon_two_disjoint_blobs_two_rings():
-    """An occlusion-split mask (two disjoint regions) must return two rings, not one truncated
-    to the largest."""
-    m = np.zeros((64, 64), dtype=np.uint8)
-    m[5:15, 5:15] = 1
-    m[40:55, 40:55] = 1  # far enough away to be a separate connected component
-    rings = mask_to_polygon_points(m)
-    assert len(rings) == 2
+    threshold = resolve_binarize_threshold().unvalidated_value(acknowledge_unvalidated=True)
+    return {"segmentation": [[c for point in ring for c in point]
+                             for ring in mask_to_polygon_rings(mask, threshold=threshold)]}
 
-
-def test_mask_to_polygon_empty_mask_no_rings():
-    m = np.zeros((16, 16), dtype=np.uint8)
-    assert mask_to_polygon_points(m) == []
-
-
-# --------------------------------------------------------------------------
-# export.py write_predictions_json: masks become a real (possibly
-# multi-ring) Polygon; resolve_binarize_threshold is a real caller
-# --------------------------------------------------------------------------
 
 def test_export_single_component_mask_writes_polygon(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
@@ -483,7 +410,7 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
     result = {
         "image": "img.jpg", "width": 32, "height": 32,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
-        "masks": [mask.tolist()],
+        "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
     write_predictions_json(str(out), result, subject="leaf", attribute=None)
@@ -497,8 +424,8 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
     """Stamping the mask-binarize threshold into Annotation.attributes (the domain trait
     namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
     accepts the prediction. For a detector run (attribute=None) attributes must stay empty; a
-    classified run's own decoded value would land there instead. The threshold travels via
-    mask_binarize_provenance() into the run's operating_point.json instead (see
+    classified run's own decoded value would land there instead. The threshold travels once into
+    the run's operating_point.json instead (see
     test_run_inference_stamps_mask_binarize_provenance_when_masks_present)."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
@@ -508,22 +435,12 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
     result = {
         "image": "img.jpg", "width": 32, "height": 32,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
-        "masks": [mask.tolist()],
+        "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
     write_predictions_json(str(out), result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert anns[0].attributes == {}
-
-
-def test_mask_binarize_provenance_reports_the_unvalidated_default():
-    from tcip_mcp.pipelines.postprocessing.export import mask_binarize_provenance
-
-    prov = mask_binarize_provenance()
-    assert prov["name"] == "mask_binarize_threshold"
-    assert prov["value"] == pytest.approx(0.5)
-    assert prov["requires_validation"] is True
-    assert prov["validated_against"] == "false"
 
 
 def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
@@ -540,7 +457,7 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     result = {
         "image": "img.jpg", "width": 64, "height": 64,
         "boxes": [[5.0, 5.0, 54.0, 54.0]], "scores": [0.9], "labels": [1],
-        "masks": [mask.tolist()],
+        "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
     write_predictions_json(str(out), result, subject="leaf", attribute=None)
@@ -559,7 +476,7 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
     result = {
         "image": "img.jpg", "width": 16, "height": 16,
         "boxes": [[1.0, 1.0, 5.0, 5.0]], "scores": [0.9], "labels": [1],
-        "masks": [mask.tolist()],
+        "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
     write_predictions_json(str(out), result, subject="leaf", attribute=None)
@@ -583,7 +500,7 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
     result = {
         "image": "img.jpg", "width": 64, "height": 64,
         "boxes": [[5.0, 10.0, 12.0, 12.0]], "scores": [0.9], "labels": [1],
-        "masks": [[[0]]],
+        "masks": [{"segmentation": []}],
     }
     out = tmp_path / "img.json"
     dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
@@ -608,7 +525,7 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, 
     result = {
         "image": "img.jpg", "width": 64, "height": 64,
         "boxes": [[1.0, 1.0, 2.0, 2.0]], "scores": [0.9], "labels": [1],
-        "masks": [[[0]]],
+        "masks": [{"segmentation": []}],
     }
     out = tmp_path / "img.json"
     dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
@@ -639,44 +556,3 @@ def test_export_no_masks_key_writes_bbox_as_before():
         assert isinstance(anns[0].geometry, BBox)
     finally:
         os.unlink(path)
-
-
-def test_resolve_binarize_threshold_is_a_real_caller_of_export(monkeypatch, tmp_path):
-    """resolve_binarize_threshold must be the actual threshold export uses, not a bare hardcoded
-    0.5 reintroduced beside it. Proven by changing the threshold and observing the binarized mask
-    (and therefore the exported polygon) change accordingly."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Polygon, BBox
-
-    # A mask whose values sit strictly between 0.3 and 0.6: binarizes to a real blob at threshold
-    # 0.3, and to nothing at threshold 0.6.
-    mask = np.zeros((32, 32), dtype=np.float32)
-    mask[5:20, 5:20] = 0.45
-    result = {
-        "image": "img.jpg", "width": 32, "height": 32,
-        "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
-        "masks": [mask.tolist()],
-    }
-
-    import importlib
-    # tcip_mcp.pipelines.measurement.mask_geometry as a package attribute resolves to the
-    # re-exported `mask_geometry` function (measurement/__init__.py shadows the submodule name
-    # with a same-named function); importlib.import_module bypasses that via sys.modules and
-    # returns the real submodule, which is what _mask_geometry_for_export actually imports from.
-    mg = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
-
-    real_resolve = mg.resolve_binarize_threshold
-
-    out_low = tmp_path / "low.json"
-    monkeypatch.setattr(mg, "resolve_binarize_threshold", lambda *a, **k: real_resolve(0.3))
-    write_predictions_json(str(out_low), result, subject="leaf", attribute=None)
-    anns_low = json_io.read_annotations(str(out_low))
-
-    out_high = tmp_path / "high.json"
-    monkeypatch.setattr(mg, "resolve_binarize_threshold", lambda *a, **k: real_resolve(0.6))
-    write_predictions_json(str(out_high), result, subject="leaf", attribute=None)
-    anns_high = json_io.read_annotations(str(out_high))
-
-    assert isinstance(anns_low[0].geometry, Polygon)   # 0.45 >= 0.3 -> real blob
-    assert isinstance(anns_high[0].geometry, BBox)      # 0.45 < 0.6 -> binarizes to nothing

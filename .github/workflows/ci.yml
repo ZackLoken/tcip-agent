@@ -21,6 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install the system libraries the opencv-python wheel links (libGL, GLib)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
       - uses: conda-incubator/setup-miniconda@v3
         with:
           environment-file: environment.yml
@@ -31,6 +35,7 @@ jobs:
         run: |
           python --version
           python -c "import rasterio, fiona, pyproj; print('rasterio', rasterio.__version__, 'gdal', rasterio.__gdal_version__); print('fiona', fiona.__version__)"
+          python -c "import cv2, sahi; print('cv2', cv2.__version__, cv2.__file__); print('sahi', sahi.__version__)"
 
       - name: The raster stack works in the documented environment
         run: pytest tests/test_raster_source.py tests/test_overviews.py tests/test_band_stats.py -q
@@ -104,6 +109,9 @@ jobs:
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
+      - name: Install the system libraries the opencv-python wheel links (libGL, GLib)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
       - name: Install packages
         run: |
           pip install pytest-timeout pytest-xdist ruff
@@ -111,6 +119,7 @@ jobs:
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
+          python -c "import cv2, sahi; print('cv2', cv2.__version__, cv2.__file__); print('sahi', sahi.__version__)"
 
       - name: Lint (ruff)
         run: ruff check .
@@ -212,7 +221,7 @@ jobs:
         run: docker build -f packages/tcip-web/Dockerfile -t tcip-web:ci .
 
       - name: Import smoke (the system libs the slim base doesn't ship)
-        run: docker run --rm tcip-web:ci python -c "import cv2, rasterio, torch, tcip_web"
+        run: docker run --rm tcip-web:ci python -c "import cv2, rasterio, sahi, torch, tcip_web"
 
       - name: Run and poll for the GUI
         run: |

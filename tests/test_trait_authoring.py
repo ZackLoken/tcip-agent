@@ -27,6 +27,7 @@ from tcip_mcp.traits import (
     registered_traits,
 )
 from tests._binding_fixtures import write_bound_sidecar
+from tests._regime_fixtures import tiled_regime
 from tests._trait_fixtures import BUD_OPENING
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -165,7 +166,7 @@ def test_resolve_operating_point_defaults_unrecorded_count_objective_instead_of_
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "undecided", {"delivers": ["leaf_length"]})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
-    bundle = OP.resolve_operating_point("undecided", tiled=True, dataset_hash="h1", calibration_records=[])
+    bundle = OP.resolve_operating_point("undecided", **tiled_regime(), dataset_hash="h1", calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == COUNT_UNBIASED
     assert param.source == "default"
@@ -180,7 +181,7 @@ def test_resolve_operating_point_stamps_explicit_count_objective_as_trait_author
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "decided", {"delivers": ["leaf_length"], "count_objective": "detection_f1"})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
-    bundle = OP.resolve_operating_point("decided", tiled=True, dataset_hash="h1", calibration_records=[])
+    bundle = OP.resolve_operating_point("decided", **tiled_regime(), dataset_hash="h1", calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == "detection_f1"
     assert param.derived_from == "trait-authored"
@@ -193,7 +194,7 @@ def test_resolve_operating_point_refuses_unregistered_count_objective(tmp_path: 
     _write_spec(specs_dir, "custom", {"delivers": ["leaf_length"], "count_objective": "a_brand_new_objective"})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     with pytest.raises(ValueError, match="no registered picker"):
-        OP.resolve_operating_point("custom", tiled=True, dataset_hash="h1", calibration_records=[])
+        OP.resolve_operating_point("custom", **tiled_regime(), dataset_hash="h1", calibration_records=[])
 
 
 def test_config_spec_every_registered_objective_is_accepted(tmp_path: Path):

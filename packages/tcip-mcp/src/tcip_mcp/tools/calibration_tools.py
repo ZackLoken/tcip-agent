@@ -415,8 +415,9 @@ def calibrate_count_operating_point(
     ``pred_dir`` only when the earned conf is the conf its stored detections were produced at.
 
     Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point`: one
-    low-threshold model pass over a disjoint, locked calibration/holdout split of ``labels_dir``,
-    resolved into the count-unbiased conf and its held-out count-bias gate. A validated stamp is
+    low-threshold pass, sliced and merged as ``pred_dir``'s stamp records its own pass was, over a
+    disjoint, locked calibration/holdout split of ``labels_dir``, resolved into the count-unbiased
+    conf and its held-out count-bias gate. A validated stamp is
     written only when the earned conf equals the conf ``pred_dir``'s own stamp already records as
     its production conf (``operating_point.conf.value``, read before the pass runs). Any other
     earned conf refuses by name, stating both values, and points at ``run_inference``, whose
@@ -474,9 +475,9 @@ def calibrate_count_operating_point(
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
     from tcip_mcp.pipelines.resolution import (
-        bucket_relative_key, bucket_scope, claim_payload,
-        fold_tile_validation, open_validation, read_operating_point_sidecar, seal_validation,
-        stamp_names_raster, update_sidecar, verify_stamp_binding,
+        bucket_relative_key, bucket_scope, claim_payload, fold_tile_validation, open_validation,
+        read_operating_point_sidecar, seal_validation, stamp_names_raster, update_sidecar,
+        verify_stamp_binding,
     )
     from tcip_mcp.project_paths import platform_state_root
     from tcip_store import StoreError
@@ -542,6 +543,15 @@ def calibrate_count_operating_point(
                          "calibration claim covers the checkpoint that produced these "
                          "predictions."}
 
+    # The pass the bucket's own stamp records: its slicing and merge, and the edge it tiled at
+    # when stated, else the edge the checkpoint's own geometry derives again.
+    stamped_op, stamped_slicing = existing["operating_point"], existing["slicing"]
+    tile_param = stamped_op["tile_size"]
+    regime = {"tile": stamped_slicing is not None,
+              "tile_size": tile_param["value"] if tile_param["source"] == "explicit" else None,
+              "cross_tile_nms": stamped_op["cross_tile_nms"]["value"],
+              **({"overlap": stamped_slicing["overlap"],
+                  "postprocess": stamped_slicing["postprocess"]} if stamped_slicing else {})}
     try:
         resolved = resolve_count_operating_point(
             checkpoint_path=checkpoint_path, trait=trait, labels_dir=labels_dir,
@@ -549,6 +559,7 @@ def calibrate_count_operating_point(
             project_root=str(platform_state_root()), subject=subject, attribute=attribute,
             experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
             selection_dir=selection_dir, holdout_ratio=holdout_ratio, seed=seed, device=device,
+            regime=regime,
         )
     except (ValueError, UnregisteredCheckpoint) as exc:
         return {"error": str(exc)}

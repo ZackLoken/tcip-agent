@@ -1,7 +1,7 @@
 """One contour extractor: a SAM-assisted proposal keeps every region of a split mask.
 
 ``state.Polygon`` is multi-ring because an occlusion-split object (a bud behind a branch) is
-genuinely more than one region. The prediction-export path and the human-in-the-loop
+genuinely more than one region. A predictor's masks and the human-in-the-loop
 bootstrapping path (SAM proposal -> ``stage_proposals``) both extract contours through
 ``tcip_annotation.mask_contours.mask_to_polygon_rings``, so one object cannot be whole as a
 prediction and truncated as SAM-assisted GT, which is the GT a dataset rasterizes and a model
@@ -154,26 +154,6 @@ def test_shared_extractor_honors_a_soft_mask_threshold() -> None:
     soft[5:20, 5:20] = 0.4
     assert mask_to_polygon_rings(soft, threshold=0.5) == []
     assert len(mask_to_polygon_rings(soft, threshold=0.3)) == 1
-
-
-def test_measurement_entry_point_delegates_to_the_shared_extractor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``mask_to_polygon_points`` must call the shared extractor, not re-implement agreement with it:
-    a second implementation that merely agrees today is a latent defect."""
-    from tcip_annotation import mask_contours
-    from tcip_mcp.pipelines.measurement.mask_geometry import mask_to_polygon_points
-
-    sentinel = [[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0)]]
-    seen: dict[str, object] = {}
-
-    def _fake(mask, *, threshold=None, epsilon_frac=0.005):
-        seen["threshold"] = threshold
-        return sentinel
-
-    monkeypatch.setattr(mask_contours, "mask_to_polygon_rings", _fake)
-    assert mask_to_polygon_points(_split_mask(), threshold=0.25) is sentinel
-    assert seen["threshold"] == 0.25
 
 
 # --------------------------------------------------------------------------

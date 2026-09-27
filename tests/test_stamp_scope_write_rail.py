@@ -25,7 +25,7 @@ DETECTOR_MAP = {SUBJECT: 0}
 
 def _stamp(**overrides) -> dict:
     fields = dict(
-        validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        slicing=None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
         id_map=None, subject=SUBJECT, attribute=None, trait=SUBJECT, dataset_hash="h",
         checkpoint="m", checkpoint_sha256="f" * 64, experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-01-01T00:00:00+00:00",

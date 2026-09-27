@@ -51,8 +51,8 @@ def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
     assert target["boxes"].tolist() == [[10.0, 20.0, 70.0, 40.0], [80.0, 5.0, 95.0, 75.0]]
 
 
-# A 300x200 frame tiled at 64 with no overlap: columns 0/64/128/192/256, rows 0/64/128/192.
-# Two boxes cross a seam by two pixels; the rest sit inside one tile each.
+# A 320x256 frame sliced at 64 with no overlap is an exact lattice (columns 0/64/128/192/256,
+# rows 0/64/128/192); two boxes cross a seam by two pixels, the rest sit inside one tile each.
 SEAM_BOXES = [
     (10, 20, 66, 47),     # 56x27, crosses the x=64 seam, leaving a 2x27 stub in the next column
     (70, 10, 110, 34),    # 40x24, inside column 64
@@ -73,7 +73,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     """
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-    size = (300, 200)
+    size = (320, 256)
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["img0"], size)
@@ -83,8 +83,8 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac)
 
     assert ds.min_box_size > 0
-    per_tile = {(e["tile_x"], e["tile_y"]): len(e["boxes"]) for e in ds._index}
-    assert len(per_tile) == 20, "five tile columns by four rows over the 300x200 frame"
+    per_tile = {e["slice"][:2]: len(e["boxes"]) for e in ds._index}
+    assert len(per_tile) == 20, "five slice columns by four rows over the 320x256 frame"
     assert per_tile[(64, 0)] == 1, "the stub beside the neighboring box was indexed as an object"
     assert per_tile[(192, 64)] == 0, "the stub above the seam was indexed as an object"
     assert per_tile[(0, 0)] == 1, "the clipped box's own tile lost it"

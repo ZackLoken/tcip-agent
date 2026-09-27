@@ -35,9 +35,10 @@ from tcip_mcp.pipelines.data.selection import (
     DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
 )
 from tcip_mcp.pipelines.image_utils import (
-    crop_pad_tile, image_dimensions, load_image,
-    pad_tile, pil_to_tensor, resolve_source_path, to_pil_if_faithful,
+    image_dimensions, load_image, pil_to_tensor, pixel_array, resolve_source_path,
+    to_pil_if_faithful,
 )
+from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP
 
 logger = logging.getLogger(__name__)
 
@@ -381,17 +382,128 @@ class DetectionDataset(DocumentDataset):
 
 
 # ====================================================================
-# Tiled Detection (SAHI-style sliding window)
+# Tiled Detection (SAHI's slice lattice)
 # ====================================================================
 
 TILE_SIZE = 224
-"""Tile edge in pixels a tiled detection run uses when its config states none. Stated here, where
-the tiler reads it, so a split deriving its block geometry before the dataset exists and the
-dataset itself resolve one lattice."""
+"""Tile edge in pixels a tiled detection run uses when its config states none."""
 
-TILE_OVERLAP = 0.2
-"""Fraction of a tile shared with its neighbor when a tiled run's config states none, beside
-:data:`TILE_SIZE` and read by the same two callers."""
+_EMPTY_BOXES = np.zeros((0, 4), dtype=np.float32)
+_EMPTY_LABELS = np.zeros((0,), dtype=np.int64)
+
+
+def clip_boxes_to_tile(
+    boxes: np.ndarray, labels: np.ndarray, tile_x: int, tile_y: int,
+    tile_w: int, tile_h: int, min_box_size: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Intersect full-image-px boxes with a ``tile_w`` x ``tile_h`` tile; drop seam slivers; emit
+    tile-local xyxy.
+
+    A box clipped by the tile edge is dropped only when the visible (clipped) part is a sliver: its
+    characteristic size ``sqrt(iw*ih) < min_box_size``. Boxes fully inside the tile are always
+    kept. ``tile_w``/``tile_h`` need not be equal.
+    """
+    boxes = np.asarray(boxes)
+    labels = np.asarray(labels)
+    if len(boxes) == 0:
+        return _EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()
+    tx2, ty2 = tile_x + tile_w, tile_y + tile_h
+    ix1 = np.maximum(boxes[:, 0], tile_x)
+    iy1 = np.maximum(boxes[:, 1], tile_y)
+    ix2 = np.minimum(boxes[:, 2], tx2)
+    iy2 = np.minimum(boxes[:, 3], ty2)
+    iw, ih = ix2 - ix1, iy2 - iy1
+    visible = (iw > 0) & (ih > 0)
+    was_clipped = ((boxes[:, 0] < tile_x) | (boxes[:, 1] < tile_y)
+                   | (boxes[:, 2] > tx2) | (boxes[:, 3] > ty2))
+    # Negative extents are clamped before the size so an empty intersection never feeds sqrt;
+    # the clamp changes nothing kept, since only visible boxes survive the mask below.
+    char_size = (np.maximum(iw, 0) * np.maximum(ih, 0)) ** 0.5
+    keep = visible & ~(was_clipped & (char_size < min_box_size))
+    if not keep.any():
+        return _EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()
+    out = np.stack([ix1[keep] - tile_x, iy1[keep] - tile_y,
+                    ix2[keep] - tile_x, iy2[keep] - tile_y], axis=1)
+    return out.astype(np.float32), labels[keep].astype(np.int64)
+
+
+def clipped_boxes_per_slice(
+    boxes: np.ndarray, labels: np.ndarray, slices: list[tuple[int, int, int, int]],
+    min_box_size: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """:func:`clip_boxes_to_tile` for every slice of a lattice at once, each clipped to its own
+    ``(x0, y0, x1, y1)`` extent.
+
+    Result ``i`` equals ``clip_boxes_to_tile(boxes, labels, x0, y0, x1 - x0, y1 - y0, ...)`` for
+    ``slices[i]`` exactly, but the cost scales with the box-slice incidences rather than slices
+    times boxes: each box's candidate rows/columns come from one ``searchsorted`` over the distinct
+    slice origins, bounded by the widest and tallest slice, and only slices with a candidate pay a
+    clip call. Slice origins are distinct, as a lattice's are.
+    """
+    n = len(slices)
+    boxes = np.asarray(boxes)
+    labels = np.asarray(labels)
+    if n == 0 or len(boxes) == 0:
+        return [(_EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()) for _ in range(n)]
+    xs = np.unique(np.asarray([s[0] for s in slices], dtype=np.int64))
+    ys = np.unique(np.asarray([s[1] for s in slices], dtype=np.int64))
+    # float64 holds every float32/float64 coordinate and every origin exactly, so these strict
+    # bounds agree with the clip's own visibility arithmetic instead of re-rounding it.
+    bx1 = boxes[:, 0].astype(np.float64)
+    by1 = boxes[:, 1].astype(np.float64)
+    bx2 = boxes[:, 2].astype(np.float64)
+    by2 = boxes[:, 3].astype(np.float64)
+    span_x = max(x1 - x0 for x0, _y0, x1, _y1 in slices)
+    span_y = max(y1 - y0 for _x0, y0, _x1, y1 in slices)
+    col_lo = np.searchsorted(xs, bx1 - span_x, side="right")
+    col_hi = np.searchsorted(xs, bx2, side="left")
+    row_lo = np.searchsorted(ys, by1 - span_y, side="right")
+    row_hi = np.searchsorted(ys, by2, side="left")
+    candidates: dict[tuple[int, int], list[int]] = {}
+    for i in range(len(boxes)):
+        for k in range(row_lo[i], row_hi[i]):
+            ty = int(ys[k])
+            for j in range(col_lo[i], col_hi[i]):
+                candidates.setdefault((int(xs[j]), ty), []).append(i)
+    results: list[tuple[np.ndarray, np.ndarray] | None] = [None] * n
+    index_of = {(x0, y0): m for m, (x0, y0, _x1, _y1) in enumerate(slices)}
+    for (x0, y0), idxs in candidates.items():
+        m = index_of.get((x0, y0))
+        if m is None:
+            continue  # an origin pair the lattice never laid down
+        _x0, _y0, x1, y1 = slices[m]
+        results[m] = clip_boxes_to_tile(
+            boxes[idxs], labels[idxs], x0, y0, x1 - x0, y1 - y0, min_box_size)
+    return [(_EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()) if r is None else r for r in results]
+
+
+def dedup_boxes(
+    boxes: np.ndarray, labels: np.ndarray, iou_thresh: float, class_aware: bool = True,
+) -> list[int]:
+    """Greedy largest-first dedup: the sorted indices of the boxes kept, dropping a box that
+    overlaps a kept box by >= iou_thresh. Indices, so a caller keeps every per-box array (a crowd
+    flag beside the labels) in step by indexing each one the same way."""
+    n = len(boxes)
+    if not iou_thresh or iou_thresh >= 1.0 or n < 2:
+        return list(range(n))
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    order = sorted(range(n), key=lambda i: -areas[i])  # largest first
+    kept: list[int] = []
+    for i in order:
+        dup = False
+        for k in kept:
+            if class_aware and labels[i] != labels[k]:
+                continue
+            ix1, iy1 = max(boxes[i][0], boxes[k][0]), max(boxes[i][1], boxes[k][1])
+            ix2, iy2 = min(boxes[i][2], boxes[k][2]), min(boxes[i][3], boxes[k][3])
+            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+            union = areas[i] + areas[k] - inter
+            if inter > 0 and union > 0 and inter / union >= iou_thresh:
+                dup = True
+                break
+        if not dup:
+            kept.append(i)
+    return sorted(kept)
 
 
 def _validated_keep_regions(
@@ -420,25 +532,25 @@ def _validated_keep_regions(
 
 class TiledDetectionDataset(BaseImageDataset):
     """Wrap a ``DetectionDataset`` and expand each source image into native-resolution
-    tiles with labels clipped/remapped to tile space.
+    slices of SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) with labels
+    clipped/remapped to slice space.
 
-    Tile membership is computed at ``__init__`` without decoding pixels. Sources whose backend
+    Slice membership is computed at ``__init__`` without decoding pixels. Sources whose backend
     opens without a decode (``raster_source.opens_windowed``: a GDAL-served raster, a
     memory-mapped ``.npy``) are opened through the process source pool, so their dims come from
     the open source and layout refusals surface here; every other container keeps a header-only
     dimension probe, and its refusals surface at first read. ``__getitem__`` reads a windowed
-    stem one tile window at a time through the pool, and a whole-decode stem by decoding once
-    and cropping; both zero-pad border tiles to ``tile_size`` and emit the same target dict
-    shape as ``DetectionDataset``. The dataset itself never holds an open source object, so it
-    pickles into spawned DataLoader workers.
+    stem one slice window at a time through the pool, and a whole-decode stem by decoding once
+    and indexing the slice; both emit the same target dict shape as ``DetectionDataset``. The
+    dataset itself never holds an open source object, so it pickles into spawned DataLoader
+    workers.
 
     ``keep_regions``, when given, is a sequence of half-open pixel rects ``(x0, y0, x1, y1)``
-    in each image's own full-resolution frame: only tiles whose rect lies fully inside one of
-    them are indexed (an empty sequence keeps none). Tiles overhanging the image extent are
-    dropped first and counted in ``tiles_dropped_past_extent``, since they can never lie inside
-    a rect clipped to the image; tiles no rect contains count in
-    ``tiles_dropped_outside_regions``. Without ``keep_regions`` both counts stay 0 and
-    overhanging tiles are kept and zero-padded.
+    in each image's own full-resolution frame: only slices lying fully inside one of them are
+    indexed (an empty sequence keeps none). A slice shorter than ``tile_size`` (a frame shorter
+    than the tile on that axis) is dropped first and counted in ``tiles_dropped_past_extent``;
+    slices no rect contains count in ``tiles_dropped_outside_regions``. Without ``keep_regions``
+    both counts stay 0 and every slice is kept.
     """
 
     task_type = "detection"
@@ -447,18 +559,16 @@ class TiledDetectionDataset(BaseImageDataset):
         self,
         base: "DetectionDataset",
         tile_size: int = TILE_SIZE,
-        overlap: float = TILE_OVERLAP,
+        overlap: float = DEFAULT_OVERLAP,
         sliver_frac: float | None = None,
         dedup_iou: float = 0.8,
         skip_empty: bool = False,
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
-        from tcip_mcp.pipelines.data.tiling import (
-            compute_stride, tile_positions, clipped_boxes_per_tile, dedup_boxes,
-            tile_within_extent, rect_contains_tile,
-        )
         from tcip_mcp.pipelines.derivations import char_sizes_from_boxes, derive_sliver_frac
+        from tcip_mcp.pipelines.raster_source import rect_contains_rect
+        from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
         self.base = base
         # This wrapper does its own channel-aware reads and its own tile index over the base's
@@ -470,7 +580,6 @@ class TiledDetectionDataset(BaseImageDataset):
         self.tile_size = tile_size
         self.overlap = overlap
         self.transforms = transforms
-        self.stride = compute_stride(tile_size, overlap)
         self._index: list[dict] = []
         # Per-stem frame facts this index was built against (plain values only; a RasterSource
         # attribute would break pickling into spawned workers), asserted again at decode time.
@@ -556,29 +665,29 @@ class TiledDetectionDataset(BaseImageDataset):
         self.sliver_frac = sliver_frac
         self.min_box_size = sliver_frac * self.class_avg_size
 
-        # Pass 2: tile using the derived sliver cutoff, boxes clipped in bulk per stem.
+        # Pass 2: slice using the derived sliver cutoff, boxes clipped in bulk per stem.
         for stem, fb, fl, fc, w, h in stems_data:
-            positions = tile_positions(h, w, tile_size, self.stride)
+            slices = slice_lattice(h, w, tile_size, overlap)
             if regions is not None:
-                kept: list[tuple[int, int]] = []
-                for tile_x, tile_y in positions:
-                    if not tile_within_extent(tile_x, tile_y, tile_size, w, h):
+                kept: list[tuple[int, int, int, int]] = []
+                for s in slices:
+                    if not is_full_slice(s, tile_size):
                         self.tiles_dropped_past_extent += 1
-                    elif any(rect_contains_tile(r, tile_x, tile_y, tile_size) for r in regions):
-                        kept.append((tile_x, tile_y))
+                    elif any(rect_contains_rect(r, s) for r in regions):
+                        kept.append(s)
                     else:
                         self.tiles_dropped_outside_regions += 1
-                positions = kept
+                slices = kept
             # Clipped by row index, so each kept box's label and crowd flag are read by that row.
-            per_tile = clipped_boxes_per_tile(
-                fb, np.arange(len(fb)), positions, tile_size, self.min_box_size)
-            for (tile_x, tile_y), (tb, rows) in zip(positions, per_tile):
+            per_slice = clipped_boxes_per_slice(
+                fb, np.arange(len(fb)), slices, self.min_box_size)
+            for s, (tb, rows) in zip(slices, per_slice):
                 if len(tb) > 1:
                     keep = dedup_boxes(tb, fl[rows], dedup_iou)
                     tb, rows = tb[keep], rows[keep]
                 if skip_empty and len(tb) == 0:
                     continue
-                self._index.append({"stem": stem, "tile_x": tile_x, "tile_y": tile_y,
+                self._index.append({"stem": stem, "slice": s,
                                     "boxes": tb, "labels": fl[rows], "iscrowd": fc[rows]})
 
     @property
@@ -594,10 +703,10 @@ class TiledDetectionDataset(BaseImageDataset):
         return [e["stem"] for e in self._index]
 
     @property
-    def tile_entries(self) -> list[tuple[str, int, int]]:
-        """``(stem, tile_x, tile_y)`` per sample, in index order: the tile geometry a sampler
-        needs to order reads for locality without touching a pixel."""
-        return [(e["stem"], e["tile_x"], e["tile_y"]) for e in self._index]
+    def tile_entries(self) -> list[tuple[str, tuple[int, int, int, int]]]:
+        """``(stem, slice)`` per sample, in index order, each slice its half-open ``(x0, y0, x1,
+        y1)`` lattice box."""
+        return [(e["stem"], e["slice"]) for e in self._index]
 
     @property
     def source_frames(self) -> dict[str, dict[str, Any]]:
@@ -614,12 +723,9 @@ class TiledDetectionDataset(BaseImageDataset):
                 counts[int(lab) - 1] += 1  # 0-indexed cid, matching DetectionDataset
         return dict(counts)
 
-    def _read_windowed_tile(self, stem: str, info: dict, tile_x: int, tile_y: int):
-        """One tile through the pooled windowed source, clipped to bounds and zero-padded; PIL
-        where the dtype has a faithful mode (so augmentation applies), else ndarray. A 4-channel
-        tile only converts when the source's own ``band_interpretations`` names the 4th band alpha
-        (see :func:`to_pil_if_faithful`); an untagged or genuinely spectral 4th band stays ndarray,
-        same as any other mode PIL can't represent faithfully.
+    def _read_windowed_tile(self, stem: str, info: dict, s: tuple[int, int, int, int]):
+        """One slice through the pooled windowed source: its ``[H, W, C]`` array and the source's
+        band interpretations.
 
         Refuses when the recorded frame disagrees with the pooled source's own dims, or the
         returned window's shape disagrees with the requested rect.
@@ -632,8 +738,7 @@ class TiledDetectionDataset(BaseImageDataset):
                 f"{src.width}x{src.height} at {self.expected_channels} channels. Cropping here "
                 f"would displace every box."
             )
-        y0, y1 = tile_y, min(tile_y + self.tile_size, src.height)
-        x0, x1 = tile_x, min(tile_x + self.tile_size, src.width)
+        x0, y0, x1, y1 = s
         region, _spec = src.read_region(raster_source.Rect(x0, y0, x1, y1))
         if region.shape[:2] != (y1 - y0, x1 - x0):
             raise ValueError(
@@ -641,19 +746,21 @@ class TiledDetectionDataset(BaseImageDataset):
                 f"pixels for the {y1 - y0}x{x1 - x0} window at ({x0}, {y0}): the decoder "
                 f"disagrees with its own header, refusing to serve displaced pixels."
             )
-        return to_pil_if_faithful(
-            pad_tile(region, self.tile_size),
-            band_interpretations=getattr(src, "band_interpretations", None))
+        return region, getattr(src, "band_interpretations", None)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        """One slice and its clipped targets. The slice is PIL where its dtype has a faithful mode
+        (so augmentation applies), else ``[H, W, C]``; a 4-channel slice converts only when the
+        source names its 4th band alpha (:func:`to_pil_if_faithful`)."""
         e = self._index[idx]
         stem = e["stem"]
         info = self._source_frames[stem]
+        interpretations = None
         if info["windowed"]:
-            tile = self._read_windowed_tile(stem, info, e["tile_x"], e["tile_y"])
+            region, interpretations = self._read_windowed_tile(stem, info, e["slice"])
         else:
             # Channel-aware and EXIF-oriented (via load_image) so cropped pixels align with the
-            # tile geometry and the labels clipped in __init__.
+            # slice geometry and the labels clipped in __init__.
             img = self._open_image(stem)
             w, h = self._image_size(img)
             if (w, h) != (info["width"], info["height"]):
@@ -664,7 +771,10 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{info['width']}x{info['height']} but now decodes as {w}x{h} at "
                     f"{self.expected_channels} channels. Cropping here would displace every box."
                 )
-            tile = crop_pad_tile(img, e["tile_x"], e["tile_y"], self.tile_size, w, h)
+            arr, interpretations = pixel_array(img)
+            x0, y0, x1, y1 = e["slice"]
+            region = arr[y0:y1, x0:x1]
+        tile = to_pil_if_faithful(region, band_interpretations=interpretations)
         return self._finalize(tile, {**target_tensors(e), "image_id": idx})
 
 

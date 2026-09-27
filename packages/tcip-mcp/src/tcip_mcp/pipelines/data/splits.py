@@ -412,13 +412,9 @@ _SPATIAL_IDENTITY_SEP = "::"
 
 
 def spatial_strip_identity(stem: str, region_label: str) -> str:
-    """A spatial split's per-region membership identity for one tile's source stem.
-
-    ``region_label`` names the contiguous pixel-space strip a tile fell into (e.g.
-    ``"strip_x_2"``). A selection that groups by this instead of the bare stem never reads a
-    within-image split as the same stem appearing on more than one side:
-    :func:`stem_of_spatial_identity` is the one place that identity is parsed back.
-    """
+    """A spatial split's per-region membership identity for one tile's source stem, ``region_label``
+    naming the contiguous pixel-space strip the tile fell into (e.g. ``"strip_x_2"``);
+    :func:`stem_of_spatial_identity` parses it back."""
     return f"{stem}{_SPATIAL_IDENTITY_SEP}{region_label}"
 
 
@@ -458,7 +454,6 @@ class SpatialStripSplit:
     height: int
     tile_size: int
     overlap: float
-    stride: int
     axis: str
     buffer: int
     split_names: tuple[str, ...]
@@ -474,33 +469,31 @@ class SpatialStripSplit:
     realized_fractions: dict[str, float]
     realized_discard_fraction: float
 
-    def _region_index_for(self, tile_x: int, tile_y: int) -> int | None:
-        """Index into ``region_bounds`` for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
-        this position falls in a dropped gap (buffer band or past-extent) rather than fully inside
-        any region.
-        """
-        pos = tile_x if self.axis == "x" else tile_y
-        starts = [start for _, start, _ in self.region_bounds]
-        idx = bisect.bisect_right(starts, pos) - 1
-        if idx < 0:
-            return None
-        _, start, end = self.region_bounds[idx]
-        return idx if (start <= pos and pos + self.tile_size <= end) else None
-
-    def split_name_for(self, tile_x: int, tile_y: int) -> str | None:
-        """Which split (``"train"``/``"val"``/``"test"``/...) a kept tile at ``(tile_x,
-        tile_y)`` belongs to, or ``None`` when it falls in a dropped gap."""
-        idx = self._region_index_for(tile_x, tile_y)
+    def split_name_for(self, box: tuple[int, int, int, int]) -> str | None:
+        """Which split (``"train"``/``"val"``/``"test"``/...) the lattice slice ``box`` belongs
+        to, or ``None`` when it falls in a dropped gap."""
+        idx = _region_index(self.region_bounds, self.axis, box)
         return None if idx is None else self.region_bounds[idx][0]
 
-    def identity_for(self, stem: str, tile_x: int, tile_y: int) -> str | None:
-        """The region identity for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
-        this position falls in a dropped gap (buffer band or past-extent) rather than fully
-        inside any region."""
-        idx = self._region_index_for(tile_x, tile_y)
+    def identity_for(self, stem: str, box: tuple[int, int, int, int]) -> str | None:
+        """The region identity for the lattice slice ``box`` of ``stem``, or ``None`` when it
+        falls in a dropped gap."""
+        idx = _region_index(self.region_bounds, self.axis, box)
         if idx is None:
             return None
         return spatial_strip_identity(stem, f"strip_{self.axis}_{idx}")
+
+
+def _region_index(region_bounds: list[tuple[str, int, int]], axis: str,
+                  box: tuple[int, int, int, int]) -> int | None:
+    """Index into ``region_bounds`` of the region the slice ``box`` lies wholly inside along
+    ``axis``, or ``None`` when it falls in a dropped gap (a buffer band or past the extent)."""
+    lo, hi = (box[0], box[2]) if axis == "x" else (box[1], box[3])
+    idx = bisect.bisect_right([start for _, start, _ in region_bounds], lo) - 1
+    if idx < 0:
+        return None
+    _, start, end = region_bounds[idx]
+    return idx if start <= lo and hi <= end else None
 
 
 def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]:
@@ -520,22 +513,21 @@ def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]
 
 
 def _strip_regions(
-    positions: list[int], tile_size: int, buffer: int,
+    spans: list[tuple[int, int]], buffer: int,
     split_names: tuple[str, ...], fractions: tuple[float, ...],
     discard_ceiling: float, stripes_per_split: int,
 ) -> list[tuple[str, int, int]]:
     """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis order,
-    cut and shrunk in the discrete tile-origin lattice rather than continuous pixel space: a region
-    with positive pixel width could otherwise miss the stride-spaced lattice entirely and contain
-    zero real tile origins.
+    cut and shrunk over the lattice's own slice ``spans`` (each slice's ``(start, end)`` on the
+    axis, in order) so every region holds whole slices.
 
     ``stripes_per_split`` sets how many pieces a side is cut into before adjacent same-name pieces
     merge (capped by ``discard_ceiling``, the maximum share of the axis a buffer band between
     differing sides may consume); the fraction each side targets sets its total share of the axis.
     The piece order is :func:`_center_out_order`'s; see :class:`SpatialStripSplit`.
     """
-    n = len(positions)
-    axis_span = positions[-1] + tile_size - positions[0]
+    n = len(spans)
+    axis_span = spans[-1][1] - spans[0][0]
     n_splits = len(split_names)
     max_stripes = max(1, int(discard_ceiling * axis_span / max(1, n_splits * buffer)))
     stripes = max(1, min(stripes_per_split, max_stripes))
@@ -566,13 +558,13 @@ def _strip_regions(
     shrunk: list[tuple[str, int, int]] = []
     for i, (name, s, e) in enumerate(merged):
         if i > 0 and merged[i - 1][0] != name:
-            neighbor_end_pixel = positions[merged[i - 1][2] - 1] + tile_size
-            while s < e and positions[s] < neighbor_end_pixel + buffer:
+            neighbor_end_pixel = spans[merged[i - 1][2] - 1][1]
+            while s < e and spans[s][0] < neighbor_end_pixel + buffer:
                 s += 1
         if e > s:
             shrunk.append((name, s, e))
 
-    return [(name, positions[s], positions[e - 1] + tile_size) for name, s, e in shrunk]
+    return [(name, spans[s][0], spans[e - 1][1]) for name, s, e in shrunk]
 
 
 def spatial_strip_split(
@@ -585,9 +577,9 @@ def spatial_strip_split(
     the case where there are too few source images to hold one out whole: a strip is train, val, or
     test instead of a stem.
 
-    The tile lattice comes from :func:`~tcip_mcp.pipelines.data.tiling.tile_positions` at the
-    training stride, so the regions this returns tile the same grid a
-    :class:`TiledDetectionDataset` built at this ``tile_size``/``overlap`` will index. The split
+    The tile lattice comes from :func:`~tcip_mcp.pipelines.slicing.slice_lattice`, so the regions
+    this returns tile the same slices a :class:`TiledDetectionDataset` built at this
+    ``tile_size``/``overlap`` will index. The split
     runs along whichever axis (width or height) offers more distinct tile positions. Piece count
     and order follow :class:`SpatialStripSplit` (``stripes_per_split``, capped by
     ``discard_ceiling``).
@@ -602,7 +594,7 @@ def spatial_strip_split(
     ``tile_size``, or when the derived strip layout leaves any requested, non-zero-fraction side
     with zero kept tiles.
     """
-    from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions, tile_within_extent
+    from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
     if len(fractions) != len(split_names):
         raise ValueError(
@@ -631,29 +623,23 @@ def spatial_strip_split(
             f"at least two non-zero fractions are needed for a spatial split, got {fractions}."
         )
 
-    stride = compute_stride(tile_size, overlap)
-    lattice = tile_positions(height, width, tile_size, stride)
+    lattice = slice_lattice(height, width, tile_size, overlap)
     total_tiles = len(lattice)
-    if total_tiles == 0:
-        raise ValueError(f"no tile position fits a {width}x{height} image at tile_size={tile_size}.")
-
-    in_extent = [(tx, ty) for tx, ty in lattice
-                 if tile_within_extent(tx, ty, tile_size, width, height)]
+    in_extent = [box for box in lattice if is_full_slice(box, tile_size)]
     tiles_dropped_past_extent = total_tiles - len(in_extent)
     if not in_extent:
         raise ValueError(
             f"no tile fits fully inside the {width}x{height} image extent at tile_size="
-            f"{tile_size} (every tile position needs edge padding); a spatial split needs at "
-            "least one fully-real tile to assign."
+            f"{tile_size} (the frame is shorter than the tile on an axis); a spatial split needs "
+            "at least one full tile to assign."
         )
 
-    xs = sorted({tx for tx, _ in in_extent})
-    ys = sorted({ty for _, ty in in_extent})
-    axis = "x" if len(xs) >= len(ys) else "y"
-    positions = xs if axis == "x" else ys
+    x_spans = sorted({(x0, x1) for x0, _y0, x1, _y1 in in_extent})
+    y_spans = sorted({(y0, y1) for _x0, y0, _x1, y1 in in_extent})
+    axis = "x" if len(x_spans) >= len(y_spans) else "y"
 
     region_bounds = _strip_regions(
-        positions, tile_size, buffer, active_names, active_fracs, discard_ceiling,
+        x_spans if axis == "x" else y_spans, buffer, active_names, active_fracs, discard_ceiling,
         stripes_per_split,
     )
     if len({name for name, _, _ in region_bounds}) < len(active_names):
@@ -665,15 +651,12 @@ def spatial_strip_split(
 
     kept: dict[str, int] = {name: 0 for name in active_names}
     dropped_outside = 0
-    starts = [start for _, start, _ in region_bounds]
-    for tx, ty in in_extent:
-        pos = tx if axis == "x" else ty
-        idx = bisect.bisect_right(starts, pos) - 1
-        name, start, end = region_bounds[idx] if idx >= 0 else (None, 0, 0)
-        if name is not None and start <= pos and pos + tile_size <= end:
-            kept[name] += 1
-        else:
+    for box in in_extent:
+        idx = _region_index(region_bounds, axis, box)
+        if idx is None:
             dropped_outside += 1
+        else:
+            kept[region_bounds[idx][0]] += 1
 
     if any(kept[name] == 0 for name in active_names):
         raise ValueError(
@@ -690,7 +673,7 @@ def spatial_strip_split(
     total_kept = sum(kept.values()) or 1
     tiles_within_extent = len(in_extent)
     return SpatialStripSplit(
-        width=width, height=height, tile_size=tile_size, overlap=overlap, stride=stride,
+        width=width, height=height, tile_size=tile_size, overlap=overlap,
         axis=axis, buffer=buffer, split_names=split_names,
         requested_fractions=fractions, stripes_per_split=stripes_per_split,
         discard_ceiling=discard_ceiling, regions=regions, region_bounds=region_bounds,
@@ -710,13 +693,9 @@ def cal_holdout_split(
     holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     seed: int = DEFAULT_CAL_SEED,
 ) -> dict[str, list[str]]:
-    """A disjoint, group-coherent, annotation-balanced calibration/holdout split.
-
-    A thin wrapper over :func:`group_balanced_split` (never reimplemented): its third split's
-    fraction is always 0, and the resulting ``{"train", "val"}`` parts are the two halves of
-    whatever universe ``stems`` holds, remapped to ``{"calibration", "holdout"}`` for the
-    calibration callers.
-    """
+    """A disjoint, group-coherent, annotation-balanced calibration/holdout split of ``stems``:
+    :func:`group_balanced_split` at ``(1 - holdout_ratio, holdout_ratio, 0)``, its two halves
+    returned as ``{"calibration", "holdout"}``."""
     parts = group_balanced_split(
         stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
         splits=(1.0 - holdout_ratio, holdout_ratio, 0.0), seed=seed,
@@ -927,8 +906,8 @@ def resolve_locked_cal_holdout_split(
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
     The split locks on its first draw for a given ``identity_hash``: every later call for the same
-    identity returns the identical split unless the caller passes ``force_redraw=True`` (the
-    ``redraw_calibration_holdout`` MCP tool). The grouping policy is resolved via
+    identity returns the identical split unless the caller passes ``force_redraw=True``. The
+    grouping policy is resolved via
     :func:`resolve_group_key_fn` first, so a malformed ``group_by``/``group_key_map`` raises; an
     unstated ``group_by`` is :data:`DEFAULT_GROUP_BY`.
 

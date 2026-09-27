@@ -61,7 +61,7 @@ def test_the_cal_holdout_lock_golden_carries_every_key_the_resolver_writes(tmp_p
 def test_the_job_registry_golden_carries_job_id_not_id(tmp_path):
     job = InferenceJob(
         job_id="j1", checkpoint_path="model_best.pt", images_dir="images/2026-03-04",
-        output_dir="predictions/live/2026-03-04", conf=0.5, iou=0.5,
+        output_dir="predictions/live/2026-03-04", conf=0.5, cross_tile_nms=0.5,
         overlap=0.2, status="completed",
     )
     fresh = _summary(job)

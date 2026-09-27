@@ -14,52 +14,32 @@ pytest.importorskip("torch")
 from tests._producer_fixtures import admission_of
 
 
-def _stub_predictor(monkeypatch) -> None:
-    import tcip_mcp.model_registry as model_registry_mod
+class _Dataset:
+    """The members a stubbed dataset build names, each its own source, with no ground truth."""
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    def __init__(self, samples):
+        self.stems = [getattr(s, "member", s) for s in samples]
+        self.sample_sources = {k: k for k in self.stems}
 
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    def member_of(self, key):
+        return key
 
-    class _Predictor:
-        def __init__(self):
-            self.model = SimpleNamespace(detector=SimpleNamespace(
-                roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
-            self.device = "cpu"
-            self.train_tile_size = None
-            self.in_chans = 3
-
-    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
-                        lambda checkpoint=None, **kw: _Predictor())
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
-                        lambda *a, **kw: admission_of(["a", "b"]))
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
-                        lambda *a, samples=None, **kw: SimpleNamespace(
-                            stems=list(samples) if samples is not None else ["a", "b"]))
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines",
-                        lambda label_path, **kw: 1)
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
-                        lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        lambda model, loader, device, task: [])
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
-                        lambda b, locked: None)
+    def det_targets(self, key):
+        return {"boxes": [], "labels": [], "iscrowd": []}
 
 
-
-
-def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_records) -> None:
-    """Stub every model-pass mechanic ``resolve_count_operating_point`` composes around its own
-    ``resolve_operating_point`` call (the checkpoint, the predictor, dataset probing and record
-    collection), leaving the resolver itself to run for real over the records supplied.
+def _stub_dense_pass(monkeypatch, cal_stems=("a",), hold_stems=("b",), cal_records=(),
+                     hold_records=()) -> None:
+    """Stub every model-pass mechanic the count door composes around its own
+    ``resolve_operating_point`` call (the checkpoint, the predictor, dataset probing and the
+    prepared pass's record collection), leaving the resolver itself to run for real over the
+    records supplied.
     """
     import tcip_mcp.model_registry as model_registry_mod
 
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
+    cal_stems, hold_stems = list(cal_stems), list(hold_stems)
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
 
@@ -77,32 +57,36 @@ def _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_recor
     all_stems = cal_stems + hold_stems
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(all_stems))
-
-    def _build_dataset(*a, samples=None, **kw):
-        return SimpleNamespace(stems=list(samples) if samples is not None else all_stems)
-
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", _build_dataset)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
+                        lambda *a, samples=None, **kw: _Dataset(samples))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines",
                         lambda label_path, **kw: 1)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
         lambda stems, **kw: {"calibration": cal_stems, "holdout": hold_stems})
-    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
 
-    def _records_over_loader(model, loader, device, task):
-        # The stubbed factory hands the producer's own samples through as ``stems``; the door is
-        # asked for a side by the members those samples name.
-        served = sorted(getattr(s, "member", s) for s in loader.stems)
-        if served == sorted(cal_stems):
-            return cal_records
-        if served == sorted(hold_stems):
-            return hold_records
-        raise AssertionError(f"unexpected members requested from records_over_loader: {served}")
+    def _collect(p, cal, hold, source_of, gt_of):
+        # The door asks the prepared pass for each side by the members its samples name.
+        assert (sorted(cal), sorted(hold)) == (sorted(cal_stems), sorted(hold_stems))
+        return list(cal_records), list(hold_records)
 
-    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
-                        _records_over_loader)
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
+                        _collect)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
+
+
+def _stub_predictor(monkeypatch) -> None:
+    _stub_dense_pass(monkeypatch)
+
+
+def _untiled_regime() -> dict:
+    """The tile edge and merge threshold an untiled pass's bundle states."""
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms, resolve_tile_size_param
+
+    return {"tile_size": resolve_tile_size_param(None, tiled=False, tile_size_source="default",
+                                                 tile_size_derived_from=None),
+            "cross_tile_nms": resolve_cross_tile_nms(None, None)}
 
 
 def _label_pair(tmp_path):
@@ -131,9 +115,10 @@ def _existing_bucket(tmp_path, *, checkpoint_sha256="stub-sha256", tile_size_val
         "conf": derived("conf", conf_value, requires_validation=True,
                         validation_kind="annotations", derived_from="x",
                         validated_against="false"),
+        **_untiled_regime(),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
-        op, validated=False, validated_by=None, tile_size_validated=tile_size_validated,
+        op, slicing=None, validated=False, validated_by=None, tile_size_validated=tile_size_validated,
         shippable_issues=[], id_map={trait: 0}, trait=trait, dataset_hash="H",
         checkpoint="m", checkpoint_sha256=checkpoint_sha256, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
@@ -153,7 +138,8 @@ def _resolve_op_shippable(trait_name, **kw):
     conf = derived("conf", 0.42, requires_validation=True, validation_kind="annotations",
                    derived_from="held-out sweep", validated_against=VALIDATED_HELD_OUT,
                    gate_evidence={"passed_holdout": True})
-    return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
+    return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"),
+                          params={"conf": conf, **_untiled_regime()})
 
 
 def _resolve_op_unshippable(trait_name, **kw):
@@ -162,7 +148,8 @@ def _resolve_op_unshippable(trait_name, **kw):
     conf = derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
                    derived_from="held-out sweep", validated_against="false",
                    gate_evidence={"passed_holdout": False, "failures": ["holdout_count_bias"]})
-    return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
+    return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"),
+                          params={"conf": conf, **_untiled_regime()})
 
 
 def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
@@ -221,7 +208,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     hold_stems = [r["image_id"] for r in hold_records]
 
     probe = resolve_operating_point("bud_opening", dataset_hash="H", calibration_records=cal_records,
-                                    holdout_records=hold_records, tiled=False,
+                                    holdout_records=hold_records, slicing=None,
                                     staged_conf_floor=0.01)
     assert probe.is_shippable, probe.shippable_issues()
     production_conf = probe.get("conf").to_provenance()["value"]
@@ -448,9 +435,10 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
     op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="false"),
+        **_untiled_regime(),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
-        op, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        op, slicing=None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
         id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None, images_dir=None,
         raster_path=str(tmp_path / "mosaic.tif"), produced_at="2024-01-01T00:00:00Z",
@@ -496,9 +484,10 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
     op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="held_out_annotations"),
+        **_untiled_regime(),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
-        op, validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        op, slicing=None, validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
         id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
@@ -542,9 +531,10 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
     op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="held_out_annotations"),
+        **_untiled_regime(),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
-        op, validated=True,
+        op, slicing=None, validated=True,
         validated_by={"experiment_id": "exp-nonexistent", "record_digest": "deadbeef"},
         tile_size_validated=None, shippable_issues=[], id_map={"bud": 0}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
@@ -656,7 +646,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
                        derived_from="held-out sweep", validated_against=VALIDATED_HELD_OUT,
                        gate_evidence={"passed_holdout": True})
         return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"),
-                              params={"conf": conf})
+                              params={"conf": conf, **_untiled_regime()})
 
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
                         _resolve_op_and_race)
@@ -680,9 +670,10 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
 def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, tmp_path):
     """Import identity, not a second implementation: both entry points resolve
     ``resolve_count_operating_point`` off the one module at call time."""
+    _stub_predictor(monkeypatch)
     calls = []
 
-    def _stub(**kwargs):
+    def _stub(*args, **kwargs):
         calls.append(kwargs)
         raise RuntimeError("stub-count-calibration-called")
 
@@ -737,9 +728,10 @@ def _producer_bucket(tmp_path, *, subject="bud", attribute=None):
     op = ResolvedBundle(trait=subject, dataset_hash="H", params={
         "conf": derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="false"),
+        **_untiled_regime(),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
-        op, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        op, slicing=None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
         id_map=id_map, trait=subject, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
@@ -762,11 +754,12 @@ def test_calibrate_count_operating_point_defaults_to_the_bucket_own_scope_when_n
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    _stub_predictor(monkeypatch)
     dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
 
     calls: list[dict] = []
 
-    def _stub(**kwargs):
+    def _stub(*args, **kwargs):
         calls.append(kwargs)
         raise RuntimeError("stub-count-calibration-called")
 
@@ -814,11 +807,12 @@ def test_calibrate_count_operating_point_succeeds_when_stated_pair_matches_bucke
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    _stub_predictor(monkeypatch)
     dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
 
     calls: list[dict] = []
 
-    def _stub(**kwargs):
+    def _stub(*args, **kwargs):
         calls.append(kwargs)
         raise RuntimeError("stub-count-calibration-called")
 

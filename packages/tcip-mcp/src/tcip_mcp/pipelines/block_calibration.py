@@ -13,8 +13,6 @@ from typing import Any
 
 import numpy as np
 
-from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE
-
 logger = logging.getLogger(__name__)
 
 # Enough bands to measure a per-band bias spread (resolve_operating_point's own equivalence gate
@@ -84,25 +82,28 @@ def _band_rects(
     return out
 
 
+def _centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
+    """Which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
+    x0, y0, x1, y1 = rect
+    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
+    return (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
+
+
 def _select_gt_for_band(
     gt: dict[str, np.ndarray], band_rect: tuple[int, int, int, int],
 ) -> dict[str, np.ndarray]:
     """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
-    ``iscrowd``) whose box center lands in ``band_rect``, each box kept at its full extent (never
-    clipped) and translated to the band's own local (inner-rect-relative) pixel space: the same
-    inclusion rule as :func:`_band_records`.
+    ``iscrowd``) :func:`_centered_in` ``band_rect``, each box kept at its full extent (never
+    clipped) and translated to the band's own local (inner-rect-relative) pixel space.
     """
-    boxes = gt["boxes"]
-    x0, y0, x1, y1 = band_rect
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
-    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
-    keep = (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
+    keep = _centered_in(gt["boxes"], band_rect)
     band = {k: gt[k][keep] for k in PER_BOX_KEYS if k in gt}
     band["boxes"] = band["boxes"].astype(np.float64, copy=True)
-    band["boxes"][:, [0, 2]] -= x0
-    band["boxes"][:, [1, 3]] -= y0
+    band["boxes"][:, [0, 2]] -= band_rect[0]
+    band["boxes"][:, [1, 3]] -= band_rect[1]
     return band
 
 
@@ -162,12 +163,12 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 
 def resolve_block_calibration_records(
-    predictor: Any, *, trait_name: str, experiment_id: str | None,
-    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE, postprocess: str = DEFAULT_POSTPROCESS,
+    p: Any, *, trait_name: str, experiment_id: str | None,
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
-    calibration/test regions.
+    calibration/test regions, every band predicted through the whole-mosaic export's own prepared
+    pass ``p`` (``inference_tools._PreparedPass``).
 
     Returns ``(bundle, provenance, evidence)``: ``bundle`` is a
     :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle`; ``provenance`` carries the resolved
@@ -185,8 +186,10 @@ def resolve_block_calibration_records(
     (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source always
     falls back to GT-spacing.
 
-    ``export_tile_size`` (required) is the edge the caller's whole-mosaic export pass runs at;
-    refused, naming both, when it differs from the run partition's own ``tile_size``.
+    ``p``'s tile edge is refused, naming both, when it differs from the run partition's own
+    ``tile_size``. An unstated merge threshold on ``p`` is resolved from the calibration bands'
+    own GT before any band is predicted (:func:`~tcip_mcp.pipelines.calibration.resolve_pass_merge`),
+    so the bands are merged at the threshold the export runs at.
     """
     from tcip_store import store
 
@@ -239,6 +242,7 @@ def resolve_block_calibration_records(
 
     from tcip_mcp.dataset_layout import dataset_root_of
 
+    predictor = p.predictor
     dataset_root = dataset_root_of(labels_dir)
     if dataset_root is None:
         raise BlockCalibrationRefused(
@@ -278,11 +282,11 @@ def resolve_block_calibration_records(
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
 
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
-    if tile_size != int(export_tile_size):
+    if tile_size != p.geometry.tile_size:
         raise BlockCalibrationRefused(
             f"block calibration refused: the run's reserved regions were tiled at "
             f"{tile_size}px, but this export is resolved to run the whole-mosaic pass at "
-            f"{int(export_tile_size)}px; the reserved-region claim and the exported bucket must be "
+            f"{p.geometry.tile_size}px; the reserved-region claim and the exported bucket must be "
             "tiled at one regime, or the claim says nothing about the counts the export actually "
             "produces."
         )
@@ -301,18 +305,14 @@ def resolve_block_calibration_records(
 
     from tcip_mcp.pipelines.derivations import derive_block_scale_px
 
-    def _in_regions(cx: float, cy: float, regions: list) -> bool:
-        return any(rx0 <= cx < rx1 and ry0 <= cy < ry1 for rx0, ry0, rx1, ry1 in regions)
-
     from tcip_mcp.pipelines.data.datasets import object_rows
 
     objects = gt["boxes"][object_rows(gt["iscrowd"])]
-    centers = (objects[:, :2] + objects[:, 2:]) / 2.0 if len(objects) else objects
     # One real spatial scale, pooled across both reserved regions' own GT objects: a crowd region
     # is no object, so its extent says nothing about their spacing.
-    reserved_mask = np.array([
-        _in_regions(cx, cy, cal_region) or _in_regions(cx, cy, test_region) for cx, cy in centers
-    ], dtype=bool) if len(centers) else np.zeros((0,), dtype=bool)
+    reserved_mask = np.zeros(len(objects), dtype=bool)
+    for region in list(cal_region) + list(test_region):
+        reserved_mask |= _centered_in(objects, tuple(region))
     reserved_boxes_xywh = [
         [x1, y1, x2 - x1, y2 - y1]
         for (x1, y1, x2, y2) in objects[reserved_mask].tolist()
@@ -375,8 +375,11 @@ def resolve_block_calibration_records(
     applied, applied_attribute_path = apply_operating_point(
         predictor, STAGED_CONF_FLOOR, density_cap)
 
+    from tcip_mcp.pipelines.calibration import pass_resolver_inputs, resolve_pass_merge
     from tcip_mcp.pipelines.raster_source import open_raster
+    from tcip_mcp.pipelines.training.evaluation import gt_records
 
+    resolve_pass_merge(p, [gt_records(_select_gt_for_band(gt, rect)) for rect in cal_bands.values()])
     with open_raster(training_source, predictor.in_chans) as reader:
         if (reader.width, reader.height) != (mosaic_w, mosaic_h):
             raise BlockCalibrationRefused(
@@ -387,15 +390,9 @@ def resolve_block_calibration_records(
                 f"file before block calibration can trust the reserved regions' geometry."
             )
         cal_records, cal_rects = _band_records(
-            reader, cal_bands, mosaic_w, mosaic_h, tile_size, overlap, predictor,
-            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-            gt=gt, stem=stem,
-        )
+            reader, cal_bands, mosaic_w, mosaic_h, p, gt=gt, stem=stem)
         test_records, test_rects = _band_records(
-            reader, test_bands, mosaic_w, mosaic_h, tile_size, overlap, predictor,
-            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-            gt=gt, stem=stem,
-        )
+            reader, test_bands, mosaic_w, mosaic_h, p, gt=gt, stem=stem)
 
     from tcip_mcp.pipelines.operating_point import (
         attach_spatial_split_kind_provenance, resolve_operating_point,
@@ -406,8 +403,9 @@ def resolve_block_calibration_records(
     # Explicit dict[str, Any] so the **resolver_inputs splat below checks against each of
     # resolve_operating_point's differently-typed keyword parameters.
     resolver_inputs: dict[str, Any] = {
+        **pass_resolver_inputs(p),
         "dataset_hash": dh, "calibration_records": cal_records, "holdout_records": test_records,
-        "tiled": True, "tiled_source": "default", "cross_tile_nms": None, "max_dets": density_cap,
+        "max_dets": density_cap,
         "max_dets_derived_from": (
             "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
         "staged_conf_floor": applied.get("score_thresh"),
@@ -442,47 +440,46 @@ def resolve_block_calibration_records(
 
 def _band_records(
     reader: Any, bands: dict[str, tuple[int, int, int, int]], mosaic_w: int, mosaic_h: int,
-    tile_size: int, overlap: float, predictor: Any, *, tile_batch_size: int, global_nms_iou: float,
-    postprocess: str, gt: dict[str, np.ndarray], stem: str,
+    p: Any, *, gt: dict[str, np.ndarray], stem: str,
 ) -> tuple[list[dict], dict[str, tuple[int, int, int, int]]]:
     """Per-band COCO-shaped records
     (:func:`~tcip_mcp.pipelines.training.evaluation.build_coco_image_record`) plus the band rects
     keyed by a globally-unique image_id, for ``resolve_operating_point``'s
     ``cal_rects``/``hold_rects`` geometric disjointness check.
 
-    Runs :meth:`~tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor.predict_tiled`
-    over a haloed :class:`~tcip_mcp.pipelines.raster_source._RegionView` of ``reader``, keeps only
-    detections whose center lands in the un-haloed inner rect (kept at full extent, never clipped),
-    and selects GT the same way (:func:`_select_gt_for_band`).
+    Predicts through the prepared pass ``p`` (its geometry, slicing record and merge threshold)
+    over a :class:`~tcip_mcp.pipelines.raster_source._RegionView` of ``reader`` widened on every
+    side (clipped to the mosaic) by the overlap the slice lattice states between neighbors, and
+    keeps the detections and the GT :func:`_centered_in` the band's own rect, each at full extent.
     """
-    from tcip_mcp.pipelines.data.tiling import region_halo
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
+    from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import (
         build_coco_image_record, detection_record, gt_records,
     )
 
+    tile_size = p.geometry.tile_size
+    # The second slice's origin over a two-tile-wide frame is where the lattice's overlap ends.
+    halo = tile_size - slice_lattice(tile_size, 2 * tile_size, tile_size, p.geometry.overlap)[1][0]
     records: list[dict] = []
     rects_by_id: dict[str, tuple[int, int, int, int]] = {}
-    for name, band_rect in sorted(bands.items()):
-        haloed, inner = region_halo(band_rect, mosaic_w, mosaic_h, tile_size, overlap)
-        hx0, hy0, hx1, hy1 = haloed
+    for name, inner in sorted(bands.items()):
         ix0, iy0, ix1, iy1 = inner
+        hx0, hy0 = max(0, ix0 - halo), max(0, iy0 - halo)
+        hx1, hy1 = min(mosaic_w, ix1 + halo), min(mosaic_h, iy1 + halo)
         view = _RegionView(reader, Rect(hx0, hy0, hx1, hy1))
         image_id = f"{stem}::block_{name}"
-        result = predictor.predict_tiled(
-            view, tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
-            global_nms_iou=global_nms_iou, postprocess=postprocess, require_masks=False,
-            source_label=image_id,
+        result = p.predictor.predict_sliced(
+            view, tile_size=tile_size, overlap=p.geometry.overlap,
+            postprocess=p.slicing["postprocess"], cross_tile_nms=p.cross_tile_nms.value,
+            tile_batch_size=p.tile_batch_size, tile_resize=p.geometry.tile_resize,
+            require_masks=False, source_label=image_id,
         )
         cap_hit = result.get("cap_hit", False)
-        dt: list[dict] = []
-        for (bx1, by1, bx2, by2), score, label in zip(
-            result["boxes"], result["scores"], result["labels"],
-        ):
-            cx, cy = (bx1 + bx2) / 2.0 + hx0, (by1 + by2) / 2.0 + hy0
-            if ix0 <= cx < ix1 and iy0 <= cy < iy1:
-                dx, dy = hx0 - ix0, hy0 - iy0
-                dt.append(detection_record((bx1 + dx, by1 + dy, bx2 + dx, by2 + dy), label, score))
+        boxes = np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4) + [hx0, hy0, hx0, hy0]
+        dt = [detection_record((box - [ix0, iy0, ix0, iy0]).tolist(), label, score)
+              for box, score, label, kept in zip(boxes, result["scores"], result["labels"],
+                                                 _centered_in(boxes, inner)) if kept]
         rec = build_coco_image_record(ix1 - ix0, iy1 - iy0,
                                       gt_records(_select_gt_for_band(gt, inner)), dt,
                                       image_id=image_id)

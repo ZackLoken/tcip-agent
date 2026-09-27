@@ -1,5 +1,5 @@
-"""Resolve the count operating point, untiled, over a locked, disjoint cal/holdout split of a
-labeled directory.
+"""Resolve the count operating point over a locked, disjoint cal/holdout split of a labeled
+directory, through a prepared pass.
 """
 
 from __future__ import annotations
@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.pipelines.calibration import calibration_reference_inputs
+from tcip_mcp.pipelines.calibration import (
+    calibration_reference_inputs, collect_calibration_records, pass_resolver_inputs,
+)
 from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO
 from tcip_mcp.pipelines.resolution import ResolvedBundle
 
@@ -51,14 +53,21 @@ def resolve_count_operating_point(
     holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     seed: int = DEFAULT_CAL_SEED,
     device: str | None = None,
+    regime: dict[str, Any] | None = None,
 ) -> CountCalibrationBundle:
-    """One low-threshold model pass over a disjoint calibration/holdout split, resolved into the
+    """One low-threshold pass over a disjoint calibration/holdout split
+    (:func:`~tcip_mcp.pipelines.calibration.collect_calibration_records`), resolved into the
     count-unbiased operating point and its held-out count-bias gate.
 
+    The pass is the one ``inference_tools._prepare_pass`` prepares from the checkpoint and
+    ``regime``, its ``tile``/``tile_size``/``overlap``/``postprocess``/``cross_tile_nms`` as a
+    ``run_inference`` caller states them (the checkpoint's own regime for any left out).
+    ``checkpoint_path`` must be named by a registry entry under ``project_root``; an unregistered
+    checkpoint raises :class:`~tcip_mcp.model_registry.UnregisteredCheckpoint`, and a pass that
+    cannot be prepared raises :class:`CalibrationUsageError` with its refusal.
+
     ``labels_dir`` is this calibration's measurement reference, so it clears
-    ``require_reference_ground_truth`` before anything else runs. ``checkpoint_path`` must be named
-    by a registry entry under ``project_root`` (``register_model``); an unregistered checkpoint
-    raises :class:`~tcip_mcp.model_registry.UnregisteredCheckpoint`.
+    ``require_reference_ground_truth`` before anything else runs.
 
     The cal/holdout split locks on its first draw for this labels directory's identity
     (``resolve_locked_cal_holdout_split``, scoped under ``dataset_root``); ``val_ratio``/``seed``
@@ -78,32 +87,36 @@ def resolve_count_operating_point(
     if policy_conflict:
         raise CalibrationUsageError(policy_conflict)
 
-    from torch.utils.data import DataLoader
-
     from tcip_annotation.json_io import require_reference_ground_truth
-    from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.splits import (
         resolve_locked_cal_holdout_split,
     )
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
         STAGED_CONF_FLOOR, apply_operating_point, attach_split_policy_provenance,
-        derive_max_dets_from_counts, records_over_loader, resolve_operating_point,
+        derive_max_dets_from_counts, resolve_operating_point,
     )
     from tcip_mcp.pipelines.data.label_queries import (
         admit, foreground_counts, require_admitted,
     )
-    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
-    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE, dataset_hash,
+    )
+    from tcip_mcp.pipelines.training.evaluation import gt_records
+    from tcip_mcp.tools.inference_tools import _prepare_pass
 
     # labels_dir is this function's measurement reference, cleared before any model/dataset work.
     require_reference_ground_truth(labels_dir)
 
-    checkpoint = load_registered_checkpoint(checkpoint_path, project_path=project_root)
-
-    predictor = build_predictor(checkpoint, device=device, max_dets=DEFAULT_MAX_DETS)
-    tile_size = getattr(predictor, "train_tile_size", None)
+    stated = {"tile": None, "tile_size": None, "overlap": None, "cross_tile_nms": None,
+              "postprocess": DEFAULT_POSTPROCESS, **(regime or {})}
+    p = _prepare_pass(
+        load_registered_checkpoint(checkpoint_path, project_path=project_root), images_dir=None,
+        conf_threshold=None, device=device, max_dets=None, experiment_id=experiment_id,
+        tile_batch_size=DEFAULT_TILE_BATCH_SIZE, **stated)
+    if isinstance(p, str):
+        raise CalibrationUsageError(p)
 
     selection_sha256 = None
     # One membership and one class space for this pass, whichever named it: the selection's own
@@ -151,29 +164,25 @@ def resolve_count_operating_point(
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
     applied, _applied_attribute_path = apply_operating_point(
-        predictor, STAGED_CONF_FLOOR, density_cap)
+        p.predictor, STAGED_CONF_FLOOR, density_cap)
 
-    def _records(sub: list[str]) -> list[dict]:
-        # This pass's own recorded samples, at the width the predictor reads at: the measurement
-        # reads the pixels its membership named, in the shape the model below takes.
-        samples = [counted[s] for s in sub]
-        ds = build_dataset("detection", tiling=None, samples=samples, scope=scope,
-                           sizes=resolve_sizes("detection",
-                                               {"num_channels": predictor.in_chans}, samples))
-        loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
-        return records_over_loader(predictor.model, loader, predictor.device, "detection")
+    # This pass's own recorded samples, each target and source read through the dataset a run
+    # over them builds, at the width the predictor reads at.
+    samples = [counted[s] for s in cal_stems + hold_stems]
+    ds: Any = build_dataset("detection", tiling=None, samples=samples, scope=scope,
+                            sizes=resolve_sizes("detection", {"num_channels": p.predictor.in_chans},
+                                                samples))
+    gt_of = {ds.member_of(k): gt_records(ds.det_targets(k)) for k in ds.stems}
+    source_of = {ds.member_of(k): ds.sample_sources[k] for k in ds.stems}
+    cal_records, hold_records = collect_calibration_records(
+        p, [s for s in cal_stems if s in gt_of], [s for s in hold_stems if s in gt_of],
+        source_of, gt_of)
 
     resolver_inputs: dict[str, Any] = {
+        **pass_resolver_inputs(p),
         "dataset_hash": dh,
-        "calibration_records": _records(cal_stems),
-        "holdout_records": _records(hold_stems),
-        "tile_size": tile_size,
-        # tile_size above is the checkpoint's persisted training geometry when present: say so,
-        # or an unclaimed value would wrongly stamp "default" rather than "derived".
-        "tile_size_source": ("derived" if tile_size is not None else "default"),
-        # This pass (_records, above) is always untiled, never predict_tiled/predict_batch
-        # (tile=...), so tiled=False is stated rather than left to the tiled=True default.
-        "tiled": False,
+        "calibration_records": cal_records,
+        "holdout_records": hold_records,
         "staged_conf_floor": applied.get("score_thresh"),
         "selection_dir": selection_dir,
         "calibration_labels_dir": labels_dir,
@@ -182,10 +191,8 @@ def resolve_count_operating_point(
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
 
-    checkpoint_sha256 = resolve_model_identity(checkpoint, experiment_id=experiment_id)["sha256"]
-
     return CountCalibrationBundle(
         trait=trait, dataset_hash=dh, bundle=bundle, resolver_inputs=resolver_inputs,
-        reference_inputs=calibration_reference_inputs(resolver_inputs, locked, stems), checkpoint_sha256=checkpoint_sha256, locked=locked,
-        labels_dir=str(Path(labels_dir)),
+        reference_inputs=calibration_reference_inputs(resolver_inputs, locked, stems),
+        checkpoint_sha256=p.identity["sha256"], locked=locked, labels_dir=str(Path(labels_dir)),
     )

@@ -60,7 +60,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured["ds"] = loader.dataset
-        return {"tiled": False, "eval_regime": "tile-level"}
+        return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
@@ -94,7 +94,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
 
     def _fake(ckpt, model, loader, device, output_dir, **kw):
         captured["ds"] = loader.dataset
-        return {"tiled": False, "eval_regime": "tile-level"}
+        return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 

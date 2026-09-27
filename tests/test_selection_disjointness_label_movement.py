@@ -155,7 +155,7 @@ def _seal(
         n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
         miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
     bundle = resolve_operating_point(
-        TRAIT, experiment_id=experiment_id, dataset_hash=dh, tiled=False,
+        TRAIT, experiment_id=experiment_id, dataset_hash=dh, slicing=None,
         staged_conf_floor=0.01,
         calibration_records=cal_records, holdout_records=hold_records,
         selection_dir=str(out),
@@ -373,7 +373,7 @@ def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothin
     state = _review_state_over_stems(list(_STEMS))
     bundle = resolve_operating_point_from_review(
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
-        staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_untouched",
+        staged_conf_floor=0.01, slicing=None, experiment_id="exp_review_untouched",
         calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 
@@ -405,7 +405,7 @@ def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
     state = _review_state_over_stems(list(_STEMS))
     bundle = resolve_operating_point_from_review(
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
-        staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_moved",
+        staged_conf_floor=0.01, slicing=None, experiment_id="exp_review_moved",
         calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 

@@ -1,8 +1,8 @@
 """TiledDetectionDataset: keep-region filtering, the sampler-facing properties, eager
 backend-conditioned opens, windowed tile reads, and worker pickling.
 
-Fixtures use a 200x200 frame with tile 64 / overlap 0.2 (stride 51): origins 0/51/102/153 per
-axis, so tiles at 153 overhang the extent (153 + 64 > 200).
+Fixtures use a 200x200 frame with tile 64 / overlap 0.2: SAHI's lattice steps 52 and pulls the
+last slice back to the edge, so origins are 0/52/104/136 per axis and every slice is full-size.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data import datasets as datasets_module
 from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
-from tcip_mcp.pipelines.image_utils import crop_pad_tile, load_image, pil_to_tensor
+from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
@@ -95,35 +95,44 @@ def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
     assert full.tiles_dropped_past_extent == 0
     assert full.tiles_dropped_outside_regions == 0
 
-    ds = _tiled(images_dir, labels_dir, keep_regions=[(0, 0, 115, 115)])
-    # Contained: origins 0/51 per axis (51 + 64 = 115, half-open). Overhanging: any origin 153.
-    assert [(tx, ty) for _s, tx, ty in ds.tile_entries] == [(0, 0), (51, 0), (0, 51), (51, 51)]
-    assert ds.tiles_dropped_past_extent == 7
-    assert ds.tiles_dropped_outside_regions == 5
+    ds = _tiled(images_dir, labels_dir, keep_regions=[(0, 0, 116, 116)])
+    # Contained: origins 0/52 per axis (52 + 64 = 116, half-open).
+    assert [box[:2] for _s, box in ds.tile_entries] == [(0, 0), (52, 0), (0, 52), (52, 52)]
+    assert ds.tiles_dropped_past_extent == 0
+    assert ds.tiles_dropped_outside_regions == 12
     assert len(ds) == 4
 
     # Kept tiles carry exactly the boxes the unfiltered dataset computed for the same tiles.
-    by_key = {(e["stem"], e["tile_x"], e["tile_y"]): e for e in full._index}
+    by_key = {(e["stem"], e["slice"]): e for e in full._index}
     for e in ds._index:
-        ref = by_key[(e["stem"], e["tile_x"], e["tile_y"])]
+        ref = by_key[(e["stem"], e["slice"])]
         assert np.array_equal(e["boxes"], ref["boxes"])
         assert np.array_equal(e["labels"], ref["labels"])
 
 
 def test_keep_regions_union_across_disjoint_rects(tmp_path):
     images_dir, labels_dir = _jpeg_project(tmp_path)
-    ds = _tiled(images_dir, labels_dir, keep_regions=[(0, 0, 64, 64), (102, 102, 166, 166)])
-    assert [(tx, ty) for _s, tx, ty in ds.tile_entries] == [(0, 0), (102, 102)]
-    assert ds.tiles_dropped_past_extent == 7
-    assert ds.tiles_dropped_outside_regions == 7
+    ds = _tiled(images_dir, labels_dir, keep_regions=[(0, 0, 64, 64), (104, 104, 168, 168)])
+    assert [box[:2] for _s, box in ds.tile_entries] == [(0, 0), (104, 104)]
+    assert ds.tiles_dropped_past_extent == 0
+    assert ds.tiles_dropped_outside_regions == 14
 
 
 def test_an_empty_keep_regions_sequence_keeps_nothing(tmp_path):
     images_dir, labels_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir, labels_dir, keep_regions=[])
     assert len(ds) == 0
-    assert ds.tiles_dropped_past_extent == 7
-    assert ds.tiles_dropped_outside_regions == 9
+    assert ds.tiles_dropped_past_extent == 0
+    assert ds.tiles_dropped_outside_regions == 16
+
+
+def test_a_frame_shorter_than_the_tile_counts_its_short_slice_past_the_extent(tmp_path):
+    images_dir, labels_dir = _jpeg_project(tmp_path, size=50)
+    assert len(_tiled(images_dir, labels_dir)) == 1  # one 50x50 slice, kept unfiltered
+    ds = _tiled(images_dir, labels_dir, keep_regions=[(0, 0, 200, 200)])
+    assert len(ds) == 0
+    assert ds.tiles_dropped_past_extent == 1
+    assert ds.tiles_dropped_outside_regions == 0
 
 
 def test_a_malformed_keep_region_refuses_by_name(tmp_path):
@@ -142,11 +151,11 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     ds = _tiled(images_dir, labels_dir)
     entries = ds.tile_entries
     assert len(entries) == len(ds)
-    assert all(isinstance(s, str) and isinstance(tx, int) and isinstance(ty, int)
-               for s, tx, ty in entries)
-    assert entries[0] == (_only_source(ds), 0, 0)
+    assert all(isinstance(s, str) and all(isinstance(v, int) for v in box)
+               for s, box in entries)
+    assert entries[0] == (_only_source(ds), (0, 0, 64, 64))
     assert ds.member_of(entries[0][0]) == "img0"
-    assert entries == [(e["stem"], e["tile_x"], e["tile_y"]) for e in ds._index]
+    assert entries == [(e["stem"], e["slice"]) for e in ds._index]
 
 
 def test_source_frames_for_a_photographic_source(tmp_path):
@@ -206,14 +215,14 @@ def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
 
 
 def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
-    """Every tile served through the windowed path is identical to the whole-decode crop of the
-    same source: interior tiles, right/bottom edge tiles, and the zero-padded corner."""
+    """Every slice served through the windowed path is identical to the same rect of the
+    whole-decoded source: interior slices and the pulled-back right/bottom edge ones."""
     images_dir, labels_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir, labels_dir)
-    img = load_image(images_dir / "img0.tif", 3)
-    assert len(ds.tile_entries) == 16, "the 200x200 frame tiles into 16 windows at stride 51"
-    for i, (_stem, tx, ty) in enumerate(ds.tile_entries):
-        expected = pil_to_tensor(crop_pad_tile(img, tx, ty, 64, 200, 200))
+    whole = np.asarray(load_image(images_dir / "img0.tif", 3))
+    assert len(ds.tile_entries) == 16, "the 200x200 frame slices into 16 windows"
+    for i, (_stem, (tx, ty, x1, y1)) in enumerate(ds.tile_entries):
+        expected = pil_to_tensor(whole[ty:y1, tx:x1])
         got, target = ds[i]
         assert torch.equal(got, expected), f"tile at ({tx}, {ty}) differs"
         assert target["boxes"].shape[1] == 4

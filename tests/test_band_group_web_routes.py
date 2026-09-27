@@ -246,7 +246,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
 
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
     )
     _worker(job)

@@ -22,7 +22,6 @@ from tcip_mcp.dataset_layout import bucket_dataset_root, label_filename
 from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO, same_directory
 from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
-    mask_binarize_provenance,
     positive_detections,
     unmapped_label_ids,
     write_predictions_json,
@@ -35,7 +34,8 @@ from tcip_mcp.project_paths import resolve_output_path
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.resolution import Acknowledgment
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.pipelines.resolution import Acknowledgment, ResolvedParam
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +139,11 @@ register_store(
     )
 )
 """One tiled raster pass' resume state: an ``identity`` record naming the pass a bucket is mid-way
-through, plus one ``batch-<index>`` record per tile batch already reconstructed. Sits under
+through, plus one ``batch-<index>`` record per tile batch already predicted. Sits under
 ``<bucket>/.tcip/raster_pass_progress/``, outside ``prediction_documents``' own non-recursive glob
-of the bucket root, so an interrupted pass' own progress never reads as a prediction document.
-Scratch, never a state that needs a receipt: written, resumed from and deleted with no audit line,
-since what a pass leaves is its published bucket, which the publication records. Not frozen: its shape may still move, so a reader checks the identity record's own ``schema_version`` by
-hand (``_RASTER_PASS_PROGRESS_SCHEMA_VERSION``) rather than relying on the seam, which only enforces
-that ceiling for a store declared frozen."""
+of the bucket root. Written, resumed from and deleted with no audit line. Not frozen, so a reader
+checks the identity record's own ``schema_version`` against
+``_RASTER_PASS_PROGRESS_SCHEMA_VERSION`` itself."""
 
 _RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
 
@@ -241,7 +239,7 @@ def run_inference(
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-    global_nms_iou: float | None = None,
+    cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     postprocess: str = DEFAULT_POSTPROCESS,
     dry_run: bool = False,
@@ -273,8 +271,8 @@ def run_inference(
     Two source regimes:
 
     - ``images_dir``: writes ``<stem>.json`` per image. Works for ``instance_seg`` too; each tiled
-      result's ``masks`` (see ``GenericPredictor.predict_tiled``) are a tile-local patch plus its
-      full-image-space offset, never the untiled path's dense full-image array.
+      result's ``masks`` (see ``GenericPredictor.predict_sliced``) are SAHI polygons in
+      full-image pixels, merged across seams when tiled.
     - ``raster_path``: sources tiles from the windowed raster layer instead
       (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), always tiled, and writes exactly one
       ``<raster stem>.json`` prediction file (in full-raster pixel space).
@@ -331,7 +329,7 @@ def run_inference(
             stamped ``"default"``; a stated value is stamped as an explicit override, including
             when it equals the platform default.
         device: Device to use ('cuda' or 'cpu').
-        tile: Enable tiled (SAHI-style) detection inference (``images_dir`` regime only;
+        tile: Enable tiled (SAHI) detection inference (``images_dir`` regime only;
             ``raster_path`` is always tiled). ``None`` (default) derives it from the checkpoint's
             own training tile geometry (``predictor.train_tile_size is not None``); its provenance
             is stamped ``"default"`` vs ``"explicit"``.
@@ -341,20 +339,23 @@ def run_inference(
             instead (``"native_ratio"``), each tile run through the resize that run's own
             augmentation config recorded. A checkpoint with none of those has no basis to tile at:
             a tiled run with no resolvable ``tile_size`` refuses, naming the missing basis.
-        overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from
-            the checkpoint (else 0.2).
+        overlap: Fractional tile overlap, SAHI's overlap ratio on both axes. ``None`` derives
+            from the checkpoint, else the platform default (``resolution.DEFAULT_OVERLAP``).
         tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile global NMS IoU threshold. ``None`` (default): a calibrated run
-            derives it from the calibration GT's own neighbor-IoU distribution; a stated value is
-            stamped as an explicit override.
+        cross_tile_nms: The cross-tile merge threshold, under the metric ``postprocess`` names.
+            ``None`` (default): a calibrated run derives it, before predicting anything, from the
+            calibration GT's own neighbor-overlap distribution in that metric; a stated value is
+            stamped as an explicit override. The model's own NMS is never set here: it stays as
+            the checkpoint's builder constructed it.
         max_dets: Full-frame detection cap (after any tiled merge). ``None`` (default): a
             calibrated run derives it from the calibration GT's own object density; a stated value
             is stamped as an explicit override.
-        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split across a
-            tile seam.
-        dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) and the
-            bucket the write would resolve to, without loading the model or running inference;
-            previews the same bucket refusal a real call would hit.
+        postprocess: Cross-tile merge over every slice's detections, one of
+            ``resolution.CROSS_TILE_MERGES``; any other name refuses.
+        dry_run: Run the call up to its publication, calibration included, and report the
+            operating point, slicing record and validity the stamp would carry and the bucket the
+            write would resolve to, predicting and publishing nothing; refuses as the real call
+            would, the bucket refusal included.
         trait: Trait name to derive the confidence operating point per dataset. ``images_dir``
             regime: with ``calibration_labels_dir``. ``raster_path`` regime: alone, against the
             checkpoint's own training mosaic's reserved calibration/test regions (requires
@@ -405,9 +406,8 @@ def run_inference(
             all match this call's own, or it refuses naming what differs; the resumed pass then
             runs the remaining tiles at the recorded operating point (a block-calibrated pass
             applies the recorded conf/cross_tile_nms directly). Refuses when the bucket carries no
-            progress, when the recorded progress is a schema version newer than this reader knows,
-            and for a mask-bearing (``instance_seg`` with ``require_masks``) pass. See
-            :func:`_export_predictions_raster`.
+            progress, and when the recorded progress is a schema version newer than this reader
+            knows. See :func:`_export_predictions_raster`.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -415,7 +415,7 @@ def run_inference(
         return {"error": "output_dir is required"}
 
     # Every check below refuses on the call's own shape ahead of dry_run's preview, so a preview
-    # previews the same refusal a real call would hit; "provide either" runs after dry_run instead.
+    # hits the same refusal a real call would; a preview alone needs no image source.
     if images_dir is not None and raster_path is not None:
         return {"error": "Provide only one of images_dir or raster_path, not both"}
     if raster_path is not None and calibration_labels_dir:
@@ -439,43 +439,7 @@ def run_inference(
         return {"error": "resume=True and overwrite=True conflict: overwrite discards a bucket's "
                          "recorded progress and starts over, resume continues it. Pick one."}
 
-    if dry_run:
-        # No model load here: an unset ``tile`` is a pending derivation, not a fabricated default.
-        # A preview needs no images_dir/raster_path: those are about the pass, not this preview.
-        applied_conf, applied_nms_iou, applied_max_dets = applied_operating_point(
-            conf_threshold, global_nms_iou, max_dets)
-        if tile is None:
-            tiled_dry: bool | str = "pending-checkpoint-derivation"
-            tiled_source_dry = "pending-checkpoint-derivation"
-            cross_tile_nms_dry: float | None | str = "pending-checkpoint-derivation"
-        else:
-            tiled_dry, tiled_source_dry = tile, "explicit"
-            cross_tile_nms_dry = applied_nms_iou if tile else None
-        out_preview, resolution_preview, _bucket_root_preview, refusal_preview = (
-            _resolve_writable_bucket_for(output_dir, overwrite=overwrite))
-        if refusal_preview is not None:
-            return refusal_preview
-        return {
-            "dry_run": True,
-            "checkpoint_path": checkpoint_path,
-            "output_dir": str(out_preview),
-            "bucket_redirected": resolution_preview.redirected,
-            "operating_point": {
-                "conf": applied_conf,
-                "cross_tile_nms": cross_tile_nms_dry,
-                "tiled": tiled_dry,
-                "tiled_source": tiled_source_dry,
-                "tile_size": tile_size if tile_size is not None else "pending-checkpoint-derivation",
-                "overlap": overlap if overlap is not None else "pending-checkpoint-derivation",
-                "max_dets": applied_max_dets,
-                "postprocess": postprocess,
-            },
-            "note": ("These operating-point values govern the object count (the phenotype for count "
-                     "traits). For a trait with a labeled subset, resolve them per dataset "
-                     "(resolve_operating_point) so the count is calibrated, not a default."),
-        }
-
-    if images_dir is None and raster_path is None:
+    if images_dir is None and raster_path is None and not dry_run:
         return {"error": "Provide either images_dir or raster_path"}
 
     # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
@@ -516,17 +480,17 @@ def run_inference(
             checkpoint=checkpoint, raster_path=raster_path, out=out, resolution=resolution,
             output_dir=output_dir, dataset_root=bucket_root, device=device,
             conf_threshold=conf_threshold, tile_size=tile_size, overlap=overlap,
-            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
+            tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
             postprocess=postprocess, require_masks=require_masks,
             experiment_id=block_calibration_experiment_id or experiment_id,
             allow_unvalidated_staging=allow_unvalidated_staging, trait=trait,
-            resume=resume, overwrite=overwrite,
+            resume=resume, overwrite=overwrite, dry_run=dry_run,
         )
 
     result = _run_inference_verified(
         checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
         device=device, tile=tile, tile_size=tile_size, overlap=overlap,
-        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
+        tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
         calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
         selection_dir=selection_dir, experiment_id=experiment_id,
@@ -538,9 +502,12 @@ def run_inference(
 
     pub = publish_bucket(
         result, out=out, trait=trait, dataset_root=bucket_root,
-        allow_unvalidated_staging=allow_unvalidated_staging)
+        allow_unvalidated_staging=allow_unvalidated_staging, dry_run=dry_run)
     if pub["refusal"] is not None:
         return pub["refusal"]
+    if dry_run:
+        return _dry_run_response(pub, out=out, resolution=resolution,
+                                 requested_output_dir=output_dir)
     counted = _bucket_csv_rows(out, pub["op_stamp"])
     # Every field the pass returned, minus ``results``, overlaid with what the write earned.
     response = {k: v for k, v in result.items() if k != "results"}
@@ -562,7 +529,7 @@ def _run_inference_verified(
     tile_size: int | None,
     overlap: float | None,
     tile_batch_size: int,
-    global_nms_iou: float | None,
+    cross_tile_nms: float | None,
     max_dets: int | None,
     postprocess: str,
     trait: str | None,
@@ -584,7 +551,7 @@ def _run_inference_verified(
 
     p = _prepare_pass(
         checkpoint, images_dir=images_dir, conf_threshold=conf_threshold, device=device, tile=tile, tile_size=tile_size,
-        overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+        overlap=overlap, tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms,
         max_dets=max_dets, postprocess=postprocess, experiment_id=experiment_id)
     if isinstance(p, str):
         return {"error": p}
@@ -601,14 +568,7 @@ def _run_inference_verified(
         cal_images = calibration_images_dir or images_dir
         try:
             bundle, cal_hash, n_excluded_incomplete_attribute, evidence = calibrate_operating_point(
-                p.predictor, trait, calibration_labels_dir, cal_images,
-                tile=p.tiled, tile_size=p.tile_size, overlap=p.overlap,
-                tile_resize=p.tile_resize,
-                tile_size_source=p.tile_size_source,
-                tile_size_derived_from=p.tile_size_derived_from, tiled_source=p.tiled_source,
-                tile_batch_size=tile_batch_size, global_nms_iou=p.nms_iou,
-                postprocess=postprocess,
-                cross_tile_nms=global_nms_iou, max_dets=max_dets,
+                p, trait, calibration_labels_dir, cal_images,
                 group_by=group_by, group_key_map=group_key_map,
                 experiment_id=p.identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
@@ -622,7 +582,6 @@ def _run_inference_verified(
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
         p.max_dets = int(bundle.get("max_dets").value)
-        p.nms_iou = float(bundle.get("cross_tile_nms").value or p.nms_iou)
         apply_operating_point(p.predictor, conf, p.max_dets)
         # Dataset-scope firewall: the conf is scoped to the calibration GT. The inference target is
         # usually unlabeled, so its GT identity (a content hash) is undefined, pass None and record
@@ -688,11 +647,6 @@ def _run_inference_verified(
             "trait": trait,
             "dataset_hash": cal_hash,
             "checkpoint_sha256": p.identity["sha256"],
-            "predictor_path": {
-                "tile": p.tiled, "tile_size": p.tile_size,
-                "overlap": p.overlap, "postprocess": postprocess,
-                "global_nms_iou": p.nms_iou, "max_dets": p.max_dets,
-            },
             "gate_evidence": conf_param.gate_evidence,
             "calibration_evidence": evidence,
         }
@@ -706,16 +660,17 @@ def _run_inference_verified(
             logger.warning("could not persist operating-point curve", exc_info=True)
         else:
             extra["calibration_evidence_key"] = curve_identity_hex
-        out = p.result(bundle.to_provenance()["operating_point"], extra)
+        out = p.result(bundle.to_provenance(), extra)
 
+    tiled = p.slicing is not None
     # Warn, never fail, when a slow workload will run on CPU because CUDA is not available.
-    if device != "cpu" and (p.tiled or len(p.paths) > 8):
+    if device != "cpu" and (tiled or len(p.paths) > 8):
         import torch
 
         if not torch.cuda.is_available():
             out["warning"] = (
                 f"CUDA not available, running {len(p.paths)} image(s)"
-                f"{' tiled' if p.tiled else ''} on CPU, which is much slower. Install a "
+                f"{' tiled' if tiled else ''} on CPU, which is much slower. Install a "
                 "CUDA torch build (see environment.yml) to use the GPU."
             )
             logger.warning(out["warning"])
@@ -726,9 +681,10 @@ def _run_inference_verified(
 
 @dataclass
 class _PreparedPass:
-    """A raw per-image pass resolved from a loaded checkpoint and its caller's stated values: the
-    predictor, the images it runs over, the tile regime and operating point it runs at, and the
-    run's identity and class scope.
+    """A per-image or raster pass resolved from a loaded checkpoint and its caller's stated values:
+    the predictor, the images it runs over, the run's identity and class scope, and the execution
+    regime it runs at: the tile geometry, the slicing record (``None`` untiled), the resolved merge
+    threshold, and the conf and cap its predictor carries.
     """
 
     checkpoint_path: str
@@ -738,29 +694,28 @@ class _PreparedPass:
     identity: dict
     scope: ClassScope
     id_map: dict | None
-    tiled: bool
-    tiled_source: str
-    tile_size: int | None
-    tile_size_source: str
-    tile_size_derived_from: Any
-    overlap: float
-    tile_resize: Any
+    geometry: TileGeometry
+    slicing: dict | None
+    cross_tile_nms: ResolvedParam
     conf: float
-    nms_iou: float
-    max_dets: int
+    max_dets: int | None
     conf_stated: bool
     max_dets_stated: bool
     tile_batch_size: int
-    postprocess: str
 
     def predict(self, paths: list[str | Path | BandGroupRef]) -> list[dict]:
+        s = self.slicing or {}
         return self.predictor.predict_batch(
-            paths, tile=self.tiled, tile_size=self.tile_size, overlap=self.overlap,
-            tile_batch_size=self.tile_batch_size, global_nms_iou=self.nms_iou,
-            postprocess=self.postprocess, tile_resize=self.tile_resize)
+            paths, tile=self.slicing is not None, tile_size=self.geometry.tile_size,
+            overlap=self.geometry.overlap, tile_batch_size=self.tile_batch_size,
+            cross_tile_nms=self.cross_tile_nms.value,
+            postprocess=s.get("postprocess", DEFAULT_POSTPROCESS),
+            tile_resize=self.geometry.tile_resize)
 
-    def result(self, operating_point: dict, extra: dict) -> dict:
-        """The run's own facts a publisher stamps from, before any image is predicted."""
+    def result(self, provenance: dict, extra: dict) -> dict:
+        """The run's own facts a publisher stamps from, before any image is predicted:
+        ``provenance`` is the operating-point bundle's (``ResolvedBundle.to_provenance``), whose
+        operating point and slicing record the stamp states."""
         from datetime import datetime, timezone
 
         return {
@@ -770,7 +725,8 @@ class _PreparedPass:
             "images_dir": self.images_dir,
             "raster_path": None,
             "produced_at": datetime.now(timezone.utc).isoformat(),
-            "operating_point": operating_point,
+            "operating_point": provenance["operating_point"],
+            "slicing": provenance["slicing"],
             "id_map": self.id_map,
             "subject": self.scope.subject,
             "attribute": self.scope.attribute,
@@ -781,25 +737,21 @@ class _PreparedPass:
         }
 
     def raw_result(self) -> dict:
-        """:meth:`result` at the pass' own uncalibrated operating point: the model already carries
-        it in-model, and the bundle stamps it validated_against=false so its untrustworthiness
-        travels with the result."""
+        """:meth:`result` at the pass' own uncalibrated operating point
+        (:func:`~tcip_mcp.pipelines.resolution.raw_operating_point`), stamped unvalidated."""
         from tcip_mcp.pipelines.resolution import raw_operating_point
 
         op_bundle = raw_operating_point(
-            conf=self.conf, cross_tile_nms=self.nms_iou, tiled=self.tiled,
-            tile_size=self.tile_size, max_dets=self.max_dets,
-            tile_size_source=self.tile_size_source,
-            tile_size_derived_from=self.tile_size_derived_from, tiled_source=self.tiled_source,
-            conf_stated=self.conf_stated, max_dets_stated=self.max_dets_stated)
-        return self.result(op_bundle.to_provenance()["operating_point"],
-                           {"validated": False, "conf_source": "default"})
+            conf=self.conf, conf_stated=self.conf_stated, max_dets=self.max_dets,
+            max_dets_stated=self.max_dets_stated, geometry=self.geometry, slicing=self.slicing,
+            cross_tile_nms=self.cross_tile_nms)
+        return self.result(op_bundle.to_provenance(), {"validated": False, "conf_source": "default"})
 
 
 def _prepare_pass(
     checkpoint, *, images_dir: str | None,
     conf_threshold: float | None, device: str | None, tile: bool | None, tile_size: int | None,
-    overlap: float | None, global_nms_iou: float | None, max_dets: int | None, postprocess: str,
+    overlap: float | None, cross_tile_nms: float | None, max_dets: int | None, postprocess: str,
     experiment_id: str | None, tile_batch_size: int,
 ) -> "_PreparedPass | str":
     """Resolve a pass from a loaded checkpoint and what its caller stated (``None`` for anything
@@ -810,30 +762,29 @@ def _prepare_pass(
     from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.predictor import (
-        TileEdgeContradiction, build_predictor, explicit_edge_provenance, resolve_tile_regime,
+        TileEdgeContradiction, build_predictor, resolve_tile_geometry,
     )
+    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
+    from tcip_mcp.pipelines.slicing import slicing_record
 
     logical = list_logical_images(images_dir) if images_dir is not None else {}
     paths: list[str | Path | BandGroupRef] = [logical[stem] for stem in sorted(logical)]
 
-    conf, nms_iou, applied_max_dets = applied_operating_point(
-        conf_threshold, global_nms_iou, max_dets)
-    # NMS IoU and the detection cap govern which boxes exist in-model, not only the tile merge.
+    conf, applied_max_dets = applied_operating_point(conf_threshold, max_dets)
+    # The conf and the detection cap govern which boxes exist in-model, not only the tile merge.
     predictor = build_predictor(
-        checkpoint, device=device, score_threshold=conf, nms_iou=nms_iou,
-        max_dets=applied_max_dets)
+        checkpoint, device=device, score_threshold=conf, max_dets=applied_max_dets)
     # An unset ``tile`` gets the checkpoint's own tiled-or-not regime, never a platform default.
     tiled = (getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
     # Identity before calibration: its train-disjointness gate needs the checkpoint's experiment.
     identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
 
-    # The resize half resolves only when tiled, so an unreadable augmentation config never sinks
-    # an untiled run.
     try:
-        resolved_tile, tile_size_source, resolved_overlap, _overlap_source, tile_resize = (
-            resolve_tile_regime(predictor, tiled=tiled, tile_size=tile_size, overlap=overlap))
+        geometry = resolve_tile_geometry(
+            predictor, tiled=tiled, tile_size=tile_size, overlap=overlap)
     except TileEdgeContradiction as exc:
         return str(exc)
+    resolved_tile, tile_size_source = geometry.tile_size, geometry.tile_size_source
     if tiled and resolved_tile is None:
         return (
             f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries no "
@@ -847,8 +798,8 @@ def _prepare_pass(
     if tile_size_source == "derived":
         logger.info("tile_size %d derived from the checkpoint's training geometry", resolved_tile)
     elif tiled and tile_size_source == "native_ratio":
-        resize_note = "" if tile_resize is None else (
-            f", each tile run through its recorded train-time resize {tuple(tile_resize)}")
+        resize_note = "" if geometry.tile_resize is None else (
+            f", each tile run through its recorded train-time resize {tuple(geometry.tile_resize)}")
         logger.info(
             "tile_size %d derived from this checkpoint's own uniform untiled training frame%s",
             resolved_tile, resize_note)
@@ -859,18 +810,14 @@ def _prepare_pass(
     refusal = unmapped_classified_run(scope, id_map, images_dir=images_dir)
     if refusal is not None:
         return refusal
+    slicing = slicing_record(geometry.overlap, geometry.tile_resize, postprocess) if tiled else None
     return _PreparedPass(
         checkpoint_path=checkpoint.path, predictor=predictor, images_dir=images_dir, paths=paths,
-        identity=identity, scope=scope, id_map=id_map, tiled=tiled,
-        tiled_source="explicit" if tile is not None else "default",
-        tile_size=resolved_tile, tile_size_source=tile_size_source,
-        tile_size_derived_from=(
-            explicit_edge_provenance(predictor, resolved_tile)
-            if tile_size_source == "explicit" and resolved_tile is not None else None),
-        overlap=resolved_overlap, tile_resize=tile_resize,
-        conf=conf, nms_iou=nms_iou, max_dets=applied_max_dets,
+        identity=identity, scope=scope, id_map=id_map, geometry=geometry, slicing=slicing,
+        cross_tile_nms=resolve_cross_tile_nms(cross_tile_nms, slicing),
+        conf=conf, max_dets=applied_max_dets,
         conf_stated=conf_threshold is not None, max_dets_stated=max_dets is not None,
-        tile_batch_size=tile_batch_size, postprocess=postprocess)
+        tile_batch_size=tile_batch_size)
 
 
 # --- earning the record a validated count claim names (the shared half of every door here) ---
@@ -1050,7 +997,7 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
     id_map, subject, attribute = stamp_body["id_map"], stamp_body["subject"], stamp_body["attribute"]
     written: list[str] = []
     names: dict[str, str] = {}
-    dropped, has_masks = 0, False
+    dropped, mask_binarize = 0, None
     try:
         out.mkdir(parents=True, exist_ok=True)
         for r in predictions:
@@ -1061,7 +1008,8 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
                     f"{image.stem}: this classified run decoded to id(s) {unmapped}, not keys of "
                     f"its recorded id_map ({sorted((id_map or {}).values())}).")
             # Read before the write: a drop can empty a mask list that was genuinely there.
-            has_masks = has_masks or bool(r.get("masks"))
+            if r.get("masks"):
+                mask_binarize = r["mask_binarize"]
             document = out / label_filename(image.stem)
             dropped += write_predictions_json(
                 document, r, created_by=producer, id_map=id_map, subject=subject,
@@ -1069,8 +1017,8 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
             written.append(str(document))
             names[image.stem] = image.name
         stamp_body["image_filenames"] = names
-        if has_masks:
-            stamp_body["mask_binarize"] = mask_binarize_provenance()
+        if mask_binarize is not None:
+            stamp_body["mask_binarize"] = mask_binarize
         if draft is not None:
             stamp_body = seal_validation(
                 draft, dataset_root=draft.dataset_root, bucket_dirs=[out], stamp_body=stamp_body)
@@ -1150,7 +1098,7 @@ def _frozen_pointer_refusal(experiment_id: str | None, out: Path) -> str | None:
 
 def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: Path | None,
                    allow_unvalidated_staging: bool, claim_evidence: dict | None = None,
-                   stamp_extras: dict | None = None) -> dict:
+                   stamp_extras: dict | None = None, dry_run: bool = False) -> dict:
     """Publish a run's predictions into ``out``: the tile gate, the count claim's own gate, the
     frozen-lineage-pointer refusal, then the writes, the stamp, the lineage link and the
     publication's line (:func:`_publish_predictions`).
@@ -1164,7 +1112,9 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
     Returns ``{"refusal": <the door's own error dict>}`` with the bucket untouched, or ``refusal``
     ``None`` beside ``written``, ``dropped_boxes``, the ``op_stamp`` as written and
     ``lineage_linked`` (``True``/``False`` for an attempted link, ``None`` when the run named no
-    experiment to link).
+    experiment to link). ``dry_run`` stops once every gate has passed, drawing no result and
+    writing nothing, and returns ``refusal`` ``None`` beside the ``op_stamp`` the writes would
+    start from.
     """
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate, operating_point_stamp, prediction_producer, tile_size_gate_flag,
@@ -1190,7 +1140,8 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
 
     sha = result["checkpoint_sha256"]
     op_stamp = operating_point_stamp(
-        result["operating_point"], validated=draft is not None, validated_by=None,
+        result["operating_point"], slicing=result["slicing"], validated=draft is not None,
+        validated_by=None,
         tile_size_validated=tile_size_validated, shippable_issues=result["shippable_issues"],
         id_map=result["id_map"], subject=result["subject"], attribute=result["attribute"],
         trait=trait, dataset_hash=result["dataset_hash"],
@@ -1198,6 +1149,8 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
         experiment_id=result["experiment_id"], images_dir=result["images_dir"],
         raster_path=result["raster_path"], produced_at=result["produced_at"],
         gate_evidence_summary=result["gate_evidence_summary"], **(stamp_extras or {}))
+    if dry_run:
+        return {"refusal": None, "op_stamp": op_stamp}
     written, dropped_boxes, op_stamp, lineage_linked = _publish_predictions(
         out, result["results"], op_stamp, draft,
         producer=prediction_producer(result["checkpoint"], sha), dataset_root=dataset_root)
@@ -1210,6 +1163,15 @@ def bucket_location(out: Path | str, resolution, requested_output_dir: str) -> d
     and the bucket the caller asked for when it was."""
     return {"output_dir": str(out), "bucket_redirected": resolution.redirected,
             "requested_output_dir": requested_output_dir if resolution.redirected else None}
+
+
+def _dry_run_response(pub: dict, *, out: Path, resolution, requested_output_dir: str) -> dict:
+    """What a dry run reports: where the bucket would land and the operating point, slicing
+    record and validity of the stamp the real call would write."""
+    stamp = pub["op_stamp"]
+    return {"dry_run": True, **bucket_location(out, resolution, requested_output_dir),
+            "operating_point": stamp["operating_point"], "slicing": stamp["slicing"],
+            "validated": stamp["validated"]}
 
 
 def _bucket_response(pub: dict, *, out: Path, resolution, dataset_root: Path | None,
@@ -1716,79 +1678,70 @@ def _raster_pass_key(bucket: Path, segment: str) -> Key:
 
 
 def _raster_pass_identity_body(
-    *, raster_identity: dict, checkpoint_sha256: str | None, trait: str | None,
-    experiment_id: str | None, tile_batch_size: int, conf: float, cross_tile_nms: float | None,
-    max_dets: int | None, tile_size: int, overlap: float, tile_resize: tuple[int, int] | None,
-    postprocess: str, require_masks: bool,
+    result: dict, p: _PreparedPass, *, raster_identity: dict, trait: str | None,
+    require_masks: bool,
 ) -> dict:
     """The pass a raster-export bucket is mid-way through, as the plain dict a later resume
-    compares its own call against. The device is deliberately absent: the same detections on
-    other hardware are the same pass."""
+    compares its own call against: its inputs, and under ``execution`` the run's own operating
+    point and slicing record (``result``, :meth:`_PreparedPass.result`) and whether it collects
+    masks. The device is absent."""
     return {
         "schema_version": _RASTER_PASS_PROGRESS_SCHEMA_VERSION,
         "raster_identity": raster_identity,
-        "checkpoint_sha256": checkpoint_sha256,
+        "checkpoint_sha256": p.identity["sha256"],
         "trait": trait,
-        "experiment_id": experiment_id,
-        "tile_batch_size": tile_batch_size,
-        "operating_point": {
-            "conf": conf,
-            "cross_tile_nms": cross_tile_nms,
-            "max_dets": max_dets,
-            "tile_size": tile_size,
-            "overlap": overlap,
-            "tile_resize": list(tile_resize) if tile_resize is not None else None,
-            "postprocess": postprocess,
-            "require_masks": require_masks,
-        },
+        "experiment_id": p.identity["experiment_id"],
+        "tile_batch_size": p.tile_batch_size,
+        "execution": {"operating_point": result["operating_point"], "slicing": result["slicing"],
+                      "require_masks": require_masks},
     }
+
+
+_ABSENT = object()
 
 
 def _differing_fields(recorded: dict, current: dict, excluded: frozenset = frozenset()) -> list[str]:
     """Every field over both sides' keys, less ``excluded``, that one side lacks or the two state
-    differently; ``None`` is a value like any other."""
-    return [field for field in sorted((set(recorded) | set(current)) - excluded)
-            if field not in recorded or field not in current or recorded[field] != current[field]]
+    differently, a field both sides hold as a mapping named by its dotted inner fields; ``None``
+    is a value like any other."""
+    fields: list[str] = []
+    for field in sorted((set(recorded) | set(current)) - excluded):
+        mine, theirs = recorded.get(field, _ABSENT), current.get(field, _ABSENT)
+        if isinstance(mine, dict) and isinstance(theirs, dict):
+            fields += [f"{field}.{inner}" for inner in _differing_fields(mine, theirs)]
+        elif mine != theirs:
+            fields.append(field)
+    return fields
 
 
 def _raster_pass_input_mismatches(recorded: dict, current: dict) -> list[str]:
-    """Every top-level identity field (everything but ``schema_version`` and ``operating_point``,
-    compared by :func:`_raster_pass_identity_mismatches`) naming a difference between a recorded
-    raster-pass identity and this call's own.
-    """
-    return _differing_fields(recorded, current, frozenset({"schema_version", "operating_point"}))
+    """Every top-level identity field but ``schema_version`` and ``execution`` naming a
+    difference between a recorded raster-pass identity and this call's own."""
+    return _differing_fields(recorded, current, frozenset({"schema_version", "execution"}))
 
 
 def _raster_pass_identity_mismatches(recorded: dict, current: dict) -> list[str]:
     """Every field naming a difference between a recorded raster-pass identity and this call's
     own, for a resume refusal to list by name."""
-    return _raster_pass_input_mismatches(recorded, current) + [
-        f"operating_point.{field}"
-        for field in _differing_fields(recorded["operating_point"], current["operating_point"])]
+    return _differing_fields(recorded, current, frozenset({"schema_version"}))
 
 
 def _load_raster_pass_prior(bucket: Path) -> dict:
-    """Every tile batch a bucket's progress already holds, merged in tile order (by the numeric
-    index parsed out of each ``batch-<index>`` key) into the shape
-    ``GenericPredictor._tiled_infer_core`` seeds its own accumulators from.
-    """
+    """Every slice batch a bucket's progress already holds, merged in lattice order (by the
+    numeric index parsed out of each ``batch-<index>`` key) into one ``{"slices",
+    "predictions"}`` mapping."""
     indexed: list[tuple[int, Key]] = []
     for key in store.keys(RASTER_PASS_PROGRESS_STORE, str(bucket)):
         segment = key.parts[0]
         if not segment.startswith("batch-"):
             continue
         indexed.append((int(segment[len("batch-"):]), key))
-    tile_info: list[dict] = []
-    boxes: list = []
-    scores: list = []
-    labels: list = []
+    prior: dict[str, list] = {"slices": [], "predictions": []}
     for _index, key in sorted(indexed):
         batch = store.read(key)
-        tile_info.extend(batch["tile_info"])
-        boxes.extend(batch["boxes"])
-        scores.extend(batch["scores"])
-        labels.extend(batch["labels"])
-    return {"tile_info": tile_info, "boxes": boxes, "scores": scores, "labels": labels}
+        for field_name, values in prior.items():
+            values.extend(batch[field_name])
+    return prior
 
 
 def _clear_raster_pass_progress(bucket: Path) -> None:
@@ -1811,48 +1764,41 @@ def _export_predictions_raster(
     *, checkpoint, raster_path: str, out: Path, resolution, output_dir: str,
     dataset_root: Path | None, device: str | None, conf_threshold: float | None,
     tile_size: int | None, overlap: float | None, tile_batch_size: int,
-    global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
+    cross_tile_nms: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
     experiment_id: str | None, allow_unvalidated_staging: bool, trait: str | None = None,
-    resume: bool = False, overwrite: bool = False,
+    resume: bool = False, overwrite: bool = False, dry_run: bool = False,
 ) -> dict:
-    """The raster regime of :func:`run_inference`: one always-tiled pass over a raster read
-    window by window (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), published through
+    """One always-tiled pass over a raster read window by window
+    (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), published through
     :func:`publish_bucket` as one ``<raster stem>.json`` document in full-raster pixel space.
 
-    ``out``/``resolution`` are the bucket :func:`run_inference` resolved for ``output_dir`` and
-    ``dataset_root`` its dataset root. The pass is prepared by :func:`_prepare_pass` with no image
-    list; a checkpoint with no basis for its tile edge refuses there, whatever
+    ``out``/``resolution`` are the bucket already resolved for ``output_dir`` and ``dataset_root``
+    its dataset root. The pass is prepared by :func:`_prepare_pass` with no image list; a
+    checkpoint with no basis for its tile edge refuses there, whatever
     ``allow_unvalidated_staging`` says. With ``trait`` ``None`` the pass runs at the stated or
     default operating point, unvalidated. With a ``trait`` (passed only once the checkpoint's
     training experiment reserved a calibration region) it runs block calibration first, refuses
     unless the block-validated reference is this raster (the claim-scope gate), then runs the
     whole-mosaic pass at the calibrated conf and cross-tile NMS with the full-frame cap lifted.
 
-    A pass that is not mask-bearing (``instance_seg`` with ``require_masks``) records its identity
-    and each flushed tile batch under ``<out>/.tcip/``, once the publisher's gates have passed.
-    ``resume=True`` continues that record: the recorded checkpoint, raster content, trait,
-    experiment, tile batch size and operating point must equal this call's, or it refuses naming
-    what differs; a block-calibrated pass resumes at the operating point the interrupted attempt
-    earned. ``resume=False`` over a bucket carrying progress refuses unless ``overwrite=True``,
-    which discards it. A published pass deletes its progress.
+    The pass records its identity and each flushed tile batch's shifted predictions, masks
+    included, under ``<out>/.tcip/``, once the publisher's gates have passed. ``resume=True``
+    continues that record: the recorded checkpoint, raster content, trait, experiment, tile batch
+    size and execution regime must equal this call's, or it refuses naming what differs; a
+    block-calibrated pass resumes at the operating point the interrupted attempt earned.
+    ``resume=False`` over a bucket carrying progress refuses unless ``overwrite=True``, which
+    discards it. A published pass deletes its progress. ``dry_run`` stops at the publisher's gates
+    (:func:`publish_bucket`) and returns :func:`_dry_run_response`.
     """
     p = _prepare_pass(
         checkpoint, images_dir=None, conf_threshold=conf_threshold, device=device, tile=True,
-        tile_size=tile_size, overlap=overlap, global_nms_iou=global_nms_iou, max_dets=max_dets,
+        tile_size=tile_size, overlap=overlap, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         postprocess=postprocess, experiment_id=experiment_id, tile_batch_size=tile_batch_size)
     if isinstance(p, str):
         return {"error": p}
-    assert p.tile_size is not None  # a tiled pass with no edge refuses in _prepare_pass
+    # A tiled pass with no edge refuses in _prepare_pass, and a tiled pass carries its slicing.
+    assert p.geometry.tile_size is not None and p.slicing is not None
     predictor, identity = p.predictor, p.identity
-
-    if resume and predictor.task == "instance_seg" and require_masks:
-        return {"error": (
-            "resume=True refuses for a mask-bearing pass: an instance_seg checkpoint's tiled "
-            "masks have no persisted per-batch representation this door records, so a "
-            "mask-bearing raster pass records no progress and cannot be resumed. Run the whole "
-            "pass again instead."
-        )}
-    record_progress = not (predictor.task == "instance_seg" and require_masks)
 
     import dataclasses
 
@@ -1909,7 +1855,8 @@ def _export_predictions_raster(
 
     from tcip_mcp.pipelines.operating_point import apply_operating_point
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
+        VALIDATED_FALSE, ResolvedParam, block_calibrated_export_operating_point,
+        check_delivery_gate,
     )
 
     stamp_extras: dict = {"raster_content_identity": raster_identity}
@@ -1920,11 +1867,11 @@ def _export_predictions_raster(
         result = p.raw_result()
     elif resume:
         snapshot = store.read(_raster_pass_key(out, "block-calibration"))
-        recorded_op = existing_pass_identity["operating_point"]
-        p.conf, p.nms_iou = recorded_op["conf"], recorded_op["cross_tile_nms"]
-        apply_operating_point(predictor, p.conf, recorded_op["max_dets"])
-        result = p.result(snapshot["operating_point"],
-                          {k: snapshot[k] for k in _SNAPSHOT_RESULT_KEYS})
+        recorded_op = snapshot["provenance"]["operating_point"]
+        p.conf = recorded_op["conf"]["value"]
+        p.cross_tile_nms = ResolvedParam.from_provenance(recorded_op["cross_tile_nms"])
+        apply_operating_point(predictor, p.conf, recorded_op["max_dets"]["value"])
+        result = p.result(snapshot["provenance"], {k: snapshot[k] for k in _SNAPSHOT_RESULT_KEYS})
         stamp_extras.update(snapshot["stamp_extras"])
         claim_evidence = snapshot["block_evidence"]
     else:
@@ -1938,11 +1885,7 @@ def _export_predictions_raster(
 
         try:
             block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
-                predictor, trait_name=trait,
-                experiment_id=identity["experiment_id"], global_nms_iou=p.nms_iou,
-                export_tile_size=p.tile_size,
-                tile_batch_size=tile_batch_size, postprocess=postprocess,
-            )
+                p, trait_name=trait, experiment_id=identity["experiment_id"])
         except ValueError as exc:  # a named block refusal, or the run's scope refused
             return {"error": str(exc)}
 
@@ -1980,14 +1923,12 @@ def _export_predictions_raster(
         conf_param = block_bundle.get("conf")
         p.conf = (conf_param.value if conf_param.is_shippable
                   else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        p.nms_iou = float(block_bundle.get("cross_tile_nms").value)
         # The whole mosaic runs uncapped, never at the block bundle's band-scoped density cap.
         apply_operating_point(predictor, p.conf, None)
 
         op_bundle = block_calibrated_export_operating_point(
-            block_bundle, trait=trait, tile_size=p.tile_size,
-            tile_size_source=p.tile_size_source, tile_size_derived_from=p.tile_size_derived_from)
-        result = p.result(op_bundle.to_provenance()["operating_point"], {
+            block_bundle, trait=trait, geometry=p.geometry)
+        result = p.result(op_bundle.to_provenance(), {
             "validated": op_bundle.is_shippable and claim_scope_validated != VALIDATED_FALSE,
             "conf_source": "block_calibration", "dataset_hash": op_bundle.dataset_hash,
             "shippable_issues": op_bundle.shippable_issues()})
@@ -1997,7 +1938,8 @@ def _export_predictions_raster(
             block_calibration={k: v for k, v in block_prov.items() if k != "spatial_manifest"})
         claim_evidence = block_evidence
         snapshot = {
-            "operating_point": result["operating_point"],
+            "provenance": {"operating_point": result["operating_point"],
+                           "slicing": result["slicing"]},
             **{k: result[k] for k in _SNAPSHOT_RESULT_KEYS},
             "stamp_extras": {k: stamp_extras[k]
                              for k in ("claim_scope_validated", "block_calibration")},
@@ -2006,12 +1948,7 @@ def _export_predictions_raster(
     result["raster_path"] = str(raster_path)
 
     current_pass_identity = _raster_pass_identity_body(
-        raster_identity=raster_identity, checkpoint_sha256=identity["sha256"], trait=trait,
-        experiment_id=identity["experiment_id"], tile_batch_size=tile_batch_size,
-        conf=p.conf, cross_tile_nms=p.nms_iou, max_dets=predictor.max_dets,
-        tile_size=p.tile_size, overlap=p.overlap, tile_resize=p.tile_resize,
-        postprocess=postprocess, require_masks=require_masks,
-    )
+        result, p, raster_identity=raster_identity, trait=trait, require_masks=require_masks)
     if existing_pass_identity is not None:
         mismatches = _raster_pass_identity_mismatches(existing_pass_identity, current_pass_identity)
         if mismatches:
@@ -2039,20 +1976,21 @@ def _export_predictions_raster(
         prior = None
         if existing_pass_identity is not None:
             prior = _load_raster_pass_prior(out)
-        elif record_progress:
+        else:
             store.replace(identity_key, current_pass_identity, expect=Version.ABSENT)
             if snapshot is not None:
                 store.replace(_raster_pass_key(out, "block-calibration"), snapshot,
                               expect=Version.ABSENT)
+        assert p.slicing is not None
         # The model's own in_chans is the channel routing hint; the reader's real band count is
-        # checked against it inside predict_tiled before any tile is read.
+        # checked against it inside predict_sliced before any slice is read.
         with open_raster(raster_path, predictor.in_chans) as reader:
-            tiled = predictor.predict_tiled(
-                reader, tile_size=p.tile_size, overlap=p.overlap,
-                tile_batch_size=tile_batch_size, global_nms_iou=p.nms_iou,
-                postprocess=postprocess, require_masks=require_masks,
-                source_label=str(raster_path), tile_resize=p.tile_resize, prior=prior,
-                progress=_record_raster_pass_batch if record_progress else None,
+            tiled = predictor.predict_sliced(
+                reader, tile_size=p.geometry.tile_size, overlap=p.geometry.overlap,
+                postprocess=p.slicing["postprocess"], cross_tile_nms=p.cross_tile_nms.value,
+                tile_batch_size=p.tile_batch_size, tile_resize=p.geometry.tile_resize,
+                require_masks=require_masks, source_label=str(raster_path), prior=prior,
+                progress=_record_raster_pass_batch,
             )
         passed["tiles"] = tiled.get("tiles")
         yield tiled
@@ -2061,9 +1999,12 @@ def _export_predictions_raster(
     pub = publish_bucket(
         result, out=out, trait=trait, dataset_root=dataset_root,
         allow_unvalidated_staging=allow_unvalidated_staging, claim_evidence=claim_evidence,
-        stamp_extras=stamp_extras)
+        stamp_extras=stamp_extras, dry_run=dry_run)
     if pub["refusal"] is not None:
         return pub["refusal"]
+    if dry_run:
+        return _dry_run_response(pub, out=out, resolution=resolution,
+                                 requested_output_dir=output_dir)
     _clear_raster_pass_progress(out)
 
     response = {
@@ -2093,7 +2034,7 @@ def deliver_per_image_counts(
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-    global_nms_iou: float | None = None,
+    cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     postprocess: str = DEFAULT_POSTPROCESS,
     calibration_labels_dir: str | None = None,
@@ -2120,7 +2061,7 @@ def deliver_per_image_counts(
       no predictor import. Reads an existing per-image prediction bucket's own
       ``operating_point.json`` stamp as its identity and validity source, counting real detections
       (a ``Point`` excluded) off each of its documents, sorted by stem. Every parameter meaningful
-      only to a live run (conf/device/tiling/NMS/max_dets/calibration/selection/experiment_id)
+      only to a live run (conf/device/tiling/cross-tile merge/max_dets/calibration/selection/experiment_id)
       refuses here by name; ``postprocess``/``tile_batch_size`` refuse only away from their own
       documented default. A bucket recording ``raster_path`` refuses naming
       ``deliver_orthomosaic_plant_counts``. A stamp recording a different, non-``None`` trait
@@ -2172,14 +2113,15 @@ def deliver_per_image_counts(
             platform default; a stated value is an explicit override even when it equals the
             platform default.
         device: Live regime only. Device to use.
-        tile: Live regime only. Tiled (SAHI-style) inference for small dense objects; ``None``
+        tile: Live regime only. Tiled (SAHI) inference for small dense objects; ``None``
             (default) as ``run_inference`` resolves it.
         tile_size: Live regime only. Sliding-window tile edge (px).
         overlap: Live regime only. Fractional tile overlap.
         tile_batch_size: Live regime only. Tiles per forward batch.
-        global_nms_iou: Live regime only. Cross-tile NMS IoU; as ``run_inference`` resolves it.
+        cross_tile_nms: Live regime only. Cross-tile merge threshold; as ``run_inference``
+            resolves it.
         max_dets: Live regime only. Full-frame detection cap; as ``run_inference`` resolves it.
-        postprocess: Live regime only. Cross-tile merge, "nms" or "nmm".
+        postprocess: Live regime only. Cross-tile merge, one of ``resolution.CROSS_TILE_MERGES``.
         calibration_labels_dir: Live regime only. Labeled dir for calibrating + held-out validating
             the operating point.
         calibration_images_dir: Live regime only. Images for the calibration labels (defaults to
@@ -2225,7 +2167,7 @@ def deliver_per_image_counts(
             name for name, value in (
                 ("conf_threshold", conf_threshold), ("device", device), ("tile", tile),
                 ("tile_size", tile_size), ("overlap", overlap),
-                ("global_nms_iou", global_nms_iou), ("max_dets", max_dets),
+                ("cross_tile_nms", cross_tile_nms), ("max_dets", max_dets),
                 ("calibration_labels_dir", calibration_labels_dir),
                 ("calibration_images_dir", calibration_images_dir),
                 ("selection_dir", selection_dir), ("experiment_id", experiment_id),
@@ -2301,7 +2243,7 @@ def deliver_per_image_counts(
         tile_size=tile_size,
         overlap=overlap,
         tile_batch_size=tile_batch_size,
-        global_nms_iou=global_nms_iou,
+        cross_tile_nms=cross_tile_nms,
         max_dets=max_dets,
         postprocess=postprocess,
         trait=trait,

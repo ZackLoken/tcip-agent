@@ -84,8 +84,8 @@ def _sidecar(bucket: Path) -> None:
     """
     tcip_store.replace(sidecar_key(bucket, "operating_point"), {
         "checkpoint_sha256": "sha-detector", "experiment_id": None, "validated": False,
-        "id_map": {"bud": 0}, "subject": "bud", "attribute": None,
-        "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.25}},
+        "id_map": {"bud": 0}, "subject": "bud", "attribute": None, "slicing": None,
+        "operating_point": {"conf": {"value": 0.25}},
     }, expect=tcip_store.Version.ABSENT)
 
 
