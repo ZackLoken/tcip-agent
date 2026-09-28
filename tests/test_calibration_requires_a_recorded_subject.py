@@ -87,7 +87,7 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
 
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bright_region_detector",
-                         "builder_kwargs": {}, "task": "detection", "in_chans": 3},
+                         "builder_kwargs": {}, "task": "detection"},
         "data": data_cfg, "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
@@ -98,8 +98,7 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
     collate = task_collate("detection")
     run = create_run(config, str(out_dir), id=out_dir.name)
     completed = train(run, DataLoader(train_ds, batch_size=2, collate_fn=collate),
-                      val_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate),
-                      task="detection")
+                      val_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate))
     assert completed.status == "completed", completed.status
     checkpoint = out_dir / "model_best.pt"
     registered = register_model(name=out_dir.name, checkpoint_path=str(checkpoint), config={},
@@ -126,22 +125,11 @@ def test_a_run_that_recorded_no_subject_is_refused_calibration_by_name(tmp_path:
     data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
                 "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
     checkpoint = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
-    assert data_cfg.get("subject") is None  # the producer admitted by shape and stamped none
+    # The producer admitted by shape and recorded an empty scope.
+    assert data_cfg["scope"] == {"subject": None, "attribute": None, "id_map": None}
 
     result = _calibrate(checkpoint, images, reference, tmp_path / "ds" / "predictions" / "a")
 
     assert "records no subject" in result.get("error", ""), result
     assert not (tmp_path / "ds" / "predictions" / "a").exists() or not any(
         (tmp_path / "ds" / "predictions" / "a").iterdir())
-
-
-def test_the_id_map_resolver_reads_the_scopes_own_subject_decision(tmp_path: Path):
-    """A training scope naming no subject is refused by the scope's one statement of that
-    refusal, an empty name read as none; a named single-class scope still resolves its map."""
-    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
-
-    _images, _masks, reference = _capture(tmp_path / "ds")
-    for subject, attribute in ((None, None), ("", "")):
-        with pytest.raises(ValueError, match="records no subject"):
-            resolve_registry_id_map(reference, subject, attribute)
-    assert resolve_registry_id_map(reference, "bur", None)[1] == {"bur": 0}

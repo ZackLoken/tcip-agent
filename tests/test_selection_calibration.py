@@ -83,7 +83,7 @@ def test_selection_calibration_universe_holds_only_the_calibration_side(tmp_path
     drawn = _draw(root, tmp_path / "m")
 
     stems, group_by, group_key_map, excluded, _counts, _samples = \
-        selection_calibration_universe(drawn, _labels_dir(root))
+        selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
 
     assert set(stems) == set(_calibration_this_date(drawn))
     assert set(excluded["excluded_training_stems"]) == _side_this_date(drawn, "train")
@@ -101,7 +101,7 @@ def test_selection_calibration_universe_reads_only_the_named_labels_directory(tm
     drawn = _draw(root, tmp_path / "m")
 
     stems, *_rest = selection_calibration_universe(
-        drawn, _labels_dir(root, DATES[1]), min_foreground_groups={"calibration": 1})
+        drawn, _labels_dir(root, DATES[1]), drawn.scope, min_foreground_groups={"calibration": 1})
 
     assert set(stems) == set(_calibration_this_date(drawn, DATES[1]))
     assert set(stems) != set(_calibration_this_date(drawn, DATES[0]))
@@ -110,11 +110,9 @@ def test_selection_calibration_universe_reads_only_the_named_labels_directory(tm
 def test_a_calibration_member_whose_ground_truth_moved_is_named_by_the_re_admission(
     tmp_path: Path,
 ):
-    """The selection says which samples were held out, so the universe returns them all. Whether
-    each one still admits is the one re-admission over recorded samples, which every door building
-    a loader over them runs: a member whose document was deleted since the draw is named there
-    rather than dropped into a universe one member smaller than the one recorded."""
-    from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
+    """The selection says which samples were held out; the universe re-admits them under the
+    class space the measurement reads, so a member whose document was deleted since the draw is
+    named there rather than dropped into a universe one member smaller than the one recorded."""
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
@@ -122,15 +120,13 @@ def test_a_calibration_member_whose_ground_truth_moved_is_named_by_the_re_admiss
     calibration_this_date = _calibration_this_date(drawn)
     assert len(calibration_this_date) >= 3, "fixture must leave room to drop one and still have >=2"
 
-    stems, *_rest, samples = selection_calibration_universe(drawn, _labels_dir(root))
-    assert set(stems) == set(calibration_this_date)
-
     # Admits valid work: as drawn, every held-out member still admits.
-    refuse_inadmissible_samples([samples[stem] for stem in stems])
+    stems, *_rest = selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
+    assert set(stems) == set(calibration_this_date)
 
     (_labels_dir(root) / f"{calibration_this_date[0]}.json").unlink()
     with pytest.raises(ValueError, match="no longer admissible") as raised:
-        refuse_inadmissible_samples([samples[stem] for stem in stems])
+        selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
     assert "draw the selection again" in str(raised.value)
 
 
@@ -146,7 +142,7 @@ def test_selection_calibration_universe_refuses_fewer_than_two_groups(tmp_path: 
 
     with pytest.raises(ValueError, match="calibration_ratio"):
         selection_calibration_universe(
-            drawn, _labels_dir(root),
+            drawn, _labels_dir(root), drawn.scope,
             min_foreground_groups={"calibration": len(held_out) + 1})
 
 
@@ -155,6 +151,7 @@ def test_selection_calibration_universe_floor_is_foreground_aware(tmp_path: Path
     floor counts the groups whose own members carry this draw's subject, read through the one
     per-sample counter, not bare group presence."""
     from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
@@ -162,13 +159,17 @@ def test_selection_calibration_universe_floor_is_foreground_aware(tmp_path: Path
     calibration_this_date = _calibration_this_date(drawn)
     assert len(calibration_this_date) >= 3
 
-    # Every held-out member but one emptied of the subject: one foreground group is left.
+    # Every held-out member but one emptied of the subject and confirmed negative, so each still
+    # admits and only one foreground group is left.
     for stem in calibration_this_date[1:]:
         json_io.write_annotations(
             _labels_dir(root) / f"{stem}.json", [], IMG, IMG, keep_empty=True)
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]),
+                          {f"{stem}.jpg": "negative" for stem in calibration_this_date[1:]},
+                          recorded_by="user:breeder")
 
     with pytest.raises(ValueError, match="foreground group"):
-        selection_calibration_universe(drawn, _labels_dir(root))
+        selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
 
 
 def test_selection_calibration_universe_refuses_a_calibration_sample_naming_a_rect(
@@ -192,7 +193,7 @@ def test_selection_calibration_universe_refuses_a_calibration_sample_naming_a_re
     from tcip_mcp.pipelines.data.selection import read_selection
 
     with pytest.raises(ValueError, match="pixel rect"):
-        selection_calibration_universe(read_selection(out), _labels_dir(root))
+        selection_calibration_universe(read_selection(out), _labels_dir(root), drawn.scope)
 
 
 def test_a_calibration_door_refuses_a_selections_recorded_rect(tmp_path: Path):
@@ -229,7 +230,7 @@ def test_the_calibration_universe_refuses_a_directory_the_draw_never_held(
     elsewhere.mkdir(parents=True)
 
     with pytest.raises(ValueError, match=str(elsewhere.name)):
-        selection_calibration_universe(drawn, elsewhere)
+        selection_calibration_universe(drawn, elsewhere, drawn.scope)
 
 
 def test_a_selection_restricted_calibration_reads_its_own_recorded_sources(tmp_path: Path):
@@ -252,7 +253,7 @@ def test_a_selection_restricted_calibration_reads_its_own_recorded_sources(tmp_p
 
     labels_dir = _labels_dir(root)
     stems, _gb, _gkm, _excl, _counts, samples = \
-        selection_calibration_universe(drawn, str(labels_dir))
+        selection_calibration_universe(drawn, str(labels_dir), drawn.scope)
 
     assert stems
     for stem in stems:
@@ -354,7 +355,8 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config = {"data": {"subject": subject, "attribute": attribute}}
+        self.config = {"data": {"scope": {"subject": subject, "attribute": attribute,
+                                          "id_map": {subject: 0}}}}
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -392,16 +394,16 @@ def test_calibrate_operating_point_binds_to_the_selections_calibration_side(tmp_
 def test_calibrate_operating_point_refuses_a_checkpoint_trained_for_another_class_space(
     tmp_path: Path,
 ):
-    """A model only speaks its own training vocabulary, so a checkpoint trained for one subject
-    cannot be measured against a selection drawn for another: the refusal names both rather than
-    letting the class-id read fail deep inside the reference build."""
+    """A model only speaks its own training vocabulary, so the selection's held-out samples are
+    read under the checkpoint's class space: samples carrying another subject hold no foreground
+    of the checkpoint's own, and the calibration refuses naming the empty universe."""
     import tcip_mcp.pipelines.calibration as calibration
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    with pytest.raises(ValueError, match="training vocabulary"):
+    with pytest.raises(ValueError, match="0 foreground group"):
         calibration.calibrate_operating_point(
             stub_pass(_CalStub(subject="a_different_subject")), "bud_opening",
             str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
@@ -609,7 +611,7 @@ def test_force_redraw_binds_to_the_selection_and_records_its_dir(tmp_path: Path)
     result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), selection_dir=str(out),
-        subject=SUBJECT, reason="test redraw",
+        reason="test redraw",
     )
 
     assert "error" not in result
@@ -643,21 +645,25 @@ def test_force_redraw_reads_the_scope_off_the_selection(tmp_path: Path):
 
 
 def test_force_redraw_refuses_a_document_selection_that_records_no_subject(tmp_path: Path):
-    """A read over per-image label documents is subject-scoped, so a selection drawn without one
-    names no class space to count foreground in, and refuses in the words every reader of a
-    selection's scope uses."""
-    from tcip_mcp.pipelines.data.selection import Sample, Selection, write_selection
+    """A read over per-image label documents is subject-scoped, so a selection recorded without
+    one names no class space to count foreground in, and refuses in the words the selection reader
+    uses. The record is written past the writer, which refuses one."""
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.data.selection import (
+        ClassScope, Sample, Selection, selection_document, selection_key,
+    )
     from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
     out = tmp_path / "unscoped"
-    write_selection(out, Selection(samples=tuple(
+    ts.replace(selection_key(out), selection_document(Selection(samples=tuple(
         Sample(member=stem, source=str(images_dir / f"{stem}.jpg"),
                ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                confirmation_bucket=f"{SUBJECT}/{DATES[0]}")
         for stem, side in zip(_STEMS, ("train", "val", "calibration", "calibration"))),
-        seed=0, group_by="stem"))
+        seed=0, group_by="stem", scope=ClassScope())))
 
     result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(labels_dir), images_dir=str(images_dir),
@@ -671,7 +677,6 @@ def test_force_redraw_selection_refuses_the_same_missing_image_the_universe_name
     """A held-out sample whose image is gone is not a smaller universe: the redraw and the
     universe refuse on the same member by name, so neither can lock a split the other would never
     draw."""
-    from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
     from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
@@ -681,14 +686,13 @@ def test_force_redraw_selection_refuses_the_same_missing_image_the_universe_name
     missing = _calibration_this_date(drawn)[0]
     (root / "images" / DATES[0] / f"{missing}.jpg").unlink()
 
-    stems, *_rest, samples = selection_calibration_universe(drawn, _labels_dir(root))
     with pytest.raises(ValueError, match=missing):
-        refuse_inadmissible_samples([samples[stem] for stem in stems])
+        selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
 
     result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), selection_dir=str(out),
-        subject=SUBJECT, reason="test redraw",
+        reason="test redraw",
     )
 
     assert "error" in result and missing in result["error"]
@@ -820,8 +824,7 @@ def test_a_calibration_date_holding_no_training_members_is_checked_not_unresolva
                        else "val")
 
     write_selection(out, Selection(
-        samples=tuple(_sided(s) for s in drawn.samples), subject=drawn.subject,
-        attribute=drawn.attribute, id_map=drawn.id_map, seed=drawn.seed,
+        samples=tuple(_sided(s) for s in drawn.samples), scope=drawn.scope, seed=drawn.seed,
         group_by=drawn.group_by))
 
     data_cfg = {"split": {"selection_dir": str(out)}}
@@ -957,7 +960,7 @@ def test_a_bespoke_datasets_own_stems_name_its_records(tmp_path: Path):
     drawn = _draw(root, out)
     dataset = build_dataset(
         "detection", samples=drawn.on("train"), sizes={}, transforms=None, scope=drawn.scope,
-        dataset_source={"builder": f"{__name__}:build_bespoke_stem_dataset", "task": "detection"})
+        dataset_source={"builder": f"{__name__}:build_bespoke_stem_dataset"})
 
     class _NoDetections:
         def eval(self):

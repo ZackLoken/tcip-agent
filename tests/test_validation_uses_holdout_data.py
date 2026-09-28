@@ -42,7 +42,8 @@ def _loaders():
 def _config(out_dir, *, epochs: int, early_stopping: dict) -> dict:
     return {
         "model_source": {"builder": BUILDER, "builder_kwargs": {"init_weight": 0.0},
-                         "task": "regression", "in_chans": 1},
+                         "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": epochs}],
@@ -56,8 +57,8 @@ def _capture_model(monkeypatch, sink: list) -> None:
     """Keep a reference to the model the run actually built and trained."""
     real_build_model = gt.build_model
 
-    def build(config):
-        model = real_build_model(config)
+    def build(config, dims):
+        model = real_build_model(config, dims)
         sink.append(model)
         return model
 
@@ -81,7 +82,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the experiment's own record.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="regression", experiment_id="exp-holdout")
+                       experiment_id="exp-holdout")
     run = ctx.default_train()
 
     assert run.status == "completed", run.error
@@ -89,8 +90,8 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     model = models[0]
 
     device = torch.device("cpu")
-    on_holdout = evaluate(model, val_loader, device, "regression")
-    on_training = evaluate(model, train_loader, device, "regression")
+    on_holdout = evaluate(model, val_loader, device, "regression", dims={"in_chans": 1})
+    on_training = evaluate(model, train_loader, device, "regression", dims={"in_chans": 1})
     # The two loaders must be distinguishable at all, or nothing below can discriminate.
     assert on_holdout["loss"] > 3.0 * on_training["loss"] > 0.0
     assert on_holdout["mae"] != pytest.approx(on_training["mae"], rel=0.1)
@@ -118,7 +119,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     config = _config(out_dir, epochs=4,
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
     run = create_run(config, str(out_dir), id="auto-run-76")
-    run = train(run, train_loader, val_loader=val_loader, task="regression")
+    run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error
     history = run.metrics_history

@@ -5,10 +5,11 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import Acknowledgment
 
 logger = logging.getLogger(__name__)
@@ -61,42 +62,21 @@ def _run_class_id(label: int) -> int:
     return max(int(label) - 1, 0)
 
 
-def unmapped_label_ids(results: list[dict], id_map: dict[str, int] | None) -> list[int]:
-    """Every 0-indexed label id across ``results`` that ``id_map`` cannot decode, sorted; empty
-    when every one decodes, or when ``id_map`` is ``None`` (the detector-run case, where the raw
-    index is itself the name). Only meaningful for a classified run (``attribute`` set).
-    """
-    if id_map is None:
-        return []
-    known = set(id_map.values())
-    unmapped: set[int] = set()
-    for r in results:
-        for label in r.get("labels", []):
-            cid = _run_class_id(label)
-            if cid not in known:
-                unmapped.add(cid)
-    return sorted(unmapped)
-
-
 def write_predictions_json(
-    json_path: str | Path, result: dict, created_by: str | None = None, *,
-    subject: str | None, attribute: str | None, id_map: dict[str, int] | None = None,
+    json_path: str | Path, result: dict, created_by: str | None = None, *, scope: "ClassScope",
 ) -> int:
     """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
-    image ``width``/``height``. Each detection's numeric label is decoded via ``id_map`` (the run's
-    recorded ``operating_point.json`` name->id map).
+    image ``width``/``height``. Each detection's numeric label is decoded via ``scope``'s map, the
+    run's own admitted class space, as its checkpoint records it.
 
-    ``subject`` and ``attribute`` are the run's own scope
-    (:func:`~tcip_mcp.tools.inference_tools.run_scope`). With ``attribute`` set, every decoded name
-    lands in ``attributes[attribute]`` and ``subject`` carries the object class itself. With
-    ``attribute=None``, ``subject`` carries the decoded name and ``attributes`` stays empty. An
-    ``attribute`` with no ``subject`` refuses (``ValueError``) before the first document is
-    written. Absent a recorded map, a detector run uses the raw 0-indexed id as the name; a
-    classified run refuses (``ValueError``, naming the id and the map's own ids) the first label it
-    cannot decode. ``keep_empty=True`` so a processed image with zero detections still yields an
-    ``{"annotations": []}`` file. ``created_by`` stamps the producing model on every prediction.
+    Under a classified scope every decoded name lands in ``attributes[attribute]`` and ``subject``
+    carries the object class itself; otherwise ``subject`` carries the decoded name and
+    ``attributes`` stays empty. The first label the map cannot decode refuses (``ValueError``,
+    naming the id and the map's own ids). ``keep_empty=True`` so a processed image with zero detections
+    still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model on every
+    prediction.
 
     When ``result`` carries ``masks`` (``instance_seg``), each is a ``{"segmentation"}`` dict of
     flat polygons in full-image pixels, binarized by the predictor at the threshold the result's
@@ -121,14 +101,10 @@ def write_predictions_json(
             "stem is reserved this way can never be written as a bucket's per-image prediction "
             "document, since the stamp write would then destroy or refuse over it."
         )
-    if attribute is not None and subject is None:
-        raise ValueError(
-            f"{p.name}: attribute {attribute!r} was given with no subject; a value with no "
-            "object class names nothing a reader could hold this record to."
-        )
+    attribute = scope.attribute
     w, h = result["width"], result["height"]
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
-    id_to_name = decode_class_ids(id_map) if id_map else {}
+    id_to_name = decode_class_ids(scope.id_map or {})
     masks = result.get("masks")
     boxes = result.get("boxes", [])
     scores = result.get("scores", [])
@@ -139,25 +115,19 @@ def write_predictions_json(
     dropped = 0
     for i, (score, label) in enumerate(zip(scores, labels)):
         cid = _run_class_id(label)
-        if attribute is not None:
-            if cid not in id_to_name:
-                raise ValueError(
-                    f"{p.name}: detection {i} decoded to id {cid}, not a key of this run's "
-                    f"recorded id_map ({sorted(id_to_name)}); a value no vocabulary declares "
-                    f"cannot be written under attribute {attribute!r}."
-                )
-            name = id_to_name[cid]
-        else:
-            name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
+        if cid not in id_to_name:
+            raise ValueError(
+                f"{p.name}: detection {i} decoded to id {cid}, not a key of this run's recorded "
+                f"id_map ({sorted(id_to_name)}); a name no admitted class map declares cannot be "
+                "written."
+            )
+        name = id_to_name[cid]
         geometry = stored.get(i)
         if geometry is None:
             dropped += 1
             continue
-        if attribute is not None:
-            assert subject is not None  # refused above when attribute is set with no subject
-            pred_subject = subject
-        else:
-            pred_subject = name
+        # A classified scope names its subject (ClassScope's own admission).
+        pred_subject = cast(str, scope.subject) if attribute is not None else name
         pred_attributes = {attribute: name} if attribute is not None else {}
         preds.append(Annotation(subject=pred_subject, geometry=geometry, score=float(score),
                                 attributes=pred_attributes,
@@ -220,7 +190,7 @@ def export_detection_csv(
     pred_dirs: list[str] | None = None,
     acknowledgment: Acknowledgment | None = None,
     project_root: str | Path | None = None,
-) -> tuple[str, dict, dict, bool]:
+) -> tuple[str, dict, dict]:
     """Export per-image detection counts to CSV.
 
     A delivery door: it refuses a bare write (an unvalidated count with no acknowledgment) via
@@ -264,11 +234,10 @@ def export_detection_csv(
             to. ``None`` resolves against this process's pinned platform root.
 
     Returns:
-        ``(path, tail, summary, event_recorded)``: the path to the written CSV, the
-        ``_PROVENANCE_COLUMNS`` tail ``delivered_tail`` composed and wrote into every row, the
-        gate's own evaluation summary (``stamp``, ``unvalidated``, ``tile_size_operative``,
-        ``tile_size_validated``, ``binding_notes``), and whether the best-effort delivery-event
-        write landed (``record_delivery_binding_event``'s own return).
+        ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
+        ``delivered_tail`` composed and wrote into every row, and the gate's own evaluation summary
+        (``stamp``, ``unvalidated``, ``tile_size_operative``, ``tile_size_validated``,
+        ``binding_notes``).
 
     Raises:
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
@@ -276,9 +245,9 @@ def export_detection_csv(
         OperationalizationRefused (``tcip_mcp.operationalization``): the ``trait``'s
             ``per_image_count`` operationalization is unrecorded, not breeder-confirmed, or was
             withdrawn since the first check; carries the failed check and no counts.
-        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
-            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
-            already written to ``output_path``.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
+            appended, raised by ``record_delivery_binding_event`` after the CSV and the
+            ``delivery_events`` record were written.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
@@ -287,7 +256,6 @@ def export_detection_csv(
         resolve_trait_and_record,
     )
     from tcip_annotation.json_io import safe_score
-    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
         DeliveryRefused,
@@ -304,13 +272,12 @@ def export_detection_csv(
     counted_subjects: dict[str, set[str]] = {}
     for d in (pred_dirs or []):
         scope = bucket_scope(Path(d))
-        if scope is not None and scope.classified:
-            if scope.subject is not None:
-                counted_subjects[d] = {scope.subject}
+        if scope is None:
             continue
-        recorded_map = bucket_id_map(Path(d))
-        if recorded_map:
-            counted_subjects[d] = set(recorded_map)
+        if scope.classified:
+            counted_subjects[d] = {cast(str, scope.subject)}
+        elif scope.id_map:
+            counted_subjects[d] = set(scope.id_map)
     spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT, project_root=project_root)
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
@@ -374,14 +341,13 @@ def export_detection_csv(
                 **stamp,
             })
 
-    event_recorded = record_delivery_binding_event(
+    record_delivery_binding_event(
         "export_detection_csv", output_path, pred_dirs,
         document_reconciliations=(
             {_MEASUREMENT_DOCUMENT: operating_point_recon} if operating_point_recon is not None
             else {}
         ),
         dimension_reconciliations={"tile_size": tile_recon} if tile_recon is not None else {},
-        measurement_documents=[_MEASUREMENT_DOCUMENT],
         acknowledgment=gate.effective_acknowledgment(), trait=trait,
         delivery_kind=PER_IMAGE_COUNT, project_root=project_root)
     summary = {
@@ -391,4 +357,4 @@ def export_detection_csv(
         "tile_size_validated": (tile_recon or {}).get("validated"),
         "binding_notes": notes,
     }
-    return output_path, stamp, summary, event_recorded
+    return output_path, stamp, summary

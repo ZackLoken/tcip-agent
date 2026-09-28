@@ -67,10 +67,9 @@ def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overr
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "in_chans": in_chans, "min_size": 64, "max_size": 128,
-                           **(builder_kwargs or {})},
+        "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
         "task": "detection",
-    })
+    }, data={"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
     return run_inference_verified(
         str(ckpt), images_dir=str(tmp_path), device="cpu",
         trait="bud_opening", calibration_labels_dir=str(tmp_path), **overrides)

@@ -10,6 +10,7 @@ import pytest
 import tcip_store
 
 from tcip_annotation.json_io import SIDECAR_FILENAMES
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import (
     VALIDATED_EXPLICIT_GEOMETRY,
     VALIDATED_FALSE,
@@ -38,9 +39,7 @@ def _stamp(*, validated_by=None, **overrides) -> dict:
         validated=True,
         tile_size_validated=None,
         shippable_issues=[],
-        id_map={"bud": 0},
-        subject="bud",
-        attribute=None,
+        scope=ClassScope(subject="bud", id_map={"bud": 0}),
         trait="bud_opening",
         dataset_hash="abc123",
         checkpoint="best",

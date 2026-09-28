@@ -40,7 +40,8 @@ def _loaders():
 def _config(evaluation: dict | None = None) -> dict:
     config = {
         "model_source": {"builder": BUILDER, "builder_kwargs": {"init_weight": 0.0},
-                         "task": "regression", "in_chans": 1},
+                         "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 3}],
@@ -68,7 +69,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the experiment's own record and fires the hook a trial prunes on.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="regression", experiment_id="exp-selection",
+                       experiment_id="exp-selection",
                        epoch_hook=lambda epoch, metrics: callbacks.append(dict(metrics)))
     run = ctx.default_train()
 
@@ -100,7 +101,7 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     train_loader, val_loader = _loaders()
     out_dir = tmp_path / "out"
     run = create_run(_config({"selection_metric": "mae"}), str(out_dir), id="auto-run-64")
-    run = train(run, train_loader, val_loader=val_loader, task="regression")
+    run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error
     history = run.metrics_history
@@ -127,7 +128,8 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
 
     config = {
         "model_source": {"builder": CLASSIFIER_BUILDER, "builder_kwargs": {"init_weight": -1.0},
-                         "task": "classification", "in_chans": 1},
+                         "task": "classification"},
+        "data": {"num_channels": 1, "num_classes": 2, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 5}],
@@ -137,7 +139,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
         "evaluation": {"selection_metric": "f1"},
     }
     run = create_run(config, str(tmp_path / "out"), id="auto-run-65")
-    run = train(run, train_loader, val_loader=val_loader, task="classification")
+    run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error
     history = run.metrics_history
@@ -158,7 +160,7 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     produce, not silently fall back to the training loss under a name nobody chose."""
     train_loader, val_loader = _loaders()
     run = create_run(_config({"selection_metric": "f1"}), str(tmp_path / "out"), id="auto-run-66")
-    run = train(run, train_loader, val_loader=val_loader, task="regression")
+    run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "failed"
     assert "'f1'" in run.error
@@ -173,7 +175,7 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
     default (loss) metric must still complete and choose the lowest-loss epoch."""
     train_loader, _ = _loaders()
     run = create_run(_config(), str(tmp_path / "out"), id="auto-run-67")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
     history = run.metrics_history

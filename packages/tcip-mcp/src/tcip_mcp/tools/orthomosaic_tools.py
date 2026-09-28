@@ -475,7 +475,7 @@ def orthomosaic_plant_counts(
     }
 
     try:
-        csv_path, tail, event_recorded = export_aggregated_csv(
+        csv_path, tail = export_aggregated_csv(
             agg, output_csv_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
@@ -515,7 +515,6 @@ def orthomosaic_plant_counts(
         "checkpoint_sha256": tail["producer_model_sha256"],
         "producing_experiment_id": tail["producing_experiment_id"],
         "validation_record": tail["validation_record"],
-        "delivery_event_recorded": event_recorded,
         **extra_response_fields,
     }
 

@@ -137,7 +137,7 @@ def test_persist_run_partition_records_identity(tmp_path, exp_dir):
 
     images_dir, labels_dir = _make_dataset(tmp_path)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT}
+                "scope": {"subject": SUBJECT}}
     create_experiment("e1", {"data": data_cfg})
     _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
 

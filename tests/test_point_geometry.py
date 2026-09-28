@@ -97,19 +97,22 @@ def test_target_class_id_still_assigns_a_box_its_class() -> None:
 
 def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     label = tmp_path / "IMG_0001.json"
     json_io.write_annotations(label, [
         Annotation(subject="bud", geometry=Point(20.0, 20.0)),
         Annotation(subject="bud", geometry=BOX),
     ], 100, 80)
-    target, n_unlabeled = json_det_targets(str(label), "bud", None, {"bud": 0})
+    target, n_unlabeled = json_det_targets(str(label), ClassScope(subject="bud",
+                                                                  id_map={"bud": 0}))
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["labels"] == [1]
     assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
     # An attribute scope must not turn the point into a decode failure either: it is simply not a
     # target for this scope, which is a different thing from "a target the registry can't decode".
-    target, n_unlabeled = json_det_targets(str(label), "bud", "opening", {"open": 0})
+    target, n_unlabeled = json_det_targets(str(label), ClassScope(
+        subject="bud", attribute="opening", id_map={"open": 0}))
     assert target["boxes"] == [] and n_unlabeled == 1  # only the box, never assessed, is a gap
 
 
@@ -209,7 +212,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
 
 def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
-    from tcip_mcp.pipelines.resolution import BucketScope
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     path = tmp_path / "IMG_0001.json"
     json_io.write_annotations(path, [
@@ -218,9 +221,8 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
         Annotation(subject="bud", geometry=Point(60.0, 60.0), score=0.9,
                   attributes={"opening": "open"}),
     ], 100, 80)
-    scope = BucketScope(subject="bud", attribute="opening")
-    total, positive, unclassified = count_by_class(
-        path, {"open": 0, "closed": 1}, "open", scope=scope)
+    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
+    total, positive, unclassified = count_by_class(path, "open", scope=scope)
     assert (total, positive, unclassified) == (1, 1, 0)
 
 

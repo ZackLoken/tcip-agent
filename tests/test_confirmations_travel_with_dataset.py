@@ -17,6 +17,7 @@ from tcip_annotation import json_io
 from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import stamp_image_status_digests, status_bucket
+from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
@@ -190,7 +191,7 @@ def test_the_admission_reports_quarantined_stale_definition(tmp_path):
     )))
 
     records, counts = admitted_documents(
-        root / "annotations", root / "images", subject="bud", date=None)
+        root / "annotations", root / "images", scope=ClassScope(subject="bud"), date=None)
     stems = [record.member for record in records]
     assert stems == []
     assert counts["quarantined_stale_definition"] == 1
@@ -255,7 +256,7 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
              "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1]}]},
     }}
     out = tmp_path / "out"
-    materialize_dataset(review_state, str(src_images), str(out), subject="bud")
+    materialize_dataset(review_state, str(src_images), str(out), scope=ClassScope(subject="bud"))
 
     assert (out / "subjects.json").is_file(), "the materialized dataset must be self-describing"
     stamps = tcip_store.read(image_status_digest_key(out), default={}).get("bud", {})

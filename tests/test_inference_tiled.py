@@ -9,8 +9,6 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
-
 TILE = 64
 SLICED = dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
               tile_batch_size=8, tile_resize=None, require_masks=True)
@@ -20,19 +18,11 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     """Write a bespoke detection checkpoint and register it against ``tmp_path`` as the project
     root, so a caller can load it through ``load_registered_checkpoint`` or hand its bare path to
     an MCP tool that resolves the registry itself."""
-    from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
-                    "task": "detection"}
-    model = build_model({"model_source": model_source})
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
-    result = register_model(name="test-model", checkpoint_path=str(ckpt), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
-    return str(ckpt)
+    return registered_checkpoint(tmp_path, project_root=tmp_path, model_source={
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}, "task": "detection"})
 
 
 def _image(tmp_path: Path, size: int = 128) -> str:
@@ -181,31 +171,18 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
     live registry, and reachable with no images_dir/subjects.json at all (proving it is not
     falling through to the registry-derivation branch)."""
-    import torch as _torch
+    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-    from tcip_mcp.tools.model_tools import register_model
-
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 3, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
-                    "task": "detection"}
-    from tcip_mcp.pipelines.model_build import build_model
-    model = build_model({"model_source": model_source})
     recorded_id_map = {"closed": 0, "open": 1}
-    ckpt_path = tmp_path / "model_best.pt"
-    _torch.save({
-        "model_source": model_source,
-        "model_state_dict": model.state_dict(),
-        "config": {"model_source": model_source,
-                   "data": {"subject": "bud", "attribute": "opening",
-                            "id_map": recorded_id_map}},
-    }, str(ckpt_path))
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    result = register_model(name="test-model", checkpoint_path=str(ckpt_path), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
+    ckpt_path = registered_checkpoint(
+        tmp_path, project_root=tmp_path,
+        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
+                      "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
+                      "task": "detection"},
+        data={"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
+                                           "id_map": recorded_id_map}})
     img = _image(tmp_path)
 
     r = run_inference_verified(str(ckpt_path), images_dir=str(Path(img).parent), conf_threshold=0.0)
-    assert r["id_map"] == recorded_id_map  # the recorded map, not a fresh registry re-derivation
+    assert r["scope"].id_map == recorded_id_map  # the recorded map, not a fresh registry re-derivation

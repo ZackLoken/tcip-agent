@@ -216,15 +216,6 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     from tcip_mcp.audit import audit_log_key
 
-    # The delivery's one line, the writer's own event, in the dataset's log: the refusal wrote
-    # nothing, so it left none, and the delivery leaves no second line in the platform's log.
-    page = tcip_store.read_log(audit_log_key(dataset_root))
-    door_rows = [r for r in page.records if r["tool"] == "deliver_per_plant_csv"]
-    assert len(door_rows) == 1, page.records
-    assert door_rows[0]["verified_buckets"][str(pred_dir)]["verified"] is True
-    platform_page = tcip_store.read_log(audit_log_key())
-    assert [r for r in platform_page.records if r["tool"] == "deliver_per_plant_csv"] == []
-
     from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
 
     scope = delivery_events_scope(tmp_path)
@@ -233,6 +224,17 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
         for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
     ]
     event = next(e for e in events if e and e["door"] == "deliver_per_plant_csv")
+    bindings = event["document_reconciliations"]["operating_point"]["bindings"]
+    assert bindings[str(pred_dir)]["ok"] is True
+
+    # The delivery's one line, in the dataset's log, names the event: the refusal wrote nothing,
+    # so it left none, and the delivery leaves no second line in the platform's log.
+    page = tcip_store.read_log(audit_log_key(dataset_root))
+    door_rows = [r for r in page.records if r["tool"] == "delivery_event"]
+    assert [r["arguments"] for r in door_rows] == [{"event_id": event["event_id"]}]
+    platform_page = tcip_store.read_log(audit_log_key())
+    assert [r for r in platform_page.records if r["tool"] == "delivery_event"] == []
+
     assert event["plant_mapping"]["name"] == mapping_name
     assert event["plant_mapping"]["record_sha256"] == mapping_build.record_sha256
 

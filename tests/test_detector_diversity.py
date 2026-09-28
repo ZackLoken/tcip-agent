@@ -14,7 +14,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import run_over  # noqa: E402
 
 
 def _features():
@@ -102,16 +102,17 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
             keep_empty=True,
         )
 
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "detector": "fcos", "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"detector": "fcos", "min_size": 64, "max_size": 128},
         "task": "detection",
     }
     cfg = {
-        "model_source": model_source, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
+        "model_source": model_source, "data": data, "device": "cpu",
+        "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
@@ -119,7 +120,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         "evaluation": {"selection_metric": "loss"},
     }
     run = create_run(cfg, str(tmp_path / "out"), id="auto-run-8")
-    run = train(run, loader, val_loader=None, task="detection")
+    run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
     assert math.isfinite(run.metrics_history[-1]["train_loss"])
     assert (tmp_path / "out" / "model_best.pt").is_file()

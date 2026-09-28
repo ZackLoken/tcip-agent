@@ -39,7 +39,6 @@ function reconciliationLine(key: string, entry: ReconciledDocument | ReconciledD
 }
 
 function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
-  const buckets = Object.entries(record.documents);
   return (
     <li
       className="rounded border border-tcip-border p-3"
@@ -66,18 +65,6 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           </>
         )}
       </dl>
-      {buckets.length > 0 && (
-        <div className="mt-2 flex flex-col gap-0.5">
-          <div className="text-[11px] text-tcip-muted">Per-bucket evidence</div>
-          {buckets.map(([bucket, binding]) => (
-            <Fragment key={bucket}>
-              <div className="font-mono text-[11px] text-tcip-muted">
-                {bucket}: {bucketStatusText(binding)}
-              </div>
-            </Fragment>
-          ))}
-        </div>
-      )}
       {(() => {
         const documentEntries = Object.entries(record.document_reconciliations);
         const dimensionEntries = Object.entries(record.dimension_reconciliations);
@@ -86,9 +73,16 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           <div className="mt-2 flex flex-col gap-0.5">
             <div className="text-[11px] text-tcip-muted">Reconciled validity</div>
             {documentEntries.map(([key, entry]) => (
-              <div key={`document-${key}`} className="font-mono text-[11px] text-tcip-muted">
-                {reconciliationLine(key, entry)}
-              </div>
+              <Fragment key={`document-${key}`}>
+                <div className="font-mono text-[11px] text-tcip-muted">
+                  {reconciliationLine(key, entry)}
+                </div>
+                {Object.entries(entry.bindings).map(([bucket, binding]) => (
+                  <div key={bucket} className="pl-3 font-mono text-[11px] text-tcip-muted">
+                    {bucket}: {bucketStatusText(binding)}
+                  </div>
+                ))}
+              </Fragment>
             ))}
             {dimensionEntries.map(([key, entry]) => (
               <div key={`dimension-${key}`} className="font-mono text-[11px] text-tcip-muted">

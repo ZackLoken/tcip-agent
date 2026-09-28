@@ -1,8 +1,7 @@
-"""``run_inference``'s images regime, publishing a classified bucket end to end: the run's own
-recorded ``(subject, attribute, id_map)`` scope decodes every detection into the ground-truth
-shape and stamps the bucket's ``operating_point.json`` with the same pair, read back through
-``bucket_scope``. A detector run (no attribute) is unaffected: its stamp gains the pair, but its
-documents are exactly what a detector run always wrote.
+"""``run_inference``'s images regime, publishing a classified bucket end to end: the checkpoint's
+own recorded ``scope`` decodes every detection into the ground-truth shape and stamps the bucket's
+``operating_point.json`` with the same scope, read back through ``bucket_scope``. A detector run
+(no attribute) decodes through its own one-subject map the same way.
 """
 
 from __future__ import annotations
@@ -14,18 +13,26 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+
 SUBJECT = "bud"
 ATTRIBUTE = "opening"
 ID_MAP = {"open": 0, "closed": 1}
+CLASSIFIED = ClassScope(SUBJECT, ATTRIBUTE, ID_MAP)
+DETECTOR = ClassScope(SUBJECT, None, {SUBJECT: 0})
 
 
-@pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
+def _stub_checkpoint(monkeypatch, scope: ClassScope) -> None:
+    """Every registered-checkpoint load answers a checkpoint recording ``scope``."""
+    from dataclasses import asdict
+
     import tcip_mcp.model_registry as model_registry_mod
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
+    data = {"num_channels": 3, "scope": asdict(scope)}
+
     def _stub(path, *a, **kw):
-        return stub_verified_checkpoint(str(path))
+        return stub_verified_checkpoint(str(path), config_data=data)
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
 
@@ -37,9 +44,7 @@ def _ckpt(tmp_path) -> str:
 
 
 class _ClassifiedPredictor:
-    """A run whose checkpoint recorded a classified scope: two detections, one of each value."""
-
-    config = {"data": {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": ID_MAP}}
+    """A classified run's predictor: two detections, one of each value."""
 
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
@@ -52,9 +57,7 @@ class _ClassifiedPredictor:
 
 
 class _DetectorPredictor:
-    """A run with no recorded scope at all: the pre-existing detector shape."""
-
-    config = {"data": {}}
+    """A detector run's predictor: one detection of its one class."""
 
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
@@ -79,6 +82,7 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
+    _stub_checkpoint(monkeypatch, CLASSIFIED)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _ClassifiedPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
@@ -95,7 +99,8 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
     assert all(a["subject"] == SUBJECT for a in anns)
 
     scope = bucket_scope(out)
-    assert (scope.subject, scope.attribute) == (SUBJECT, ATTRIBUTE)
+    assert scope is not None
+    assert scope == CLASSIFIED
 
 
 def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_stamps_the_pair(
@@ -105,6 +110,7 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
+    _stub_checkpoint(monkeypatch, DETECTOR)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _DetectorPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
@@ -116,8 +122,7 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
     data = json.loads((out / "img.json").read_text())
     anns = data["annotations"]
     assert len(anns) == 1
-    assert anns[0]["subject"] == "0"  # no recorded id_map: the raw-index name, as always
+    assert anns[0]["subject"] == SUBJECT  # decoded through the run's own one-subject map
     assert not anns[0].get("attributes")
 
-    scope = bucket_scope(out)
-    assert (scope.subject, scope.attribute) == (None, None)
+    assert bucket_scope(out) == DETECTOR

@@ -52,15 +52,12 @@ class ImageStatsSampling(BaseModel):
 
 
 class ModelSourceSchema(BaseModel):
-    """The importable-builder reference. ``extra="forbid"``: a misspelled key here is dropped
-    silently by every reader, so it is refused by name instead of building at the builder's
-    own defaults."""
+    """The importable-builder reference; a key outside these fields refuses by name."""
 
     model_config = ConfigDict(extra="forbid")
     builder: str | None = None
     builder_kwargs: dict | None = None
     task: str | None = None
-    in_chans: int | None = None
     source_files: list[str] | None = None
     image_stats_sampling: ImageStatsSampling | None = None
 
@@ -98,8 +95,7 @@ def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
     Catches type/structure errors (e.g. ``batch_size="big"``, a stage missing ``epochs``, a
-    nested ``training`` section). Does not enforce ``model_source`` presence
-    (``preflight_config`` keeps its own check).
+    nested ``training`` section). Does not require ``model_source``.
     """
     issues: list[str] = []
     try:

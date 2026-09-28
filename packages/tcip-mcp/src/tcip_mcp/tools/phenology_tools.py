@@ -17,7 +17,7 @@ fraction → crossings).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
@@ -293,80 +293,54 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
                          tolerance=iou_threshold)
 
 
-def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str,
-                          positive_value: str, attribute: str) -> list[dict]:
+def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str | None,
+                          attribute: str | None, positive_value: str) -> list[dict]:
     """Build classification calibration/holdout items for one split from paired GT + prediction
     dirs.
 
     For every ``<stem>.json`` present in both dirs, matches GT annotations against predictions by
     the trait's own localization criterion (``_match_gt_to_predictions``) and yields one item per
-    matched pair: ``{"image_id": stem, "is_true_positive": <GT subject/attribute ==
-    positive_value>, "is_pred_positive": <prediction subject == positive_value>, "bbox": <the GT
-    box, x1,y1,x2,y2>}``. ``subject`` scopes the GT side to the run's own object class. Predictions
-    are held to the object class the same way ground truth is
-    (:func:`~tcip_annotation.json_io.require_classified_record`), never subject-filtered out of
-    that check. ``attribute`` names which GT attribute carries the trait's positive-class axis.
-    ``bbox`` is the matched instance's own GT geometry. An unmatched GT or prediction (the detector
-    itself missed or hallucinated an object) is excluded. A crowd region is never paired
+    matched pair: ``{"image_id": stem, "is_true_positive": <the GT's attribute value ==
+    positive_value>, "is_pred_positive": <the prediction's attribute value == positive_value>,
+    "bbox": <the GT box, x1,y1,x2,y2>}``. The class space's subject scopes the GT side, and its attribute names
+    which GT attribute carries the trait's positive-class axis. Predictions are held to the object
+    class the same way ground truth is (:func:`~tcip_annotation.json_io.require_classified_record`).
+    An unmatched GT or prediction is excluded, and a crowd region is never paired
     (:func:`~tcip_annotation.state.instances`).
 
-    ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
-    calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
-    classified stamp must agree with it, else this refuses naming both; a detector stamp refuses
-    outright. The vocabulary a bare ``pred_dir``, or a classified stamp recording no usable
-    ``id_map``, is held to is the registry ``gt_dir``'s own dataset root carries; with none, this
-    refuses naming ``pred_dir``, ``gt_dir`` and the remedy (place the split under its dataset
-    root).
+    The class space is ``pred_dir``'s (:func:`~tcip_mcp.pipelines.resolution.input_scope`); a
+    detector stamp refuses. A bare ``pred_dir`` (the hand-split workflow) is read under the stated
+    ``subject`` and ``attribute``, given the map the registry of ``gt_dir``'s own dataset root
+    assigns them (:func:`~tcip_mcp.pipelines.data.label_queries.stated_scope`); with no registry
+    there, this refuses naming the remedy.
 
-    ``gt_dir`` goes through ``json_io.require_reference_ground_truth`` first.
-
-    The match criterion (kind + tolerance/iou_threshold) is resolved once across the whole split
-    via ``evaluation.resolve_match_criterion``, from the same subject-scoped GT the matching itself
-    uses.
+    ``gt_dir`` goes through ``json_io.require_reference_ground_truth`` first. The match criterion
+    is resolved once across the whole split via ``evaluation.resolve_match_criterion``.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import prediction_documents
     from tcip_annotation.state import BBox, instances
-    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
-    from tcip_mcp.pipelines.resolution import bucket_scope
+    from tcip_mcp.pipelines.resolution import input_scope
     from tcip_mcp.pipelines.training.evaluation import (
         records_from_annotation, resolve_match_criterion,
     )
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
     json_io.require_reference_ground_truth(gt_p)  # the prediction side is never held to this
-    scope = bucket_scope(pred_p)
-    if scope is None:
-        vocabulary_map = None
-    elif scope.classified:
-        if (scope.subject, scope.attribute) != (subject, attribute):
-            raise ValueError(
-                f"{pred_p}'s stamp records scope (subject={scope.subject!r}, "
-                f"attribute={scope.attribute!r}), not the stated (subject={subject!r}, "
-                f"attribute={attribute!r})."
-            )
-        vocabulary_map = bucket_id_map(pred_p)
-    else:
-        raise ValueError(f"{pred_p} is a detector bucket: it carries no value to calibrate.")
-    if vocabulary_map is None:
-        from tcip_mcp.pipelines.data.label_queries import (
-            resolve_registry_id_map,
-            resolved_subjects_path,
-        )
+    scope, stamped = input_scope(pred_p, subject, attribute)
+    if not scope.classified:
+        raise ValueError(f"{pred_p} names no attribute: it carries no value to calibrate.")
+    if not stamped:
+        from tcip_mcp.pipelines.data.label_queries import resolved_subjects_path, stated_scope
 
         if resolved_subjects_path(gt_dir) is None:
-            absent = (
-                "carries no stamp at all" if scope is None
-                else "records a classified scope with no usable id_map"
-            )
             raise ValueError(
-                f"{pred_p} {absent}, and {gt_p} resolves no dataset registry of its own: place "
-                "the split under its dataset root (<root>/annotations/<date>/, or a labels/ tree "
-                "directly under a root carrying subjects.json), since the vocabulary a classifier "
-                "is calibrated against is the registry the reference belongs to, never the values "
-                "the reference happens to carry."
+                f"{pred_p} carries no stamp at all, and {gt_p} resolves no dataset registry of its "
+                "own: place the split under its dataset root (<root>/annotations/<date>/, or a "
+                "labels/ tree directly under a root carrying subjects.json), since the vocabulary "
+                "a classifier is calibrated against is the registry the reference belongs to."
             )
-        _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
+        scope = stated_scope(gt_dir, subject, attribute)
         vocabulary_source = f"{gt_p}'s registry"
         vocabulary_remedy = "declare it in the registry before calibrating against this split"
     else:
@@ -375,7 +349,8 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
             "the bucket's id_map must carry the trait's positive value: publish the bucket with "
             "a map that declares it, or calibrate against a bucket that does"
         )
-    vocabulary = set(vocabulary_map or {})
+    subject, attribute = cast(str, scope.subject), cast(str, scope.attribute)
+    vocabulary = set(scope.id_map or {})
     if positive_value not in vocabulary:
         raise ValueError(
             f"{vocabulary_source} declares values {sorted(vocabulary)} for (subject={subject!r}, "
@@ -450,8 +425,6 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
 @mcp.tool()
 def calibrate_classifier_operating_point(
     trait_name: str,
-    subject: str,
-    attribute: str,
     calibration_gt_dir: str,
     calibration_pred_dir: str,
     holdout_gt_dir: str,
@@ -459,6 +432,8 @@ def calibrate_classifier_operating_point(
     output_dir: str,
     dataset_root: str,
     experiment_id: str | None = None,
+    subject: str | None = None,
+    attribute: str | None = None,
 ) -> dict:
     """Calibrate and validate the trait's positive-class classifier against held-out GT.
 
@@ -482,11 +457,6 @@ def calibrate_classifier_operating_point(
 
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
-        subject: The GT annotation subject naming this trait's object type, a per-run fact the
-            caller supplies. Scopes the GT side of matching so an unrelated subject sharing the
-            same labels dir cannot enter the match pool.
-        attribute: The GT annotation attribute carrying this trait's positive-class axis, a per-run
-            fact the caller supplies.
         calibration_gt_dir / calibration_pred_dir: Paired per-image JSON dirs for the calibration
         split (same stems).
         holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out
@@ -501,6 +471,9 @@ def calibrate_classifier_operating_point(
         experiment_id: The classifier checkpoint's training run's record id (one run's immutable
             record, ``tcip_mcp.experiments``), if known, gates train-disjointness. ``None`` (a
             foreign/unregistered checkpoint) skips that check.
+        subject / attribute: The object class and the attribute carrying the trait's
+            positive-class axis, for prediction dirs that carry no stamp; a stamped prediction dir
+            records its own and refuses them (``_classification_items``).
     """
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
     from tcip_mcp.traits import TraitUnknownError, get_trait
@@ -520,12 +493,12 @@ def calibrate_classifier_operating_point(
     from tcip_store import StoreError
 
     try:
-        cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
-                                          subject=subject, positive_value=spec.positive_value,
-                                          attribute=attribute)
-        hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
-                                           subject=subject, positive_value=spec.positive_value,
-                                           attribute=attribute)
+        cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir,
+                                          trait_name=trait_name, subject=subject,
+                                          attribute=attribute, positive_value=spec.positive_value)
+        hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir,
+                                           trait_name=trait_name, subject=subject,
+                                           attribute=attribute, positive_value=spec.positive_value)
     except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
     # One spelling of the resolver's inputs, for the report and the validation record's replay.

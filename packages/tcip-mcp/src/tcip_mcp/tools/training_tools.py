@@ -164,8 +164,8 @@ def _run_population(data_cfg: dict, selection) -> RunPopulation:
     if selection is not None:
         return RunPopulation(selection.trainable(), selection.scope, {}, [], [])
     empty = RunPopulation([], ClassScope(), {}, [], [])
-    if _data_dir_issues(data_cfg):
-        return empty  # preflight names each of them
+    if _data_dir_issues(data_cfg) or (data_cfg.get("split") or {}).get("selection_dir"):
+        return empty  # preflight names each of them, and a selection that did not read
 
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_store import SchemaVersionRefused
@@ -221,19 +221,21 @@ def _selection_dir_conflicts(data_cfg: dict) -> list[str]:
     return issues
 
 
-def _selection_dependent_issues(selection, selection_dir: str) -> list[str]:
-    """Every objection that needs the selection itself, read at ``selection_dir``, to answer: it
-    names a subject when the ground truth is a label document
-    (:func:`~tcip_mcp.pipelines.data.selection.unscoped_document_issue`), and its train and val
-    sides are both populated. Whether the selected loader can read the ground truth these samples
-    name is that loader's own refusal.
+def _selection_dependent_issues(selection, selection_dir: str, data_cfg: dict) -> list[str]:
+    """Every objection that needs the selection itself, read at ``selection_dir``, to answer: its
+    train and val sides are both populated, and ``data_cfg`` states no ``scope`` other than the
+    selection's own. Whether the selected loader can read the ground truth these samples name is
+    that loader's own refusal.
     """
-    from tcip_mcp.pipelines.data.selection import unscoped_document_issue
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     issues: list[str] = []
-    unscoped = unscoped_document_issue(selection, selection_dir)
-    if unscoped:
-        issues.append(unscoped)
+    if "scope" in data_cfg and ClassScope.of(data_cfg) != selection.scope:
+        issues.append(
+            f"data.scope states {ClassScope.of(data_cfg)} beside data.split.selection_dir, whose "
+            f"selection records its own class space ({selection.scope}); a second one would not "
+            "be the one the run trains in. Drop data.scope."
+        )
     counts = selection.counts()
     if not counts["train"] or not counts["val"]:
         issues.append(
@@ -249,20 +251,18 @@ def selection_compatibility(config: dict, selection, selection_dir: str) -> list
     :func:`_selection_dependent_issues` (needs the selection in hand).
     """
     issues = _selection_dir_conflicts(config.get("data") or {})
-    issues.extend(_selection_dependent_issues(selection, selection_dir))
+    issues.extend(_selection_dependent_issues(selection, selection_dir, config.get("data") or {}))
     return issues
 
 
 def candidate_config_with_selection(config: dict, selection_dir: str) -> dict:
     """The launch config choosing ``selection_dir`` over ``config``'s own "As recorded" data
     section would build: ``data.split`` replaced wholesale by ``{"selection_dir": selection_dir}``,
-    and the recorded class scope emptied, since a bound run reads its scope off the selection.
+    and the recorded ``scope`` dropped, since a bound run reads its scope off the selection.
     """
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
     data_cfg_raw = config.get("data")
     data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
-    ClassScope().onto(data_cfg)
+    data_cfg.pop("scope", None)
     data_cfg["split"] = {"selection_dir": selection_dir}
     return {**config, "data": data_cfg}
 
@@ -274,9 +274,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     Config structure, one placement for everything::
 
-        model_source: {builder, builder_kwargs, task, in_chans}
-        data: {images_dir, labels_dir, task}    # known loaders, or a bespoke
-                                                # {dataset_source: {builder, ...}, task}
+        model_source: {builder, builder_kwargs, task}
+        data: {images_dir, labels_dir, scope}   # known loaders, or a bespoke
+                                                # {dataset_source: {builder, ...}}
         batch_size, stages, mixed_precision, device, seed, ...   # every key
                                                 # generic_trainer.train() reads, at the top
                                                 # level; train()'s own docstring is the list
@@ -369,7 +369,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         except ValueError as exc:
             issues.append(str(exc))
         else:
-            issues.extend(_selection_dependent_issues(selection, selection_dir))
+            issues.extend(_selection_dependent_issues(selection, selection_dir, data_cfg_dict))
             if split_cfg_dict.get("redraw_within_selection"):
                 warnings.append(
                     "data.split.redraw_within_selection=true: this run redraws train and "
@@ -390,9 +390,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     warnings.extend(run.warnings)
 
     # The run's own sizes, read the way the run reads them, so whatever refuses the launch refuses
-    # here: a channel-wrong train is caught before the subprocess, declared width or not.
+    # here, before the subprocess.
     from tcip_mcp.pipelines.data.datasets import stated_sizes
-    from tcip_mcp.pipelines.model_build import run_in_chans
 
     sizes: dict[str, int] = stated_sizes(data_cfg_dict)
     if population:
@@ -404,15 +403,6 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                                   data_cfg_dict.get(DATASET_SOURCE_KEY) or None)
         except (ValueError, UnreadableLabelDocument) as exc:
             issues.append(f"data: {exc}")
-    channels = sizes.get("num_channels")
-    declared = run_in_chans(model_source, None)  # the model's own, for the comparison below
-    if channels is not None and declared is not None:
-        from tcip_mcp.pipelines.resolution import (
-            ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
-        )
-        b = ResolvedBundle(trait="", dataset_hash=None, params={
-            "in_chans": _resolved_default("in_chans", declared)})
-        issues.extend(validate_resolved_bundle(b, probed_channels=int(channels)))
 
     # Normalization provenance: per-band builder_kwargs statistics must carry which images produced them.
     image_stats_containment: str | None = None
@@ -520,16 +510,18 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
         try:
-            from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims
+            from tcip_mcp.pipelines.model_build import (
+                build_model, model_dims, resolve_contract_dims,
+            )
             from tcip_mcp.pipelines.model_contract import (
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
             task = run_task(config)
-            # The sizes preflight resolved above, this run having recorded none yet; a run that
-            # states none has no synthetic shape and smokes against a real batch.
-            dims = resolve_contract_dims(config, task, scope=run.scope, sizes=sizes)
-            model = build_model(config)
+            # The scope and sizes preflight resolved above, this run having recorded none yet.
+            built_at = model_dims(run.scope, sizes)
+            dims = resolve_contract_dims(config, task, built_at)
+            model = build_model(config, built_at)
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
@@ -1027,6 +1019,7 @@ def list_launchable_configs() -> list[dict]:
         config_key, derived_state, is_pristine, lineage_key, list_experiments,
         metrics_logged_of, read_member, status_key,
     )
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     rows = []
@@ -1038,13 +1031,14 @@ def list_launchable_configs() -> list[dict]:
         lineage = read_member(lineage_key(experiment_id), {})
         status = read_member(status_key(experiment_id), {})
         model_source = config.get(MODEL_SOURCE_KEY) if isinstance(config, dict) else None
-        data_cfg = config.get("data") if isinstance(config, dict) else None
+        data_cfg = (config.get("data") if isinstance(config, dict) else None) or {}
         rows.append({
             "experiment_id": experiment_id,
             "builder": (model_source or {}).get("builder"),
             "task": run_task(config),
-            "images_dir": (data_cfg or {}).get("images_dir"),
-            "subject": (data_cfg or {}).get("subject"),
+            "images_dir": data_cfg.get("images_dir"),
+            # A stated config names a scope only when its caller stated one.
+            "subject": ClassScope.of(data_cfg).subject if "scope" in data_cfg else None,
             "created": exp["created"],
             "state": exp["state"] if is_pristine(exp["state"], metrics_logged_of(status))
                      else derived_state(status, TCIP_HEARTBEAT_STALE_SECONDS),
@@ -1696,7 +1690,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
         # Same training_source-or-default_train dispatch the full envelope uses; experiment_id=None
         # isolates a trial from the registry, and trial_report feeds a bespoke loop's own progress.
-        ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
+        ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
                            experiment_id=None, epoch_hook=epoch_cb, trial_report=call_report)
         dispatch_train_body(ctx)
         # A diverged or canceled run reports the losing side, never what it reported before ending.
@@ -2845,15 +2839,14 @@ def evaluate_model(
     cross_tile_nms: float | None = None,
     postprocess: str = DEFAULT_POSTPROCESS,
     trait: str | None = None,
-    subject: str | None = None,
-    attribute: str | None = None,
     selection_dir: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
     Computes the same per-task metrics as validation, detection/instance_seg get pycocotools mAP +
     precision/recall/F1; classification/ordinal/regression get the in-house scalar metrics, and
-    writes ``test_results.json`` beside the checkpoint.
+    writes ``test_results.json`` beside the checkpoint. The reference is read under the class
+    space the checkpoint records, its map included.
 
     Three detection eval regimes:
       * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
@@ -2900,9 +2893,6 @@ def evaluate_model(
             trait's center-match) governs the reported count and the selection f1; AP@0.5
             (``iou_threshold``) is kept as a labeled comparability metric. Absent -> the IoU
             convention governs.
-        subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing run's
-            own config.
-        attribute: Attribute scope for the same name-based GT resolution as ``subject``.
         selection_dir: Score the checkpoint over this selection's ``calibration`` samples whose
             label documents live under ``labels_dir`` instead of the whole directory, refusing by
             name the way the calibration door does (detection/instance_seg only, and not combined
@@ -2941,27 +2931,18 @@ def evaluate_model(
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
     try:
         checkpoint = load_registered_checkpoint(ckpt)
         task = checkpoint.task
+        scope = ClassScope.of(checkpoint.data_config)
     except (UnregisteredCheckpoint, ValueError) as exc:
         return {"error": str(exc)}
-
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
-    # A bare checkpoint path (run is None) carries its own stamped config["data"] too, read off
-    # the object already loaded, so both paths agree without a second read.
-    run_data_cfg = (run.config.get("data") or {}) if run is not None else checkpoint.data_config
-    run_tiling = run_data_cfg.get("tiling")
-    # Caller-supplied subject/attribute win, else the run's own recorded class space through the
-    # one reader of it, so the name-based GT reads under the space the run trained in.
-    recorded_scope = ClassScope.recorded_in(run_data_cfg)
-    subject = subject or recorded_scope.subject
-    attribute = attribute or recorded_scope.attribute
+    run_tiling = checkpoint.data_config.get("tiling")
 
     selection_stems: list[str] | None = None
     selection_samples: dict[str, Any] = {}
-    selection_scope = None
     if selection_dir is not None:
         if use_tiled_inference:
             return {"error": "selection_dir is not combined with use_tiled_inference: that "
@@ -2974,12 +2955,9 @@ def evaluate_model(
         try:
             (selection_stems, _group_by, _group_key_map, _excluded, _counts,
              selection_samples) = selection_calibration_universe(
-                selection, labels_dir, min_foreground_groups={"calibration": 1})
+                selection, labels_dir, scope, min_foreground_groups={"calibration": 1})
         except ValueError as exc:
             return {"error": str(exc)}
-        # The selection's own class space governs a selection-restricted measurement.
-        selection_scope = selection.scope
-        subject, attribute = selection_scope.subject, selection_scope.attribute
 
     # Delivery-grade full-frame path: conf_threshold/cross_tile_nms/max_dets pass through exactly
     # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
@@ -2992,7 +2970,6 @@ def evaluate_model(
         try:
             return run_full_frame_evaluation(
                 checkpoint, images_dir, labels_dir, str(Path(ckpt).parent),
-                subject=subject, attribute=attribute,
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
                 cross_tile_nms=cross_tile_nms, postprocess=postprocess,
@@ -3014,36 +2991,22 @@ def evaluate_model(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    universe: list[Any] = []
-    if selection_stems is not None:
-        from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
-
-        universe = [selection_samples[s] for s in selection_stems]
-        # A loader indexes exactly what it is handed, so a label emptied since the
-        # draw measures as an image with no objects unless the admission refuses it here.
-        try:
-            refuse_inadmissible_samples(universe, selection_scope)
-        except ValueError as exc:
-            return {"error": str(exc)}
-
     evaluated_stem_count = None
     try:
         if selection_stems is not None:
-            # The universe's own recorded samples under the class space the selection recorded:
-            # the pixels measured are the ones the draw held out, in the run's own vocabulary.
-            measured_samples, measured_scope = universe, selection_scope
+            measured_samples = [selection_samples[s] for s in selection_stems]
         else:
             # Through the producer, over the ground truth this door was pointed at, so the door
             # and a run over the same data admit one membership.
             from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
-            admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute)
+            admitted = admit(images_dir, labels_dir, scope=scope)
             require_admitted(admitted)
-            measured_samples, measured_scope = admitted.every_sample(), admitted.scope
+            measured_samples = admitted.every_sample()
         # Read at the width the predictor reads at: the model scores these tensors, so a loader
         # sized off the references instead would hand it images of another shape.
         dataset = build_dataset(
-            task, samples=measured_samples, tiling=tiling, scope=measured_scope,
+            task, samples=measured_samples, tiling=tiling, scope=scope,
             sizes=resolve_sizes(task, {"num_channels": predictor.in_chans}, measured_samples))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}

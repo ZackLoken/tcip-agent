@@ -148,7 +148,7 @@ def _patch_trial_machinery(monkeypatch, train_ds):
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         run.best_metric = 1.0
         run.status = "completed"
@@ -164,7 +164,7 @@ def _patch_trial_machinery(monkeypatch, train_ds):
 def _base_config(tiling):
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls", "tiling": tiling},
         "batch_size": 2,
     }

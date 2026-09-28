@@ -82,7 +82,7 @@ def _loader(task: str, root: Path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     data_cfg = {"images_dir": str(root / "images" / DATE), "labels_dir": str(_labels(root)),
-                "subject": SUBJECT, "auto_val": False}
+                "scope": {"subject": SUBJECT}, "auto_val": False}
     loader, _, _ = auto_train_val(task, data_cfg, None)
     return loader
 

@@ -1329,8 +1329,7 @@ export function ResultsTab() {
             )}
             {countResultHeaders && (
               <div className="text-[11px] text-tcip-muted">
-                Saved to {countResultHeaders.savedTo}. Delivery event recorded:{" "}
-                {countResultHeaders.deliveryEventRecorded ? "yes" : "no"}.
+                Saved to {countResultHeaders.savedTo}.
                 {countResultHeaders.unvalidatedDimensions
                   ? ` Unvalidated: ${countResultHeaders.unvalidatedDimensions}.`
                   : ""}

@@ -18,7 +18,7 @@ pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
-from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
+from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     auto_train_val, persist_run_partition, recorded_side as _side,
 )
@@ -121,7 +121,8 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_pat
     assert [record.member for record in admitted.records] == ["b"]
     # Admits valid work: what it did admit still admits when it is checked again.
     refuse_inadmissible_samples(
-        admitted.samples({record.member: "train" for record in admitted.records}, lambda m: m))
+        admitted.samples({record.member: "train" for record in admitted.records}, lambda m: m),
+        admitted.scope)
 
 
 # -- each sample reaches its own ground truth ----------------------------------
@@ -284,13 +285,14 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
 
 
 def _frozen(experiment_id: str, task: str, data_cfg: dict) -> dict:
-    """Train a run through the platform's own producer, persist its partition, and freeze it."""
+    """Train a run through the platform's own producer, record the data section it resolved (the
+    record a run's own subprocess mirrors), persist its partition, and freeze it."""
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.data_tools import freeze_selection
 
+    _train, _val, partition = auto_train_val(task, data_cfg, None)
     create_experiment(experiment_id, {"model_source": {"builder": "m:f", "task": task},
                                       "data": data_cfg})
-    _train, _val, partition = auto_train_val(task, data_cfg, None)
     persist_run_partition(experiment_id, data_cfg, partition=partition)
     return freeze_selection(experiment_id)
 
@@ -308,7 +310,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
 
     assert "error" not in result, result
     frozen = read_selection(result["selection_dir"])
-    assert frozen.subject is None and frozen.id_map == {}
+    assert frozen.scope == ClassScope()
     assert {Path(s.ground_truth).suffix for s in frozen.samples} == {".png"}
     for sample in frozen.samples:
         assert Path(sample.ground_truth).parent == masks_dir
@@ -355,10 +357,10 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.data_tools import freeze_selection
 
+    _train, _val, partition = auto_train_val("semantic_seg", data_cfg, None)
     create_experiment("exp-mask-moved", {"model_source": {"builder": "m:f",
                                                           "task": "semantic_seg"},
                                          "data": data_cfg})
-    _train, _val, partition = auto_train_val("semantic_seg", data_cfg, None)
     persist_run_partition("exp-mask-moved", data_cfg, partition=partition)
 
     edited = np.zeros((16, 16), dtype=np.uint8)
@@ -464,7 +466,9 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     persist_run_partition("exp-scalar-scope", data_cfg, partition=partition)
 
     checkpoint = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "kind": "tcip_module"}, checkpoint)
+    torch.save({"model_state_dict": {}, "kind": "tcip_module",
+                "config": {"model_source": {"task": "regression"},
+                           "data": {"num_channels": 3, "scope": {}}}}, checkpoint)
     assert "error" not in register_model(
         name="table-scope", checkpoint_path=str(checkpoint), config={},
         project_path=str(tmp_path))
@@ -481,7 +485,7 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
                         lambda *a, **kw: _RecordedValues())
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="regression", checkpoint_path=str(checkpoint),
+        trait_name="bud_opening", checkpoint_path=str(checkpoint),
         images_dir=str(images_dir), csv_path=str(csv_path), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(root),
         experiment_id="exp-scalar-scope", group_by="stem",
@@ -510,7 +514,7 @@ def test_a_table_calibration_universe_holds_the_rows_the_draw_held_out(tmp_path:
     drawn = _drawn(root, csv_path, out)
 
     stems, group_by, group_key_map, excluded, _counts, samples = \
-        selection_calibration_universe(drawn, str(csv_path), min_foreground_groups={})
+        selection_calibration_universe(drawn, str(csv_path), drawn.scope, min_foreground_groups={})
 
     held_out = sorted(s.member for s in drawn.on("calibration"))
     assert stems == held_out and sorted(samples) == held_out
@@ -539,29 +543,44 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
     return images_dir, masks_dir
 
 
-def test_a_runs_stated_class_count_reaches_both_its_loaders(tmp_path: Path):
-    """The count a config states is the count both of one run's loaders are built at, and the
-    loader's own refusal fires on the run path: a count that never left the config would let a
-    train loader and a validation loader over one run's own halves disagree about the class
-    space, and would leave a configured count that is too small to reach the refusal."""
+def test_a_stated_class_count_other_than_the_derived_one_refuses_on_the_run_path(tmp_path: Path):
+    """A built-in loader's count is the one its ground truth derives: a config stating another,
+    below or above it, refuses on the run path before any loader is built, and a config stating
+    the derived count records that count."""
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     base = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
             "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
 
-    train_ds, val_ds, _partition = auto_train_val(
-        "semantic_seg", {**base, "num_classes": 3, "split": dict(base["split"])}, None)
+    for wrong in (2, 9):
+        with pytest.raises(ValueError, match=f"num_classes={wrong}, and the ground truth"):
+            auto_train_val(
+                "semantic_seg", {**base, "num_classes": wrong, "split": dict(base["split"])},
+                None)
+
+    stated = {**base, "num_classes": 3, "split": dict(base["split"])}
+    _train_ds, val_ds, _partition = auto_train_val("semantic_seg", stated, None)
     assert val_ds is not None
-    assert train_ds.num_classes == val_ds.num_classes == 3
-
-    with pytest.raises(ValueError, match="num_classes"):
-        auto_train_val(
-            "semantic_seg", {**base, "num_classes": 2, "split": dict(base["split"])}, None)
+    assert stated["num_classes"] == 3 and stated.get("num_ranks") is None
 
 
-def test_a_runs_unstated_class_count_is_read_once_for_both_its_loaders(tmp_path: Path):
-    """A class reaching one side only still sizes both loaders: the count a config states none of
-    is read off every sample the run was handed, before the split, so a training loader and a
-    validation loader over one run's own halves cannot be built in two vocabularies."""
+def test_a_table_run_stating_a_count_its_values_do_not_derive_refuses(tmp_path: Path):
+    """Table values ``0`` and ``1`` derive two classes; nine stated beside them refuses by name,
+    and the unstated run records two."""
+    from tests._producer_fixtures import run_over
+
+    images_dir, csv_path = _table_dataset(tmp_path / "table")
+    with open(csv_path, "w", newline="") as handle:
+        csv.writer(handle).writerows([("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))])
+    with pytest.raises(ValueError, match="num_classes=9"):
+        run_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 9})
+
+    _dataset, data = run_over("classification", str(images_dir), str(csv_path))
+    assert data["num_classes"] == 2
+
+
+def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Path):
+    """A class reaching one side only still sizes the run: the count a config states none of is
+    read off every sample the run was handed, before the split, and recorded once."""
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
@@ -572,8 +591,6 @@ def test_a_runs_unstated_class_count_is_read_once_for_both_its_loaders(tmp_path:
     # per-loader count would produce here.
     assert _side(partition, "val") == [STEMS[0]]
     assert val_ds is not None
-    assert train_ds.num_classes == val_ds.num_classes == 3
-    # And the run records what it resolved, so a reader after training takes the count from there.
     assert data_cfg["num_classes"] == 3
     assert data_cfg["num_channels"] == train_ds.expected_channels
 
@@ -590,54 +607,21 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     from tests import bespoke_models
 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
+    data_cfg: dict = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                      "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
 
     train_ds, _val_ds, _partition = auto_train_val("semantic_seg", data_cfg, None)
     held = {int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
             for stem in STEMS[1:4]}
     assert held == {1}, "the training half reaches only class 1, which is what this measures"
 
-    model = bespoke_models.build_bespoke_semantic_seg(num_classes=train_ds.num_classes)
+    count = int(data_cfg["num_classes"])
+    model = bespoke_models.build_bespoke_semantic_seg(num_classes=count)
     loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
-    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg")
+    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
+                      dims={"in_chans": 3, "num_classes": count})
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
-
-
-def test_a_head_that_states_no_class_count_stops_the_measurement(tmp_path: Path):
-    """The scale metrics are reported on is the head's own count and nothing else: a model whose
-    head states none stops the evaluation where the count is read, rather than falling back to
-    whatever the scored half happens to carry and reporting that as the run's scale."""
-    import torch
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.evaluation import evaluate
-
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
-    train_ds, _val_ds, _partition = auto_train_val("semantic_seg", data_cfg, None)
-
-    class _CountlessSegModel(torch.nn.Module):
-        """A segmentation model whose head states no class count at all."""
-
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv = torch.nn.Conv2d(3, train_ds.num_classes, 1)
-            self.heads = torch.nn.ModuleList([torch.nn.Identity()])
-
-        def forward(self, images, targets=None):
-            logits = self.conv(images)
-            if self.training and targets is not None:
-                return {"head0_loss": logits.mean()}
-            return {"head0_masks": logits.argmax(1)}
-
-    loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
-
-    with pytest.raises(AttributeError, match="num_classes"):
-        evaluate(_CountlessSegModel(), loader, torch.device("cpu"), "semantic_seg")
 
 
 def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
@@ -661,19 +645,22 @@ def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
         assert ground_truth_shape(str(place)) == shape_of(str(member), None), place
 
 
-def test_a_mask_run_records_no_class_space_over_a_stale_config_one(tmp_path: Path):
-    """A mask raster carries its own classes and no registry scopes it, so the run records no
-    subject and no map: a stale scope a relaunched config carried would otherwise be stamped onto
-    the checkpoint as the vocabulary this run trained in."""
+def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_path: Path):
+    """A mask raster carries its own classes, so a scope naming a subject over it refuses by name;
+    the explicit empty scope admits and is what the run records."""
     images_dir, masks_dir = _mask_dataset(tmp_path / "ds")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
-                "subject": "leaf", "attribute": "condition", "id_map": {"leaf": 0},
+
+    def data_cfg(scope: dict) -> dict:
+        return {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "scope": scope,
                 "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5}}
 
-    auto_train_val("semantic_seg", data_cfg, None)
+    with pytest.raises(ValueError, match="carries its own classes"):
+        auto_train_val("semantic_seg", data_cfg(
+            {"subject": "leaf", "attribute": "condition", "id_map": {"leaf": 0}}), None)
 
-    assert data_cfg["subject"] is None and data_cfg["attribute"] is None
-    assert data_cfg["id_map"] is None
+    admitted = data_cfg({})
+    auto_train_val("semantic_seg", admitted, None)
+    assert admitted["scope"] == {"subject": None, "attribute": None, "id_map": None}
 
 
 def test_a_mask_selections_held_out_side_redraws_without_a_subject(tmp_path: Path):
@@ -783,8 +770,8 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
 
     document_run, document_served, document_sources = persisted(
         "exp-shape-document", "detection", {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "leaf",
-            "split": dict(split)})
+            "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+            "scope": {"subject": "leaf"}, "split": dict(split)})
     mask_run, mask_served, mask_sources = persisted(
         "exp-shape-mask", "semantic_seg", {
             "images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,

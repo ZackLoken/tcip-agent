@@ -21,11 +21,10 @@ Labels reference these names, never integer ids. Integer class ids exist only in
 run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0-indexed ids in
 their declared order, deterministically and re-derivably. Ordering is the declared ``values`` order
 and never sorted. A run records the map it used: the producer that admitted its samples states the
-scope on the run's own data config, which travels onto the checkpoint via the run's own config
-object and, best-effort, onto the durable experiment record. Decode reads that recorded map first
-(``inference_tools.resolve_decode_id_map``), falling back to a fresh derivation from the inference
-dataset's registry only for a checkpoint with no recorded map, a run whose ground truth carries its
-own classes and which no registry scopes.
+scope on the run's own data config (``data.scope``), which travels onto the checkpoint via the
+run's own config object and onto the durable experiment record. Decode reads that recorded map
+(``ClassScope.of`` over the checkpoint's data section) and nothing else; a run whose ground truth
+carries its own classes records an empty scope.
 """
 
 from __future__ import annotations
@@ -266,13 +265,8 @@ def _sweep_schema_change(
     """Stamp the outgoing attribute-schema digest onto every confirmation of an affected subject
     that carries no stamp yet, before ``incoming`` is what a later read sees.
 
-    A confirmation and its digest stamp are two transactions, so unstamped confirmations exist, and
-    an unstamped confirmation reads as valid. ``outgoing`` (``None`` for a first-ever write, or a
-    stored registry :func:`replace_registry` could not decode) is the last state that digest is
-    recoverable from, so it is recorded here, and those confirmations then read as stale exactly
-    like the stamped ones.
-
-    Stamps every status in the subject's buckets, not the negatives alone. Already-stamped
+    ``outgoing`` is ``None`` for a first-ever write or a stored registry that could not be
+    decoded. Stamps every status in the subject's buckets, not the negatives alone. Already-stamped
     confirmations, and subjects whose digest is unchanged, are left alone.
 
     Also counts, per affected subject, its finished confirmations
@@ -280,8 +274,8 @@ def _sweep_schema_change(
     digest, once this write's own stamping has landed, still disagrees with the subject's new
     digest, computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`.
 
-    Never blocks the registry write, which has already landed by the time this runs: an absent
-    ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` for the caller to surface.
+    An absent ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` rather than
+    raising.
     Returns ``{"newly_stamped": {subject: count}, "predating_vocabulary": {subject: count},
     "warning": str | None}``, each count over finished statuses only.
     """

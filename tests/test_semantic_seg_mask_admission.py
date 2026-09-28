@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
 def _dataset(tmp_path: Path):
@@ -54,20 +54,21 @@ def test_a_same_stem_non_png_entry_refuses(tmp_path: Path) -> None:
 
 def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: Path) -> None:
     """The head is sized for the classes this run's own masks hold, never a pinned two: masks
-    reaching id 2 need three logits, a caller may state more than they hold, and a caller stating
-    fewer refuses by name rather than indexing past the head a target would then reach."""
+    reaching id 2 derive three, and a caller stating any other count, more or fewer, refuses by
+    name."""
     images_dir, masks_dir = _dataset(tmp_path)
     three_classes = np.zeros((8, 8), dtype=np.uint8)
     three_classes[0:4, 0:4] = 1
     three_classes[4:8, 4:8] = 2
     Image.fromarray(three_classes, mode="L").save(masks_dir / "img1.png")
 
-    assert dataset_over("semantic_seg", str(images_dir), str(masks_dir)).num_classes == 3
-    assert dataset_over("semantic_seg", str(images_dir), str(masks_dir),
-                        stated={"num_classes": 5}).num_classes == 5
+    _ds, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
+    assert data["num_classes"] == 3
 
-    with pytest.raises(ValueError, match="num_classes"):
-        dataset_over("semantic_seg", str(images_dir), str(masks_dir), stated={"num_classes": 2})
+    for stated in (2, 5):
+        with pytest.raises(ValueError, match=f"num_classes={stated}"):
+            run_over("semantic_seg", str(images_dir), str(masks_dir),
+                     stated={"num_classes": stated})
 
 
 def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(tmp_path, monkeypatch):

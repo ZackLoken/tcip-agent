@@ -66,8 +66,7 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {"in_chans": 3},
-           "task": task}
+    src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {}, "task": task}
     path = registered_checkpoint(tmp_path, project_root=tmp_path, model_source=src)
     return build_predictor(load_registered_checkpoint(path, project_path=str(tmp_path)),
                            device="cpu")

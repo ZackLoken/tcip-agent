@@ -95,9 +95,7 @@ def _predictions(
             "validated": True,
             "trait": trait,
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
-            "id_map": id_map,
-            "subject": trait,
-            "attribute": attribute,
+            "scope": {"subject": trait, "attribute": attribute, "id_map": id_map},
         }
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
                             producing_experiment_id="exp-1", trait=trait)

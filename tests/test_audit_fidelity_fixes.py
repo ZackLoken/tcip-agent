@@ -23,12 +23,7 @@ def _img(tmp_path, name="IMG_0001.JPG", size=(100, 80)):
 
 
 def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
-    """An empty save is refused (each annotation needs a subject) and never deletes existing GT.
-
-    A confirmed negative is an empty label plus a human Complete in image_status.json, never a
-    product of an empty save. What stays load-bearing is that a save call cannot destroy
-    annotated ground truth.
-    """
+    """An empty save is refused (each annotation needs a subject) and never deletes existing GT."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = _img(tmp_path)
@@ -70,12 +65,13 @@ def test_review_engine_save_gt_empty_keeps_record(tmp_path):
 
 
 def test_write_predictions_json_stamps_model_provenance(tmp_path):
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     p = tmp_path / "pred.json"
     write_predictions_json(p, {"width": 100, "height": 80,
                                "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
-                           created_by="model:best_bud", subject="bud", attribute=None)
+                           created_by="model:best_bud", scope=ClassScope(subject="bud", id_map={"bud": 0}))
     obj = json.loads(p.read_text())["annotations"][0]
     assert obj["created_by"] == "model:best_bud"
     assert obj["created_at"]

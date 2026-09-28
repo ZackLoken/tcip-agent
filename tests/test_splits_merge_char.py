@@ -61,8 +61,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
     result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     result.pop("selection_dir")
-    assert result.pop("subject") == "bud"
-    assert result.pop("attribute") is None
+    assert result.pop("scope") == {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
     admission_counts = result.pop("admission_counts")
     assert admission_counts["annotated"] == 12
     assert result.pop("calibration_foreground_groups") == GOLDEN_CALIBRATION_FOREGROUND_GROUPS

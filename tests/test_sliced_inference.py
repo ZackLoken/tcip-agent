@@ -27,20 +27,20 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
                 data: dict | None = None):
     """A registered bright-blob checkpoint, loaded through the platform's own loader."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     task = "instance_seg" if with_masks else "detection"
     model_source = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                    "builder_kwargs": {"in_chans": in_chans, "with_masks": with_masks,
+                    "builder_kwargs": {"with_masks": with_masks,
                                        "classes_by_channel": classes_by_channel},
                     "task": task}
-    model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
-    data_cfg = {**(data or {}), **({"tiling": tiling} if tiling else {})}
-    config = {"model_source": model_source, "data": data_cfg} if data_cfg else {}
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict(),
-                "config": config}, str(ckpt))
+    data_cfg = {"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}},
+                **(data or {}), **({"tiling": tiling} if tiling else {})}
+    config = {"model_source": model_source, "data": data_cfg}
+    model = build_model(config, recorded_model_dims(config))
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     result = register_model(name="blob", checkpoint_path=str(ckpt), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result
@@ -407,7 +407,7 @@ def test_a_calibrated_pass_collects_exports_previews_and_seals_one_regime(
 
     dataset = tmp_path / "ds"
     images, labels = _blob_calibration_dataset(dataset)
-    ckpt, _record = _checkpoint(tmp_path, data={"subject": "bud", "id_map": {"bud": 0}})
+    ckpt, _record = _checkpoint(tmp_path)
     merged_at: list[float] = []
     real_predict_sliced = GenericPredictor.predict_sliced
 

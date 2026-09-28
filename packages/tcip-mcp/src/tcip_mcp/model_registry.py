@@ -161,8 +161,8 @@ def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, diges
 
 @dataclass(frozen=True)
 class VerifiedCheckpoint:
-    """A checkpoint :func:`load_registered_checkpoint` read, hashed and matched against the
-    registry before anything in it was unpickled.
+    """A checkpoint read, hashed and matched against the registry before anything in it was
+    unpickled.
     """
 
     path: str
@@ -185,12 +185,11 @@ class VerifiedCheckpoint:
 
     @property
     def task(self) -> str:
-        """The task the checkpoint's model is for, :func:`run_task` over its own config with its
-        ``model_source`` in place; raises ``ValueError`` when neither states one."""
-        from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
+        """The task the checkpoint's model is for, :func:`run_task` over its own config; raises
+        ``ValueError`` when that states none."""
+        from tcip_mcp.pipelines.model_build import run_task
 
-        return run_task({**(self.payload.get("config") or {}),
-                         MODEL_SOURCE_KEY: self.payload.get(MODEL_SOURCE_KEY) or {}})
+        return run_task(self.payload.get("config") or {})
 
 
 class UnregisteredCheckpoint(ValueError):
@@ -484,9 +483,8 @@ def _pick_duplicate(candidates: list[Path], *, root: Path, original_basename: st
 def _conform_entries(
     entries: list[dict], root: Path, *, hash_cache: dict[Path, str],
 ) -> tuple[list[dict], list[str]]:
-    """Respell every entry's ``checkpoint_path`` relative to ``root``, per
-    :func:`conform_registry_paths_on_disk`'s own rule. Returns the conformed entries and one
-    outcome line per entry examined."""
+    """Respell every entry's ``checkpoint_path`` relative to ``root``. Returns the conformed
+    entries and one outcome line per entry examined."""
     conformed: list[dict] = []
     lines: list[str] = []
     for entry in entries:

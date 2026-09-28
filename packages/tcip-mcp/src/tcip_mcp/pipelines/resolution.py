@@ -21,7 +21,7 @@ import inspect
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -40,6 +40,7 @@ from tcip_store import (
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.dataset_layout import bucket_dataset_root
+from tcip_mcp.pipelines.data.selection import ClassScope
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.predictor import TileGeometry
@@ -367,11 +368,10 @@ def default(name: str, value: Any, *, derived_from: str = "documented default") 
 class ResolvedBundle:
     """The phenotype-gating operating point for one (trait, dataset, checkpoint), fully resolved.
 
-    Holds the operating-point params (conf, cross_tile_nms, tile_size, max_dets) plus the
-    structural facts (in_chans, num_classes) and the produced count / classifier-validation status.
-    ``slicing`` is the record of how the pass its predictions came from sliced and merged
-    (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` for an untiled pass.
-    Stamped into the immutable experiment config and every prediction/CSV.
+    Holds the operating-point params (conf, cross_tile_nms, tile_size, max_dets) by name and the
+    classifier-validation status. ``slicing`` is the record of how the pass its predictions came
+    from sliced and merged (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` for an
+    untiled pass.
     """
 
     trait: str
@@ -756,45 +756,6 @@ def parse_validation_reference(value: str) -> tuple[str, str] | None:
     return experiment_id, digest
 
 
-def scope_consistent_with_map(
-    subject: str | None, attribute: str | None, id_map: dict | None,
-) -> str | None:
-    """Whether a bucket's ``(subject, attribute)`` claim is consistent with its own recorded
-    ``id_map``, or the reason it is not (``None`` when it is).
-
-    A detector pair (``attribute`` ``None``) needs a map that is absent or keyed by exactly the
-    subject (``subject_registry.assign_class_ids`` with no attribute). A classified pair
-    (``attribute`` not ``None``) needs a map that is not keyed by the subject alone.
-
-    An attribute declaring exactly one value whose name equals the subject records ``{subject:
-    0}``, indistinguishable here from a detector map.
-
-    An empty recorded ``id_map`` (``{}``, distinct from ``None``) is refused by name under both
-    pairs.
-    """
-    if id_map is not None and not id_map:
-        return (
-            f"the pair ({subject!r}, {attribute!r}) claims a scope over a bucket whose recorded "
-            "id_map is empty: an empty map names no vocabulary a pair could agree or disagree with."
-        )
-    keyed_by_subject_alone = id_map is None or set(id_map) == {subject}
-    if attribute is None:
-        if keyed_by_subject_alone:
-            return None
-        # Reached only when keyed_by_subject_alone is False, which is impossible for id_map=None.
-        assert id_map is not None
-        return (
-            f"the pair ({subject!r}, None) claims a detector bucket, but its recorded id_map is "
-            f"keyed by {sorted(id_map)}, not just {subject!r}: this looks like a classified bucket"
-        )
-    if keyed_by_subject_alone:
-        return (
-            f"the pair ({subject!r}, {attribute!r}) claims a classified bucket, but its recorded "
-            f"id_map is keyed by exactly {subject!r}, the shape a detector run records"
-        )
-    return None
-
-
 def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None:
     """Refuse a stamp whose shape or claim a reader could not trust.
 
@@ -802,11 +763,6 @@ def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None
     declared: one of ``operating_point_stamp``'s own (:data:`STAMP_KEYS`) or a named producer
     addition (:data:`STAMP_EXTENSION_KEYS`). Other documents (classifier/ordinal/regression/scale) carry no such
     declared shape and are not checked here.
-
-    The same document also carries the writer-side scope rail: the body being written must carry
-    both ``subject`` and ``attribute``, each a string or ``None``; an ``attribute`` that is not
-    ``None`` needs a ``subject`` that is not ``None``; and when the body also carries an ``id_map``
-    the pair must agree with it through :func:`scope_consistent_with_map`.
 
     A validated stamp also names the record it was earned from and the trait it was earned for.
     """
@@ -818,32 +774,6 @@ def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None
                 f"{sorted(unknown)}. Declare a new producer addition in STAMP_EXTENSION_KEYS "
                 "(resolution.py), naming which producer writes it, before writing it here."
             )
-        if "subject" not in stamp or "attribute" not in stamp:
-            raise ValueError(
-                f"{document}.json at {str(pred_dir)!r} carries no subject/attribute pair. "
-                "Every producer must call operating_point_stamp with both: the object class "
-                "every prediction record in this bucket is of, and the attribute each "
-                "record's value sits under (None for a detector bucket)."
-            )
-        subject, attribute = stamp["subject"], stamp["attribute"]
-        if subject is not None and not isinstance(subject, str):
-            raise ValueError(
-                f"{document}.json at {str(pred_dir)!r}: subject must be a string or None, "
-                f"got {type(subject).__name__}")
-        if attribute is not None and not isinstance(attribute, str):
-            raise ValueError(
-                f"{document}.json at {str(pred_dir)!r}: attribute must be a string or None, "
-                f"got {type(attribute).__name__}")
-        if attribute is not None and subject is None:
-            raise ValueError(
-                f"{document}.json at {str(pred_dir)!r} declares attribute {attribute!r} with no "
-                "subject: a value with no object class names nothing a reader could hold it to."
-            )
-        recorded_map = stamp.get("id_map")
-        if recorded_map is not None:
-            reason = scope_consistent_with_map(subject, attribute, recorded_map)
-            if reason is not None:
-                raise ValueError(f"{document}.json at {str(pred_dir)!r}: {reason}")
     if not stamp.get("validated"):
         return
     if well_formed_validated_by(stamp) is None:
@@ -926,9 +856,7 @@ def operating_point_stamp(
     validated_by: dict | None,
     tile_size_validated: str | None,
     shippable_issues: list[str],
-    id_map: dict | None,
-    subject: str | None,
-    attribute: str | None,
+    scope: ClassScope,
     trait: str | None,
     dataset_hash: str | None,
     checkpoint: str | None,
@@ -944,10 +872,10 @@ def operating_point_stamp(
     Every field is required; the per-path additions a single producer has (persisted gate evidence,
     a mask-binarize threshold, a block calibration's own record) travel through ``fields``.
 
-    ``subject`` and ``attribute`` are the run's own scope: the object class every prediction record
-    in the bucket is of, and the attribute each record's value sits under (``attribute`` ``None``
-    for a detector bucket). Every reader resolves a bucket's scope from these two fields through
-    :func:`bucket_scope`.
+    ``scope`` is the run's own class space, recorded whole as the stamp's ``scope`` mapping: the
+    object class every prediction record in the bucket is of, the attribute each record's value
+    sits under (``None`` for a detector bucket) and the map its labels were decoded with. Every
+    reader resolves a bucket's scope through :func:`bucket_scope`.
 
     ``validated`` is the producing door's own verdict over the dimensions it resolved, floored here
     by the tile scale (:func:`fold_tile_validation`).
@@ -963,9 +891,7 @@ def operating_point_stamp(
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
         "slicing": slicing,
-        "id_map": id_map,
-        "subject": subject,
-        "attribute": attribute,
+        "scope": asdict(scope),
         "validated": fold_tile_validation(validated, tile_size_validated),
         "validated_by": validated_by,
         "tile_size_validated": tile_size_validated,
@@ -994,7 +920,7 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
 _SKELETON_ARGS: dict[str, Any] = {
     **dict.fromkeys(name for name, param in inspect.signature(operating_point_stamp).parameters.items()
                     if param.kind is param.KEYWORD_ONLY),
-    "validated": False, "shippable_issues": ()}
+    "validated": False, "shippable_issues": (), "scope": ClassScope()}
 STAMP_KEYS: frozenset[str] = frozenset(operating_point_stamp(None, **_SKELETON_ARGS))
 """``operating_point_stamp``'s own keys, the ones it returns before a producer's own ``**fields``,
 read off one construction of it."""
@@ -1028,37 +954,9 @@ def read_operating_point_sidecar(pred_dir: str | Path, *, strict: bool = False) 
     return _read_sidecar(pred_dir, "operating_point", strict=strict)
 
 
-@dataclass(frozen=True)
-class BucketScope:
-    """A prediction bucket's own recorded ``(subject, attribute)`` claim.
-
-    ``subject`` is the object class every prediction record in the bucket is of; ``attribute`` is
-    the attribute each record's value sits under, ``None`` for a detector bucket.
-    """
-
-    subject: str | None
-    attribute: str | None
-
-    @property
-    def classified(self) -> bool:
-        return self.attribute is not None
-
-
-def scope_of_stamp(stamp: dict, pred_dir: str | Path) -> BucketScope:
-    """The ``(subject, attribute)`` pair an already-read stamp body records. Raises
-    ``ValueError`` for a pair member that is neither a string nor ``None``."""
-    subject, attribute = stamp["subject"], stamp["attribute"]
-    if (subject is not None and not isinstance(subject, str)) or (
-        attribute is not None and not isinstance(attribute, str)
-    ):
-        raise ValueError(
-            f"{pred_dir}: operating_point.json's subject/attribute pair is not a string or None."
-        )
-    return BucketScope(subject=subject, attribute=attribute)
-
-
-def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
-    """A prediction bucket's own recorded scope, or ``None`` for a bucket with no stamp at all.
+def bucket_scope(pred_dir: str | Path) -> ClassScope | None:
+    """A prediction bucket's own recorded class space, its stamp's ``scope``, or ``None`` for a
+    bucket with no stamp at all.
 
     ``None`` means a bare directory: its records are read under the caller's own statement. A
     stamp that will not decode propagates the seam's own error (the strict read,
@@ -1067,7 +965,26 @@ def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
     stamp = _read_sidecar(pred_dir, "operating_point", strict=True)
     if stamp is None:
         return None
-    return scope_of_stamp(stamp, pred_dir)
+    return ClassScope.of(stamp)
+
+
+def input_scope(pred_dir: str | Path | None, subject: str | None,
+                attribute: str | None) -> tuple[ClassScope, bool]:
+    """The class space an input bucket is read under, and whether its stamp recorded it.
+
+    A stamped ``pred_dir`` gives its own scope, whole, and any ``subject`` or ``attribute`` stated
+    beside it refuses (``ValueError``), an empty one included. A bucket with no stamp, or no
+    ``pred_dir``, gives the stated subject and attribute, with no map.
+    """
+    recorded = bucket_scope(pred_dir) if pred_dir is not None else None
+    if recorded is None:
+        return ClassScope(subject=subject, attribute=attribute), False
+    if subject is not None or attribute is not None:
+        raise ValueError(
+            f"{pred_dir}'s stamp records its own class space (subject={recorded.subject!r}, "
+            f"attribute={recorded.attribute!r}); a subject or attribute stated beside it would be "
+            "a second one. Drop subject and attribute for a stamped bucket.")
+    return recorded, True
 
 
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -1121,19 +1038,14 @@ def _sidecar_reference(
 
 _CLAIM_KEYS: dict[str, tuple[str, ...]] = {
     "operating_point": ("operating_point", "slicing", "tile_size_validated",
-                        "claim_scope_validated", "shippable_issues", "id_map", "mask_binarize"),
+                        "claim_scope_validated", "shippable_issues", "scope", "mask_binarize"),
     "classifier_operating_point": ("operating_point",),
     "ordinal_operating_point": ("operating_point",),
     "regression_operating_point": ("operating_point",),
     "resolve_scale": ("operating_point",),
 }
 """Which of a stamp's fields *are* the claim, per document: the values a delivery consumes, as
-opposed to the provenance describing where they came from. Stated once and nowhere restated, since
-the side that mints a record and the side that verifies one must subset a stamp identically or a
-verification compares two different things and always agrees. ``operating_point``'s
-``subject``/``attribute`` pair is deliberately absent: it is provenance, not claim, so the conform
-script can edit a bucket's scope without flooring a count claim already sealed over it, and
-:func:`verify_stamp_binding` never sees it move."""
+opposed to the provenance describing where they came from."""
 
 _DOCUMENT_PARAM: dict[str, tuple[str, str]] = {
     "operating_point": ("conf", "annotations"),
@@ -1142,9 +1054,7 @@ _DOCUMENT_PARAM: dict[str, tuple[str, str]] = {
     "regression_operating_point": ("regression", "annotations"),
     "resolve_scale": ("scale", "physical"),
 }
-"""The parameter each document's claim hangs on, and the kind of reference that can validate it.
-Read by every reconciler and by the verifier, so a document's validity is decided against one
-parameter of one kind wherever it is read."""
+"""The parameter each document's claim hangs on, and the kind of reference that can validate it."""
 
 MEASUREMENT_DOCUMENTS: tuple[str, ...] = (
     "operating_point", "ordinal_operating_point", "regression_operating_point",
@@ -1848,7 +1758,9 @@ def verify_stamp_binding(
             f"{row.get('trait')!r}, not {trait!r}. Re-calibrate for the delivered trait.", **known)
     claimed, earned = claim_payload(stamp, document=document), row.get("claim")
     if claimed != earned:
-        differing = [k for k in _CLAIM_KEYS[document] if claimed.get(k) != (earned or {}).get(k)]
+        earned = earned or {}
+        differing = sorted(k for k in set(claimed) | set(earned)
+                           if (k in claimed, claimed.get(k)) != (k in earned, earned.get(k)))
         return floored(
             f"{document}.json at {bucket!r} asserts a claim record {record_digest!r} was not earned "
             f"for: the stamp's {', '.join(differing)} disagree with the values the gate "
@@ -2316,9 +2228,8 @@ def _delivered_file_sha256(output_path: str | None) -> str | None:
 
 
 def _render_bindings(bindings: Mapping[str, StampBinding]) -> dict:
-    """A per-bucket ``StampBinding`` mapping as the stored record renders it, in ``documents`` and
-    in each ``document_reconciliations`` entry's own ``bindings``.
-    """
+    """A per-bucket ``StampBinding`` mapping as a ``document_reconciliations`` entry's own
+    ``bindings`` stores it."""
     return {
         bucket: {
             "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
@@ -2373,46 +2284,35 @@ def record_delivery_binding_event(
     *,
     document_reconciliations: Mapping[str, Mapping],
     dimension_reconciliations: Mapping[str, Mapping],
-    measurement_documents: Sequence[str],
     acknowledgment: Acknowledgment | None,
     trait: str | None = None,
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
     plant_mapping: dict | None = None,
-) -> bool:
-    """Record what verification found for each bucket a delivery read, in that dataset's own log.
+) -> None:
+    """Record what verification found for each bucket a delivery read: one project-scoped
+    ``delivery_events`` record, carrying the delivering ``door`` and every reconciliation its gate
+    ran, findable by ``trait``/``delivery_kind``, and after it the delivery's one audit line, a
+    ``delivery_event`` operation naming the record's ``event_id`` and stating nothing the record
+    states.
 
-    This event is the delivery's one audit line: which buckets stood behind it, which of their
-    claims were answered for, and by which records. The event files against the dataset root the
-    buckets share; a delivery whose buckets share no dataset root files against the platform log
-    instead. A dropped append raises ``AuditEntryNotWritten``.
-
-    Beside that audit line, a project-scoped ``delivery_events`` record is written, carrying every
-    reconciliation the delivering door's gate ran, findable by ``trait``/``delivery_kind``. This
-    second write is best-effort: a lost line is logged as a warning.
+    The record is written first, and a write that fails raises. The audit line files against the
+    dataset root the buckets share, or against the platform log when they share none; a dropped
+    append raises ``AuditEntryNotWritten`` with the record already written.
 
     ``document_reconciliations`` and ``dimension_reconciliations`` are the
     ``_reconcile_validity``-shaped and ``reconcile_tile_size_validity``-shaped mappings the door's
     own gate ran, keyed by the sidecar document (``operating_point``,
     ``classifier_operating_point``, ...) or dimension (``claim_scope``, ``tile_size``, ``scale``)
     each reconciled; a key is present exactly when the door called that reconciler, and ``{}``
-    means none of that family ran. Both are required. The stored ``documents`` and the audit line's
-    ``verified_buckets``/``record_digests`` carry binding integrity alone (``StampBinding.ok``,
-    true even for a bucket with no stamp at all), while each reconciliation's own
-    ``per_bucket``/``validated`` carries the validity state that same bucket can read ``false``
-    under. The record carries what the door's gate reconciled, never what the delivered file's own
-    columns say.
+    means none of that family ran. Both are required. Each reconciled document's ``bindings``
+    carry binding integrity alone (``StampBinding.ok``, true even for a bucket with no stamp at
+    all), while its ``per_bucket``/``validated`` carries the validity state that same bucket can
+    read ``false`` under. The record carries what the door's gate reconciled, never what the
+    delivered file's own columns say.
 
     ``project_root`` names the project this event belongs to; ``None`` gets the process-pinned
     root.
-
-    ``measurement_documents`` names which sidecar document(s) the delivery's own gate reconciled;
-    required. When ``pred_dirs`` is non-empty, every document
-    named in ``measurement_documents`` must have an entry in ``document_reconciliations``, checked
-    before the record is written: a missing one raises ``ValueError`` naming the door and the
-    document, with the audit line already on the log. When ``pred_dirs`` is empty no entry is
-    required, and ``documents``, the audit line's ``verified_buckets``/``record_digests`` and every
-    rendered reconciliation are empty.
 
     ``acknowledgment`` is the breeder's own act of shipping this delivery unvalidated, or ``None``
     when nothing needed acknowledging; required. Recorded as the record's own
@@ -2427,36 +2327,10 @@ def record_delivery_binding_event(
     The assembled record is validated against ``DeliveryEventRecord``
     (``delivery_events_schema.py``) before the write; a shape violation raises
     ``pydantic.ValidationError``.
-
-    Raises ``AuditEntryNotWritten`` (``tcip_mcp.audit``) when the dataset-scoped audit line itself
-    cannot be appended.
-
-    Returns whether the project-scoped ``delivery_events`` write landed: ``True`` on a successful
-    store write, ``False`` when that best-effort write failed (logged, never raised).
     """
     from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
     from tcip_mcp.subject_registry import distinct_dataset_root
-
-    scope = distinct_dataset_root(pred_dirs or [])
-
-    primary_document = measurement_documents[0] if measurement_documents else None
-    primary_bindings: Mapping[str, StampBinding] = (
-        document_reconciliations.get(primary_document, {}).get("bindings", {})
-        if primary_document is not None else {}
-    )
-    record_event_or_raise(
-        door,
-        {"output_path": output_path, "pred_dirs": list(pred_dirs or [])},
-        scope=scope,
-        verified_buckets={
-            bucket: {"verified": b.ok,
-                     "record": f"{b.experiment_id}:{b.record_digest}" if b.claimed and b.ok else "",
-                     "note": b.note}
-            for bucket, b in primary_bindings.items()
-        },
-        record_digests=sorted({b.record_digest for b in primary_bindings.values()
-                               if b.ok and b.claimed and b.record_digest}),
-    )
 
     now = datetime.now(timezone.utc).isoformat()
     event_id = _delivery_event_id(door, output_path, now)
@@ -2470,7 +2344,6 @@ def record_delivery_binding_event(
         "acknowledged_by": acknowledgment.acknowledged_by if acknowledgment is not None else None,
         "acknowledgment_reason": acknowledgment.reason if acknowledgment is not None else None,
         "plant_mapping": plant_mapping,
-        "documents": _render_bindings(primary_bindings),
         "document_reconciliations": {
             doc: _render_reconciled_document(entry)
             for doc, entry in document_reconciliations.items()
@@ -2481,25 +2354,10 @@ def record_delivery_binding_event(
         },
         "produced_at": now,
     }
-    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
-
-    if pred_dirs:
-        missing = [doc for doc in measurement_documents if doc not in document_reconciliations]
-        if missing:
-            raise ValueError(
-                f"{door}: pred_dirs names {len(list(pred_dirs))} bucket(s) but "
-                f"document_reconciliations carries no entry for {missing}; every document "
-                "measurement_documents declares must be reconciled before this delivery's "
-                "record is built."
-            )
     DeliveryEventRecord.model_validate(record)
-    key = delivery_event_key(delivery_events_scope(project_root), event_id)
-    try:
-        tcip_store.replace(key, record)
-    except Exception:
-        logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
-        return False
-    return True
+    tcip_store.replace(delivery_event_key(delivery_events_scope(project_root), event_id), record)
+    record_event_or_raise("delivery_event", {"event_id": event_id},
+                          scope=distinct_dataset_root(pred_dirs or []))
 
 
 def binding_notes_text(notes: Mapping[str, str]) -> str:
@@ -3080,57 +2938,3 @@ def check_delivery_gate(
         ok=True, unvalidated=unvalidated, stamp=stamp,
         acknowledged_by=acknowledged_by, acknowledgment_reason=acknowledgment_reason,
     )
-
-
-# --- validation (returns list[str] of problems, empty = valid) ---
-
-def validate_resolved_bundle(
-    bundle: ResolvedBundle,
-    *,
-    probed_channels: int | None = None,
-    inference_bundle: ResolvedBundle | None = None,
-    target_dataset_hash: str | None = None,
-    for_export: bool = False,
-) -> list[str]:
-    """Return human-readable issues for a resolved bundle (empty list = valid).
-
-    Checks:
-    - ``in_chans`` must equal the probed raster band count (mismatch trains/infers channel-wrong).
-    - a calibration operating point with ``validated=false`` must not feed an export/delivery.
-    - the eval operating point must equal the inference operating point on the same dataset
-      (select@0.25 / ship@0.5 divergence).
-    - a dataset-scoped calibration must not be inherited across a different dataset hash.
-
-    A block-calibrated bundle and its own whole-raster export bundle differ in ``max_dets`` by
-    design (the export pass is uncapped); a caller comparing that pair excludes ``"max_dets"``
-    first.
-    """
-    issues: list[str] = []
-
-    # in_chans vs probed bands
-    if probed_channels is not None and "in_chans" in bundle.params:
-        ic = bundle.params["in_chans"]._raw
-        if ic != probed_channels:
-            issues.append(f"in_chans={ic} != probed raster bands={probed_channels}")
-
-    # dataset-scoped inheritance across a hash mismatch + un-shippable calibration
-    issues.extend(bundle.shippable_issues(target_dataset_hash=target_dataset_hash))
-
-    # export must not ship an unvalidated operating point
-    if for_export and not bundle.is_shippable:
-        issues.append("export/delivery requires a validated (held-out) operating point; this bundle is not shippable")
-
-    # eval op-point must match inference op-point on the same dataset, every param the two bundles
-    # have in common, not a hardcoded list (a new param added to one bundle's construction site is
-    # covered automatically rather than silently exempt from this check).
-    if inference_bundle is not None:
-        for key in sorted(set(bundle.params) & set(inference_bundle.params)):
-            a = bundle.params[key]
-            b = inference_bundle.params[key]
-            if a._raw != b._raw:
-                issues.append(
-                    f"{key}: eval operating point {a._raw} != inference operating point {b._raw} "
-                    f"on the same dataset (the select-point must equal the ship-point)"
-                )
-
-    return issues

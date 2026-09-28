@@ -5,7 +5,9 @@ decided by the data it is fed and never by random init: two runs on the same bat
 same path, and two runs on different batches take visibly different ones.
 
 Not a ``test_*`` module: the trainer imports these builders by dotted name through
-``model_source``, the same seam a real bespoke model comes through.
+``model_source``, the same seam a real bespoke model comes through, so each accepts the width
+(``in_chans``) and, for the classifier, the class count the platform hands every builder; a model
+here reads a frame's mean intensity whatever its width.
 """
 
 from __future__ import annotations
@@ -57,7 +59,9 @@ class MeanIntensityRegressor(nn.Module):
         return {"head0_values": pred}
 
 
-def build_mean_intensity_regressor(*, init_weight: float = 0.0) -> MeanIntensityRegressor:
+def build_mean_intensity_regressor(
+    *, in_chans: int = 1, init_weight: float = 0.0,
+) -> MeanIntensityRegressor:
     """``model_source`` builder for :class:`MeanIntensityRegressor`."""
     return MeanIntensityRegressor(init_weight=init_weight)
 
@@ -77,7 +81,7 @@ class NanEvalRegressor(MeanIntensityRegressor):
         return {"head0_values": pred + float("nan")}
 
 
-def build_nan_eval_regressor(*, init_weight: float = 0.0) -> NanEvalRegressor:
+def build_nan_eval_regressor(*, in_chans: int = 1, init_weight: float = 0.0) -> NanEvalRegressor:
     """``model_source`` builder for :class:`NanEvalRegressor`."""
     return NanEvalRegressor(init_weight=init_weight)
 
@@ -122,7 +126,9 @@ class MeanIntensityClassifier(nn.Module):
         return {"head0_labels": logits.argmax(dim=1)}
 
 
-def build_mean_intensity_classifier(*, init_weight: float = 0.0) -> MeanIntensityClassifier:
+def build_mean_intensity_classifier(
+    *, in_chans: int = 1, num_classes: int = 2, init_weight: float = 0.0,
+) -> MeanIntensityClassifier:
     """``model_source`` builder for :class:`MeanIntensityClassifier`."""
     return MeanIntensityClassifier(init_weight=init_weight)
 
@@ -145,7 +151,7 @@ class DataScaledGradientModel(nn.Module):
         return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
 
 
-def build_data_scaled_gradient_model() -> DataScaledGradientModel:
+def build_data_scaled_gradient_model(*, in_chans: int = 1) -> DataScaledGradientModel:
     """``model_source`` builder for :class:`DataScaledGradientModel`."""
     return DataScaledGradientModel()
 
@@ -174,7 +180,7 @@ class AlwaysDivergedModel(nn.Module):
         return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
 
 
-def build_always_diverged_model(*, on_forward=None) -> AlwaysDivergedModel:
+def build_always_diverged_model(*, in_chans: int = 1, on_forward=None) -> AlwaysDivergedModel:
     """``model_source`` builder for :class:`AlwaysDivergedModel`."""
     return AlwaysDivergedModel(on_forward=on_forward)
 
@@ -224,7 +230,7 @@ class TransientlyDivergedModel(nn.Module):
 
 
 def build_transiently_diverged_model(
-    *, bad_batches: int = 2, init_weight: float = 0.0,
+    *, in_chans: int = 1, bad_batches: int = 2, init_weight: float = 0.0,
 ) -> TransientlyDivergedModel:
     """``model_source`` builder for :class:`TransientlyDivergedModel`."""
     return TransientlyDivergedModel(bad_batches=bad_batches, init_weight=init_weight)
@@ -257,7 +263,7 @@ class StepCountedDivergenceModel(nn.Module):
 
 
 def build_step_counted_divergence_model(
-    *, finite_at=(), init_weight: float = 0.0,
+    *, in_chans: int = 1, finite_at=(), init_weight: float = 0.0,
 ) -> StepCountedDivergenceModel:
     """``model_source`` builder for :class:`StepCountedDivergenceModel`."""
     return StepCountedDivergenceModel(finite_at=finite_at, init_weight=init_weight)
@@ -287,7 +293,9 @@ class DivergesAfterModel(nn.Module):
         return {"head0_values": pred}
 
 
-def build_diverges_after_model(*, good_calls: int, init_weight: float = 0.0) -> DivergesAfterModel:
+def build_diverges_after_model(
+    *, good_calls: int, in_chans: int = 1, init_weight: float = 0.0,
+) -> DivergesAfterModel:
     """``model_source`` builder for :class:`DivergesAfterModel`."""
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
 
@@ -310,7 +318,7 @@ class PixelSumDivideModel(nn.Module):
         return {"head0_values": pred}
 
 
-def build_pixel_sum_divide_model() -> PixelSumDivideModel:
+def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
     """``model_source`` builder for :class:`PixelSumDivideModel`."""
     return PixelSumDivideModel()
 

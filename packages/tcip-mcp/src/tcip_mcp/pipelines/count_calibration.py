@@ -44,8 +44,6 @@ def resolve_count_operating_point(
     dataset_root: str,
     project_root: str,
     *,
-    subject: str | None = None,
-    attribute: str | None = None,
     experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
@@ -71,9 +69,10 @@ def resolve_count_operating_point(
 
     The cal/holdout split locks on its first draw for this labels directory's identity
     (``resolve_locked_cal_holdout_split``, scoped under ``dataset_root``); ``val_ratio``/``seed``
-    only take effect on that first call. ``selection_dir`` restricts the calibration universe to a
-    selection's calibration samples under ``labels_dir`` instead of every labeled stem, under the
-    selection's own class space, and conflicts with ``group_by``/``group_key_map``.
+    only take effect on that first call. Ground truth is read under the class space the checkpoint
+    records. Without ``selection_dir`` every labeled stem the producer admits under it is the
+    universe; ``selection_dir`` restricts it to a selection's calibration samples under
+    ``labels_dir``, and conflicts with ``group_by``/``group_key_map``.
 
     Raises :class:`CalibrationUsageError` (a ``ValueError``) for every usage refusal above, for
     fewer than two labeled stems to split, and for whatever
@@ -119,8 +118,9 @@ def resolve_count_operating_point(
         raise CalibrationUsageError(p)
 
     selection_sha256 = None
-    # One membership and one class space for this pass, whichever named it: the selection's own
-    # held-out samples, or the producer's admission over the place this door was pointed at.
+    # One membership for this pass, whichever named it: the selection's own held-out samples, or
+    # the producer's admission over the place this door was pointed at.
+    scope = p.scope
     counted: dict[str, Any]
     if selection_dir:
         from tcip_mcp.pipelines.data.selection import read_selection
@@ -131,17 +131,15 @@ def resolve_count_operating_point(
         selection_sha256 = selection_digest(selection)
         try:
             (stems, group_by, group_key_map, _excluded, annotation_counts,
-             counted) = selection_calibration_universe(selection, labels_dir)
+             counted) = selection_calibration_universe(selection, labels_dir, scope)
         except ValueError as exc:
             raise CalibrationUsageError(str(exc)) from exc
-        scope = selection.scope
     else:
         # Through the producer, so this door and a run over the same data admit one membership.
-        admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute)
+        admitted = admit(images_dir, labels_dir, scope=scope)
         require_admitted(admitted)
         stems = sorted(record.member for record in admitted.records)
         counted = {s.member: s for s in admitted.every_sample()}
-        scope = admitted.scope
         # The one per-sample counter, over each member's own recorded ground truth.
         annotation_counts = foreground_counts(counted, scope)
     if len(stems) < 2:

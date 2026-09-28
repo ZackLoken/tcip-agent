@@ -167,8 +167,8 @@ def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
 
 class DocumentBinding(BaseModel):
     """One bucket's binding evidence, exactly as ``record_delivery_binding_event`` renders a
-    :class:`tcip_mcp.pipelines.resolution.StampBinding` into the stored record's ``documents``
-    mapping and into each :class:`ReconciledDocument`'s own ``bindings``."""
+    :class:`tcip_mcp.pipelines.resolution.StampBinding` into each :class:`ReconciledDocument`'s
+    own ``bindings``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -242,7 +242,6 @@ class DeliveryEventRecord(BaseModel):
     plant_mapping: Optional[
         Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
     ]
-    documents: dict[str, DocumentBinding]
     # Keyed by the reconciler the delivering door's gate ran.
     document_reconciliations: dict[str, ReconciledDocument]
     dimension_reconciliations: dict[str, ReconciledDimension]

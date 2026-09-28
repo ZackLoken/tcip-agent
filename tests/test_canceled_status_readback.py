@@ -55,7 +55,7 @@ def test_a_canceled_training_run_derives_as_canceled_from_its_experiment_record(
     from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
 
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
         "training_source": f"{__name__}:_train_stops_on_cancel",
         "device": "cpu",
     }
@@ -64,7 +64,7 @@ def test_a_canceled_training_run_derives_as_canceled_from_its_experiment_record(
     draw_seed_if_unset(config)
     run = create_run(config, str(tmp_path / "out"), id="canceled-run")
     run_training_envelope(TrainContext(run=run, train_loader=None, val_loader=None,
-                                       task="detection", experiment_id="exp-canceled"))
+                                       experiment_id="exp-canceled"))
 
     status = read_member(status_key("exp-canceled"), None)
     assert derived_state(status, 600.0) == "canceled"

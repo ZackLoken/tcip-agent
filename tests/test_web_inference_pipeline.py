@@ -30,6 +30,7 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
 
     from tcip_annotation import json_io
     from tcip_mcp import subject_registry
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -39,7 +40,7 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     write_predictions_json(p, {
         "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, subject="bud", attribute=None, id_map=id_map)
+    }, scope=ClassScope(subject="bud", id_map=id_map))
     data = json.loads(p.read_text())
     ann = data["annotations"][0]
     assert ann["subject"] == "bud"                       # 1-indexed label 1 -> id 0 -> "bud"
@@ -52,7 +53,7 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     neg = tmp_path / "empty.json"
     write_predictions_json(neg, {"width": 100, "height": 100,
                                  "boxes": [], "scores": [], "labels": [], "count": 0},
-                           subject="bud", attribute=None)
+                           scope=ClassScope(subject="bud"))
     assert json.loads(neg.read_text())["annotations"] == []
 
 
@@ -106,67 +107,28 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     import json
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    assert obj["subject"] == "0"                     # no recorded id_map -> id 0 stringified honestly
+    assert obj["subject"] == "bud"                   # decoded through the checkpoint's recorded map
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
     assert obj["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
 
-def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch):
-    """The GUI door reads subject/attribute off predictor.config["data"] the same way
-    run_inference already does, and decodes predictions through the resolved id_map: never a raw
-    index string."""
-    pytest.importorskip("fastapi")
-    from PIL import Image
-
-    from tcip_web.routes.inference import InferenceJob, _worker
-
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-
-    class FakePredictor:
-        # A single-subject detector's config, the same shape run_inference reads
-        # (predictor.config["data"]["subject"]), no subjects.json needed, resolve_registry_id_map
-        # synthesizes {subject: 0} for a plain single-class run.
-        config = {"data": {"subject": "bud"}}
-
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
-                    for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
-
-    job = InferenceJob(
-        job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
-    )
-    _worker(job)
-
-    assert job.status == "completed"
-    import json
-    obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    assert obj["subject"] == "bud"  # resolved via id_map, not the raw index "0"
-
-
 def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
-    """The GUI inference worker must not re-derive its id_map locally from the live registry,
-    independently of run_inference's own resolution. Both doors call the same
-    tcip_mcp.tools.inference_tools.resolve_decode_id_map: this proves the GUI door genuinely
-    prefers a recorded map too, not just falls through to live-registry derivation."""
+    """The GUI inference worker decodes through the checkpoint's own recorded scope, never a map
+    re-derived from a live registry: no subjects.json exists under images_dir at all."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
+    import tcip_mcp.model_registry as model_registry_mod
     from tcip_web.routes.inference import InferenceJob, _worker
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    classified = {"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
+                                               "id_map": {"closed": 0, "open": 1}}}
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda path, *a, **kw: stub_verified_checkpoint(
+                            str(path), config_data=classified))
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -176,12 +138,6 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     ckpt.write_bytes(b"stub")
 
     class FakePredictor:
-        # A recorded id_map naming class 1 "open", deliberately not what a live registry at
-        # images_dir would derive (there is no subjects.json under images_dir at all), so a pass
-        # here can only mean the recorded map was used, never a registry fallback.
-        config = {"data": {"subject": "bud", "attribute": "opening",
-                           "id_map": {"closed": 0, "open": 1}}}
-
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
@@ -212,9 +168,8 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     assert obj["subject"] == "bud"
     assert obj["attributes"] == {"opening": "open"}
     sidecar = tcip_store.read(sidecar_key(out_dir, "operating_point"))
-    assert sidecar["id_map"] == {"closed": 0, "open": 1}
-    assert sidecar["subject"] == "bud"
-    assert sidecar["attribute"] == "opening"
+    assert sidecar["scope"] == {"subject": "bud", "attribute": "opening",
+                                "id_map": {"closed": 0, "open": 1}}
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):
@@ -337,8 +292,6 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
     ckpt.write_bytes(b"stub")
 
     class FakePredictor:
-        config = {"data": {"subject": "bud"}}
-
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 

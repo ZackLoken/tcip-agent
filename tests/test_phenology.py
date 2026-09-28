@@ -27,6 +27,7 @@ if str(_MCP_SRC) not in sys.path:
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines import resolution  # noqa: E402
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
 from tcip_mcp.pipelines.resolution import Acknowledgment  # noqa: E402
@@ -51,7 +52,7 @@ def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "bud"
     fact count_by_class reads to decide whether/how a bucket was classified."""
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(dir_path, {"id_map": id_map, "subject": subject, "attribute": attribute})
+    write_sidecar(dir_path, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}})
 
 
 def _preds(dir_path: Path, stem: str, subjects: list[str], *, attribute: str | None = None,
@@ -195,9 +196,8 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_pat
             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    id_map = {"bud": 0}
-    scope = resolution.BucketScope(subject="bud", attribute=None)
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
+    scope = ClassScope(subject="bud", id_map={"bud": 0})
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
     assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
 
 
@@ -209,9 +209,9 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                        attributes={"damage": "mild"})], 8, 8,
     )
-    id_map = {"none": 0, "mild": 1, "severe": 2}
-    scope = resolution.BucketScope(subject="bud", attribute="damage")
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
+    scope = ClassScope(subject="bud", attribute="damage",
+                       id_map={"none": 0, "mild": 1, "severe": 2})
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
@@ -221,7 +221,8 @@ def test_count_by_class_absent_id_map_refuses(tmp_path):
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                        attributes={"opening": "open"})], 8, 8,
     )
-    total, positive, unclassified = phenology.count_by_class(p, None, "open", scope=None)
+    scope = ClassScope(subject="bud", attribute="opening")
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
@@ -236,9 +237,8 @@ def test_count_by_class_classified_bucket_splits_positive_negative(tmp_path):
                        attributes={"opening": "open"})],
         8, 8,
     )
-    id_map = {"closed": 0, "open": 1}
-    scope = resolution.BucketScope(subject="bud", attribute="opening")
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
+    scope = ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "open": 1})
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
@@ -254,17 +254,16 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    id_map = {"closed": 0, "open": 1}
-    scope = resolution.BucketScope(subject="bud", attribute="opening")
+    scope = ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "open": 1})
     with pytest.raises(ClassifiedRecordRefused, match="carries no value under attribute"):
-        phenology.count_by_class(p, id_map, "open", scope=scope)
+        phenology.count_by_class(p, "open", scope=scope)
 
 
 def test_count_by_class_missing_file_reads_as_empty():
     # count_by_class degrades gracefully on a missing path (json_io.read_annotations answers []);
     # per_plant_series never calls it on one, checking is_file() and tracking n_missing itself.
     total, positive, unclassified = phenology.count_by_class(
-        Path("does-not-exist.json"), {"open": 1}, "open", scope=None)
+        Path("does-not-exist.json"), "open", scope=None)
     assert (total, positive, unclassified) == (0, 0, 0)
 
 
@@ -473,7 +472,7 @@ def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date
     """The rail must admit valid work: with nothing to reconcile, the new missing-entry check
     does not fire, so a legitimate acknowledged, bucket-less call still writes rather than being
     refused for a document it never had a chance to reconcile."""
-    cells = phenology.write_phenology_csv(
+    phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", BUD_OPENING,
         flags={"classifier": None, "operating_point": None},
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="nothing to reconcile"),
@@ -481,7 +480,7 @@ def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date
         dimension_reconciliations={}, predictions_by_date={},
         project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert (tmp_path / "out.csv").exists()
-    assert cells["delivery_event_recorded"] is True
+    assert [r["door"] for r in resolution.read_delivery_events(tmp_path)] == ["test"]
 
 
 def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_point_sidecar(
@@ -518,7 +517,7 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
-    cells = phenology.write_phenology_csv(
+    phenology.write_phenology_csv(
         "test.missing_stamp", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="missing sidecar"),
         basis=schema_basis(),
@@ -530,9 +529,6 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
-    assert cells["delivery_event_recorded"] is True
-
-    from tcip_mcp.pipelines import resolution
 
     records = [
         r for r in resolution.read_delivery_events(tmp_path) if r["door"] == "test.missing_stamp"
@@ -681,8 +677,7 @@ def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
     """There is no ``stamp`` parameter: the writer composes its own provenance cells and
     returns them, so this pins that the set it returns is exactly the schema's provenance columns
-    plus the trait's own majority crossing-unconfirmed marker and the write's own
-    ``delivery_event_recorded`` flag (not a schema column; the CSV itself never carries it)."""
+    plus the trait's own majority crossing-unconfirmed marker."""
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
 
@@ -693,9 +688,8 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     expected = (set(phenology.PROVENANCE_COLUMNS)
-                | {phenology.majority_crossing_unconfirmed_column(BUD_OPENING), "delivery_event_recorded"})
+                | {phenology.majority_crossing_unconfirmed_column(BUD_OPENING)})
     assert set(cells) == expected
-    assert cells["delivery_event_recorded"] is True
 
 
 def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):

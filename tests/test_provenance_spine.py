@@ -29,15 +29,16 @@ def test_stamp_model_ref_stamps_experiment_id():
     from tcip_mcp.pipelines.model_build import stamp_model_ref
 
     src = {"model_source": {"builder": "x:y", "task": "detection"}}
-    payload = stamp_model_ref({"model_state_dict": {}}, src, experiment_id="expZ")
+    payload = stamp_model_ref({"model_state_dict": {}, "config": src}, experiment_id="expZ")
     assert payload["experiment_id"] == "expZ"
 
     # From config when not passed explicitly.
-    payload2 = stamp_model_ref({"model_state_dict": {}}, {**src, "experiment_id": "expC"})
+    payload2 = stamp_model_ref(
+        {"model_state_dict": {}, "config": {**src, "experiment_id": "expC"}})
     assert payload2["experiment_id"] == "expC"
 
     # Absent id -> no key fabricated (raw/foreign checkpoints legitimately have none).
-    payload3 = stamp_model_ref({"model_state_dict": {}}, src)
+    payload3 = stamp_model_ref({"model_state_dict": {}, "config": src})
     assert "experiment_id" not in payload3
 
 
@@ -234,7 +235,7 @@ def test_export_detection_csv_carries_provenance(tmp_path):
     bucket = root / "predictions" / "preds"
     write_prediction(bucket, "img_a")
     stamp = {
-        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None},
         "validated": True, "trait": fx.COUNT_TRAIT, "checkpoint_sha256": sha,
         "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
                                      "validation_kind": "annotations",
@@ -267,7 +268,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     bucket = root / "predictions" / "preds"
     write_prediction(bucket, "img_a")
     stamp = {
-        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None},
         "validated": True, "trait": fx.COUNT_TRAIT, "checkpoint_sha256": sha,
         "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
                                      "validation_kind": "annotations",
@@ -300,7 +301,7 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
     bucket = root / "predictions" / "preds"
     write_prediction(bucket, "img_a")
     stamp = {
-        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None},
         "validated": True, "trait": fx.COUNT_TRAIT,
         "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
                                      "validation_kind": "annotations",
@@ -335,7 +336,7 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
     bucket = root / "predictions" / "preds"
     write_prediction(bucket, "img_a")
     stamp = {
-        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None},
         "validated": True, "trait": fx.COUNT_TRAIT,
         "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
                                      "validation_kind": "annotations",

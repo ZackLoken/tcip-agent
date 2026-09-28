@@ -18,6 +18,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import (
     record_image_statuses, stamp_image_status_digests, status_bucket,
 )  # noqa: E402
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import (  # noqa: E402
     Attribute, SubjectRegistry, Subject, assign_class_ids,
 )
@@ -25,6 +26,7 @@ from tcip_mcp.subject_registry import (  # noqa: E402
 from tests._producer_fixtures import admit_over, dataset_over  # noqa: E402
 
 BUD = "bud"
+BUD_SCOPE = ClassScope(subject=BUD, id_map={BUD: 0})
 
 
 def _make_images(images_dir, stems):
@@ -140,10 +142,10 @@ def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_p
     _subject_bearing_coco(labels / "img0.json")
 
     with pytest.raises(json_io.UnreadableLabelDocument, match="import_coco"):
-        json_det_targets(str(labels / "img0.json"), BUD, None, {BUD: 0})
+        json_det_targets(str(labels / "img0.json"), BUD_SCOPE)
     with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO"):
         auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
-                                     "subject": BUD}, None)
+                                     "scope": {"subject": BUD}}, None)
 
 
 def test_a_same_stem_provenance_sidecar_is_never_read_as_that_images_label(tmp_path):
@@ -454,7 +456,7 @@ def test_instance_seg_excludes_a_partially_labeled_stem_from_training(tmp_path):
     admitted = admit_over(images_dir, labels_dir, subject=BUD, attribute="opening")
 
     assert [r.member for r in admitted.records] == ["complete"]
-    assert admitted.id_map == id_map
+    assert admitted.scope.id_map == id_map
     assert admitted.counts["skipped_incomplete_attribute"] == 1
     assert admitted.counts["annotated"] == 1
 
@@ -604,14 +606,14 @@ def test_a_stale_complete_confirmation_is_quarantined(tmp_path):
     assert current_digest != "stale-digest"
     stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
 
-    records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None)
+    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
     keep = [record.member for record in records]
 
     assert keep == []
     assert counts["quarantined_stale_definition"] == 1
     assert counts["annotated"] == 0
     with pytest.raises(ValueError, match="quarantined"):
-        require_admitted(admit(images, labels, subject=BUD))
+        require_admitted(admit(images, labels, scope=BUD_SCOPE))
 
 
 def test_a_quarantined_negative_reads_as_quarantined(tmp_path):
@@ -635,7 +637,7 @@ def test_a_quarantined_negative_reads_as_quarantined(tmp_path):
     assert current_digest != "stale-digest"
     stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
 
-    _records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None)
+    _records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
     assert counts["quarantined_stale_definition"] == 1
     assert counts["skipped_unconfirmed_empty"] == 0
 
@@ -658,7 +660,7 @@ def test_a_reconfirmed_complete_trains_again_after_the_schema_change(tmp_path):
                           recorded_by="user:breeder")
     stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], current_digest)
 
-    records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None)
+    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
     keep = [record.member for record in records]
     assert keep == ["a"]
     assert counts["annotated"] == 1
@@ -680,7 +682,7 @@ def test_an_unstamped_complete_trains(tmp_path):
     record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
                           recorded_by="user:breeder")
 
-    records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None)
+    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
     keep = [record.member for record in records]
     assert keep == ["a"]
     assert counts["quarantined_stale_definition"] == 0
@@ -714,7 +716,8 @@ def test_a_complete_under_an_unchanged_subject_trains(tmp_path):
     # bud's own schema changes; bush's bucket, and its stamp, must be untouched by it.
     stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["b.jpg"], "stale-digest")
 
-    records, counts = admitted_documents(str(labels), str(images), subject="bush", date=None)
+    records, counts = admitted_documents(str(labels), str(images),
+                                         scope=ClassScope(subject="bush"), date=None)
     keep = [record.member for record in records]
     assert keep == ["a"]
     assert counts["quarantined_stale_definition"] == 0
@@ -738,7 +741,7 @@ def test_a_partial_carrying_a_stale_stamp_still_trains(tmp_path):
         tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
     assert stamped == ["a.jpg"]
 
-    records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None)
+    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None)
     keep = [record.member for record in records]
     assert keep == ["a"]
     assert counts["quarantined_stale_definition"] == 0
@@ -762,7 +765,7 @@ def test_a_stale_and_contradicted_negative_still_trains_by_content(tmp_path):
     stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
 
     contradicted: set[str] = set()
-    records, counts = admitted_documents(str(labels), str(images), subject=BUD, date=None,
+    records, counts = admitted_documents(str(labels), str(images), scope=BUD_SCOPE, date=None,
                                          contradicted_out=contradicted)
     assert [record.member for record in records] == ["a"]
     assert counts["annotated"] == 1
@@ -783,7 +786,7 @@ def test_admission_with_subject_none_over_only_complete_statuses_does_not_refuse
     record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "complete"},
                           recorded_by="user:breeder")
 
-    records, counts = admitted_documents(str(labels), str(images), subject=None, date=None)
+    records, counts = admitted_documents(str(labels), str(images), scope=ClassScope(), date=None)
     keep = [record.member for record in records]
     assert keep == ["a"]
     assert counts["annotated"] == 1
@@ -801,8 +804,8 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
         Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
     ], 100, 100)
 
-    id_map = {"open": 0, "closed": 1}
-    target, n_unlabeled = json_det_targets(str(path), "bud", "opening", id_map)
+    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
+    target, n_unlabeled = json_det_targets(str(path), scope)
     # 0-indexed 1 ("closed") + 1 for background
     assert len(target["boxes"]) == 1 and target["labels"] == [2] and target["iscrowd"] == [False]
     assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
@@ -813,7 +816,7 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
                   attributes={"opening": "not-a-real-value"}),
     ], 100, 100)
     with pytest.raises(ValueError):
-        json_det_targets(str(undecodable), "bud", "opening", id_map)
+        json_det_targets(str(undecodable), scope)
 
 
 def test_detection_excludes_a_partially_labeled_stem_from_training(tmp_path):

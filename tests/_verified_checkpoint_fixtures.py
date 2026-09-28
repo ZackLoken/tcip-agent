@@ -17,6 +17,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
+"""A three-band detection run's recorded data section, scoped to one subject."""
+
 
 def registered_checkpoint(
     tmp_path: Path,
@@ -24,25 +27,29 @@ def registered_checkpoint(
     project_root: str | Path,
     name: str = "test-model",
     model_source: dict | None = None,
+    data: dict | None = None,
     stamp: dict | None = None,
     filename: str = "model_best.pt",
 ) -> str:
     """Write a bespoke checkpoint through ``build_model``, register it via ``register_model``'s
     explicit mode against ``project_root``, and return its path.
 
-    ``model_source`` defaults to a tiny detection builder; ``stamp`` merges extra top-level keys
-    onto the saved payload (e.g. ``experiment_id``, tiling config) the way the trainer stamps one.
+    ``model_source`` defaults to a tiny detection builder. ``data`` is the run's own recorded data
+    section the model is built at and the payload carries, by default a three-band run scoped to
+    one subject; ``stamp`` merges extra top-level keys onto the saved payload (e.g.
+    ``experiment_id``) the way the trainer stamps one.
     """
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     src = model_source or {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"min_size": 64, "max_size": 128},
         "task": "detection",
     }
-    model = build_model({"model_source": src})
-    payload: dict[str, Any] = {"model_source": src, "model_state_dict": model.state_dict()}
+    config = {"model_source": src, "data": data or dict(SCOPED_DATA)}
+    model = build_model(config, recorded_model_dims(config))
+    payload: dict[str, Any] = {"config": config, "model_state_dict": model.state_dict()}
     if stamp:
         payload.update(stamp)
     ckpt_path = Path(tmp_path) / filename
@@ -105,16 +112,17 @@ def stub_verified_checkpoint(
 ):
     """A ``VerifiedCheckpoint``-shaped stub for a test that stubs ``build_predictor``/
     ``load_registered_checkpoint``: the fields a door under test reads off the object
-    (``path``, ``sha256``, ``entries``, ``producer``, and a ``payload`` carrying
-    ``config["data"]``/``experiment_id``), with no registry lookup or file read behind it.
-    ``kind`` stamps the payload's own ``kind`` key (the tcip module default) so
-    ``build_predictor``'s kind sniff succeeds without needing a real ``model_source``/state dict;
-    pass ``None`` for a test that means to exercise the kind-sniff failure itself.
+    (``path``, ``sha256``, ``entries``, ``producer``, and a ``payload`` carrying a detection
+    run's ``config``, its data section ``config_data`` or :data:`SCOPED_DATA`, and
+    ``experiment_id``), with no registry lookup or file read behind it. ``kind`` stamps the
+    payload's own ``kind`` key (the tcip module default) so ``build_predictor``'s kind sniff
+    succeeds without needing a real builder or state dict; pass ``None`` for a test that means to
+    exercise the kind-sniff failure itself.
     """
     from tcip_mcp.model_registry import VerifiedCheckpoint
 
-    payload: dict[str, Any] = {"config": {"data": config_data or {}},
-                               "model_source": {"task": "detection"}}
+    payload: dict[str, Any] = {"config": {"model_source": {"task": "detection"},
+                                          "data": config_data or dict(SCOPED_DATA)}}
     if kind is not None:
         payload["kind"] = kind
     if experiment_id is not None:

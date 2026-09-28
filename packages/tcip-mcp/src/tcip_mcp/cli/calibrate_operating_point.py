@@ -8,11 +8,11 @@ Usage:
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> --project-root <project_root> \
-        [--experiment-id <id>] [--holdout-ratio 0.5] [--device cpu] [--subject <subject>] \
-        [--attribute <attribute>] [--selection-dir <dir>]
+        [--experiment-id <id>] [--holdout-ratio 0.5] [--device cpu] [--selection-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project-root (register it with
-register_model first); this script refuses one it is not, naming the digest and the root.
+register_model first); this script refuses one it is not, naming the digest and the root. The
+labels are read under the class space the checkpoint records.
 """
 
 from __future__ import annotations
@@ -60,17 +60,11 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "governs the locked draw instead.")
     parser.add_argument("--group-key-map", default=None,
                         help="Path to a JSON file mapping stem -> group key, overriding --group-by.")
-    parser.add_argument("--subject", default=None,
-                        help="The object class to read name-based labels for. Required with "
-                             "--selection-dir; a run's own admission needs one too.")
-    parser.add_argument("--attribute", default=None,
-                        help="Scope the draw to instances already assessed for this attribute "
-                             "of --subject.")
     parser.add_argument("--selection-dir", default=None,
                         help="Restrict the calibration universe to a selection's own calibration "
                              "side (draw_splits' output directory) instead of every labeled stem, "
                              "the same restriction run_inference applies. Conflicts with "
-                             "--group-by/--group-key-map; requires --subject.")
+                             "--group-by/--group-key-map.")
     args = parser.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
@@ -92,8 +86,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         result = resolve_count_operating_point(
             checkpoint_path=args.checkpoint, trait=args.trait, labels_dir=args.labels_dir,
             images_dir=args.images_dir, dataset_root=args.dataset_root,
-            project_root=args.project_root, subject=args.subject, attribute=args.attribute,
-            experiment_id=args.experiment_id, group_by=args.group_by, group_key_map=group_key_map,
+            project_root=args.project_root, experiment_id=args.experiment_id, group_by=args.group_by, group_key_map=group_key_map,
             selection_dir=args.selection_dir, holdout_ratio=args.holdout_ratio, seed=args.seed,
             device=args.device,
         )

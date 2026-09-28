@@ -19,6 +19,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 pytest.importorskip("pycocotools")
 
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     DEFAULT_SCORE_WEIGHTS,
     build_coco_image_record,
@@ -46,6 +47,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
     resolve_selection_metric,
 )
+from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
 
 # No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
 # test's pinned platform state root so trait="bud_opening" call sites keep resolving.
@@ -692,7 +694,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
 
         # "bud_opening" (seeded center_match) exercises evaluate()'s center-match branch for detection.
         trait = "bud_opening" if task == "detection" else None
-        result = evaluate(model, loader, device, task, trait=trait)
+        dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
+        result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait)
         returned.update(result)
 
     per_image = [
@@ -749,8 +752,9 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
 
     def _checkpoint(task: str):
         ckpt_path = tmp_path / f"{task}.pt"
-        torch.save({"model_source": {"builder": "x:y", "task": task}, "model_state_dict": {}},
-                   str(ckpt_path))
+        torch.save({"config": {"model_source": {"builder": "x:y", "task": task},
+                               "data": dict(SCOPED_DATA)},
+                    "model_state_dict": {}}, str(ckpt_path))
         result = register_model(name=f"iou-type-check-{task}", checkpoint_path=str(ckpt_path),
                                 config={}, project_path=str(tmp_path))
         assert "error" not in result, result
@@ -805,8 +809,9 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
-               str(ckpt_path))
+    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
+                           "data": dict(SCOPED_DATA)},
+                "model_state_dict": {}}, str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     reg = register_model(name="row4-writer-check", checkpoint_path=str(ckpt_path), config={},
@@ -836,7 +841,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     ff_out = tmp_path / "ff_eval"
     run_full_frame_evaluation(
         stub_verified_checkpoint(str(tmp_path / "ff.pt")), str(images_dir),
-        str(ff_labels), str(ff_out), subject="bud", tile_size=32, overlap=0.0)
+        str(ff_labels), str(ff_out), tile_size=32, overlap=0.0)
     ff_result = ts.read(evaluation_results_key(ff_out))
 
     for field in common_fields:
@@ -881,8 +886,9 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
-               str(ckpt_path))
+    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
+                           "data": dict(SCOPED_DATA)},
+                "model_state_dict": {}}, str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -919,8 +925,9 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_source": {"builder": "x:y", "task": "detection"}, "model_state_dict": {}},
-               str(ckpt_path))
+    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
+                           "data": dict(SCOPED_DATA)},
+                "model_state_dict": {}}, str(ckpt_path))
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
 
@@ -951,7 +958,7 @@ from torch.utils.data import DataLoader  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import run_over  # noqa: E402
 
 IMG = 64
 
@@ -962,9 +969,9 @@ def _save_png(path: Path) -> None:
     save_image(torch.rand(3, IMG, IMG) * 0.3, str(path))
 
 
-def _cfg(model_source) -> dict:
+def _cfg(model_source, data: dict) -> dict:
     return {
-        "model_source": model_source, "device": "cpu",
+        "model_source": model_source, "data": data, "device": "cpu",
         "stages": [{"freeze_to": -1, "epochs": 1}], "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
@@ -982,14 +989,14 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                    "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    run = create_run(_cfg(model_source), str(tmp_path / "out"), id="auto-run-23")
-    run = train(run, loader, val_loader=loader, task="detection")  # no AttributeError on model.heads
+    run = create_run(_cfg(model_source, data), str(tmp_path / "out"), id="auto-run-23")
+    run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
     assert run.status == "completed", getattr(run, "error", run.status)
     last = run.metrics_history[-1]
@@ -1018,16 +1025,16 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+    ds, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                    "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    cfg = _cfg(model_source)
+    cfg = _cfg(model_source, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
     run = create_run(cfg, str(tmp_path / "out"), id="auto-run-24")
-    run = train(run, loader, val_loader=loader, task="detection")
+    run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
     last = run.metrics_history[-1]
@@ -1048,13 +1055,13 @@ def test_validate_classification_metrics(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = dataset_over("classification", str(images_dir), str(csv_path))
+    ds, data = run_over("classification", str(images_dir), str(csv_path))
     loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                    "builder_kwargs": {"num_classes": 2}, "task": "classification"}
-    run = create_run(_cfg(model_source), str(tmp_path / "out"), id="auto-run-25")
-    run = train(run, loader, val_loader=loader, task="classification")
+                    "task": "classification"}
+    run = create_run(_cfg(model_source, data), str(tmp_path / "out"), id="auto-run-25")
+    run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
     last = run.metrics_history[-1]
@@ -1159,7 +1166,7 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     json_io.write_annotations(label, [
         Annotation(subject="bur", geometry=BBox(1.25, 2.5, 30.75, 40.5)),
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
     arrays = {k: np.asarray(v) for k, v in listed.items()}
     off_grid = {**listed, "boxes": [[1.2504, 2.5, 30.7496, 40.5], [50.0, 50.0, 90.0, 90.0]]}
 
@@ -1184,7 +1191,7 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
     json_io.write_annotations(label, [
         Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3)),
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
     _, record = records_from_annotation(json_io.read_annotations(label), [], width=100,
                                         height=100, name_id={"bur": 1})
     assert record["gt"] == gt_records(listed)
@@ -1205,7 +1212,7 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
     label = tmp_path / "a.json"
     json_io.write_annotations(label, [Annotation(subject="bur", geometry=BBox(10.3, 20.7, 40.1, 60.9))],
                               100, 100)
-    listed, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
     output = {"boxes": torch.tensor([[10.1, 10.1, 40.3, 30.3]]),
               "labels": torch.tensor([1]), "scores": torch.tensor([0.9])}
     record = records_from_detector(target_tensors(listed), output, width=100, height=100)
@@ -1266,5 +1273,5 @@ def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):
     json_io.write_annotations(label, [
         Annotation(subject="bur", geometry=BBox(1, 1, 9, 9)),
         Annotation(subject="bur", geometry=BBox(20, 20, 60, 60), iscrowd=True)], 100, 100)
-    assert count_label_lines(label, subject="bur") == 1
+    assert count_label_lines(label, ClassScope(subject="bur")) == 1
     assert count_label_lines(label) == 1

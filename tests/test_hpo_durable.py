@@ -204,7 +204,7 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
 
     result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                                      "task": "detection"},
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical", "choices": ["tests.bespoke_models:build_bespoke_detection"]}},
@@ -231,7 +231,7 @@ def test_run_hyperparameter_search_refuses_when_every_sampled_value_of_a_swept_a
 
     result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                                      "task": "detection"},
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {"type": "categorical", "choices": ["still:bad"]}},
         n_trials=1, output_dir=str(tmp_path), search_seed=0
@@ -259,7 +259,7 @@ def test_run_hyperparameter_search_refuses_when_a_non_first_swept_choice_fails_p
 
     result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                                      "task": "detection"},
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical",
@@ -286,7 +286,7 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
 
     result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                                      "task": "detection"},
                     "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical",

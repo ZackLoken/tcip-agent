@@ -38,20 +38,21 @@ def _bespoke_builder(**kwargs):
 
 def test_build_model_from_model_source_imports_builder():
     src = {"builder": f"{__name__}:_bespoke_builder", "builder_kwargs": {}, "task": "classification"}
-    model = build_model({"model_source": src})
+    dims = {"in_chans": 3, "num_classes": 2}
+    model = build_model({"model_source": src}, dims)
     assert isinstance(model, TCIPModel)
     # build_from_model_source is the same path, callable directly.
-    assert type(build_from_model_source(src)).__name__ == type(model).__name__
+    assert type(build_from_model_source(src, dims)).__name__ == type(model).__name__
 
 
 def test_build_model_requires_model_source():
     with pytest.raises(ValueError, match="model_source"):
-        build_model({})
+        build_model({}, {"in_chans": 3})
 
 
 def test_build_model_bad_builder_raises():
     with pytest.raises(ValueError, match="not found|Invalid dotted"):
-        build_model({"model_source": {"builder": f"{__name__}:does_not_exist"}})
+        build_model({"model_source": {"builder": f"{__name__}:does_not_exist"}}, {"in_chans": 3})
 
 
 # --------------------------------------------------------------------------

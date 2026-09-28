@@ -157,10 +157,10 @@ def materialize_review_dataset(
     When ``experiment_id`` is given, records the review session as experiment lineage. Output is
     the platform's ``images/`` + ``annotations/`` dataset layout.
 
-    The reviewed bucket's own recorded scope (``resolution.bucket_scope``) governs when there is
-    one: under a classified scope every positive is written with the object class in ``subject``
-    and the confirmed value under the scope's attribute, ``subject`` (if stated) must equal the
-    scope's own, and no rejected-only image is confirmed negative, landing in
+    The reviewed bucket's scope comes from ``resolution.input_scope``: a stamped bucket's own,
+    refusing a ``subject`` stated beside it. Under a classified scope every positive is written
+    with the object class in ``subject`` and the confirmed value under the scope's attribute, and
+    no rejected-only image is confirmed negative, landing in
     ``unconfirmed_negatives`` instead. The source dataset's own registry is then copied over;
     refuses by name when the source names no dataset root, that root has no ``subjects.json``, or
     the output already holds a registry. A bare directory or a detector scope, and a
@@ -178,9 +178,10 @@ def materialize_review_dataset(
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
-        subject: The object the review was about; confirmed negatives are keyed under it. When
-            omitted it is derived from every subject the verdicts name, rejections included, and
-            only when they name exactly one. A rejected image whose own rejections answer for
+        subject: The object the review of a bucket with no stamp was about; confirmed negatives
+            are keyed under it. A stamped bucket records its own and refuses it. When neither
+            states one it is derived from every subject the verdicts name, rejections included,
+            and only when they name exactly one. A rejected image whose own rejections answer for
             another subject, or for none, is materialized as an unconfirmed empty and reported in
             ``unconfirmed_negatives`` with why.
         bucket: Which prediction bucket's verdicts to curate, as
@@ -222,11 +223,10 @@ def materialize_review_dataset(
     review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
-    from tcip_mcp.pipelines.resolution import bucket_scope
+    from tcip_mcp.pipelines.resolution import input_scope
     from tcip_store import StoreError
 
-    scope = None
-    vocabulary = None
+    scope_dir = None
     if resolved_bucket != NO_BUCKET:
         bucket_path = Path(resolved_bucket)
         if bucket_path.is_absolute():
@@ -239,29 +239,17 @@ def materialize_review_dataset(
             )}
         else:
             scope_dir = Path(dataset_root) / resolved_bucket
-        try:
-            scope = bucket_scope(scope_dir)
-        except StoreError as exc:
-            return {"error": str(exc)}
-        if scope is not None and scope.classified:
-            from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
-
-            id_map = bucket_id_map(scope_dir)
-            if id_map is None:
-                return {"error": (
-                    f"{scope_dir} records no id_map: a classified scope's confirmed values need "
-                    "the bucket's own recorded vocabulary to check them against, and this bucket's "
-                    "stamp carries none. Re-infer this run or repair its stamp before "
-                    "materializing its review."
-                )}
-            vocabulary = set(id_map)
+    try:
+        scope, _stamped = input_scope(scope_dir, subject, None)
+    except (StoreError, ValueError) as exc:
+        return {"error": str(exc)}
 
     try:
         result = materialize_dataset(
-            review_state, source_images_dir, output_dir, subject=subject,
+            review_state, source_images_dir, output_dir,
+            scope=scope,
             review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
-            copy_files=copy_files, only_completed=only_completed, scope=scope,
-            vocabulary=vocabulary,
+            copy_files=copy_files, only_completed=only_completed,
         )
     except ValueError as exc:
         return {"error": str(exc)}

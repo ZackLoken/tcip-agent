@@ -25,7 +25,7 @@ def _fixture_config(tmp_path: Path) -> Path:
     config = {
         "model_source": {"builder": "tcip_mcp.pipelines.model_build:build_model",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
     }
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")

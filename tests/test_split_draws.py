@@ -204,7 +204,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     _root, selection_dir = one_foreground_group_selection(tmp_path)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": {"split": {"selection_dir": str(selection_dir)}},
     }
     result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
@@ -576,7 +576,7 @@ def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
         data["auto_val"] = auto_val
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": data,
     }
 
@@ -1453,9 +1453,10 @@ def _one_source_tiled_cfg(images_dir, labels_dir) -> dict:
     admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": {
-            "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+            "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+            "scope": {"subject": "bud"},
             "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
             "split": {"val_ratio": 0.2, "test_ratio": 0.1},
         },
@@ -1517,8 +1518,7 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
 def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_config(
     tmp_path, monkeypatch,
 ):
-    """The rail-admits-valid-work proof: an unbound, built-in detection config with tiling on
-    that admits two or more sources never reaches this leg's own single-source branch, so
+    """An unbound, built-in detection config with tiling on that admits two or more sources never reaches this leg's own single-source branch, so
     split_draws above 1 mints the sweep."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")

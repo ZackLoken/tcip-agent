@@ -16,7 +16,7 @@ torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
 from tests import bespoke_models  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import run_over  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,6 @@ class TestFullClassificationPipeline:
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": "tests.bespoke_models:build_bespoke_classifier",
-            "builder_kwargs": {"num_classes": 2, "in_chans": 3},
             "task": "classification",
         }
 
@@ -78,8 +77,8 @@ class TestFullClassificationPipeline:
         from tcip_mcp.pipelines.training.collation import task_collate
 
         images_dir, csv_path = tiny_classification_data
-        dataset = dataset_over("classification", images_dir, csv_path)
-        assert dataset.num_classes == 2
+        dataset, data = run_over("classification", images_dir, csv_path)
+        assert data["num_classes"] == 2
         assert dataset.num_samples == 12
 
         # Train/val split: exercises the val_loader + early-stopping wiring on this run.
@@ -99,6 +98,7 @@ class TestFullClassificationPipeline:
 
         config = {
             "model_source": model_source,
+            "data": data,
             "device": "cpu",
             "stages": [{"freeze_to": -1, "epochs": 2}],
             "mixed_precision": False,
@@ -111,7 +111,7 @@ class TestFullClassificationPipeline:
         run = create_run(config, output_dir, id="auto-run-32")
 
         rows: list[dict] = []
-        completed_run = train(run, loader, val_loader=val_loader, task="classification",
+        completed_run = train(run, loader, val_loader=val_loader,
                               epoch_callback=lambda epoch, metrics: rows.append(dict(metrics)))
 
         assert completed_run.status == "completed"
@@ -132,7 +132,7 @@ class TestFullClassificationPipeline:
         # Verify checkpoint has required keys
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
         assert "model_state_dict" in ckpt
-        assert "model_source" in ckpt
+        assert "model_source" in ckpt["config"] and "model_source" not in ckpt
 
         # --- Step 5: Register the checkpoint, load it verified, and run inference ---
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -181,7 +181,7 @@ class TestFullClassificationPipeline:
             bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
                                                  "validated_against": VALIDATED_HELD_OUT}},
-                    "subject": fx.COUNT_SUBJECT, "attribute": None},
+                    "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
         export_detection_csv(csv_results, csv_path, trait=fx.COUNT_TRAIT,
                              operating_point_validated=VALIDATED_HELD_OUT,
@@ -246,7 +246,7 @@ class TestDetectionPipelineRealData:
         # --- Step 1: A bespoke detection model_source (small input sizes for speed) ---
         model_source = {
             "builder": "tests.bespoke_models:build_bespoke_detection",
-            "builder_kwargs": {"num_classes": 1, "min_size": 320, "max_size": 512},
+            "builder_kwargs": {"min_size": 320, "max_size": 512},
             "task": "detection",
         }
         model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
@@ -257,7 +257,7 @@ class TestDetectionPipelineRealData:
         assert date is not None
         images_dir = SAMPLE_PROJECT / "images" / date
         labels_dir = SAMPLE_PROJECT / "annotations" / date
-        dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
+        dataset, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
         # num_classes is derived from the dataset's subjects.json via assign_class_ids (single-class
         # bud here), and num_samples from the bud-annotated images on this date.
         assert dataset.num_classes == 1
@@ -282,6 +282,7 @@ class TestDetectionPipelineRealData:
         # --- Step 3: Train 1 epoch ---
         config = {
             "model_source": model_source,
+            "data": data,
             "device": "cpu",
             "stages": [{"freeze_to": 0, "epochs": 1}],
             "mixed_precision": False,
@@ -292,7 +293,7 @@ class TestDetectionPipelineRealData:
             "checkpoint_every_n_epochs": 1,
         }
         run = create_run(config, detection_output_dir, id="auto-run-33")
-        completed = train(run, loader, val_loader=None, task="detection")
+        completed = train(run, loader, val_loader=None)
 
         assert completed.status == "completed"
         assert completed.current_epoch == 1
@@ -303,7 +304,7 @@ class TestDetectionPipelineRealData:
         # Verify checkpoint format
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
         assert "model_state_dict" in ckpt
-        assert "model_source" in ckpt
+        assert "model_source" in ckpt["config"] and "model_source" not in ckpt
 
         # --- Step 4: Register the checkpoint, load it verified, and run inference ---
         from tcip_mcp.tools.model_tools import register_model
@@ -342,7 +343,7 @@ class TestDetectionPipelineRealData:
             bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
                                                  "validated_against": VALIDATED_HELD_OUT}},
-                    "subject": fx.COUNT_SUBJECT, "attribute": None},
+                    "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
         export_detection_csv(results, csv_path, trait=fx.COUNT_TRAIT,
                              operating_point_validated=VALIDATED_HELD_OUT,

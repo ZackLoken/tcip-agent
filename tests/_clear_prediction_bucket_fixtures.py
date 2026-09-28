@@ -15,8 +15,7 @@ torch = pytest.importorskip("torch")
 
 def assert_source_stamps_absent(bucket: Path) -> None:
     """Assert a ``read_versioned`` of each of ``SIDECAR_FILENAMES``' five stamps answers absent at
-    ``bucket``: the one helper every source-empty assertion goes through, rather than each test
-    checking ``operating_point`` alone and calling the source empty of stamps on that one answer."""
+    ``bucket``."""
     import tcip_store as ts
     from tcip_annotation.json_io import SIDECAR_FILENAMES
 
@@ -148,11 +147,12 @@ def record_review_verdict(bucket: Path, review_state_dir: Path, img_name: str) -
 def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dict:
     """Replace ``bucket``'s published stamp's ``operating_point`` with one earned through the
     same two-phase gate a producer runs (``open_validation``, then ``seal_validation``), keeping
-    the run's own ``experiment_id``, ``checkpoint_sha256``, ``subject`` and ``attribute`` so the
-    door's other checks stay meaningful; returns the stamp as stored after the merge.
+    the run's own ``experiment_id``, ``checkpoint_sha256`` and ``scope`` so the door's other
+    checks stay meaningful; returns the stamp as stored after the merge.
     """
     from tests._dense_op_fixtures import dense_records
 
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, read_operating_point_sidecar, seal_validation,
         update_sidecar,
@@ -183,8 +183,8 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
     earned_body = operating_point_stamp(
         draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
         validated_by=None,
-        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
-        subject=stored.get("subject"), attribute=stored.get("attribute"), trait=trait,
+        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
+        scope=ClassScope(**stored["scope"]), trait=trait,
         dataset_hash="h1", checkpoint=stored.get("checkpoint"),
         checkpoint_sha256=stored.get("checkpoint_sha256"), experiment_id=stored.get("experiment_id"),
         images_dir=stored.get("images_dir"), raster_path=stored.get("raster_path"),

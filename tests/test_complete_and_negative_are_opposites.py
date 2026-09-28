@@ -183,6 +183,7 @@ def test_a_contradicted_negative_still_trains_on_its_actual_content(
     over the same directory admits it by that content, the rail admitting valid work rather than
     silently shrinking the run's negative count."""
     from tcip_mcp.pipelines.data.label_queries import admitted_documents
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     labels = tmp_path / "annotations"
     labels.mkdir()
@@ -199,7 +200,8 @@ def test_a_contradicted_negative_still_trains_on_its_actual_content(
 
     contradicted: set[str] = set()
     records, counts = admitted_documents(
-        labels, images, subject="subject_a", date=None, contradicted_out=contradicted)
+        labels, images, scope=ClassScope(subject="subject_a"), date=None,
+        contradicted_out=contradicted)
     assert [record.member for record in records] == ["img_bush"]
     assert counts["annotated"] == 1
     assert counts["confirmed_negative"] == 0

@@ -20,7 +20,10 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_web.app import app
+
+_OPENING = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
 
 IMG_W, IMG_H = 160, 100
 CHECKPOINT_SHA = "3f9c1ab27e"
@@ -165,10 +168,10 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None,
-        shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
+        shippable_issues=[], trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", subject="bud", attribute="opening",
+        produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
     )
     write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
@@ -201,9 +204,10 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None,
-        shippable_issues=[], id_map={"leaf": 0}, trait="leaf", dataset_hash="H", checkpoint="m",
+        shippable_issues=[], trait="leaf", dataset_hash="H", checkpoint="m",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
-        raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="leaf", attribute=None,
+        raster_path=None, produced_at="2026-01-01T00:00:00Z",
+        scope=ClassScope(subject="leaf", id_map={"leaf": 0}),
     )
     write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
@@ -235,10 +239,10 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None,
-        shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
+        shippable_issues=[], trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", subject="bud", attribute="opening",
+        produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
     )
     write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
@@ -300,9 +304,10 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None,
-        shippable_issues=[], id_map={"bud": 0}, trait="bud", dataset_hash="H", checkpoint="m",
+        shippable_issues=[], trait="bud", dataset_hash="H", checkpoint="m",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
-        raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="bud", attribute=None,
+        raster_path=None, produced_at="2026-01-01T00:00:00Z",
+        scope=ClassScope(subject="bud", id_map={"bud": 0}),
     )
     write_sidecar(d, stamp)
 

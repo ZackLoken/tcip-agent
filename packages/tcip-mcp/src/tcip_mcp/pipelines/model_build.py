@@ -1,19 +1,15 @@
-"""``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``.
-
-The single build path is ``model_source``: import a dotted builder the agent wrote and call it. No
-``exec``; the builder is imported like any module. The only model-side contract is the measurement
-boundary (see ``model_contract``).
+"""``build_model``: a run config's ``model_source`` to an ``nn.Module``, by importing the dotted
+builder it names and calling it.
 
 ``model_source`` schema::
 
     {"builder": "my_module:build_net",     # required, 'module:function' (or 'module.function')
      "builder_kwargs": {...},              # optional, passed to the builder
-     "source_files": [...],                # optional: the builder's own files; their directories
-                                           # join sys.path before the import
-                                           (import_source_builder)
-                                           # and snapshot_model_source copies them as provenance
-     "task": "detection",                  # optional, measurement/eval routing
-     "in_chans": 3}                        # optional, channel-compat check
+     "source_files": [...],                # optional: the builder's own files, joined to sys.path
+                                           # for the import and snapshotted as provenance
+     "task": "detection"}                  # the run's task
+
+The builder is also handed the run's width and count (:func:`model_dims`), never stated here.
 """
 
 from __future__ import annotations
@@ -33,15 +29,16 @@ MODEL_SOURCE_KEY = "model_source"
 TRAINING_SOURCE_KEY = "training_source"
 DATASET_SOURCE_KEY = "dataset_source"
 STATE_DICT_KEY = "model_state_dict"
-"""The checkpoint keys this platform's own payloads carry: the importable model reference
-that rebuilds the module, and the weights that go into it. Both ends of a checkpoint, the
-writer and the reader, import these rather than spelling them, so the payload's vocabulary
-is stated once."""
+"""The config keys naming a run's bespoke sources, and the checkpoint key holding its weights."""
+
+RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks")
+"""The dimensions the platform hands a model builder (:func:`model_dims`), never its
+``builder_kwargs``."""
 
 
 def _split_dotted(target: str) -> tuple[str, str]:
     """Split ``'module.path:function'`` (or ``'module.path.function'``) into ``(module, attr)``,
-    with no resolution or validation of either half; the one place that grammar is spelled."""
+    with no resolution or validation of either half."""
     if ":" in target:
         mod_name, _, attr = target.partition(":")
     else:
@@ -137,31 +134,60 @@ def child_pythonpath() -> str:
     return os.pathsep.join(path_entries)
 
 
-def run_in_chans(model_source: Any, data_cfg: "Mapping[str, Any] | None") -> int | None:
-    """The width a run reads its sources at: what its model declares (its own ``in_chans`` or its
-    ``builder_kwargs``' one), else what its data config records
-    (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`). ``None`` when neither states
-    it.
+def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, int]:
+    """The dimensions a run's model is built at, each handed to its builder under its own name.
+
+    ``in_chans`` is the band count the run's sources are read at, ``sizes["num_channels"]``
+    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). The one count is the one the ground
+    truth derives: ``num_classes``, the length of ``scope``'s map, for a scoped run; otherwise the
+    ``num_classes`` or ``num_ranks`` ``sizes`` carries, and none for a run whose ground truth
+    carries no count. Refuses by name a ``sizes`` recording no band count, and a second count.
     """
-    ms = model_source if isinstance(model_source, dict) else {}
-    bk = ms.get("builder_kwargs")
-    bk = bk if isinstance(bk, dict) else {}
-    value = ms.get("in_chans", bk.get("in_chans"))
-    if value is None and isinstance(data_cfg, Mapping):
-        value = data_cfg.get("num_channels")
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    from tcip_mcp.pipelines.data.datasets import GROUND_TRUTH_COUNTS
+
+    if sizes.get("num_channels") is None:
+        raise ValueError(
+            "this run records no band count (data.num_channels), so the width its model reads at "
+            "is unknown, and building at a guess would feed it something other than what it "
+            "trained on. Build from a run this platform trained, or state data.num_channels."
+        )
+    counts = [(name, int(sizes[name])) for name in GROUND_TRUTH_COUNTS
+              if sizes.get(name) is not None]
+    if scope.id_map:
+        counts.append(("num_classes", len(scope.id_map)))
+    if len(counts) > 1:
+        raise ValueError(
+            f"this run records two counts ({counts}): a model has one head size, the class map's "
+            "length for a scoped run and the one count its ground truth derives otherwise. Drop "
+            "the count the run's ground truth does not derive."
+        )
+    return {"in_chans": int(sizes["num_channels"]), **dict(counts)}
+
+
+def recorded_model_dims(config: "Mapping[str, Any]") -> dict[str, int]:
+    """:func:`model_dims` over what a run's config records on its data section: its ``scope`` and
+    its sizes. Refuses by name a run of a built-in loader's task that records no count its ground
+    truth derives (``num_ranks`` for an ordinal run)."""
+    from tcip_mcp.pipelines.data.datasets import _DATASET_MAP, stated_sizes
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    data_cfg = config.get("data") or {}
+    dims = model_dims(ClassScope.of(data_cfg), stated_sizes(data_cfg))
+    loader = None if data_cfg.get(DATASET_SOURCE_KEY) else _DATASET_MAP.get(run_task(config))
+    count = loader.ground_truth_count if loader is not None else None
+    if count is not None and count not in dims:
+        raise ValueError(
+            f"this {run_task(config)} run records no {count} (data.{count}), so the head its "
+            "model was built at is unknown. Build from a run this platform trained, whose "
+            "admission records it."
+        )
+    return dims
 
 
 def run_task(config: "Mapping[str, Any]") -> str:
-    """The task a run's config names: ``model_source.task``, else ``data.task``. Raises
-    ``ValueError`` when neither states one."""
-    task = ((config.get(MODEL_SOURCE_KEY) or {}).get("task")
-            or (config.get("data") or {}).get("task"))
+    """The task a run's config names, ``model_source.task``. Raises ``ValueError`` when it states
+    none."""
+    task = (config.get(MODEL_SOURCE_KEY) or {}).get("task")
     if not task:
         raise ValueError(
             "this config states no task: name it as model_source.task (detection, "
@@ -169,55 +195,53 @@ def run_task(config: "Mapping[str, Any]") -> str:
     return task
 
 
-def build_from_model_source(model_source: dict) -> Any:
-    """Import the agent's builder and call it. Registry-free; no ``exec``. Only ``builder`` is
-    required to construct the model; the rest of the schema is provenance / measurement metadata.
+def build_from_model_source(model_source: dict, dims: "Mapping[str, int]") -> Any:
+    """Import the agent's builder and call it with its ``builder_kwargs`` and ``dims``
+    (:func:`model_dims`). Only ``builder`` is required to construct the model.
+
+    ``model_source`` is held to :class:`~tcip_mcp.pipelines.schemas.ModelSourceSchema`, so a key
+    outside it (an ``in_chans`` among them) refuses by name. A ``builder_kwargs`` naming a
+    dimension (:data:`RESERVED_DIMS`) refuses by name, whether or not this run resolved it.
     """
-    if not isinstance(model_source, dict):
-        raise ValueError("model_source must be a dict")
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
+
+    ModelSourceSchema.model_validate(model_source)
     fn = import_source_builder(model_source)
     kwargs = model_source.get("builder_kwargs") or {}
-    if not isinstance(kwargs, dict):
-        raise ValueError("model_source.builder_kwargs must be a dict")
-    return fn(**kwargs)
+    restated = sorted(set(RESERVED_DIMS) & set(kwargs))
+    if restated:
+        raise ValueError(
+            f"model_source.builder_kwargs restates {restated}: the band count a run reads its "
+            f"sources at and the count its ground truth derives are the platform's to hand the "
+            f"builder, and a second value for one would build a model the run's own record does "
+            f"not describe. Drop {restated} from builder_kwargs."
+        )
+    return fn(**kwargs, **dims)
 
 
-def build_model(config_or_ckpt: dict) -> Any:
-    """Build a model from a training-config or checkpoint dict via its ``model_source`` builder."""
-    if not isinstance(config_or_ckpt, dict):
-        raise ValueError("build_model expects a config/checkpoint dict")
-    model_source = config_or_ckpt.get(MODEL_SOURCE_KEY)
+def build_model(config: "Mapping[str, Any]", dims: "Mapping[str, int]") -> Any:
+    """Build a model from a run config (a checkpoint's own ``config`` included) via its
+    ``model_source`` builder, at ``dims`` (:func:`model_dims`)."""
+    model_source = config.get(MODEL_SOURCE_KEY)
     if model_source:
-        return build_from_model_source(model_source)
+        return build_from_model_source(model_source, dims)
     raise ValueError("Config has no 'model_source'.")
 
 
-def resolve_contract_dims(config: dict, task: str, *, scope: "ClassScope",
-                          sizes: "Mapping[str, int]") -> dict | None:
-    """The dimensions a synthetic smoke batch is shaped at, or ``None`` when this run states no
-    width and the caller must smoke a real batch instead.
+def resolve_contract_dims(config: dict, task: str, dims: "Mapping[str, int]") -> dict:
+    """The dimensions a synthetic smoke batch is shaped at: the width and count the model is built
+    at (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and an ``img_size``.
 
-    Read from the same config the builder reads: ``img_size`` is the tile edge when detection
-    tiling is on (the real training input), else a safe non-tiny fallback that clears typical
-    stride-32 backbones.
-
-    ``sizes`` is what this run resolved for its own loaders
-    (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). The width is :func:`run_in_chans`
-    over it, and the count is ``scope``'s map for a scoped run and the resolved class or rank count
-    for ground truth carrying its own classes. A run that carries no count states none here. The +1
-    background offset lives only in the loader, never here.
+    ``img_size`` is the tile edge when detection tiling is on (the real training input), else a
+    safe non-tiny fallback that clears typical stride-32 backbones. The count is the one ``dims``
+    states.
     """
-    in_chans = run_in_chans(config.get(MODEL_SOURCE_KEY), sizes)
-    if in_chans is None:
-        return None
-    count = (len(scope.id_map) if scope.id_map
-             else sizes.get("num_classes", sizes.get("num_ranks")))
-
+    count = dims.get("num_classes", dims.get("num_ranks"))
     img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
     tiling = (config.get("data") or {}).get("tiling")
     if task == "detection" and isinstance(tiling, dict) and tiling.get("enabled", True) and tiling.get("tile_size"):
         img_size = int(tiling["tile_size"])
-    return {"in_chans": in_chans, "img_size": img_size,
+    return {"in_chans": dims["in_chans"], "img_size": img_size,
             **({} if count is None else {"num_classes": count})}
 
 
@@ -424,24 +448,25 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     return manifest
 
 
-def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = None) -> dict:
-    """Stamp a checkpoint payload with its ``model_source`` reference, kind, and experiment id.
+def stamp_model_ref(payload: dict, *, experiment_id: str | None = None) -> dict:
+    """Stamp a checkpoint payload with its kind and experiment id, read off the run config the
+    payload carries under ``config``, the one place its ``model_source`` is recorded.
 
     Uses ``setdefault``, so an explicit value the caller already put in ``payload`` wins.
     ``experiment_id`` is stamped only when known.
 
-    Refuses to stamp ``kind``/``model_source`` onto a payload with no ``STATE_DICT_KEY``.
+    Refuses to stamp ``kind`` onto a payload with no ``STATE_DICT_KEY``.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
+    config = payload["config"]
     if config.get(MODEL_SOURCE_KEY):
         if STATE_DICT_KEY not in payload:
             raise ValueError(
-                f"stamp_model_ref refuses to stamp {MODEL_SOURCE_KEY!r}/'kind' onto a payload "
-                f"with no {STATE_DICT_KEY!r}: a checkpoint sniffed as a loadable tcip module must "
-                "carry its weights."
+                f"stamp_model_ref refuses to stamp 'kind' onto a payload with no "
+                f"{STATE_DICT_KEY!r}: a checkpoint sniffed as a loadable tcip module must carry "
+                "its weights."
             )
-        payload.setdefault(MODEL_SOURCE_KEY, config[MODEL_SOURCE_KEY])
         payload.setdefault("kind", KIND_TCIP_MODULE)
     eid = experiment_id if experiment_id is not None else config.get("experiment_id")
     if eid is not None:

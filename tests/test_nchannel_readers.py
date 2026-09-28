@@ -5,7 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
 def test_pil_to_tensor_grayscale_and_multiband():
@@ -34,7 +34,7 @@ def test_build_dataset_grayscale_yields_one_channel(tmp_path):
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
     (tmp_path / "labels.csv").write_text("stem,label\na,0\n")
     ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
-                      stated={"num_classes": 2, "num_channels": 1})
+                      stated={"num_channels": 1})
     img, _ = ds[0]
     assert img.shape[0] == 1
 
@@ -55,13 +55,13 @@ def test_grayscale_classification_end_to_end(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
-    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
-                      stated={"num_classes": 2, "num_channels": 1})
+    ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
+                        stated={"num_classes": 2, "num_channels": 1})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                    "builder_kwargs": {"num_classes": 2, "in_chans": 1},
-                    "task": "classification", "in_chans": 1}
-    cfg = {"model_source": model_source, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
+                    "task": "classification"}
+    cfg = {"model_source": model_source, "data": data, "device": "cpu",
+           "stages": [{"freeze_to": -1, "epochs": 1}],
            "mixed_precision": False, "early_stopping": {"enabled": False}}
-    run = train(create_run(cfg, str(tmp_path / "out"), id="auto-run-39"), loader, task="classification")
+    run = train(create_run(cfg, str(tmp_path / "out"), id="auto-run-39"), loader)
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

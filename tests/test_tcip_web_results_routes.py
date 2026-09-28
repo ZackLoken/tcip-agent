@@ -118,6 +118,9 @@ def _phenology_fixture(
     ``confs`` maps a date string to the conf its own sidecar records, ``0.4`` for every date not
     named; a caller proving the per-date joined cell states two dates apart.
     """
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import complete_stamp, record_producing_run, write_bound_sidecar
@@ -134,7 +137,7 @@ def _phenology_fixture(
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     positive = "open" if "open" in id_map else None
     # A bare single-subject map is a detector bucket never assessed for any attribute.
-    attribute = "opening" if positive else None
+    scope = ClassScope(subject="bud", attribute="opening" if positive else None, id_map=id_map)
     # A covered-bucket key is relative to a dataset root, recognized by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
@@ -155,10 +158,10 @@ def _phenology_fixture(
                     {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
                      "labels": [id_map[s] + 1 for s in subjects],
                      "scores": [0.9] * detections, "width": 100, "height": 100},
-                    subject="bud", attribute=attribute, id_map=id_map)
+                    scope=scope)
                 assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                                 "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
-        sidecar: dict = {"id_map": id_map, "subject": "bud", "attribute": attribute}
+        sidecar: dict = {"scope": asdict(scope)}
         if validated:
             conf_value = (confs or {}).get(date_str, 0.4)
             sidecar.update({
@@ -433,7 +436,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "deliver_orthomosaic_plant_counts", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None,
+        acknowledgment=None,
         trait="stem_count", delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
         plant_mapping={
             "plant_registry": {"name": "orchard-block", "digest": "0" * 64},
@@ -449,7 +452,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "results.export_csv", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None,
+        acknowledgment=None,
         trait="bud_opening", delivery_kind="state_crossing_dates", project_root=tmp_path,
         plant_mapping={
             "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
@@ -930,22 +933,24 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
 def test_the_web_export_records_what_verification_found_in_the_datasets_own_log(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The audited arguments say what was asked for; this says which buckets stood behind the
-    numbers and which records answered for them, in the log that travels with the data. The same
-    event the MCP door emits, from the door that writes the same schema."""
+    """The audited arguments say what was asked for; the delivery's line in the log that travels
+    with the data names the delivery_events record that says which buckets stood behind the numbers
+    and which records answered for them. The same event the MCP door emits, from the door that
+    writes the same schema."""
+    from tcip_mcp.pipelines.resolution import read_delivery_events
+
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200, resp.text[:300]
 
+    (record,) = [r for r in read_delivery_events(tmp_path) if r["door"] == "results.export_csv"]
+    bindings = record["document_reconciliations"]["operating_point"]["bindings"]
+    assert set(bindings) == set(body["predictions_by_date"].values())
+    assert all(doc["ok"] and doc["record_digest"] for doc in bindings.values())
     emitted = tcip_store.read_log(audit_log_key(tmp_path / "ds")).records
-    assert emitted, "the delivery wrote nothing to the log of the dataset its buckets sit in"
-    events = [e for e in emitted if e["tool"] == "results.export_csv" and "verified_buckets" in e]
-    assert len(events) == 1, emitted
-    verified = events[0]["verified_buckets"]
-    assert set(verified) == set(body["predictions_by_date"].values())
-    assert all(v["verified"] for v in verified.values())
-    assert events[0]["record_digests"], events[0]
+    events = [e for e in emitted if e["tool"] == "delivery_event"]
+    assert [e["arguments"] for e in events] == [{"event_id": record["event_id"]}]
 
 
 def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
@@ -967,7 +972,6 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     assert resp.status_code == 200
     saved = tmp_path / "results_export" / "bud_delivery.csv"
     assert resp.headers["X-TCIP-Saved-To"] == str(saved)
-    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
 
     lines = resp.content.decode("utf-8").splitlines()
     header = lines[0].split(",")
@@ -1056,7 +1060,7 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
     assert isinstance(detail, dict), detail
     saved = tmp_path / "results_export" / "unaudited.csv"
     assert detail.get("error") == "audit_entry_not_written"
-    assert detail.get("committed") == {"saved_path": str(saved), "delivery_event_recorded": False}
+    assert detail.get("committed") == {"saved_path": str(saved)}
     assert "could not be written" in (detail.get("message") or "")
     assert saved.exists()
 
@@ -1065,7 +1069,8 @@ def test_export_csv_route_line_answers_409_after_the_library_line_lands(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The library's own delivery-binding line lands; the route's own `results.export_csv` line
-    is the one refused, so ``committed`` reports the delivery event as actually recorded."""
+    is the one refused, and the delivery's record stands beside the saved file."""
+    from tcip_mcp.pipelines.resolution import read_delivery_events
     from tcip_mcp import audit as audit_module
 
     real_append = audit_module.append
@@ -1085,8 +1090,8 @@ def test_export_csv_route_line_answers_409_after_the_library_line_lands(
     detail = resp.json()["detail"]
     saved = tmp_path / "results_export" / "route_line.csv"
     assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"]["saved_path"] == str(saved)
-    assert detail["committed"]["delivery_event_recorded"] is True
+    assert detail["committed"] == {"saved_path": str(saved)}
+    assert [r["door"] for r in read_delivery_events(tmp_path)] == ["results.export_csv"]
     assert saved.exists()
 
 
@@ -1101,6 +1106,7 @@ def _count_bucket(
 ) -> Path:
     """A per-image prediction bucket a per_image_count delivery reads: real prediction
     documents plus a real (optionally validated) ``operating_point.json``."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import complete_stamp, write_bound_sidecar
@@ -1113,9 +1119,9 @@ def _count_bucket(
             bucket / f"img{i}.json",
             {"boxes": [[j, 0, j + 4, 4] for j in range(count)],
              "labels": [1] * count, "scores": [0.9] * count, "width": 100, "height": 100},
-            subject="stem", attribute=None, id_map=_COUNT_ID_MAP)
-    sidecar: dict = {"id_map": _COUNT_ID_MAP, "images_dir": str(root / "images"), "trait": trait,
-                     "subject": "stem", "attribute": None,
+            scope=ClassScope(subject="stem", id_map=_COUNT_ID_MAP))
+    sidecar: dict = {"images_dir": str(root / "images"), "trait": trait,
+                     "scope": {"subject": "stem", "attribute": None, "id_map": _COUNT_ID_MAP},
                      "image_filenames": {f"img{i}": f"img{i}.png" for i in range(n_images)}}
     if validated:
         sidecar.update({
@@ -1174,7 +1180,6 @@ def test_export_count_csv_per_image_delivers_under_acknowledgment(
     assert resp.status_code == 200
     assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
     assert resp.headers["X-TCIP-Acknowledged-By"] == "user%3Atester"
-    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
     header = resp.text.splitlines()[0].split(",")
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     assert cells["acknowledged_by"] == "user:tester"
@@ -1215,7 +1220,7 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     assert isinstance(detail, dict), detail
     saved = tmp_path / "results_export" / "unaudited_counts.csv"
     assert detail.get("error") == "audit_entry_not_written"
-    assert detail.get("committed") == {"saved_path": str(saved), "delivery_event_recorded": False}
+    assert detail.get("committed") == {"saved_path": str(saved)}
     assert "could not be written" in (detail.get("message") or "")
     assert saved.exists()
 
@@ -1251,7 +1256,6 @@ def test_export_count_csv_route_line_answers_409_after_the_library_line_lands(
     assert detail["error"] == "audit_entry_not_written"
     committed = detail["committed"]
     assert committed["saved_path"] == str(saved)
-    assert committed["delivery_event_recorded"] is True
     assert saved.exists()
 
 
@@ -1393,11 +1397,8 @@ def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_conf
 ) -> None:
     """The core's own pre-check never reads a bucket's id_map (it runs before the bucket is
     touched); a subject a bucket's recorded id_map does not name is caught only by the writer's
-    own check, and answers 400 with the structured detail rather than a 500.
-
-    The stamp write rail refuses a detector pair whose recorded map disagrees with it, so this
-    inconsistent bucket (a stamp claiming "stem" over a map keyed "other") is seeded through the
-    store directly, past the rail, the way a pre-rail or hand-repaired stamp would arrive."""
+    own check, and answers 400 with the structured detail rather than a 500. The bucket's stamp is
+    rewritten to a map keyed "other" beside its "stem" subject."""
     from tcip_mcp.pipelines.resolution import sidecar_key
 
     _seed_count_meaning(tmp_path)  # confirms measured_subject="stem"
@@ -1405,7 +1406,7 @@ def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_conf
     key = sidecar_key(bucket, "operating_point")
     with tcip_store.transaction(key) as txn:
         current = txn.read(key, default={})
-        txn.write(key, {**current, "id_map": {"other": 0}})
+        txn.write(key, {**current, "scope": {**current["scope"], "id_map": {"other": 0}}})
     store.open_project(tmp_path.resolve())
     resp = _export_count(client, {
         "project_root": str(tmp_path),
@@ -1641,7 +1642,6 @@ def test_export_count_csv_orthomosaic_delivers_under_acknowledgment(
     assert resp.status_code == 200
     assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
     assert resp.headers["X-TCIP-Acknowledged-By"] == "user%3Atester"
-    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
     header = resp.text.splitlines()[0].split(",")
     rows = [dict(zip(header, line.split(","))) for line in resp.text.splitlines()[1:]]
     assert rows

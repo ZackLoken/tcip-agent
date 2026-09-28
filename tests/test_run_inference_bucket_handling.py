@@ -66,7 +66,7 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
     assert (data["width"], data["height"]) == (100, 100)
     anns = data["annotations"]
     assert len(anns) == 1
-    assert anns[0]["subject"] == "0"                   # label 1 -> id 0; no run id_map -> stringified id
+    assert anns[0]["subject"] == "bud"                 # label 1 -> id 0 -> the checkpoint's own map
     assert anns[0]["score"] == pytest.approx(0.9)      # confidence
     # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
     assert anns[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])

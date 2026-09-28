@@ -80,7 +80,8 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
 
     config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "builder_kwargs": {"init_weight": 0.0}, "task": "regression", "in_chans": 1},
+                         "builder_kwargs": {"init_weight": 0.0}, "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu", "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 2}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
@@ -90,7 +91,7 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     update_status("exp-trainer-source", "running")
     run = create_run(config, str(tmp_path / "out"), id="auto-run-37")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="regression", experiment_id="exp-trainer-source")
+                       experiment_id="exp-trainer-source")
     run_training_envelope(ctx)
 
     assert run.status == "completed", run.error
@@ -122,7 +123,8 @@ def _lifecycle_run(tmp_path, builder: str, experiment_id: str):
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=collate)
 
     config = {
-        "model_source": {"builder": builder, "task": "regression", "in_chans": 1},
+        "model_source": {"builder": builder, "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu", "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 3}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
@@ -132,7 +134,7 @@ def _lifecycle_run(tmp_path, builder: str, experiment_id: str):
     update_status(experiment_id, "running")
     run = create_run(config, str(tmp_path / "out"), id="auto-run-38")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="regression", experiment_id=experiment_id)
+                       experiment_id=experiment_id)
     run_training_envelope(ctx)
     return run
 

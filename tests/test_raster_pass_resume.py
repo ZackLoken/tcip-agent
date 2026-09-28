@@ -40,16 +40,16 @@ def test_a_recorded_identity_lacking_its_trait_differs_from_one_recording_no_tra
 
 
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
+    model_source = {"builder": "tests.bespoke_models:build_fixed_mask_instance_seg",
                     "task": "instance_seg"}
-    model = build_model({"model_source": model_source})
+    config = {"model_source": model_source,
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
     result = register_model(name="instance-seg-test-model", checkpoint_path=str(ckpt), config={})
     assert "error" not in result, result
     return str(ckpt)

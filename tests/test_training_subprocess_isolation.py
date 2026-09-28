@@ -4,6 +4,8 @@ specific concurrency/isolation gap rather than re-testing the whole subprocess p
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -61,14 +63,14 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
 
     root = tmp_path / "plain"
     images_dir, labels_dir = _document_dataset(root, subject="bud")
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-                "split": {"val_ratio": 0.5, "seed": 1}}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val("detection", data_cfg, None)
 
-    assert ClassScope.recorded_in(data_cfg) == ClassScope("bud", None, {"bud": 0})
+    assert ClassScope.of(data_cfg) == ClassScope("bud", None, {"bud": 0})
 
     _write_classes_json(root, subject="bud", attribute="opening", values=["open", "closed"])
-    assert ClassScope.recorded_in(data_cfg) == ClassScope("bud", None, {"bud": 0})
+    assert ClassScope.of(data_cfg) == ClassScope("bud", None, {"bud": 0})
 
 
 def test_an_attribute_scoped_run_records_the_attributes_own_map(tmp_path):
@@ -77,11 +79,12 @@ def test_an_attribute_scoped_run_records_the_attributes_own_map(tmp_path):
 
     images_dir, labels_dir = _document_dataset(
         tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-                "attribute": "opening", "split": {"val_ratio": 0.5, "seed": 1}}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "scope": {"subject": "bud", "attribute": "opening"},
+                "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val("detection", data_cfg, None)
 
-    assert ClassScope.recorded_in(data_cfg) == ClassScope(
+    assert ClassScope.of(data_cfg) == ClassScope(
         "bud", "opening", {"closed": 0, "open": 1})
 
 
@@ -103,7 +106,7 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_no_map(tmp_pat
                 "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val("semantic_seg", data_cfg, None)
 
-    assert ClassScope.recorded_in(data_cfg).id_map is None
+    assert ClassScope.of(data_cfg).id_map is None
 
 
 def test_mirror_data_section_writes_the_resolved_section_into_the_durable_config(tmp_path,
@@ -116,15 +119,14 @@ def test_mirror_data_section_writes_the_resolved_section_into_the_durable_config
 
     create_experiment("exp1", {"model_source": {"builder": "x:y"},
                                "data": {"images_dir": "img", "split": {"seed": 3}}})
-    data_cfg = {"images_dir": "img", "split": {"seed": 3, "resolved_group_by": "stem"}}
-    ClassScope("bud", "opening", {"closed": 0, "open": 1}).onto(data_cfg)
+    scope = ClassScope("bud", "opening", {"closed": 0, "open": 1})
+    data_cfg = {"images_dir": "img", "split": {"seed": 3, "resolved_group_by": "stem"},
+                "scope": asdict(scope)}
 
     _mirror_data_section("exp1", data_cfg)
 
     cfg = ts.read(config_key("exp1"))
-    assert cfg["data"]["id_map"] == {"closed": 0, "open": 1}
-    assert cfg["data"]["subject"] == "bud"
-    assert cfg["data"]["attribute"] == "opening"
+    assert ClassScope.of(cfg["data"]) == scope
     assert cfg["data"]["split"] == {"seed": 3}  # an unbound run's resolved block stays out
     assert cfg["model_source"] == {"builder": "x:y"}  # untouched sibling key
 
@@ -133,7 +135,7 @@ def test_mirror_data_section_writes_nothing_with_no_experiment_record(tmp_path, 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
 
-    _mirror_data_section("no_such_exp", {"subject": "bud"})
+    _mirror_data_section("no_such_exp", {"scope": {"subject": "bud"}})
 
 
 def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
@@ -240,9 +242,10 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
     def _cfg(experiment_id: str) -> dict:
         return {
             "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                             "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                             "builder_kwargs": {"min_size": 64, "max_size": 128},
                              "task": "detection"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
+            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                     "scope": {"subject": "bud"}},
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
             "experiment_id": experiment_id,
@@ -295,7 +298,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_sentinel(tmp_path):
     run = create_run({"training_source": "tests.test_training_subprocess_isolation:_bespoke_loop"}, str(tmp_path), id="run_ctx_cancel")
     (tmp_path / ".cancel_requested").touch()  # no cancel_event set anywhere, sentinel only
 
-    ctx = TrainContext(run=run, train_loader=None, experiment_id=None, task="detection")
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
     assert ctx.should_cancel() is True
 
     dispatch_train_body(ctx)

@@ -230,14 +230,9 @@ def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
 
 @pytest.fixture
 def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
-    """Give the seeded bud_opening spec a confirmed ``state_crossing_dates`` record in the same root.
-
-    The crossing delivery doors refuse a trait whose delivered number has no breeder-confirmed
-    meaning, so a test whose subject is the delivery itself seeds one here and goes on testing what
-    it was written to test. Requested alongside ``seed_bud_trait_spec`` rather than autouse, for
-    the same reason that one is not: a test of the refusal needs the root without a record in it.
-    The trait's own name is not the subject it measures, so the measured subject is named
-    explicitly rather than left to default to the trait name.
+    """Give the seeded bud_opening spec a confirmed ``state_crossing_dates`` record in the same
+    root, measuring the subject ``bud``. Requested alongside ``seed_bud_trait_spec``, never
+    autouse, so a test of the refusal gets a root without a record in it.
     """
     from tests._operationalization_fixtures import seed_confirmed_crossing
 
@@ -256,9 +251,9 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
     lbls.mkdir(exist_ok=True)
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "builder_kwargs": {}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls),
-                 "subject": DATA_DIR_SUBJECT},
+                 "scope": {"subject": DATA_DIR_SUBJECT}},
     }
 
 

@@ -19,6 +19,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
@@ -50,7 +51,7 @@ def test_registry_decodes_its_own_labels(tmp_path):
 
     # The loader's class ids are the assign_class_ids map, and the target decodes back to the name
     # its label carried: the registry reads its own labels without guessing.
-    assert ds.id_map == id_map
+    assert ds.scope.id_map == id_map
     inv = subject_registry.decode_class_ids(id_map)
     assert target["labels"].tolist() == [1], "the labeled image produced no target"
     assert all(inv[int(label) - 1] == "bud" for label in target["labels"].tolist())
@@ -74,14 +75,15 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
     # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
-    records, counts = admitted_documents(labels_dir, images_dir, subject="bud", date=None)
+    records, counts = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"),
+                                         date=None)
     assert [record.member for record in records] == ["img_001"]
     assert counts["annotated"] == 1
     assert counts["skipped_unannotated"] == 0
     assert counts["skipped_unconfirmed_empty"] == 0
 
 
-# (c) loader.num_classes == subject_registry.num_classes, one map.
+# (c) the admitted map's length == subject_registry.num_classes, one map.
 def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
@@ -97,8 +99,8 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     id_map = subject_registry.assign_class_ids(registry, "bud")
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
 
-    assert ds.num_classes == subject_registry.num_classes(registry, "bud")
-    assert len(id_map) == ds.num_classes == 1
+    assert ds.scope.id_map == id_map
+    assert len(id_map) == subject_registry.num_classes(registry, "bud") == 1
 
 
 # (d) confirmed_negative_names recovers negatives and refuses (not silent-empty) with no subject.
@@ -142,7 +144,7 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
         640, 480)
 
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
-    assert ds.num_classes == 1
+    assert len(ds.scope.id_map) == 1
     _img, target = ds[0]
     # Only the one legitimate bud box survives; the wrong-subject and geometry-less rows are gone.
     assert target["boxes"].shape[0] == 1
@@ -160,7 +162,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
     out = tmp_path / "pred.json"
     write_predictions_json(
         out, {"boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1], "width": 640, "height": 480},
-        created_by="model:x", subject="bud", attribute=None, id_map=id_map)
+        created_by="model:x", scope=ClassScope(subject="bud", id_map=id_map))
     preds = json_io.read_annotations(str(out))
     assert len(preds) == 1
     inv = subject_registry.decode_class_ids(id_map)
@@ -317,7 +319,8 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    records, _ = admitted_documents(labels_dir, images_dir, subject="bud", date=None)
+    records, _ = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"),
+                                    date=None)
     assert [record.member for record in records] == ["boxed", "geomless"]
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):

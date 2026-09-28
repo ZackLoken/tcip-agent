@@ -11,9 +11,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     dataset_hash,
-    default,
     derived,
-    validate_resolved_bundle,
 )
 from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
 from tests._regime_fixtures import tiled_regime
@@ -68,7 +66,7 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     stamp = {
         "validated": validated, "trait": "bud_opening",
         "operating_point": {"conf": {"value": conf, "validated_against": ref if validated else "false"}},
-        "subject": "bud", "attribute": None,
+        "scope": {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
     }
     if validated:
         write_prediction(d, "img_a")
@@ -368,65 +366,6 @@ def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
     assert dataset_hash(d) == before
 
 
-# --- validate_resolved_bundle live checks ---
-
-def test_validate_in_chans_vs_probed_bands():
-    b = ResolvedBundle("bud_opening", "h1", {
-        "in_chans": derived("in_chans", 3, derived_from="raster"),
-    })
-    assert validate_resolved_bundle(b, probed_channels=3) == []
-    issues = validate_resolved_bundle(b, probed_channels=4)
-    assert any("in_chans" in s for s in issues)
-
-
-def test_validate_eval_vs_inference_operating_point_mismatch():
-    def bundle(conf):
-        return ResolvedBundle("bud_opening", "h1", {
-            "conf": derived("conf", conf, requires_validation=True, validation_kind="annotations", derived_from="sweep",
-                            validated_against=VALIDATED_HELD_OUT),
-        })
-    ev, inf = bundle(0.25), bundle(0.5)
-    issues = validate_resolved_bundle(ev, inference_bundle=inf)
-    assert any("operating point" in s for s in issues)
-    assert validate_resolved_bundle(bundle(0.4), inference_bundle=bundle(0.4)) == []
-
-
-def test_validate_max_dets_divergence_is_a_named_exemption_not_a_silent_gap():
-    # A block bundle's max_dets and its export bundle's max_dets diverge by design (see this
-    # function's own docstring); a caller comparing exactly those two must exclude "max_dets".
-    block = ResolvedBundle("bud_opening", "h1", {"max_dets": derived("max_dets", 42, derived_from="p99")})
-    export = ResolvedBundle("bud_opening", "h1", {
-        "max_dets": default("max_dets", None, derived_from="block calibration: uncapped"),
-    })
-    issues = validate_resolved_bundle(block, inference_bundle=export)
-    assert any(i.startswith("max_dets:") for i in issues)
-
-
-def test_validate_export_refuses_unvalidated():
-    b = ResolvedBundle("bud_opening", "h1", {
-        "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
-                        validated_against=VALIDATED_FALSE),
-    })
-    issues = validate_resolved_bundle(b, for_export=True)
-    assert any("shippable" in s or "not validated" in s for s in issues)
-
-
-def test_validate_bundle_surfaces_all_firewall_issues_at_export():
-    # The realistic delivery-time call: a dataset-scoped calibration inherited across a different
-    # dataset while exporting, plus an in_chans mismatch. All three firewall checks must fire, so a
-    # regression dropping any one (e.g. the shippable_issues(target_dataset_hash=...) fold-in)
-    # can't slip past: each check is exercised in isolation elsewhere but never together.
-    b = ResolvedBundle("bud_opening", "AAAA", {
-        "in_chans": derived("in_chans", 3, derived_from="raster"),
-        "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
-                        validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="AAAA"),
-    })
-    issues = validate_resolved_bundle(b, probed_channels=4, target_dataset_hash="BBBB", for_export=True)
-    assert any("in_chans" in s for s in issues)       # channel mismatch
-    assert any("never inherit" in s for s in issues)  # dataset-scoped inherited across a hash
-    assert any("shippable" in s for s in issues)      # export refuses an unvalidated operating point
-
-
 # --- trait knowledge ---
 
 def test_bud_opening_trait_semantics():
@@ -516,7 +455,7 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
     d = tmp_path / "raw_bucket"
     write_sidecar(d, {"validated": False, "trait": None,
                       "operating_point": {"conf": {"validated_against": None}},
-                      "subject": None, "attribute": None})
+                      "scope": {"subject": None, "attribute": None, "id_map": None}})
 
     r = reconcile_operating_point_validity([str(d)], trait="bud_opening")
     assert r["validated"] == VALIDATED_FALSE

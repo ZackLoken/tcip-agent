@@ -73,7 +73,8 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
+        # the run's recorded scope
+        self.config: dict = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -92,8 +93,8 @@ def _calibrate(labels_dir, images_dir):
 def _classification_items(gt_dir, pred_dir):
     from tcip_mcp.tools.phenology_tools import _classification_items
 
-    return _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                                 positive_value="open", attribute="state")
+    return _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                 subject="bud", attribute="state", positive_value="open")
 
 
 # --- the reference reads refuse a directory of the model's own predictions --------------------

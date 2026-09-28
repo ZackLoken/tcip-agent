@@ -20,6 +20,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines import resolution
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import BUD_OPENING
@@ -57,9 +58,8 @@ def _write_sidecar(dir_path: Path, id_map: dict, *, dataset_root: Path, validate
         "validated": validated,
         "trait": "bud_opening",
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
-        "id_map": id_map,
         "experiment_id": "exp-77",
-        "subject": "bud", "attribute": "opening",
+        "scope": {"subject": "bud", "attribute": "opening", "id_map": id_map},
     }
     if validated:
         write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
@@ -210,9 +210,8 @@ def test_positive_detections_are_the_named_class_not_a_position_in_the_id_map(tm
         40, 24,
     )
 
-    scope = resolution.BucketScope(subject="bud", attribute="opening")
-    total, positive, unclassified = phenology.count_by_class(
-        p, SPARSE_ID_MAP, "open", scope=scope)
+    scope = ClassScope(subject="bud", attribute="opening", id_map=SPARSE_ID_MAP)
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
 
     assert (total, positive, unclassified) == (3, 2, 0)
 
@@ -230,15 +229,14 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, data={
+        "num_channels": 3,
+        "scope": {"id_map": dict(SPARSE_ID_MAP), "subject": "bud", "attribute": "state"}})
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (120, 80), (110, 130, 90)).save(images_dir / "P1_2026-03-05.png")
 
     class FakePredictor:
-        config = {"data": {"id_map": dict(SPARSE_ID_MAP), "subject": "bud",
-                           "attribute": "state"}}
-
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
@@ -258,11 +256,9 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     res = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
     assert "error" not in res, res
 
-    id_map = phenology.bucket_id_map(bucket)
-    assert id_map == SPARSE_ID_MAP
     scope = resolution.bucket_scope(bucket)
-    counts = phenology.count_by_class(
-        bucket / "P1_2026-03-05.json", id_map, "open", scope=scope)
+    assert scope is not None and scope.id_map == SPARSE_ID_MAP
+    counts = phenology.count_by_class(bucket / "P1_2026-03-05.json", "open", scope=scope)
     assert counts == (3, 2, 0)
 
 

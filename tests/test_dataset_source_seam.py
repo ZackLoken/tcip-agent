@@ -21,9 +21,9 @@ class _CountingDataset(Dataset):
     was built with. ``rows`` is the builder's own configuration, which a direct construction with
     no producer behind it stands on instead."""
 
-    def __init__(self, *, samples=None, id_map=None, rows=None, marker: str = "", **_ignored):
+    def __init__(self, *, samples=None, scope=None, rows=None, marker: str = "", **_ignored):
         self.samples = list(samples or [])
-        self.id_map = id_map
+        self.scope = scope
         self.rows = list(rows or [])
         self.marker = marker
 
@@ -77,7 +77,6 @@ DATASET_SOURCE = {
     "builder": "tests.test_dataset_source_seam:build_bespoke_ds",
     "builder_kwargs": {"marker": "bespoke", "rows": ["s0", "s1"]},
     "source_files": [__file__],
-    "task": "grape_bunch_count",
 }
 
 
@@ -103,6 +102,13 @@ def _admitted_samples(root: Path):
     return samples_over(images_dir, labels_dir, subject="leaf")
 
 
+def _scope():
+    """The class space :func:`_admitted_samples` admits its samples under."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    return ClassScope(subject="leaf", id_map={"leaf": 0})
+
+
 def test_build_dataset_routes_to_dataset_source(tmp_path: Path):
     """The factory routes a task no built-in loader covers to the agent's own builder, handing it
     the run's samples and nothing else; the builder's own configuration rides in
@@ -111,10 +117,11 @@ def test_build_dataset_routes_to_dataset_source(tmp_path: Path):
 
     samples = _admitted_samples(tmp_path / "ds")
     ds = build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                       sizes={}, transforms=None)
+                       sizes={}, scope=_scope(), transforms=None)
 
     assert isinstance(ds, _CountingDataset)
     assert ds.samples == list(samples)       # the producer's own membership, unchanged
+    assert ds.scope == _scope()              # the class space they were admitted under, whole
     assert ds.rows == ["s0", "s1"]           # the builder's own configuration, from its own kwargs
     assert ds.marker == "bespoke"            # builder_kwargs applied
     # The platform states nothing about a dataset it did not build, and reads nothing off it.
@@ -137,34 +144,32 @@ def test_a_bespoke_builder_is_handed_only_what_the_producer_named(tmp_path: Path
                     {"subject": "leaf"}):
         with pytest.raises(ValueError, match="was given"):
             build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                          sizes={}, **unowned)
+                          sizes={}, scope=_scope(), **unowned)
 
-    # A size the platform resolved is refused beside a builder that sizes its own dataset.
+    # A tiling is refused beside a builder that composes its own.
     with pytest.raises(ValueError, match="beside a dataset_source"):
         build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                      sizes={"num_channels": 3})
+                      sizes={"num_channels": 3}, scope=_scope(), tiling={"enabled": True})
 
     # Admits valid work: the producer's own samples and class space reach the builder unchanged.
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
     built = build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE, samples=samples,
-                          sizes={}, scope=ClassScope(id_map={"leaf": 0}), transforms=None)
+                          sizes={}, scope=_scope(), transforms=None)
     assert isinstance(built, _CountingDataset)
-    assert built.samples == list(samples) and built.id_map == {"leaf": 0}
+    assert built.samples == list(samples) and built.scope == _scope()
 
 
 def test_builder_kwargs_may_not_restate_what_the_producer_named():
-    """``samples`` and ``id_map`` are the producer's, and ``task``/``transforms`` the run's: a
+    """``samples`` and ``scope`` are the producer's, and ``task``/``transforms`` the run's: a
     builder given a second value for one of them would build over membership or a class space the
     run's own record does not describe, so the seam refuses it by name."""
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
-    for reserved in ("samples", "id_map", "task", "transforms"):
+    for reserved in ("samples", "scope", "task", "transforms"):
         with pytest.raises(ValueError, match="restates"):
             build_from_dataset_source(
                 {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
                  "builder_kwargs": {reserved: "foreign"}},
-                samples=[], id_map={"admitted": 0}, task="detection", transforms=None)
+                samples=[], scope=_scope(), task="detection", transforms=None)
 
 
 def test_known_task_registry_stays_the_default(tmp_path: Path):
@@ -172,7 +177,8 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
     # No dataset_source -> the closed-registry refusal stays the honest signal for a bad name.
     with pytest.raises(ValueError, match="Unknown task"):
-        build_dataset("grape_bunch_count", samples=_admitted_samples(tmp_path / "ds"), sizes={})
+        build_dataset("grape_bunch_count", samples=_admitted_samples(tmp_path / "ds"), sizes={},
+                      scope=_scope())
 
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
@@ -186,20 +192,20 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
     required = {name for name, p in
                 inspect.signature(build_from_dataset_source).parameters.items()
                 if p.default is inspect.Parameter.empty}
-    assert required == {"dataset_source", "task", "samples", "id_map", "transforms"}
+    assert required == {"dataset_source", "task", "samples", "scope", "transforms"}
 
     samples = _admitted_samples(tmp_path / "ds")
     ds = build_from_dataset_source(
         {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
          "builder_kwargs": {"marker": "pinned"}},
-        task="grape_bunch_count", samples=samples, id_map=None, transforms=None)
+        task="grape_bunch_count", samples=samples, scope=_scope(), transforms=None)
     assert ds.marker == "pinned" and ds.samples == list(samples)
 
     with pytest.raises(ValueError, match="builder_kwargs must be a dict"):
         build_from_dataset_source(
             {"builder": "tests.test_dataset_source_seam:build_bespoke_ds",
              "builder_kwargs": [1, 2]},
-            task="grape_bunch_count", samples=samples, id_map=None, transforms=None)
+            task="grape_bunch_count", samples=samples, scope=_scope(), transforms=None)
 
 
 def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_path: Path):
@@ -208,10 +214,10 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     missing key, the one refusal every route shares."""
     from tcip_mcp.tools.training_tools import preflight_config
 
-    data: dict = {"dataset_source": DATASET_SOURCE, "task": "grape_bunch_count"}
+    data: dict = {"dataset_source": DATASET_SOURCE}
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detector",
-                         "builder_kwargs": {"gt_boxes_wh": [(10, 10)], "num_classes": 1},
+                         "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
                          "task": "grape_bunch_count"},
         "data": data,
         "batch_size": 1,
@@ -225,7 +231,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     root = tmp_path / "ds"
     _admitted_samples(root)
     located_data = {**data, "images_dir": str(root / "images"),
-                    "labels_dir": str(root / "annotations"), "subject": "leaf"}
+                    "labels_dir": str(root / "annotations"), "scope": {"subject": "leaf"}}
     admitted = preflight_config({**config, "data": located_data}, smoke=False)
     assert admitted["issues"] == [], admitted["issues"]
 

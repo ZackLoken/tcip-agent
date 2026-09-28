@@ -798,11 +798,14 @@ def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
     """A geometry-less annotation is a whole-image rating, not a detection or segmentation target:
     it has no box to train or match on, so it takes no class id, and it carries no attribute gap."""
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     path = tmp_path / "rating.json"
     write_annotations(path, [Annotation(subject="bud", attributes={"vigor": "high"})], 10, 10)
-    assert json_det_targets(str(path), "bud", None, {"bud": 0})[0]["boxes"] == []
-    target, n_unlabeled = json_det_targets(str(path), "bud", "opening", {"closed": 7, "open": 3})
+    assert json_det_targets(
+        str(path), ClassScope(subject="bud", id_map={"bud": 0}))[0]["boxes"] == []
+    target, n_unlabeled = json_det_targets(str(path), ClassScope(
+        subject="bud", attribute="opening", id_map={"closed": 7, "open": 3}))
     assert target["boxes"] == [] and n_unlabeled == 0
 
 

@@ -15,7 +15,7 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 BUD = "bud"
 
@@ -123,9 +123,9 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(tmp_path
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("stem,rank\ns0,0\ns1,2\ns2,5\n", encoding="utf-8")
 
-    ds = dataset_over("ordinal", str(images), str(csv_path))
+    ds, data = run_over("ordinal", str(images), str(csv_path))
     assert len(ds) == 3
-    assert ds.num_classes == 6  # the run's own rank count, once, off the table it was handed
+    assert data["num_ranks"] == 6  # the run's own rank count, once, off the table it was handed
     for idx, expected_rank in enumerate([0, 2, 5]):
         _img, target = ds[idx]
         assert target["ranks"] == expected_rank

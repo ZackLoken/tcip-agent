@@ -300,9 +300,9 @@ def test_gui_driving_tools_have_one_home():
 
 
 def test_checkpoint_marker_keys_have_one_home():
-    """Structural (AST-only, no import of the modules under test): every reader of the two
-    checkpoint payload marker keys, the importable model reference and the weights, spells them
-    only through ``model_build.MODEL_SOURCE_KEY``/``STATE_DICT_KEY``, never the bare
+    """Structural (AST-only, no import of the modules under test): every reader of the run
+    config's importable model reference and of the checkpoint's weights spells them only
+    through ``model_build.MODEL_SOURCE_KEY``/``STATE_DICT_KEY``, never the bare
     ``"model_source"``/``"model_state_dict"`` literal. The literal scan covers every load shape
     the key could still hide behind: a ``.get(``/``.pop(``/``.setdefault(`` call, a subscript, or
     an ``in``/``not in`` membership test. A reader importing the constant under a local
@@ -315,8 +315,6 @@ def test_checkpoint_marker_keys_have_one_home():
         "model_source": ("MODEL_SOURCE_KEY", {
             "experiments.py": _module_path("experiments.py"),
             "tools/training_tools.py": _module_path("tools/training_tools.py"),
-            "pipelines/training/generic_trainer.py":
-                _module_path("pipelines/training/generic_trainer.py"),
             "pipelines/inference/generic_predictor.py":
                 _module_path("pipelines/inference/generic_predictor.py"),
             "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),

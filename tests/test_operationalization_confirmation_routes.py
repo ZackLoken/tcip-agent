@@ -887,7 +887,7 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
 
     record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None, trait=STATEMENT_TRAIT,
+        acknowledgment=None, trait=STATEMENT_TRAIT,
         delivery_kind=PER_IMAGE_COUNT, project_root=tmp_path,
     )
 
@@ -946,7 +946,6 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_
                 "plant_csvs_unverified": [],
                 "images_unattributed_scope": "delivered_dates",
             },
-            "documents": {},
             "produced_at": "2026-02-03T12:00:00+00:00",
         },
         expect=ts.Version.ABSENT,
@@ -988,7 +987,7 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
 
     record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None, trait=STATEMENT_TRAIT,
+        acknowledgment=None, trait=STATEMENT_TRAIT,
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=disclosure,
     )
 

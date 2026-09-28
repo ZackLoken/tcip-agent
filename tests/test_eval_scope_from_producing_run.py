@@ -1,12 +1,13 @@
-"""Evaluating by run id reads ground truth through the scope the run trained with.
+"""Evaluating by run id reads ground truth through the scope the run's checkpoint records.
 
 Labels are stored by subject name in one file per image, so which subject the evaluation reads is
-what decides the counts it scores. When the caller names no subject, the producing run's own config
-supplies it; nothing else can, and a wrong scope produces a confident metric for the wrong object.
+what decides the counts it scores. The checkpoint's own recorded class space, its map included,
+is the one that supplies it; a wrong scope produces a confident metric for the wrong object.
 """
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -41,19 +42,22 @@ def _two_subject_dataset(root: Path) -> tuple[Path, Path]:
 
 def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
         tmp_path: Path, monkeypatch) -> None:
-    """With no caller-supplied subject, the evaluation dataset reads the subject the run trained
-    on, so the ground truth it scores against holds that subject's objects and no others."""
+    """The evaluation dataset reads the subject the run's checkpoint records, so the ground truth
+    it scores against holds that subject's objects and no others."""
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._producer_fixtures import admit_over
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
-    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": "leaf"}}, str(tmp_path / "runs"), id="auto-run-28")
+    scope = admit_over(images_dir, labels_dir, subject="leaf").scope
+    data = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "num_channels": 3,
+            "scope": asdict(scope)}
+    run = create_run({"data": data}, str(tmp_path / "runs"), id="auto-run-28")
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, data=data,
                           filename="model_best.pt")
 
     captured: dict = {}
@@ -68,38 +72,6 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     assert "error" not in res, res
 
     dataset = captured["ds"]
-    assert dataset.subject == "leaf"
+    assert dataset.scope == scope
     assert len(dataset) == 3
     assert len(dataset[0][1]["boxes"]) == 5  # the leaves, not the two buds on the same image
-
-
-def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
-        tmp_path: Path, monkeypatch) -> None:
-    """Reuse never overrides an explicit scope: evaluating the same run against another subject
-    stays possible, and reads that subject's ground truth."""
-    import tcip_mcp.pipelines.training.eval_runners as runners
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
-    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                               "subject": "leaf"}}, str(tmp_path / "runs"), id="auto-run-29")
-    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
-                          filename="model_best.pt")
-
-    captured: dict = {}
-
-    def _fake(ckpt, model, loader, device, output_dir, **kw):
-        captured["ds"] = loader.dataset
-        return {"eval_regime": "tile-level"}
-
-    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-
-    res = evaluate_model(run.id, str(images_dir), str(labels_dir),
-                         subject="bud")
-    assert "error" not in res, res
-    assert captured["ds"].subject == "bud"
-    assert len(captured["ds"][0][1]["boxes"]) == 2

@@ -67,10 +67,10 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> tuple[Path, Path]:
 def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "builder_kwargs": {"min_size": 64, "max_size": 96},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": "bud", "auto_val": False},
+                 "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
@@ -246,10 +246,10 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_diverging_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "builder_kwargs": {"min_size": 64, "max_size": 96},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": "bud", "auto_val": False},
+                 "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }

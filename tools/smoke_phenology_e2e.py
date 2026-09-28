@@ -42,6 +42,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from tcip_mcp.dataset_layout import label_filename  # noqa: E402
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.export import write_predictions_json  # noqa: E402
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
@@ -74,6 +75,7 @@ FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
 SUBJECT = "bud"
 ATTRIBUTE = "opening"
 ID_MAP = {"closed": 0, "open": 1}
+SCOPE = ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
 N_DETECTIONS = 10
 
 _failures = 0
@@ -208,15 +210,14 @@ def main() -> int:
                     write_predictions_json(
                         preds_root / date / label_filename(stem),
                         _pred_result(n_open, N_DETECTIONS, width=8, height=8), None,
-                        subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP,
+                        scope=SCOPE,
                     )
                 # The bucket's own recorded scope and id_map, the shape run_inference stamps,
                 # written through the store so a database-bound backend's reader can see it.
                 stamp = operating_point_stamp(
                     {"conf": {"value": 0.5, "source": "default"}}, slicing=None,
                     validated=False, validated_by=None, tile_size_validated=None,
-                    shippable_issues=[], id_map=ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE,
-                    trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,
+                    shippable_issues=[], scope=SCOPE, trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,
                     experiment_id=None, images_dir=str(images_root / date), raster_path=None,
                     produced_at=datetime.now(timezone.utc).isoformat(),
                 )

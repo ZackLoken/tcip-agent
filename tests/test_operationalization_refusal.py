@@ -974,9 +974,8 @@ def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
     bucket = tmp_path / "ds" / "predictions" / "run"
     bucket.mkdir(parents=True)
     subject = next(iter(id_map)) if len(id_map) == 1 else None
-    write_sidecar(bucket, complete_stamp({"validated": False, "id_map": id_map,
-                                         "subject": subject, "attribute": None}),
-                  "operating_point")
+    write_sidecar(bucket, complete_stamp({"validated": False, "scope": {
+        "subject": subject, "attribute": None, "id_map": id_map}}), "operating_point")
     return str(bucket)
 
 
@@ -1001,10 +1000,8 @@ def _validated_bucket(
         "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
                                         "validation_kind": "annotations",
                                         "validated_against": VALIDATED_HELD_OUT}},
-        "subject": subject, "attribute": None,
+        "scope": {"subject": subject, "attribute": None, "id_map": id_map},
     }
-    if id_map is not None:
-        stamp["id_map"] = id_map
     write_bound_sidecar(bucket, stamp, document=document, dataset_root=root)
     return str(bucket)
 

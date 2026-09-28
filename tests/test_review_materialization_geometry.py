@@ -14,7 +14,11 @@ import json
 from PIL import Image
 
 from tcip_annotation import json_io
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.feedback.materialize import materialize_dataset, partition_review_verdicts
+
+BARE = ClassScope()
+"""A review of a bucket with no stamp, whose caller states no subject."""
 
 
 def _image(images_dir, name: str, size) -> None:
@@ -47,7 +51,7 @@ def test_positive_boxes_denormalize_against_each_axis_extent(tmp_path):
         "tall.png": _completed([_accepted("bud", [0.25, 0.6, 0.5, 0.2])]),
     }}
 
-    materialize_dataset(state, str(src), str(out))
+    materialize_dataset(state, str(src), str(out), scope=BARE)
 
     wide = json_io.read_annotations(str(out / "annotations" / "wide.json"))
     assert len(wide) == 1
@@ -73,7 +77,7 @@ def test_an_accepted_crowd_region_materializes_as_a_crowd_region(tmp_path):
     crowd = {**_accepted("bur", [0.75, 0.75, 0.4, 0.4]), "iscrowd": True}
     state = {"image": {"c.png": _completed([_accepted("bur", [0.15, 0.15, 0.2, 0.2]), crowd])}}
 
-    materialize_dataset(state, str(src), str(out))
+    materialize_dataset(state, str(src), str(out), scope=BARE)
 
     got = json_io.read_annotations(str(out / "annotations" / "c.json"))
     assert [a.iscrowd for a in got] == [False, True]
@@ -89,7 +93,7 @@ def test_human_edited_box_takes_precedence_over_prediction(tmp_path):
     src = tmp_path / "src"
     _image(src, "e.png", (100, 50))
     out = tmp_path / "out"
-    materialize_dataset({"image": {"e.png": _completed([entry])}}, str(src), str(out))
+    materialize_dataset({"image": {"e.png": _completed([entry])}}, str(src), str(out), scope=BARE)
 
     anns = json_io.read_annotations(str(out / "annotations" / "e.json"))
     assert len(anns) == 1
@@ -109,7 +113,7 @@ def test_a_degenerate_positive_box_is_reported_by_name_not_raised(tmp_path):
         "good.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.3])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=BARE)
 
     assert r["positive"] == 1
     assert len(r["boundary_refused"]) == 1
@@ -136,7 +140,7 @@ def test_box_counts_track_every_positive_not_every_image(tmp_path):
         "none.png": _completed([_rejected("bud", [0.3, 0.3, 0.1, 0.1])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=BARE)
     assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (2, 1, 4)
 
     import tcip_store
@@ -162,14 +166,14 @@ def test_unreviewed_images_stay_out_of_the_materialized_set(tmp_path):
     }}
 
     strict = tmp_path / "strict"
-    r = materialize_dataset(state, str(src), str(strict), only_completed=True)
+    r = materialize_dataset(state, str(src), str(strict), scope=BARE, only_completed=True)
     assert r["positive"] == 1
     assert (strict / "annotations" / "done.json").is_file()
     assert not (strict / "annotations" / "midway.json").exists()
     assert not (strict / "images" / "midway.png").exists()
 
     loose = tmp_path / "loose"
-    assert materialize_dataset(state, str(src), str(loose))["positive"] == 2
+    assert materialize_dataset(state, str(src), str(loose), scope=BARE)["positive"] == 2
     assert (loose / "annotations" / "midway.json").is_file()
 
 
@@ -186,12 +190,13 @@ def test_hard_negative_inclusion_follows_the_caller_request(tmp_path):
     }}
 
     kept = tmp_path / "kept"
-    r = materialize_dataset(state, str(src), str(kept), include_hard_negatives=True)
+    r = materialize_dataset(state, str(src), str(kept), scope=BARE, include_hard_negatives=True)
     assert (r["positive"], r["hard_negative"], r["skipped"]) == (1, 2, 0)
     assert json.loads((kept / "annotations" / "neg_one.json").read_text())["annotations"] == []
 
     dropped = tmp_path / "dropped"
-    r = materialize_dataset(state, str(src), str(dropped), include_hard_negatives=False)
+    r = materialize_dataset(state, str(src), str(dropped), scope=BARE,
+                            include_hard_negatives=False)
     assert (r["positive"], r["hard_negative"], r["skipped"]) == (1, 0, 2)
     assert not (dropped / "annotations" / "neg_one.json").exists()
     assert not (dropped / "annotations" / "neg_two.json").exists()

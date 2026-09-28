@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 torch = pytest.importorskip("torch")
 import torch.nn as nn
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
 # ====================================================================
@@ -31,8 +31,8 @@ class TestDatasets:
         csv_path = tmp_path / "labels.csv"
         csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
 
-        ds = dataset_over("classification", str(images_dir), str(csv_path))
-        assert ds.num_classes == 2
+        ds, data = run_over("classification", str(images_dir), str(csv_path))
+        assert data["num_classes"] == 2
         assert ds.num_samples == 4
         assert ds.task_type == "classification"
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tcip_mcp.cli import doctor
 from tcip_mcp.pipelines.data.selection import (
-    Sample, Selection, read_selection, selection_key, write_selection,
+    ClassScope, Sample, Selection, read_selection, selection_key, write_selection,
 )
 from tcip_mcp.tools.data_tools import scan_dataset, draw_splits
 
@@ -142,8 +142,8 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     drawn = read_selection(out)
     assert drawn.counts() == {k: v for k, v in result["splits"].items()}
     assert all(drawn.counts()[side] for side in ("train", "val", "calibration"))
-    assert drawn.subject == "bud"
-    assert drawn.attribute is None
+    assert drawn.scope.subject == "bud"
+    assert drawn.scope.attribute is None
     assert drawn.dataset_fingerprint is not None
     for sample in drawn.samples:
         assert Path(sample.source).is_file()
@@ -835,7 +835,7 @@ def test_draw_splits_attribute_scoped_selection_holds_only_assessed_samples(tmp_
     assert "error" not in result, result
     assert result["total_stems"] == 4
     drawn = read_selection(out)
-    assert drawn.attribute == "condition"
+    assert drawn.scope.attribute == "condition"
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {
         "assessed_a", "assessed_b", "assessed_c", "assessed_d"}
 
@@ -1092,7 +1092,7 @@ def _one_sample_selection(source: str = "images/a.jpg", label: str = "annotation
     return Selection(
         samples=(Sample(member=Path(label).stem, source=source, ground_truth=label, group=group,
                         side=side, confirmation_bucket="leaf/2-11-26"),),
-        subject="leaf", id_map={"leaf": 0}, seed=1, group_by="stem",
+        scope=ClassScope(subject="leaf", id_map={"leaf": 0}), seed=1, group_by="stem",
     )
 
 
@@ -1103,7 +1103,7 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
 
     drawn = read_selection(out)
 
-    assert drawn.subject == "leaf"
+    assert drawn.scope == ClassScope(subject="leaf", id_map={"leaf": 0})
     assert drawn.seed == 1
     assert [s.identity for s in drawn.samples] == ["images/a.jpg"]
 

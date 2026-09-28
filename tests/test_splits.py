@@ -130,7 +130,7 @@ def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_dir
     foreground groups under the labels directory, never the whole directory scan: writing a
     selection refuses a zero calibration_ratio by name, so that fallback names an action no
     caller can take."""
-    from tcip_mcp.pipelines.data.selection import Sample, Selection
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     labels_dir = tmp_path / "annotations"
@@ -140,7 +140,7 @@ def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_dir
                ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
                confirmation_bucket="leaf/2026-03-01")
         for stem, side in (("a", "train"), ("b", "val"), ("c", "calibration"))
-    ), seed=0, group_by="stem")
+    ), seed=0, group_by="stem", scope=ClassScope(subject="leaf"))
 
     # The one calibration member's document carries no foreground of the draw's own subject, so
     # the universe holds no foreground group and the floor refuses.
@@ -148,7 +148,7 @@ def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_dir
 
     json_io.write_annotations(labels_dir / "c.json", [], 16, 16, keep_empty=True)
     with pytest.raises(ValueError) as exc_info:
-        selection_calibration_universe(selection, labels_dir)
+        selection_calibration_universe(selection, labels_dir, selection.scope)
     message = str(exc_info.value)
     assert "whole directory" not in message
     assert "calibration_ratio" in message
@@ -471,11 +471,12 @@ def _leaf_dataset(root, *, date: str | None):
 
 
 def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):
-    """A caller passing a checkpoint's stamped ``attribute=""`` means "no attribute", so every
-    record of the subject counts; reading it as a key no annotation carries would score every
-    stem zero and starve the minimum-foreground pass."""
+    """A scope stated with ``attribute=""`` means "no attribute", so every record of the subject
+    counts; reading it as a key no annotation carries would score every stem zero and starve the
+    minimum-foreground pass."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.splits import count_label_lines
 
     labels_dir = tmp_path / "annotations"
@@ -484,7 +485,7 @@ def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):
         labels_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5))], 32, 32)
 
     document = labels_dir / "a.json"
-    assert count_label_lines(document, subject="leaf", attribute="") == 1
-    assert count_label_lines(document, subject="", attribute="") == 1
-    assert count_label_lines(document, subject="leaf", attribute="condition") == 0
+    assert count_label_lines(document, ClassScope(subject="leaf", attribute="")) == 1
+    assert count_label_lines(document, ClassScope(subject="", attribute="")) == 1
+    assert count_label_lines(document, ClassScope(subject="leaf", attribute="condition")) == 0
 

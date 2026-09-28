@@ -118,7 +118,8 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 
-    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg")
+    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
+                      dims={"in_chans": 3, "num_classes": 2})
 
     assert "loss" in result
     for key in ("mIoU", "dice", "pixel_acc", "per_class_iou", "per_class_dice"):

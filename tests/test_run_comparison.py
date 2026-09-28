@@ -59,7 +59,7 @@ def test_compare_experiments_reports_task_and_subject_from_config(tmp_path, monk
 
     create_experiment("exp-task-subject", {
         "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"subject": "bud"},
+        "data": {"scope": {"subject": "bud"}},
     })
 
     c = compare_experiments(["exp-task-subject"], stale_seconds=600.0)["experiments"][0]
@@ -205,7 +205,8 @@ def test_status_error_names_a_diverged_run_reason(tmp_path, monkeypatch):
 
     config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model",
-                         "task": "regression", "in_chans": 1},
+                         "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu", "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 3}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
@@ -215,7 +216,7 @@ def test_status_error_names_a_diverged_run_reason(tmp_path, monkeypatch):
     update_status("exp-diverged-cmp", "running")
     run = create_run(config, str(tmp_path / "out"), id="exp-diverged-cmp")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=None,
-                       task="regression", experiment_id="exp-diverged-cmp")
+                       experiment_id="exp-diverged-cmp")
     run_training_envelope(ctx)
 
     status = read_member(status_key("exp-diverged-cmp"), {})

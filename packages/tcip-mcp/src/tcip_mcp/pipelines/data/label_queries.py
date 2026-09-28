@@ -44,20 +44,18 @@ def resolved_subjects_path(dataset_dir) -> Path | None:
     return Path(cp) if cp is not None and Path(cp).is_file() else None
 
 
-def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | None):
-    """``(registry, id_map)`` for a training scope from the dataset's ``subjects.json``, through
-    :func:`subject_registry.assign_class_ids`.
+def resolve_registry_id_map(labels_dir, scope: "ClassScope"):
+    """``(registry, id_map)`` for ``scope``'s subject and attribute from the dataset's
+    ``subjects.json``, through :func:`subject_registry.assign_class_ids`. ``scope`` names its
+    subject.
 
-    A plain single-class detector (``attribute`` is ``None``) needs no registry file: its map is
-    derived from a synthesized single-subject registry. Attribute classification needs the registry
-    to order its values, and refuses when there is none. A scope naming no subject is refused
-    through :meth:`~tcip_mcp.pipelines.data.selection.ClassScope.named_subject`.
+    A plain single-class detector (no attribute) needs no registry file: its map is derived from a
+    synthesized single-subject registry. Attribute classification needs the registry to order its
+    values, and refuses when there is none.
     """
     from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.selection import ClassScope
 
-    scope = ClassScope.recorded_in({"subject": subject, "attribute": attribute})
-    subject, attribute = scope.named_subject(f"the run over {labels_dir}"), scope.attribute
+    subject, attribute = cast(str, scope.subject), scope.attribute
     cp = resolved_subjects_path(labels_dir)
     if cp is not None:
         registry = subject_registry.read_registry(cp)
@@ -71,20 +69,34 @@ def resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | No
     return registry, subject_registry.assign_class_ids(registry, subject, attribute)
 
 
-def json_det_targets(path, subject, attribute, id_map,
+def stated_scope(labels_dir, subject: str | None, attribute: str | None) -> "ClassScope":
+    """A fresh statement of ``subject`` and ``attribute`` over ``labels_dir``, given the map that
+    dataset's registry assigns them (:func:`resolve_registry_id_map`); no subject states the empty
+    class space and reads no registry."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    stated = ClassScope(subject=subject, attribute=attribute)
+    if stated.subject is None:
+        return stated
+    return ClassScope(subject=subject, attribute=attribute,
+                      id_map=resolve_registry_id_map(labels_dir, stated)[1])
+
+
+def json_det_targets(path, scope: "ClassScope",
                      reads: Callable[[Any], bool] = box_derivable):
-    """``(target, n_unlabeled)`` for one image from the name-based per-image JSON.
+    """``(target, n_unlabeled)`` for one image from the name-based per-image JSON, read under
+    ``scope``, an admitted document class space.
 
     ``target`` is the detection target shape, ``{"boxes", "labels", "iscrowd"}`` as parallel lists
     (pixel xyxy, 1-indexed label, crowd flag), and ``"geometry"``, each row's own geometry, which a
-    mask is rasterized from. Filters to ``subject`` and the geometry the caller reads (``reads``, a
-    loader's own ``reads_geometry``; :func:`~tcip_annotation.state.box_derivable` unless stated),
-    then maps each kept annotation to its 0-indexed id via ``id_map``, +1 for background. An
-    annotation the registry cannot decode raises.
+    mask is rasterized from. Filters to the scope's subject and the geometry the caller reads
+    (``reads``, a loader's own ``reads_geometry``; :func:`~tcip_annotation.state.box_derivable`
+    unless stated), then maps each kept annotation to its 0-indexed id via the scope's map, +1 for
+    background. An annotation the map cannot decode raises.
 
-    ``n_unlabeled`` counts instances of ``subject`` never assessed for ``attribute`` yet, excluded
-    from ``boxes``/``labels`` rather than raising; a caller excludes the whole image when it is
-    above zero.
+    ``n_unlabeled`` counts instances of the subject never assessed for the scope's attribute yet,
+    excluded from ``boxes``/``labels`` rather than raising; a caller excludes the whole image when
+    it is above zero.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
@@ -98,7 +110,8 @@ def json_det_targets(path, subject, attribute, id_map,
         geometry = cast(BBox | Polygon, a.geometry)
         # allow_unlabeled=True: an instance never assessed for `attribute` yet is a soft, expected
         # gap, not a decode bug, must not raise and abort the whole read.
-        cid = json_io.target_class_id(a, subject, attribute, id_map, allow_unlabeled=True)
+        cid = json_io.target_class_id(a, cast(str, scope.subject), scope.attribute,
+                                      cast(dict, scope.id_map), allow_unlabeled=True)
         if cid == json_io.UNLABELED:
             n_unlabeled += 1
             continue
@@ -146,18 +159,17 @@ def ground_truth_shape(ground_truth) -> str:
 
 def admitted_records(
     records: Mapping[str, tuple[str | None, str | None]], *, labels_dir,
-    subject: str | None = None, date, attribute: str | None = None,
-    id_map: dict[str, int] | None = None, contradicted_out: set[str] | None = None,
+    scope: "ClassScope", date, contradicted_out: set[str] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
-    """The keys of ``records`` the label store accounts for, plus the partition that produced them.
+    """The keys of ``records`` the label store accounts for under ``scope``, an admitted document
+    class space, plus the partition that produced them.
 
     ``records`` maps a caller's own key to ``(label document path, logical image name)``; a
     ``None`` image name is a key with no image at all and a ``None`` document is a key the label
-    store holds nothing for. See :func:`admitted_documents` for what each count means.
-
-    The same pairs answer the confirmed-negative read's own contradiction check, so a positive
-    labeled under a name of its own contradicts a stale negative recorded for its image.
+    store holds nothing for. The counts are the partition :func:`admitted_documents` returns. The
+    same pairs answer the confirmed-negative read's contradiction check.
     """
+    subject = scope.subject
     quarantined: set[str] = set()
     contradicted: set[str] = set()
     negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
@@ -175,12 +187,12 @@ def admitted_records(
               "quarantined_stale_definition": 0}
 
     incomplete_names: set[str] = set()
-    if attribute is not None and id_map is not None:
+    if scope.classified:
         # The attribute-completeness rail, through the same reader the loader uses.
         for label_path, image_name in records.values():
             if image_name is None or label_path is None or not Path(label_path).is_file():
                 continue
-            _target, n_unlabeled = json_det_targets(label_path, subject, attribute, id_map)
+            _target, n_unlabeled = json_det_targets(label_path, scope)
             if n_unlabeled:
                 incomplete_names.add(image_name)
 
@@ -213,22 +225,15 @@ def admitted_records(
 
 
 def admitted_documents(
-    labels_dir, images_dir, members=None, *, subject: str | None = None, date,
-    attribute: str | None = None, id_map: dict[str, int] | None = None,
+    labels_dir, images_dir, members=None, *, scope: "ClassScope", date,
     contradicted_out: set[str] | None = None,
 ) -> tuple[list[Admitted], dict[str, int]]:
-    """The members a directory of per-image label documents admits, resolved, plus the partition
-    that produced them.
+    """The members a directory of per-image label documents admits under ``scope``, an admitted
+    document class space, resolved, plus the partition that produced them.
 
-    A sample is admitted only when the label store accounts for it for this subject:
-
-    - its document carries at least one annotation of ``subject``, whatever geometry that
-      annotation has, or
-    - it has none and a human marked that image negative for ``subject``
-      (``confirmed_negative_names``, the Complete in ``.tcip/state/image_status.json``).
-
-    An image with no label file, or an empty label file nobody confirmed, is unannotated, not a
-    negative.
+    A sample is admitted when its document carries at least one annotation of the scope's subject,
+    whatever its geometry, or carries none and the image is a confirmed negative for that subject
+    (``confirmed_negative_names``).
 
     Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
     ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
@@ -240,16 +245,13 @@ def admitted_documents(
     tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
     key.
 
-    A confirmed negative whose label file now holds ``subject`` is excluded from ``negatives`` and
-    admitted by its real content instead, even when it is also stale-stamped. The caller's
-    ``contradicted_out`` set, when given, is updated with those names.
+    A confirmed negative whose label file now holds the subject is admitted by its real content
+    instead, even when it is also stale-stamped; the caller's ``contradicted_out`` set, when given,
+    is updated with those names. A stale-stamped complete confirmation is quarantined ahead of the
+    content branch, whether or not its label file carries boxes.
 
-    A stale-stamped complete confirmation is quarantined ahead of the content branch, whether or
-    not its label file carries boxes.
-
-    ``skipped_incomplete_attribute``: with ``attribute`` set, an image carrying any instance never
-        assessed for it is dropped entirely, through ``json_det_targets``. ``attribute``/``id_map``
-        unset applies no such rail.
+    ``skipped_incomplete_attribute``: under a classified scope, an image carrying any instance
+    never assessed for its attribute is dropped entirely, through ``json_det_targets``.
 
     The verdicts are :func:`admitted_records`, over each candidate stem paired with the document
     this directory holds for it (``None`` when it holds none) and its real on-disk image name.
@@ -264,8 +266,7 @@ def admitted_documents(
         {stem: (str(documents[stem]) if stem in documents else None,
                 logical_image_name(sources[stem]) if stem in sources else None)
          for stem in candidates},
-        labels_dir=labels_dir, subject=subject, date=date,
-        attribute=attribute, id_map=id_map, contradicted_out=contradicted_out,
+        labels_dir=labels_dir, scope=scope, date=date, contradicted_out=contradicted_out,
     )
     return [
         Admitted(member=stem,
@@ -353,8 +354,7 @@ def foreground_counts(
     from tcip_mcp.pipelines.data.splits import count_label_lines
 
     return {
-        key: (count_label_lines(member.ground_truth, subject=scope.subject,
-                                attribute=scope.attribute)
+        key: (count_label_lines(member.ground_truth, scope)
               if shape_of(member.ground_truth, member.row_key) == DOCUMENT else 1)
         for key, member in members.items()
     }
@@ -458,18 +458,16 @@ def admitted_rows(csv_path, images_dir, members=None) -> tuple[list[Admitted], d
     }
 
 
-def refuse_inadmissible_samples(
-    samples: "Sequence[Sample]", scope: "ClassScope | None" = None,
-) -> None:
+def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> None:
     """Refuse a recorded sample the platform's own admission would no longer admit, naming which.
 
-    ``scope`` is the class space those samples were admitted under, whole
+    ``scope`` is the class space those samples are read under, whole
     (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`).
 
     Dispatches once on each sample's own shape: the label store and its confirmations for a
     document, the mask's own existence for a mask raster, the row's own presence in its table for a
-    table row, each over the paths the sample recorded. The subject and capture date a document
-    sample is checked under come from the confirmation bucket the producer stamped on it
+    table row, each over the paths the sample recorded. The capture date a document sample is
+    checked under comes from the confirmation bucket the producer stamped on it
     (:func:`~tcip_mcp.dataset_layout.bucket_subject_date`). Every sample's recorded source is
     resolved once (:func:`~tcip_mcp.pipelines.image_utils.resolve_source_path`, which also catches
     a band group missing a sibling).
@@ -478,10 +476,9 @@ def refuse_inadmissible_samples(
     name.
     """
     from tcip_mcp.dataset_layout import bucket_subject_date
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, ClassScope
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
     from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_source_path
 
-    scope = scope or ClassScope()
     refused: list[str] = []
     unresolved: list[str] = []
     reasons: dict[str, int] = {}
@@ -512,11 +509,8 @@ def refuse_inadmissible_samples(
                 refused.append(sample.identity)
                 reasons["row_gone"] = reasons.get("row_gone", 0) + 1
     for (labels_dir, bucket), records in sorted(documents.items()):
-        subject, date = bucket_subject_date(bucket)
-        admitted, counts = admitted_records(
-            records, labels_dir=labels_dir, subject=subject, date=date,
-            attribute=scope.attribute, id_map=scope.id_map,
-        )
+        _subject, date = bucket_subject_date(bucket)
+        admitted, counts = admitted_records(records, labels_dir=labels_dir, scope=scope, date=date)
         for name, value in counts.items():
             if name.startswith(("skipped_", "quarantined_")):
                 reasons[name] = reasons.get(name, 0) + value
@@ -827,9 +821,10 @@ class Admission:
     each :class:`Admitted` carrying its member name, its image source and its own ground truth.
     :meth:`samples` turns a side assignment over those records into explicit samples.
 
-    ``subject``/``date``/``id_map`` are the scope a document admission read confirmations and class
-    ids under, and are ``None`` for a shape no confirmation store and no registry answers for: a
-    mask raster and a table row carry their own classes.
+    ``scope`` and ``date`` are the class space and capture date a document admission read
+    confirmations and class ids under; the scope is empty and the date ``None`` for a shape no
+    confirmation store and no registry answers for: a mask raster and a table row carry their own
+    classes.
     """
 
     shape: str
@@ -837,18 +832,8 @@ class Admission:
     ground_truth: str
     records: list[Admitted]
     counts: dict[str, int]
-    subject: str | None = None
-    attribute: str | None = None
+    scope: "ClassScope"
     date: str | None = None
-    id_map: dict[str, int] | None = None
-
-    @property
-    def scope(self) -> "ClassScope":
-        """The class space these records were admitted under, empty for ground truth no registry
-        scopes."""
-        from tcip_mcp.pipelines.data.selection import ClassScope
-
-        return ClassScope(subject=self.subject, attribute=self.attribute, id_map=self.id_map)
 
     def samples(
         self, assignment: dict[str, str], group_of: "Callable[[str], str]",
@@ -857,7 +842,8 @@ class Admission:
         """The admitted records this assignment names, as samples on the sides it gives them."""
         from tcip_mcp.dataset_layout import status_bucket
 
-        bucket = status_bucket(self.subject, self.date) if self.subject else None
+        subject = self.scope.subject
+        bucket = status_bucket(subject, self.date) if subject else None
         return samples_over(self.records, assignment, group_of,
                             confirmation_bucket=bucket, digests=digests)
 
@@ -873,48 +859,55 @@ class Admission:
 
 def admit_run(data_cfg: Mapping[str, Any], *,
               contradicted_out: set[str] | None = None) -> "Admission":
-    """:func:`admit` over a run's data section: its ``images_dir`` and ``labels_dir``, under its
-    ``subject`` and ``attribute``."""
-    return admit(data_cfg["images_dir"], data_cfg["labels_dir"], subject=data_cfg.get("subject"),
-                 attribute=data_cfg.get("attribute"), contradicted_out=contradicted_out)
+    """:func:`admit` over a run's data section: its ``images_dir`` and ``labels_dir``, under the
+    ``scope`` it states, when it states one. A scope carrying a map is read under that map; one
+    stating only a subject and attribute is a fresh statement, given its registry's map
+    (:func:`stated_scope`)."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    scope = ClassScope.of(data_cfg) if "scope" in data_cfg else None
+    if scope is not None and scope.id_map is None:
+        scope = stated_scope(data_cfg["labels_dir"], scope.subject, scope.attribute)
+    return admit(data_cfg["images_dir"], data_cfg["labels_dir"], scope=scope,
+                 contradicted_out=contradicted_out)
 
 
 def admit(
-    images_dir, ground_truth, *, subject: str | None = None, attribute: str | None = None,
+    images_dir, ground_truth, *, scope: "ClassScope | None" = None,
     members: list[str] | None = None, contradicted_out: set[str] | None = None,
 ) -> Admission:
     """The membership one place holding ground truth admits, through the admission its own shape
     reads.
 
     Dispatches once on :func:`ground_truth_shape`: the label store and its human confirmations for
-    per-image documents, the mask's own existence beside the image for mask rasters, the row's own
-    presence beside a resolvable image for a table.
+    per-image documents, under ``scope`` and its map; the mask's own existence beside the image for
+    mask rasters, and the row's own presence beside a resolvable image for a table, both under an
+    empty scope. The admitted scope is held to its shape
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`), so a document scope with
+    no subject or no map refuses by name, and a scope naming anything over a mask or a table
+    refuses by name, since that ground truth carries its own classes.
 
     A place that names no ground truth this platform reads, or a directory holding a dataset-level
     COCO, refuses by name. An empty admission is returned as such; :func:`require_admitted` refuses
     it where a non-empty membership is needed.
     """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, ClassScope
 
-    # An empty subject or attribute is "no subject" and "no attribute", the same fact as unset.
-    subject, attribute = subject or None, attribute or None
     shape = ground_truth_shape(ground_truth)
+    admitted = (scope or ClassScope()).admitted_for(shape, f"the run over {ground_truth}")
     if shape == MASK:
         records, counts = admitted_masks(ground_truth, images_dir, members)
     elif shape != DOCUMENT:
         records, counts = admitted_rows(ground_truth, images_dir, members)
     else:
         date = admission_date(ground_truth)
-        # The single name->id map this run admits under, and the one its loaders read.
-        _registry, id_map = resolve_registry_id_map(ground_truth, subject, attribute)
         records, counts = admitted_documents(
-            ground_truth, images_dir, members, subject=subject, date=date,
-            attribute=attribute, id_map=id_map, contradicted_out=contradicted_out,
+            ground_truth, images_dir, members, scope=admitted, date=date,
+            contradicted_out=contradicted_out,
         )
         return Admission(
             shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-            records=records, counts=counts, subject=subject, attribute=attribute,
-            date=date, id_map=id_map,
+            records=records, counts=counts, scope=admitted, date=date,
         )
     return Admission(shape=shape, images_dir=str(images_dir), ground_truth=str(ground_truth),
-                     records=records, counts=counts)
+                     records=records, counts=counts, scope=admitted)

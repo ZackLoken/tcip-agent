@@ -1,13 +1,6 @@
-"""``/api/review/validate_reference``'s stamp reads: the route's one strict read of a bucket's
-``operating_point.json`` before its two early returns, then, before the review's operating point
-is resolved, the refusal for a bucket carrying no stamp at all and the writer-side scope rail a
-promotion that merges into an existing stamp is held to, through ``update_sidecar``'s own rail
-rather than a second check in this route. A bucket a producer already stamped carries its pair
-forward through the promotion untouched.
-
-A stamp that will not decode is one no live producer mints, and ``/api/review/action`` itself
-refuses to record a fresh verdict against one (``_review_scope``'s own strict read), so its
-verdict is seeded straight through the review store.
+"""``/api/review/validate_reference``'s stamp reads: a strict read of a bucket's
+``operating_point.json`` before its two early returns, then the refusal for a bucket carrying no
+stamp at all. A stamped bucket carries its scope forward through the promotion untouched.
 """
 
 from __future__ import annotations
@@ -97,7 +90,7 @@ def _tiled_stamp(**overrides) -> dict:
     """
     stamp = {
         "checkpoint_sha256": "sha-detector", "experiment_id": None, "validated": False,
-        "id_map": {SUBJECT: 0}, "subject": SUBJECT, "attribute": None, "slicing": None,
+        "scope": {"subject": SUBJECT, "attribute": None, "id_map": {SUBJECT: 0}}, "slicing": None,
         "operating_point": {"conf": {"value": 0.25}},
     }
     stamp.update(overrides)
@@ -178,7 +171,7 @@ def test_promotion_over_an_already_stamped_bucket_carries_its_pair_forward(
 
     assert resp.status_code == 200, resp.text
     stamp = read_operating_point_sidecar(bucket)
-    assert (stamp["subject"], stamp["attribute"]) == (SUBJECT, None)
+    assert stamp["scope"] == {"subject": SUBJECT, "attribute": None, "id_map": {SUBJECT: 0}}
 
 
 def _accept(client: TestClient, dataset_root: Path, img: Path, gt: Path, pred_path: str) -> None:
@@ -253,8 +246,8 @@ def test_promotion_over_a_producer_written_stamp_promotes(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """The admitting case built through the platform's own producer (operating_point_stamp +
-    write_sidecar), not the raw seed the pre-rail fixtures above use for shapes no live producer
-    can write."""
+    write_sidecar), not the raw seed the fixtures above use."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 
     dataset_root = tmp_path / "data"
@@ -265,7 +258,7 @@ def test_promotion_over_a_producer_written_stamp_promotes(
         {"conf": {"value": 0.25}},
         slicing=None, validated=False, validated_by=None, tile_size_validated=None,
         shippable_issues=[],
-        id_map={SUBJECT: 0}, subject=SUBJECT, attribute=None, trait=None, dataset_hash=None,
+        scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), trait=None, dataset_hash=None,
         checkpoint=None, checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None,
     )
@@ -278,4 +271,4 @@ def test_promotion_over_a_producer_written_stamp_promotes(
 
     assert resp.status_code == 200, resp.text
     stamp_after = read_operating_point_sidecar(bucket)
-    assert (stamp_after["subject"], stamp_after["attribute"]) == (SUBJECT, None)
+    assert stamp_after["scope"] == stamp["scope"]

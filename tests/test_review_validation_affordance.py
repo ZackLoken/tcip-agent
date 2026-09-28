@@ -268,8 +268,7 @@ def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | N
         "validated": False,
         "operating_point": op,
         "slicing": slicing,
-        "subject": "bud",
-        "attribute": None,
+        "scope": {"subject": "bud", "attribute": None},
     }
     import tcip_store
     from tcip_mcp.pipelines.resolution import sidecar_key
@@ -660,7 +659,7 @@ def test_route_validates_a_complete_recorded_under_a_named_subject(client, tmp_p
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     stored = tcip_store.read_versioned(sidecar_key(pred_dir, "operating_point"))
     sidecar = stored.value
-    sidecar["id_map"] = {"bud": 0}
+    sidecar["scope"] = {**sidecar["scope"], "id_map": {"bud": 0}}
     tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar, expect=stored.version)
     _write_empty_prediction_document(Path(pred_dir) / "Z.json")
 

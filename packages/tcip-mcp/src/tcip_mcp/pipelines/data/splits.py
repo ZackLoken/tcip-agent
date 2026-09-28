@@ -30,7 +30,7 @@ from tcip_mcp.pipelines.data.selection import SIDES
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.data.selection import Sample, Selection
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +64,13 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 }
 
 
-def count_label_lines(
-    label_path: str | Path, *, subject: str | None = None, attribute: str | None = None,
-) -> int:
+def count_label_lines(label_path: str | Path, scope: "ClassScope | None" = None) -> int:
     """Annotation count for one per-image label document, by its own path, a foreground-density
     proxy for stratified splitting.
 
-    With ``subject`` omitted, every record in the file counts regardless of subject; given
-    ``subject``, only that subject's records count, further narrowed to those already assessed for
-    ``attribute`` when one is given. An empty ``subject`` or ``attribute`` reads as unset.
+    With no subject in ``scope``, every record in the file counts regardless of subject; given one,
+    only that subject's records count, further narrowed to those already assessed for the scope's
+    attribute when one is named.
 
     A missing file scores 0 foreground; a present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
@@ -80,15 +78,15 @@ def count_label_lines(
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
 
-    subject, attribute = subject or None, attribute or None
     jp = Path(label_path)
     if not jp.is_file():
         return 0
     # A crowd region is never one object, so it is never counted as one.
     records = instances(json_io.read_annotations(str(jp)))
-    if subject is None:
+    if scope is None or scope.subject is None:
         return len(records)
-    return sum(1 for a in records if json_io.assessed_key(a, subject, attribute) is not None)
+    return sum(1 for a in records
+               if json_io.assessed_key(a, scope.subject, scope.attribute) is not None)
 
 
 def label_document_extent(label_path: str | Path) -> tuple[int, int] | None:
@@ -798,18 +796,20 @@ def label_image_stems(
 
 
 def selection_calibration_universe(
-    selection: "Selection", labels_dir: str | Path,
+    selection: "Selection", labels_dir: str | Path, scope: "ClassScope",
     *, min_foreground_groups: dict[str, int] | None = None,
 ) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, int],
            dict[str, "Sample"]]:
     """The calibration universe a selection gives one caller restricting a read to ``labels_dir``:
     the selection's ``calibration`` samples whose own recorded ground truth lives in
     ``labels_dir``, whatever shape that ground truth is. Nothing is intersected against a directory
-    listing.
+    listing. The selection supplies membership only: the universe is re-admitted under ``scope``,
+    the class space the measurement reads
+    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`).
 
     The floor counts only the groups that carry foreground, through
-    :func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts` under the selection's own
-    class space. ``min_foreground_groups`` is forwarded to
+    :func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts` under ``scope``.
+    ``min_foreground_groups`` is forwarded to
     :func:`refuse_insufficient_foreground_groups`; omitted, it defaults to ``{"calibration": 2}``,
     since a locked cal/holdout draw halves the universe into two non-empty parts.
 
@@ -825,10 +825,11 @@ def selection_calibration_universe(
     the labels directory and the floor, a universe holding fewer foreground groups than the floor
     states.
     """
-    from tcip_mcp.pipelines.data.label_queries import foreground_counts
+    from tcip_mcp.pipelines.data.label_queries import (
+        foreground_counts, refuse_inadmissible_samples,
+    )
     from tcip_mcp.pipelines.data.selection import refuse_unreadable_samples
 
-    scope = selection.scope
     # Through the sample's own recorded scope, never the parent of its ground-truth path: a table
     # scope is the table itself, which no sample's parent directory equals.
     in_scope = [s for s in selection.samples if same_directory(s.ground_truth_scope, labels_dir)]
@@ -861,6 +862,7 @@ def selection_calibration_universe(
             "selection again with a larger calibration_ratio or more foreground groups under "
             "this ground truth."
         ) from exc
+    refuse_inadmissible_samples(list(universe_samples.values()), scope)
     return stems, "explicit_map", group_key_map, excluded, counts, universe_samples
 
 

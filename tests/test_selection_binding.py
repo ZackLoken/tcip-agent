@@ -7,6 +7,7 @@ selection, the refusals a launch raises, and what the run's own partition record
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ pytest.importorskip("torchvision")
 from torch.utils.data import Dataset  # noqa: E402
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.data.selection import read_selection
+from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import recorded_side
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 from tcip_mcp.tools.data_tools import draw_splits
@@ -61,12 +62,13 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(tmp_
     """On a dated tree the ``stem`` policy's group key names the capture date, so a member
     standing alone in its group carries the key a draw would record for it, never the bare name
     another date's same-named image shares."""
-    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.label_queries import admit, stated_scope
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    admitted = admit(root / "images" / DATES[0], root / "annotations" / DATES[0],
-                     subject=SUBJECT)
+    labels = root / "annotations" / DATES[0]
+    admitted = admit(root / "images" / DATES[0], labels,
+                     scope=stated_scope(labels, SUBJECT, None))
     key = recorded_group_key_fn("stem", date=admitted.date)
     samples = admitted.every_sample()
 
@@ -122,12 +124,12 @@ def _tiled_dataset(root: Path) -> Path:
 
 class _RecordingDataset(Dataset):
     """A bespoke dataset standing in for an agent's own builder: it records the samples, the class
-    map and any data location the seam handed it, so a test can state what a run actually threads
-    through and what it does not."""
+    space and any data location the seam handed it, so a test can state what a run actually
+    threads through and what it does not."""
 
-    def __init__(self, samples, id_map, directories) -> None:
+    def __init__(self, samples, scope, directories) -> None:
         self.seen_samples = list(samples)
-        self.seen_id_map = id_map
+        self.seen_scope = scope
         self.seen_directories = directories
 
     def __len__(self) -> int:
@@ -140,13 +142,13 @@ class _RecordingDataset(Dataset):
 _RECORDED_BUILDS: list[_RecordingDataset] = []
 
 
-def build_recording_dataset(samples=None, id_map=None, **kwargs) -> _RecordingDataset:
+def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDataset:
     """The ``dataset_source`` builder the bespoke-seam tests register through the seam's dotted
     escape. Records every data-location key it was handed, so a test can state that none was, and
     appends itself to :data:`_RECORDED_BUILDS` for a caller that cannot reach the built dataset."""
     located = {k: v for k, v in kwargs.items()
                if k in ("images_dir", "labels_dir", "csv_path", "coco_data", "stems")}
-    built = _RecordingDataset(samples or [], id_map, located)
+    built = _RecordingDataset(samples or [], scope, located)
     _RECORDED_BUILDS.append(built)
     return built
 
@@ -195,8 +197,9 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     assert binding["redraw"] is False
     assert "date" not in binding
     # The class space is the run's own, recorded once on the data config, never restated here.
-    assert data_cfg["subject"] == SUBJECT
-    assert not {"subject", "attribute", "id_map"} & set(binding)
+    assert data_cfg["scope"] == asdict(drawn.scope)
+    assert drawn.scope.subject == SUBJECT
+    assert "scope" not in binding
     assert sorted(partition) == sorted(
         {str(Path(s.ground_truth).parent) for s in drawn.samples})
 
@@ -238,7 +241,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
     run_dir.mkdir()
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 64},
+                         "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
         "data": {"split": {"selection_dir": str(out)}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
@@ -269,8 +272,8 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
     # The checkpoint speaks the selection's own vocabulary, not one re-read from the registry.
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
     stamped = (checkpoint.get("config") or {}).get("data") or {}
-    assert stamped["subject"] == SUBJECT
-    assert stamped["id_map"] == drawn.id_map
+    assert ClassScope(**stamped["scope"]) == drawn.scope
+    assert drawn.scope.subject == SUBJECT
 
 
 def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reordered(
@@ -289,7 +292,7 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out, attribute="condition", seed=1)
-    assert drawn.id_map == {"healthy": 0, "damaged": 1}
+    assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
 
     # The same attribute, its values declared the other way round: a map re-derived here would
     # be {"damaged": 0, "healthy": 1}, a different class space than the samples were admitted in.
@@ -303,7 +306,7 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     run_dir.mkdir()
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 2, "min_size": 64, "max_size": 64},
+                         "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
         # The directories a relaunched config still carries beside its binding: exactly what a
         # registry re-read would resolve the wrong map from.
@@ -321,26 +324,27 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     worker.run("exp-reordered", str(run_dir), "")
 
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
-    assert ((checkpoint.get("config") or {}).get("data") or {})["id_map"] == drawn.id_map
+    stamped = ((checkpoint.get("config") or {}).get("data") or {})["scope"]
+    assert stamped["id_map"] == drawn.scope.id_map
 
 
-def test_a_bound_run_trains_in_the_selections_scope_over_a_stale_config_one(tmp_path: Path):
-    """A relaunched config carrying the previous run's own subject states nothing about this run:
-    the selection is what says which class space its samples were admitted under, so that scope
-    becomes the run's and the stale one is overwritten rather than compared against it."""
+def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path):
+    """The selection records the class space its samples were admitted under; a data section
+    stating another beside it refuses by name, and one stating none trains in the selection's."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
-    data_cfg = _run_data_cfg(root, out, subject=OTHER_SUBJECT)
 
+    with pytest.raises(ValueError, match="Drop data.scope"):
+        auto_train_val("detection", _run_data_cfg(root, out, scope={"subject": OTHER_SUBJECT}),
+                       None)
+
+    data_cfg = _run_data_cfg(root, out)
     train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
-
-    assert data_cfg["subject"] == drawn.subject == SUBJECT
-    assert data_cfg["id_map"] == drawn.id_map
-    assert train_ds.subject == SUBJECT and val_ds.subject == SUBJECT
-    assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
+    assert data_cfg["scope"] == asdict(drawn.scope)
+    assert train_ds.scope == drawn.scope and val_ds.scope == drawn.scope
 
 
 def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path):
@@ -447,7 +451,7 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
         member="reviewed", source=str(images_dir / "photo.jpg"),
         ground_truth=str(labels_dir / "reviewed.json"),
         group="g", side="train", confirmation_bucket=bucket),
-    ), subject=SUBJECT, id_map={SUBJECT: 0}, seed=0, group_by="stem"))
+    ), scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=0, group_by="stem"))
 
     selection = read_selection(out)
     refuse_inadmissible_samples(selection.samples, selection.scope)
@@ -488,7 +492,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
             ground_truth=str(labels_dir / "a.json"),
             group="g", side="train", confirmation_bucket=status_bucket(SUBJECT, DATES[0]),
             row_key=row_key),
-        ), subject=SUBJECT, id_map={SUBJECT: 0}, seed=0, group_by="stem"))
+        ), scope=ClassScope() if row_key else scope, seed=0, group_by="stem"))
         return read_selection(out)
 
     scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
@@ -578,14 +582,15 @@ def test_a_bound_run_reads_class_ids_from_the_selections_own_map(tmp_path: Path)
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out, attribute="condition")
-    assert drawn.id_map == {"healthy": 0, "damaged": 1}
+    assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
 
-    train_ds, _val_ds, _ = auto_train_val("detection", _run_data_cfg(root, out), None)
+    data_cfg = _run_data_cfg(root, out)
+    train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
 
-    assert train_ds.id_map == drawn.id_map
-    assert train_ds.num_classes == 2
-    assert train_ds.subject == SUBJECT
-    assert train_ds.attribute == "condition"
+    assert train_ds.scope == drawn.scope
+    assert data_cfg.get("num_classes") is None  # the map's length is the one class count
+    assert drawn.scope.subject == SUBJECT
+    assert drawn.scope.attribute == "condition"
 
 
 def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
@@ -605,7 +610,7 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
     assert sorted(s.identity for s in train_ds.seen_samples) == sorted(
         s.identity for s in drawn.on("train"))
-    assert train_ds.seen_id_map == drawn.id_map
+    assert train_ds.seen_scope == drawn.scope
 
 
 @pytest.mark.parametrize("task", ["detection", "canopy_extent"])
@@ -634,7 +639,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
 
     unbound_cfg = {"images_dir": str(root / "images" / DATES[0]),
                    "labels_dir": str(root / "annotations" / DATES[0]),
-                   "subject": SUBJECT, "dataset_source": source,
+                   "scope": {"subject": SUBJECT}, "dataset_source": source,
                    "split": {"val_ratio": 0.5, "seed": 3}}
     unbound_train, unbound_val, _unbound_partition = auto_train_val(
         task, unbound_cfg, None)
@@ -666,7 +671,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
     assert bound_here and unbound_trained
     assert len(bound_here) == len(set(bound_here)), "each sample is handed once, not repeated"
     assert bound_here == unbound_trained
-    assert unbound_train.seen_id_map == bound_train.seen_id_map == drawn.id_map
+    assert unbound_train.seen_scope == bound_train.seen_scope == drawn.scope
     # Nothing the builder can go looking in: a directory would let it read its own membership.
     for dataset in (bound_train, bound_val, unbound_train, unbound_val):
         assert dataset.seen_directories == {}
@@ -709,24 +714,45 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
     drawn = _draw(root, out)
     write_selection(out, Selection(
         samples=tuple(s for s in drawn.samples if s.side != "val"),
-        subject=drawn.subject, attribute=drawn.attribute, id_map=drawn.id_map,
-        seed=drawn.seed, group_by=drawn.group_by,
+        scope=drawn.scope, seed=drawn.seed, group_by=drawn.group_by,
     ))
 
     with pytest.raises(ValueError, match="empty side"):
         auto_train_val("detection", _run_data_cfg(root, out), None)
 
 
-def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
+def _strip_the_recorded_subject(out: Path) -> None:
+    """Rewrite a drawn selection's record with no subject, past the writer, which refuses one
+    (:func:`test_the_selection_writer_refuses_a_document_selection_with_no_subject`)."""
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    document = ts.read(selection_key(out))
+    ts.replace(selection_key(out), {**document, "scope": {**document["scope"], "subject": None}})
+
+
+def test_the_selection_writer_refuses_a_document_selection_with_no_subject(tmp_path: Path):
     import dataclasses
 
     from tcip_mcp.pipelines.data.selection import write_selection
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    drawn = _draw(root, tmp_path / "m")
+    unscoped = dataclasses.replace(drawn, scope=ClassScope(id_map=drawn.scope.id_map))
+
+    with pytest.raises(ValueError, match="no subject"):
+        write_selection(tmp_path / "unscoped", unscoped)
+    assert not (tmp_path / "unscoped").exists()
+
+
+def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
-    write_selection(out, dataclasses.replace(drawn, subject=None))
+    _draw(root, out)
+    _strip_the_recorded_subject(out)
 
     with pytest.raises(ValueError, match="no subject"):
         auto_train_val("detection", _run_data_cfg(root, out), None)
@@ -892,7 +918,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     write_selection(out, Selection(
         samples=(_sample("fg", "train"), _sample("neg", "val"),
                  _sample("held_a", "calibration"), _sample("held_b", "calibration")),
-        subject=SUBJECT, id_map={SUBJECT: 0}, seed=1, group_by="explicit_map"))
+        scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=1, group_by="explicit_map"))
     return root, out
 
 
@@ -918,7 +944,7 @@ def _preflight_config(root: Path, selection_dir: Path, **overrides) -> dict:
     data_cfg = _run_data_cfg(root, selection_dir, **overrides)
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": data_cfg, "batch_size": 2,
     }
 
@@ -938,15 +964,12 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path
 
 
 def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
-    import dataclasses
-
-    from tcip_mcp.pipelines.data.selection import write_selection
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
-    write_selection(out, dataclasses.replace(drawn, subject=None))
+    _draw(root, out)
+    _strip_the_recorded_subject(out)
 
     result = preflight_config(_preflight_config(root, out))
 
@@ -1017,7 +1040,7 @@ def test_persist_run_partition_carries_no_stale_binding_when_this_run_did_not_bi
     # The same config, relaunched with the binding dropped: it draws its own split instead.
     data_cfg["images_dir"] = str(root / "images" / DATES[0])
     data_cfg["labels_dir"] = str(root / "annotations" / DATES[0])
-    data_cfg["subject"] = SUBJECT
+    data_cfg["scope"] = {"subject": SUBJECT}
     data_cfg["split"].pop("selection_dir")
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 

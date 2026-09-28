@@ -213,7 +213,7 @@ def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "bud",
                           attribute: str | None = "opening") -> None:
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(d, {"id_map": id_map, "subject": subject, "attribute": attribute},
+    write_sidecar(d, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}},
                  "operating_point")
 
 
@@ -461,8 +461,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
         ckpt = registered_checkpoint(tmp, project_root=tmp)
 
-        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
-                          subject="bud")
+        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir))
     finally:
         runners.run_test_evaluation = orig_diag
 
@@ -528,8 +527,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     def _run(dataset, **kw):
         images_dir, labels_dir, ckpt = dataset
-        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
-                              subject="bud", **kw)
+        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), **kw)
         assert "error" not in r, r
         return ts.read(evaluation_results_key(Path(ckpt).parent))
 
@@ -632,11 +630,9 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
         "validated": validated,
         "trait": "bud_opening",
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
-        "id_map": id_map,
         "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
-        "subject": subject,
-        "attribute": attribute,
+        "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
     }
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=dataset_root,

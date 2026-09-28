@@ -37,13 +37,19 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
                                    filename="stated.pt")
     assert load_registered_checkpoint(stated, project_path=str(tmp_path)).task == "detection"
 
-    unstated = registered_checkpoint(
-        tmp_path, project_root=tmp_path, name="unstated", filename="unstated.pt",
-        model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
-                      "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
-                                         "max_size": 128}})
+    # Written past the producer, which builds no model for a config naming no task.
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import SCOPED_DATA
+
+    unstated = tmp_path / "unstated.pt"
+    torch.save({"kind": "tcip_module", "model_state_dict": {},
+                "config": {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection"},
+                           "data": dict(SCOPED_DATA)}}, str(unstated))
+    assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
+                                         config={}, project_path=str(tmp_path))
     with pytest.raises(ValueError, match="model_source.task"):
-        load_registered_checkpoint(unstated, project_path=str(tmp_path)).task
+        load_registered_checkpoint(str(unstated), project_path=str(tmp_path)).task
 
 
 def test_an_authored_trait_spec_restates_through_its_carried_forward_fields(tmp_path: Path) -> None:

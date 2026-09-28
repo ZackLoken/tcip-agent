@@ -21,7 +21,11 @@ from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, attribute_schema_digest
 from tcip_mcp.dataset_layout import image_status_digest_key, image_status_key, status_bucket
 from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key, materialize_dataset
+
+BARE = ClassScope()
+"""A review of a bucket with no stamp, whose caller states no subject."""
 
 
 def _image(images_dir, name: str, size) -> None:
@@ -66,7 +70,7 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
                                  _rejected("bud", [0.9, 0.1, 0.05, 0.05])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=BARE)
     assert r["hard_negative"] == 3
 
     store_key = image_status_key(out)
@@ -97,7 +101,7 @@ def test_explicit_subject_outranks_the_derived_one(tmp_path):
         "neg.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out), subject="bush")
+    r = materialize_dataset(state, str(src), str(out), scope=ClassScope(subject="bush"))
     assert r["subject"] == "bush"
     assert r["subjects"] == ["bud"]
     assert ts.read(curated_manifest_key(out))["subject"] == "bush"
@@ -119,7 +123,7 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
         "neg.png": _completed([_rejected("bud", [0.5, 0.5, 0.1, 0.1])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=BARE)
     assert r["subjects"] == ["bud", "leaf"]
     assert r["subject"] is None
     assert r["hard_negative"] == 1
@@ -154,7 +158,7 @@ def test_negative_stamps_match_the_source_registry_schema(tmp_path):
         "neg_b.png": _completed([_rejected("bud", [0.7, 0.4, 0.2, 0.3])]),
     }}
 
-    materialize_dataset(state, str(images), str(out))
+    materialize_dataset(state, str(images), str(out), scope=BARE)
 
     bud_digest = attribute_schema_digest(registry, "bud")
     leaf_digest = attribute_schema_digest(registry, "leaf")
@@ -186,7 +190,7 @@ def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
         "neg.png": _completed([_rejected("bud", [0.4, 0.6, 0.1, 0.2])]),
     }}
 
-    materialize_dataset(state, str(images), str(out))
+    materialize_dataset(state, str(images), str(out), scope=BARE)
 
     assert (out / "subjects.json").is_file()
     copied = subject_registry.read_registry(out / "subjects.json")
@@ -210,7 +214,7 @@ def test_a_rejection_of_one_subject_never_confirms_another(tmp_path):
         "disputed_bush.png": _completed([_rejected("bush", [0.2, 0.8, 0.6, 0.6])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=BARE)
 
     assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == set()
     assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == set()
@@ -231,7 +235,7 @@ def test_a_stated_subject_never_claims_another_subjects_rejections(tmp_path):
         "answers_for_bush.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out), subject="bud")
+    r = materialize_dataset(state, str(src), str(out), scope=ClassScope(subject="bud"))
 
     assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == {
         "answers_for_bud.png"}
@@ -254,7 +258,7 @@ def test_a_harvested_negative_records_who_confirmed_it_and_when(tmp_path):
         "neg.png": _completed([_rejected("bud", [0.4, 0.4, 0.2, 0.2], reviewed_by="rowan")]),
     }}
 
-    materialize_dataset(state, str(src), str(out))
+    materialize_dataset(state, str(src), str(out), scope=BARE)
 
     record = ts.read(image_status_key(out))[status_bucket("bud", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"
@@ -269,8 +273,6 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
     coincidence, not a claim the object is absent, so the rejected-only image is left
     unconfirmed like any other one, never read as a confirmed negative of the object.
     """
-    from tcip_mcp.pipelines.resolution import BucketScope
-
     root = tmp_path / "dataset"
     registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
@@ -285,7 +287,7 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
         # class's own name: exactly the coincidence the classified branch must not confirm on.
         "neg.png": _completed([_rejected("bud", [0.4, 0.4, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="bud", attribute="stage")
+    scope = ClassScope(subject="bud", attribute="stage", id_map={"bud": 0, "closed": 1})
 
     r = materialize_dataset(state, str(images), str(out), scope=scope)
 
@@ -298,11 +300,9 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
 
 
 def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabulary(tmp_path):
-    """A ``vocabulary`` given to the harvest checks a classified verdict's confirmed value before
-    it is written: a value the bucket's own ``id_map`` never declared is reported, not written,
-    the same posture a degenerate box already gets."""
-    from tcip_mcp.pipelines.resolution import BucketScope
-
+    """The scope's own map checks a classified verdict's confirmed value before it is written: a
+    value the bucket's own ``id_map`` never declared is reported, not written, the same posture a
+    degenerate box already gets."""
     root = tmp_path / "dataset"
     registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
     root.mkdir()
@@ -313,10 +313,9 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     state = {"image": {
         "pos.png": _completed([_accepted("shedding", [0.5, 0.5, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="bud", attribute="stage")
+    scope = ClassScope(subject="bud", attribute="stage", id_map={"closed": 0, "partial": 1})
 
-    r = materialize_dataset(
-        state, str(images), str(out), scope=scope, vocabulary={"closed", "partial"})
+    r = materialize_dataset(state, str(images), str(out), scope=scope)
 
     assert r["positive"] == 0
     assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
@@ -324,36 +323,10 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     assert "shedding" in r["boundary_refused"][0]["reason"]
 
 
-def test_a_classified_scope_with_no_vocabulary_refuses_rather_than_writing_unchecked(tmp_path):
-    """A classified scope requires the bucket's own vocabulary to check a confirmed value
-    against: with none given, the positive is reported in ``boundary_refused`` naming the
-    requirement, never written unchecked."""
-    from tcip_mcp.pipelines.resolution import BucketScope
-
-    root = tmp_path / "dataset"
-    registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
-    root.mkdir()
-    subject_registry.write_registry(root / "subjects.json", registry)
-    images = root / "images"
-    _image(images, "pos.png", (100, 30))
-    out = tmp_path / "out"
-    state = {"image": {
-        "pos.png": _completed([_accepted("closed", [0.5, 0.5, 0.2, 0.2])]),
-    }}
-    scope = BucketScope(subject="bud", attribute="stage")
-
-    r = materialize_dataset(state, str(images), str(out), scope=scope)
-
-    assert r["positive"] == 0
-    assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
-    assert "requires the bucket's own recorded vocabulary" in r["boundary_refused"][0]["reason"]
-
-
 def test_a_classified_scope_with_its_vocabulary_admits_a_value_it_declares(tmp_path):
     """The admitting case: a classified scope with its own bucket vocabulary writes a value that
     vocabulary declares, the object class in ``subject`` and the value under the attribute."""
     from tcip_annotation.json_io import read_annotations
-    from tcip_mcp.pipelines.resolution import BucketScope
 
     root = tmp_path / "dataset"
     registry = SubjectRegistry(subjects=_TWO_SUBJECTS)
@@ -365,10 +338,9 @@ def test_a_classified_scope_with_its_vocabulary_admits_a_value_it_declares(tmp_p
     state = {"image": {
         "pos.png": _completed([_accepted("closed", [0.5, 0.5, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="bud", attribute="stage")
+    scope = ClassScope(subject="bud", attribute="stage", id_map={"closed": 0, "partial": 1})
 
-    r = materialize_dataset(
-        state, str(images), str(out), scope=scope, vocabulary={"closed", "partial"})
+    r = materialize_dataset(state, str(images), str(out), scope=scope)
 
     assert r["positive"] == 1
     assert r["boundary_refused"] == []
@@ -391,7 +363,7 @@ def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
         ]),
     }}
 
-    materialize_dataset(state, str(src), str(out))
+    materialize_dataset(state, str(src), str(out), scope=BARE)
 
     record = ts.read(image_status_key(out))[status_bucket("bud", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"

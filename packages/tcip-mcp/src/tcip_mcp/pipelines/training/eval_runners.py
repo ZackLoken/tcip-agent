@@ -110,12 +110,15 @@ def run_test_evaluation(
     loader was narrowed to and how many of its samples the loader indexed: recorded verbatim when
     given, absent otherwise.
     """
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.training.evaluation import effective_iou_type, evaluate
 
     task = checkpoint.task
     model.to(device)
 
-    metrics = evaluate(model, loader, device, task, conf_threshold=conf_threshold,
+    metrics = evaluate(model, loader, device, task,
+                       dims=recorded_model_dims(checkpoint.payload.get("config") or {}),
+                       conf_threshold=conf_threshold,
                        iou_threshold=iou_threshold, iou_type=iou_type, max_dets=max_dets,
                        score_weights=score_weights, trait=trait)
     tiled = bool(tiling and tiling.get("enabled", True) and task == "detection")
@@ -138,7 +141,6 @@ def run_test_evaluation(
 
 def run_full_frame_evaluation(
     checkpoint, images_dir: str, labels_dir: str, output_dir: str, *,
-    subject: str | None = None, attribute: str | None = None,
     conf_threshold: float | None = None, iou_threshold: float = 0.5,
     tile_size: int | None = None, overlap: float | None = None,
     cross_tile_nms: float | None = None,
@@ -158,10 +160,9 @@ def run_full_frame_evaluation(
     alone falling back to a default does not raise.
 
     The measured set is the detection loader a run over ``images_dir``/``labels_dir`` would build,
-    over the platform's own admission: the capture date whose confirmed negatives count is the one
-    that admission reads, the targets scored are the ones that run trains on, read under its own
-    class map, and a document carrying the subject only in geometry a detector cannot read refuses
-    by name.
+    over the platform's own admission under the class space the checkpoint records, its map
+    included: the capture date whose confirmed negatives count is the one that admission reads,
+    and a document carrying the subject only in geometry a detector cannot read refuses by name.
 
     A box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_sliced(require_masks=False)``), so an instance_seg checkpoint is gated here on its
@@ -224,9 +225,10 @@ def run_full_frame_evaluation(
     # The loader a run over this same ground truth builds, over the samples the producer admits.
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     contradicted_negatives: set[str] = set()
-    admitted = admit(images_dir, labels_dir, subject=subject, attribute=attribute,
+    admitted = admit(images_dir, labels_dir, scope=ClassScope.of(checkpoint.data_config),
                      contradicted_out=contradicted_negatives)
     require_admitted(admitted)
     # At the width the predictor reads at, like every other measurement door: this gate reads

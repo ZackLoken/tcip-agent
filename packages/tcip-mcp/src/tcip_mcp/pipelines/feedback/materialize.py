@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
@@ -37,6 +37,7 @@ from tcip_mcp.identity import user_identity
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
 _CURATED_DOC = RootedFileLocator(suffix=".json")
 """A curated dataset's own documents. The output directory is wherever the caller asked the
@@ -131,7 +132,7 @@ def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGro
 
 
 def _write_positive_label(
-    path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope=None, vocabulary=None,
+    path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope: "ClassScope",
 ) -> str | None:
     """Write one image's positive boxes to its label file, returning the refusal message on failure
     rather than letting it propagate.
@@ -140,29 +141,24 @@ def _write_positive_label(
     refusal, ``stored_box_extent_ok`` inside ``write_annotations``); caught here so one degenerate
     record does not abort a harvest of many images.
 
-    Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
-    confirmed value, not the object: every record carries ``scope.subject`` with that value under
-    ``scope.attribute``, checked against ``vocabulary`` (the bucket's own recorded ``id_map``
-    keys), which must be non-empty. Without a classified ``scope``, ``class_name`` is the object
-    class itself, written to ``subject``.
+    Under a classified ``scope`` (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), a
+    verdict's ``class_name`` is the confirmed value, not the object: every record carries
+    ``scope.subject`` with that value under ``scope.attribute``, checked against the scope's own
+    map. Without a classified ``scope``, ``class_name`` is the object class itself, written to
+    ``subject``.
     """
     def _annotation(name: str, box_norm, iscrowd: bool) -> Annotation:
         box = BBox.from_normalized_center(box_norm, img_w, img_h)
-        if scope is not None and scope.classified:
-            if not vocabulary:
-                raise ValueError(
-                    "a classified scope requires the bucket's own recorded vocabulary "
-                    "(the bucket's own id_map keys) to check a confirmed value against; "
-                    "none was given."
-                )
+        if scope.classified:
+            vocabulary = set(scope.id_map or {})
             if name not in vocabulary:
                 raise ValueError(
                     f"{name!r} is not a value this bucket's own id_map declares "
                     f"({sorted(vocabulary)}): a confirmed value must be one the bucket's own "
                     "vocabulary has."
                 )
-            return Annotation(subject=scope.subject, geometry=box,
-                              attributes={scope.attribute: name}, iscrowd=iscrowd)
+            return Annotation(subject=cast(str, scope.subject), geometry=box,
+                              attributes={cast(str, scope.attribute): name}, iscrowd=iscrowd)
         return Annotation(subject=name, geometry=box, iscrowd=iscrowd)
 
     try:
@@ -270,14 +266,12 @@ def materialize_dataset(
     source_images_dir: str,
     output_dir: str,
     *,
-    subject: str | None = None,
+    scope: "ClassScope",
     review_state_path: str = "",
     include_hard_negatives: bool = True,
     copy_files: bool = True,
     only_completed: bool = False,
     producer_model: dict | None = None,
-    scope=None,
-    vocabulary: set | None = None,
 ) -> dict:
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
@@ -285,38 +279,29 @@ def materialize_dataset(
     platform's undated dataset layout, ``annotation_dir(root, None)``), since a curated harvest has
     no capture date of its own.
 
-    ``subject`` is the object the review was about (the confirmed negatives are keyed under it).
-    When omitted it is derived from every subject the verdicts name, rejections included, and
-    answers only when they name exactly one. ``producer_model`` (best-effort) records the model
-    whose predictions the human reviewed.
+    ``scope`` (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`) is the class space the
+    review was read under: a stamped bucket's own recorded scope, or what the caller stated for a
+    bare one. Its subject is the object the review was about, the one confirmed negatives are keyed
+    under; with none, the subject is derived from every subject the verdicts name, rejections
+    included, and answers only when they name exactly one. ``producer_model`` (best-effort)
+    records the model whose predictions the human reviewed.
 
     A rejected-only image becomes a confirmed negative only when its own rejections answer for that
     subject. One whose rejections answer for another subject, or for none, is materialized as an
     unconfirmed empty label and named in ``unconfirmed_negatives`` with why.
 
-    ``scope`` (``resolution.BucketScope``) is the reviewed bucket's own recorded scope, resolved by
-    the caller. Under a classified scope, ``subject`` must equal ``scope.subject`` (raises
-    :class:`ValueError` naming both when it disagrees) and the verdict-derived subject is never
-    consulted. No rejected-only image is confirmed negative there: every one lands in
+    Under a classified scope no rejected-only image is confirmed negative: every one lands in
     ``unconfirmed_negatives``. The source dataset's registry is copied over, raising by name when
     the source names no dataset root or that root's registry is missing, or when the output already
-    holds one. ``vocabulary`` (the bucket's own recorded ``id_map`` keys) is required under a
-    classified scope and checks a classified verdict's confirmed value before it is written; a
-    value outside it is reported in ``boundary_refused`` rather than written.
+    holds one. A classified verdict's confirmed value is checked against the scope's own map before
+    it is written; a value outside it is reported in ``boundary_refused`` rather than written.
     """
-    if scope is not None and scope.classified and subject is not None and subject != scope.subject:
-        raise ValueError(
-            f"the reviewed bucket's own recorded scope names subject {scope.subject!r}, not the "
-            f"stated {subject!r}: materialize a bucket whose scope matches the subject you intend."
-        )
-    if scope is not None and scope.classified:
+    if scope.classified:
         _copy_source_registry_for_classified_scope(source_images_dir, output_dir)
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     verdict_subjects = {s for info in partition.values() for s in info["subjects"]}
-    if scope is not None and scope.classified:
-        neg_subject = scope.subject
-    else:
-        neg_subject = subject or (next(iter(verdict_subjects)) if len(verdict_subjects) == 1 else None)
+    neg_subject = scope.subject or (
+        next(iter(verdict_subjects)) if len(verdict_subjects) == 1 else None)
     out = Path(output_dir)
     images_out = image_root(out)
     labels_out = annotation_root(out)
@@ -356,7 +341,7 @@ def materialize_dataset(
 
         if status == "positive":
             refusal = _write_positive_label(
-                label_path, info["positives"], img_w, img_h, scope=scope, vocabulary=vocabulary)
+                label_path, info["positives"], img_w, img_h, scope=scope)
             if refusal is not None:
                 counts["boundary_refused"] += 1
                 boundary_refused.append({"image": record_name, "reason": refusal})
@@ -377,8 +362,7 @@ def materialize_dataset(
 
     # Training trusts a human-confirmed negative, never a bare empty file (a label may be emptied mid-work).
     negatives, unconfirmed = _attribute_negatives(
-        negative_verdicts, neg_subject, verdict_subjects,
-        classified=scope is not None and scope.classified)
+        negative_verdicts, neg_subject, verdict_subjects, classified=scope.classified)
     counts["unconfirmed_negative"] = len(unconfirmed)
     if negatives:
         from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket
@@ -399,7 +383,7 @@ def materialize_dataset(
         src_registry = subjects_path(src_root) if src_root is not None else None
         if src_registry is not None and src_registry.is_file():
             try:
-                digest = attribute_schema_digest(read_registry(src_registry), neg_subject)
+                digest = attribute_schema_digest(read_registry(src_registry), cast(str, neg_subject))
             except (OSError, RegistryError):
                 digest = None
             if digest is not None:
@@ -413,7 +397,7 @@ def materialize_dataset(
         "output_dir": str(out),
         "producer_model": producer_model,
         "subject": neg_subject,
-        "attribute": scope.attribute if scope is not None and scope.classified else None,
+        "attribute": scope.attribute,
         "counts": counts,
         "subjects": sorted(subjects),
         "verdict_subjects": sorted(verdict_subjects),
@@ -430,7 +414,7 @@ def materialize_dataset(
         "unconfirmed_negatives": unconfirmed,
         "boundary_refused": boundary_refused,
         "subject": neg_subject,
-        "attribute": scope.attribute if scope is not None and scope.classified else None,
+        "attribute": scope.attribute,
         "output_dir": str(out),
         "structure": f"{out}/images/ + {out}/annotations/",
         "manifest": str(curated_manifest_path(out)),

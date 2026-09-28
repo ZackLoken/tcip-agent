@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -194,6 +194,7 @@ def resolve_block_calibration_records(
     from tcip_store import store
 
     from tcip_mcp.experiments import config_key, read_run_partition
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     if experiment_id is None:
         raise BlockCalibrationRefused(
@@ -235,10 +236,8 @@ def resolve_block_calibration_records(
             f"block calibration refused: experiment {experiment_id!r}'s config.json carries no "
             "data.labels_dir/data.images_dir to resolve the training mosaic's own files from."
         )
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
-    scope = ClassScope.recorded_in(data_cfg)
-    subject, attribute = scope.named_subject(f"experiment {experiment_id!r}"), scope.attribute
+    scope = p.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
+    subject = cast(str, scope.subject)
 
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -253,24 +252,15 @@ def resolve_block_calibration_records(
 
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.image_utils import resolve_image_source
-    from tcip_mcp.tools.inference_tools import resolve_decode_id_map
-
-    id_map = resolve_decode_id_map(predictor, labels_dir, scope=(subject, attribute))
-    if id_map is None:
-        raise BlockCalibrationRefused(
-            "block calibration refused: this checkpoint records no name->id map and none could be "
-            f"derived from a registry for {labels_dir!r}; the mosaic's ground truth is decoded "
-            "through that map, so there is nothing to read it with."
-        )
 
     from tcip_mcp.dataset_layout import label_filename
 
     gt_path = str(Path(labels_dir) / label_filename(stem))
-    target, n_unlabeled = json_det_targets(gt_path, subject, attribute, id_map)
+    target, n_unlabeled = json_det_targets(gt_path, scope)
     if n_unlabeled:
         raise BlockCalibrationRefused(
             f"block calibration refused: {n_unlabeled} instance(s) in {stem!r} are unlabeled for "
-            f"attribute {attribute!r}. The ordinary calibration path drops a whole image with any "
+            f"attribute {scope.attribute!r}. The ordinary calibration path drops a whole image with any "
             "unlabeled instance rather than score against partial GT; a block calibration has only "
             "one image (the mosaic), so there is no partial-image exclusion available here, and "
             "scoring the model's real detections of these instances as false positives would "

@@ -1,10 +1,7 @@
-"""Each fact here has one producer and one path its readers share: a prediction's score, a
-ground-truth record's content, the target a loader builds from annotations, a box's stored grid,
-a stamp write's audit line, a split lock's recorded fields, a completeness digest's stored grid
-and a prediction bucket's dataset root. A record that does not state the fact is refused by name where it is read, never given a
-stand-in.
-
-Fixtures are written through the platform's own label writer and read back through its reader.
+"""A prediction's score, a ground-truth record's content, the target a loader builds from
+annotations, a box's stored grid, a stamp write's audit line, a split lock's recorded fields, a
+completeness digest's stored grid and a prediction bucket's dataset root: a record that does not
+state one of these is refused by name where it is read.
 """
 
 from __future__ import annotations
@@ -146,7 +143,7 @@ def test_every_stamp_write_leaves_its_one_line_and_a_merge_that_writes_nothing_l
 
     root = tmp_path / "orchard"
     bucket = root / "predictions" / "m" / "2025-09-14"
-    write_sidecar(bucket, {"validated": False, "subject": SUBJECT, "attribute": None})
+    write_sidecar(bucket, {"validated": False, "scope": {"subject": SUBJECT, "attribute": None}})
     assert update_sidecar(bucket, lambda stored: {**stored, "shippable_issues": ["merged"]})
     assert not update_sidecar(bucket, lambda stored: None)
 

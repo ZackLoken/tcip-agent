@@ -38,7 +38,8 @@ def _loader(values, intensities, batch_size: int = 1) -> DataLoader:
 
 def _config(*, accumulation: int = 1) -> dict:
     return {
-        "model_source": {"builder": BUILDER, "task": "regression", "in_chans": 1},
+        "model_source": {"builder": BUILDER, "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -86,8 +87,8 @@ def _record_step_gradients(monkeypatch, sink: list) -> None:
 def _capture_model(monkeypatch, sink: list) -> None:
     real_build_model = gt.build_model
 
-    def build(config):
-        model = real_build_model(config)
+    def build(config, dims):
+        model = real_build_model(config, dims)
         sink.append(model)
         return model
 
@@ -105,7 +106,7 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypa
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
     run = create_run(_config(), str(tmp_path / "out"), id="auto-run-34")
-    run = train(run, loader, task="regression")
+    run = train(run, loader)
 
     assert run.status == "completed", run.error
     assert len(steps) == len(expected)
@@ -121,7 +122,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     _capture_model(monkeypatch, models)
 
     run = create_run(_config(), str(tmp_path / "out"), id="auto-run-35")
-    run = train(run, loader, task="regression")
+    run = train(run, loader)
 
     assert run.status == "completed", run.error
     assert len(models) == 1
@@ -142,7 +143,7 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
     run = create_run(_config(accumulation=2), str(tmp_path / "out"), id="auto-run-36")
-    run = train(run, loader, task="regression")
+    run = train(run, loader)
 
     assert run.status == "completed", run.error
     assert len(steps) == 2

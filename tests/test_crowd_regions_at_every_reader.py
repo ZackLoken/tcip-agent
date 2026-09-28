@@ -41,7 +41,7 @@ class RecordingDetector(BrightRegionDetector):
         return super().forward(images, targets)
 
 
-def build_recording_detector(*, in_chans: int = 3) -> RecordingDetector:
+def build_recording_detector(*, in_chans: int = 3, num_classes: int = 1) -> RecordingDetector:
     return RecordingDetector(in_chans=in_chans)
 
 
@@ -131,8 +131,9 @@ def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
 def _train_config(root: Path) -> dict:
     return {
         "model_source": {"builder": f"{__name__}:build_recording_detector", "builder_kwargs": {},
-                         "task": "detection", "in_chans": 3},
-        "data": {}, "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
+                         "task": "detection"},
+        "data": {"num_channels": 3, "scope": {"subject": SUBJECT, "id_map": {SUBJECT: 0}}},
+        "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
         "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
@@ -155,8 +156,7 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
     RecordingDetector.handed.clear()
     run = create_run(_train_config(tmp_path), str(tmp_path / "run"), id="crowd-run")
     completed = train(run, DataLoader(loader_ds, batch_size=2, collate_fn=collate),
-                      val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate),
-                      task="detection")
+                      val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate))
 
     assert completed.status == "completed", completed.status
     assert len(RecordingDetector.handed) >= 2  # one training step and one validation-loss pass

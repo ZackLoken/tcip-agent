@@ -79,7 +79,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
                         lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, scope: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
@@ -143,7 +143,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
                         lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, scope: 1)
 
     def _resolve_locked(stems, **kw):
         return {"calibration": ["a"], "holdout": ["b"]}
@@ -210,7 +210,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
                         lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
     # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
     # DEFAULT_MAX_DETS (1000), a real, visible difference from the flat constant.
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 2)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, scope: 2)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
@@ -259,7 +259,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
                         lambda *a, **kw: admission_of(["a", "b"]))
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
                         lambda *a, samples=None, **kw: SimpleNamespace(stems=[]))
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, **kw: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda label_path, scope: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.collect_calibration_records",
@@ -355,7 +355,7 @@ def test_script_selection_dir_conflicts_with_group_by(tmp_path):
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
               "--selection-dir", str(tmp_path / "m"),
-              "--subject", "bud", "--group-by", "stem"])
+              "--group-by", "stem"])
 
     assert rc == 2
 
@@ -386,7 +386,7 @@ def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main([
-        "--checkpoint", ckpt, "--trait", "bud_opening", "--subject", "bud",
+        "--checkpoint", ckpt, "--trait", "bud_opening",
         "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
         "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
     ])

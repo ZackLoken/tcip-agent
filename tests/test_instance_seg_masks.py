@@ -21,12 +21,14 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 cv2 = pytest.importorskip("cv2")
 
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 _SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+LEAF = ClassScope(subject="leaf", id_map={"leaf": 0})
 
 
 # --------------------------------------------------------------------------
@@ -131,19 +133,17 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
     unset genuinely exercise the tiled default derived from *this* checkpoint's own geometry, not a
     platform-wide fallback (an untrained-tiled checkpoint has no such basis and would derive
     untiled instead, see ``resolve_tile_geometry``)."""
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
+                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "instance_seg"}
-    model = build_model({"model_source": model_source})
+    config = {"model_source": model_source,
+              "data": {"tiling": {"tile_size": TILE, "overlap": 0.2}, "num_channels": 3,
+                       "scope": {"subject": "stem", "id_map": {"stem": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
-    torch.save({
-        "model_source": model_source, "model_state_dict": model.state_dict(),
-        "config": {"model_source": model_source,
-                  "data": {"tiling": {"tile_size": TILE, "overlap": 0.2}}},
-    }, str(ckpt))
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     return str(ckpt)
 
 
@@ -368,13 +368,12 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     _image(images_dir, "a.png")
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
+                              [Annotation(subject="stem", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
     r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                  str(tmp_path / "out"), subject="bud",
-                                  tile_size=TILE, overlap=0.2)
+                                  str(tmp_path / "out"), tile_size=TILE, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
     assert r["n_gt"] == 1
@@ -413,7 +412,7 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
         "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    write_predictions_json(str(out), result, scope=LEAF)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
@@ -438,7 +437,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
         "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    write_predictions_json(str(out), result, scope=LEAF)
     anns = json_io.read_annotations(str(out))
     assert anns[0].attributes == {}
 
@@ -460,7 +459,7 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
         "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    write_predictions_json(str(out), result, scope=LEAF)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
@@ -479,7 +478,7 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
         "masks": [_mask_record(mask)],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    write_predictions_json(str(out), result, scope=LEAF)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)
@@ -503,7 +502,7 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
         "masks": [{"segmentation": []}],
     }
     out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    dropped = export.write_predictions_json(str(out), result, scope=LEAF)
 
     assert dropped == 1
     assert json_io.read_annotations(str(out)) == []
@@ -528,7 +527,7 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, 
         "masks": [{"segmentation": []}],
     }
     out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
+    dropped = export.write_predictions_json(str(out), result, scope=LEAF)
 
     assert dropped == 1
     assert json_io.read_annotations(str(out)) == []
@@ -550,7 +549,7 @@ def test_export_no_masks_key_writes_bbox_as_before():
     fd, path = tempfile.mkstemp(suffix=".json")
     os.close(fd)
     try:
-        write_predictions_json(path, result, subject="leaf", attribute=None)
+        write_predictions_json(path, result, scope=LEAF)
         anns = json_io.read_annotations(path)
         assert len(anns) == 1
         assert isinstance(anns[0].geometry, BBox)

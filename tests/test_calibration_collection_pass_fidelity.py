@@ -97,7 +97,7 @@ class _HesitantDetectorStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config = {"data": {"subject": "bud"}}
+        self.config = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
         self.staged_model_thresholds: list[float] = []
         self.staged_predictor_thresholds: list[float] = []
         self.returned_scores: list[float] = []
@@ -208,8 +208,8 @@ class _TwoClassStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config = {"data": {"subject": "bud", "attribute": "state",
-                                "id_map": dict(ATTRIBUTE_ID_MAP)}}
+        self.config = {"data": {"scope": {"subject": "bud", "attribute": "state",
+                                          "id_map": dict(ATTRIBUTE_ID_MAP)}}}
 
     def predict_batch(self, paths, **kw):
         results = []

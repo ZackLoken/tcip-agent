@@ -369,7 +369,7 @@ describe("ResultsTab evidence gate", () => {
         {
           error: "audit_entry_not_written",
           message,
-          committed: { saved_path: "C:/proj/results_export/x.csv", delivery_event_recorded: false },
+          committed: { saved_path: "C:/proj/results_export/x.csv" },
         },
         409,
         message,
@@ -1229,27 +1229,38 @@ describe("ResultsTab delivery events (read-only)", () => {
     output_sha256: "a".repeat(64),
     acknowledged_by: null,
     acknowledgment_reason: null,
-    documents: {
-      "C:/data/predictions/baseline/2026-01-01": {
-        ok: true,
-        claimed: true,
-        experiment_id: "exp-1",
-        producing_experiment_id: "exp-1",
-        checkpoint_sha256: "abc",
-        record_digest: "digest-1",
-        note: "",
-      },
-      "C:/data/predictions/baseline/2026-01-08": {
-        ok: false,
-        claimed: false,
-        experiment_id: null,
-        producing_experiment_id: null,
-        checkpoint_sha256: null,
-        record_digest: null,
-        note: "no stamp on this bucket",
+    document_reconciliations: {
+      operating_point: {
+        validated: "false",
+        on_disk_validated: false,
+        missing_sidecars: ["C:/data/predictions/baseline/2026-01-08"],
+        unvalidated_buckets: ["C:/data/predictions/baseline/2026-01-08"],
+        binding_notes: {},
+        bindings: {
+          "C:/data/predictions/baseline/2026-01-01": {
+            ok: true,
+            claimed: true,
+            experiment_id: "exp-1",
+            producing_experiment_id: "exp-1",
+            checkpoint_sha256: "abc",
+            record_digest: "digest-1",
+            note: "",
+          },
+          "C:/data/predictions/baseline/2026-01-08": {
+            ok: false,
+            claimed: false,
+            experiment_id: null,
+            producing_experiment_id: null,
+            checkpoint_sha256: null,
+            record_digest: null,
+            note: "no stamp on this bucket",
+          },
+        },
+        conf: null,
+        confs: {},
+        per_bucket: {},
       },
     },
-    document_reconciliations: {},
     dimension_reconciliations: {},
     produced_at: "2026-02-03T12:00:00+00:00",
     plant_mapping: null,
@@ -1890,7 +1901,6 @@ describe("ResultsTab count export", () => {
       blob: new Blob(["x"]),
       headers: {
         savedTo: "C:/proj/results_export/counts.csv",
-        deliveryEventRecorded: true,
         unvalidatedDimensions: "",
         acknowledgedBy: "",
       },
@@ -1919,7 +1929,6 @@ describe("ResultsTab count export", () => {
       blob: new Blob(["x"]),
       headers: {
         savedTo: "C:/proj/results_export/plant_counts.csv",
-        deliveryEventRecorded: true,
         unvalidatedDimensions: "",
         acknowledgedBy: "",
       },
@@ -1967,7 +1976,6 @@ describe("ResultsTab count export", () => {
           message,
           committed: {
             saved_path: "C:/proj/results_export/counts.csv",
-            delivery_event_recorded: false,
           },
         },
         409,
@@ -2024,7 +2032,6 @@ describe("ResultsTab count export", () => {
       blob: new Blob(["x"]),
       headers: {
         savedTo: "C:/proj/results_export/counts.csv",
-        deliveryEventRecorded: true,
         unvalidatedDimensions: "operating_point",
         acknowledgedBy: "user:breeder",
       },
@@ -2038,7 +2045,6 @@ describe("ResultsTab count export", () => {
     expect(
       await within(panel).findByText(/Saved to C:\/proj\/results_export\/counts\.csv/),
     ).toBeInTheDocument();
-    expect(within(panel).getByText(/Delivery event recorded: yes/)).toBeInTheDocument();
     expect(within(panel).getByText(/Unvalidated: operating_point/)).toBeInTheDocument();
     expect(within(panel).getByText(/Acknowledged by user:breeder/)).toBeInTheDocument();
   });
@@ -2067,7 +2073,6 @@ describe("ResultsTab count export", () => {
       blob: new Blob(["x"]),
       headers: {
         savedTo: "C:/proj/results_export/counts.csv",
-        deliveryEventRecorded: true,
         unvalidatedDimensions: "",
         acknowledgedBy: "",
       },

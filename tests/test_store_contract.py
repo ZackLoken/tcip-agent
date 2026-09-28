@@ -1976,7 +1976,7 @@ def _real_selection() -> dict:
     """The shape ``selection.write_selection`` writes today, called for real into a throwaway
     directory so this golden cannot drift from the writer silently."""
     from tcip_mcp.pipelines.data.selection import (
-        Sample, Selection, selection_document, write_selection,
+        ClassScope, Sample, Selection, selection_document, write_selection,
     )
 
     return _construct_via_scratch_backend(lambda scratch: selection_document(write_selection(
@@ -1988,7 +1988,7 @@ def _real_selection() -> dict:
                        group="a", side="train", confirmation_bucket="bud/2026-03-04",
                        ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
-            subject="bud", attribute=None, id_map={"bud": 0}, seed=42,
+            scope=ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
         ),
     )))
@@ -2150,8 +2150,8 @@ REGISTERED = {
         {"trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
                                       "validated_against": "held_out_annotations"}},
-         "id_map": {"bud": 0}, "validated": True, "shippable_issues": [],
-         "checkpoint": "ü_best", "raster_path": None},
+         "scope": {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
+         "validated": True, "shippable_issues": [], "checkpoint": "ü_best", "raster_path": None},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
         "predictions/live/2026-03-04/operating_point.json", root_of=_stamp_bucket),
     "classifier_operating_point_sidecar": Registered(
@@ -2330,7 +2330,7 @@ REGISTERED = {
         f".tcip/hpo/{STUDY}/{TRIAL_DIR}/metrics.jsonl", pin=_pin_platform_root,
         root_of=lambda root: training_tools.sweep_dir(STUDY)),
     "run_launch_config": Registered(
-        {"model_source": {"builder": "my_module:build"}, "data": {"subject": "büsch"},
+        {"model_source": {"builder": "my_module:build"}, "data": {"scope": {"subject": "büsch"}},
          "device": "cpu"},
         lambda root: training_tools.launch_config_key(root), "launch_config.json"),
     "confidence_sweep": Registered(
@@ -2420,10 +2420,6 @@ REGISTERED = {
              "plant_csvs_unverified": [], "dates_delivered": ["2026-03-04"],
              "images_unattributed": 0, "images_unattributed_scope": "delivered_dates",
              "plant_attribution": "image"},
-         "documents": {"predictions/live/2026-03-04": {
-             "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
-             "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
-             "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
          "document_reconciliations": {
              "operating_point": {
                  "validated": "held_out_annotations", "on_disk_validated": True,
@@ -2489,11 +2485,8 @@ def test_the_delivery_events_golden_sample_validates_against_its_declared_shape(
 
 
 def test_every_json_store_encodes_through_the_one_codec_its_kind_declares():
-    """One record spelling and one log spelling across the platform, or a named reason.
-
-    Identity rather than equality: a second instance carrying the same fields is still a
-    second implementation, and it is the one that would drift.
-    """
+    """Every non-test JSON store's codec is the very ``RECORD_JSON`` or ``LOG_JSON`` instance its
+    kind declares, or it is named in ``CODEC_EXEMPT``."""
     off_canon = {}
     for name in ts.registered_stores():
         descriptor = ts.get_descriptor(name)

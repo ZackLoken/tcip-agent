@@ -84,7 +84,9 @@ def _prepare(tmp_path, monkeypatch):
 
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _CountStub())
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, data={
+        "num_channels": 3,
+        "scope": {"subject": fx.COUNT_SUBJECT, "id_map": {fx.COUNT_SUBJECT: 0}}})
     return ckpt, _images_dir(tmp_path)
 
 

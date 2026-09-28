@@ -751,7 +751,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     from tcip_web.routes.audit_gap import audit_gap_409
 
     try:
-        cells = write_csv(
+        write_csv(
             "results.export_csv", rows, saved_path, measurement.spec,
             flags=measurement.flags, acknowledgment=acknowledgment, basis=measurement.basis,
             document_reconciliations=measurement.document_reconciliations, producer=producer,
@@ -760,12 +760,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
             project_root=measurement.project_root,
             plant_mapping=measurement.plant_mapping_disclosure)
     except AuditEntryNotWritten as exc:
-        # write_csv's own append (record_delivery_binding_event) lands before the delivery_events
-        # write, so on this raise the event did not land: false, not unknown.
-        raise audit_gap_409(
-            exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
+        raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     body = saved_path.read_bytes()
-    committed = {"saved_path": str(saved_path), "delivery_event_recorded": cells["delivery_event_recorded"]}
+    committed = {"saved_path": str(saved_path)}
     try:
         _audit(str(measurement.project_root), "results.export_csv", {
             "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
@@ -774,9 +771,6 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, committed) from exc
     headers["X-TCIP-Saved-To"] = str(saved_path)
-    # The file above is already on disk either way; this tells the breeder's client whether the
-    # best-effort delivery_events write behind it actually landed.
-    headers["X-TCIP-Delivery-Event-Recorded"] = str(cells["delivery_event_recorded"]).lower()
     return Response(content=body, media_type="text/csv", headers=headers)
 
 
@@ -887,8 +881,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
         except AuditEntryNotWritten as exc:
-            raise audit_gap_409(
-                exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
+            raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     else:
         predictions_dir, raster_path = _belonging(
             root, payload.delivery.predictions_dir, payload.delivery.raster_path)
@@ -920,13 +913,11 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
         except AuditEntryNotWritten as exc:
-            raise audit_gap_409(
-                exc, {"saved_path": str(saved_path), "delivery_event_recorded": False}) from exc
+            raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
 
     body = saved_path.read_bytes()
     committed = {
         "saved_path": str(saved_path),
-        "delivery_event_recorded": result["delivery_event_recorded"],
         "unvalidated_dimensions": result.get("unvalidated_dimensions"),
         "acknowledged_by": result.get("acknowledged_by"),
     }
@@ -938,7 +929,6 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
         raise audit_gap_409(exc, committed) from exc
     headers = {"Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"'}
     headers["X-TCIP-Saved-To"] = str(saved_path)
-    headers["X-TCIP-Delivery-Event-Recorded"] = str(result["delivery_event_recorded"]).lower()
     headers["X-TCIP-Unvalidated-Dimensions"] = result.get("unvalidated_dimensions") or ""
     from urllib.parse import quote
 

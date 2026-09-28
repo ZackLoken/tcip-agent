@@ -52,7 +52,7 @@ def test_list_configs_route_reports_a_launchable_config(tmp_path, monkeypatch) -
 
     create_experiment("exp-picker-1", {
         "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"images_dir": "/data/images", "subject": "bud"},
+        "data": {"images_dir": "/data/images", "scope": {"subject": "bud"}},
     })
 
     rows = list_configs_route()["configs"]
@@ -429,7 +429,7 @@ def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression", "in_chans": 3},
+                         "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
@@ -488,9 +488,10 @@ def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "scope": {"subject": "bud"}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
@@ -518,7 +519,7 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression", "in_chans": 3},
+                         "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
@@ -565,7 +566,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
         tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression", "in_chans": 3},
+                         "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",

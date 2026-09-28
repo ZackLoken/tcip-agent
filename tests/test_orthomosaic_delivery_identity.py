@@ -92,7 +92,7 @@ def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
 def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
     stamp = {"validated": True, "trait": fx.COUNT_TRAIT,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}},
-             "subject": fx.COUNT_SUBJECT, "attribute": None}
+             "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}}
     if claim_scope is not None:
         stamp["claim_scope_validated"] = claim_scope
     return stamp
@@ -207,7 +207,7 @@ def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_unc
 def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    path, _tail, _event_recorded = export_aggregated_csv(
+    path, _tail = export_aggregated_csv(
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "detection"}],
         str(tmp_path / name),

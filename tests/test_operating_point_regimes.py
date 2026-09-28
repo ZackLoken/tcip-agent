@@ -54,7 +54,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
 
     class FakePredictor:
-        config = {"data": {"subject": "bud"}}
+        config = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
@@ -79,7 +79,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     sidecar = read_operating_point_sidecar(out_dir)
-    for key in ("operating_point", "id_map", "validated", "tile_size_validated",
+    for key in ("operating_point", "scope", "validated", "tile_size_validated",
                 "shippable_issues", "checkpoint", "checkpoint_sha256", "experiment_id",
                 "images_dir", "raster_path", "produced_at"):
         assert key in sidecar, f"the GUI-produced stamp is missing {key!r}"

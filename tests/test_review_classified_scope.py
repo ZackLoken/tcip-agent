@@ -19,6 +19,7 @@ from PIL import Image
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import prediction_dir
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tcip_mcp.prediction_buckets import stage_prediction_shapes
 from tcip_web.app import app
@@ -59,8 +60,9 @@ def _stage_classified_prediction(dataset_root: Path, *, value: str) -> dict:
 def _stamp_classified_bucket(bucket: Path) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], id_map=ID_MAP,
-        subject=SUBJECT, attribute=ATTRIBUTE, trait=ATTRIBUTE, dataset_hash="H",
+        tile_size_validated=None, shippable_issues=[],
+        scope=ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP),
+        trait=ATTRIBUTE, dataset_hash="H",
         checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
         images_dir=None, raster_path=None, produced_at="2026-03-05T00:00:00+00:00",
     )
@@ -111,7 +113,17 @@ def test_matches_resolves_the_classified_scope_with_no_request_side_statement(
     assert body["subject"] == SUBJECT and body["attribute"] == ATTRIBUTE
 
 
-def test_a_disagreeing_stated_pair_refuses(client: TestClient, tmp_path: Path) -> None:
+@pytest.mark.parametrize("stated", [
+    {"subject": SUBJECT, "attribute": "a-different-attribute"},
+    {"subject": "a-different-subject"},
+    {"subject": SUBJECT},
+    {"subject": ""},
+])
+def test_a_scope_stated_beside_a_stamped_bucket_refuses(
+    client: TestClient, tmp_path: Path, stated: dict,
+) -> None:
+    """The stamped bucket's own recorded scope is the one class space its review reads; a subject
+    or attribute stated beside it, agreeing or not, would be a second one and refuses."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
@@ -121,32 +133,11 @@ def test_a_disagreeing_stated_pair_refuses(client: TestClient, tmp_path: Path) -
 
     resp = client.post("/api/review/matches", json={
         "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
-        "gt_path": str(gt), "pred_path": staged["path"],
-        "subject": SUBJECT, "attribute": "a-different-attribute",
+        "gt_path": str(gt), "pred_path": staged["path"], **stated,
     })
 
     assert resp.status_code == 400
-    assert "this bucket's stamp records scope" in resp.json()["detail"]
-
-
-def test_a_disagreeing_stated_subject_alone_refuses(client: TestClient, tmp_path: Path) -> None:
-    """A stated subject that disagrees with the bucket's own recorded scope refuses even when no
-    attribute is stated alongside it, rather than being silently replaced by the bucket's own."""
-    dataset_root = tmp_path / "data"
-    img = _image(dataset_root)
-    staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
-    gt = _write_gt(dataset_root, value="diseased")
-
-    resp = client.post("/api/review/matches", json={
-        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
-        "gt_path": str(gt), "pred_path": staged["path"],
-        "subject": "a-different-subject",
-    })
-
-    assert resp.status_code == 400
-    assert "this bucket's stamp records scope" in resp.json()["detail"]
+    assert "would be a second one" in resp.json()["detail"]
 
 
 def test_a_bare_directory_under_a_stated_attribute_refuses(

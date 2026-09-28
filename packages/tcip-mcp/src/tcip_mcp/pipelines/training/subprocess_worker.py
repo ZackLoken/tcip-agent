@@ -155,7 +155,7 @@ def _prepare_run_context(experiment_id: str, output_dir: str, resume_from: str,
 
     return TrainContext(
         run=run_obj, train_loader=train_loader, val_loader=val_loader,
-        task=task, resume_from=resume_from, experiment_id=experiment_id,
+        resume_from=resume_from, experiment_id=experiment_id,
     )
 
 

@@ -19,11 +19,11 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 from tcip_mcp.dataset_layout import bucket_dataset_root, label_filename
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO, same_directory
 from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
     positive_detections,
-    unmapped_label_ids,
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
@@ -33,7 +33,6 @@ from tcip_mcp.project_paths import resolve_output_path
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.predictor import TileGeometry
     from tcip_mcp.pipelines.resolution import Acknowledgment, ResolvedParam
 
@@ -146,85 +145,6 @@ checks the identity record's own ``schema_version`` against
 ``_RASTER_PASS_PROGRESS_SCHEMA_VERSION`` itself."""
 
 _RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
-
-
-def run_scope(predictor) -> "ClassScope":
-    """A run's own recorded class space (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`):
-    its subject, its attribute and the name->id map its loaders read targets under, read through
-    :meth:`~tcip_mcp.pipelines.data.selection.ClassScope.recorded_in`. Refuses by name a run that
-    declares an attribute with no subject.
-    """
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
-    scope = ClassScope.recorded_in((getattr(predictor, "config", {}) or {}).get("data") or {})
-    if scope.attribute is not None and scope.subject is None:
-        raise ValueError(
-            f"{getattr(predictor, 'path', predictor)!r} declares attribute {scope.attribute!r} "
-            "with no subject: a value with no object class names nothing a reader could hold "
-            "predictions to. Retrain with data.subject stated beside data.attribute."
-        )
-    return scope
-
-
-def unmapped_classified_run(
-    scope: "ClassScope", id_map: dict | None, *, images_dir: str | None,
-) -> str | None:
-    """The composed refusal for a run that declared an attribute and resolved no ``id_map`` to
-    decode predictions with, or ``None`` when there is nothing to refuse (a mapped run, or a run
-    with no attribute at all).
-
-    An ``images_dir`` whose dataset holds no ``subjects.json`` is told to run
-    ``write_subject_registry`` for that dataset; a call with no ``images_dir`` at all is told to
-    pass one.
-    """
-    if id_map is not None:
-        return None
-    attribute = scope.attribute
-    if attribute is None:
-        return None
-    subject = scope.subject
-    if images_dir is None:
-        return (
-            f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-            "registry-derived dataset, but no images_dir was given to read the decoding "
-            "dataset's subjects.json from. Pass images_dir naming the dataset whose "
-            "subjects.json decodes this run."
-        )
-    return (
-        f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
-        f"registry-derived dataset, but {images_dir!r} holds no subjects.json to decode it "
-        "with. Run write_subject_registry for that dataset, then retry."
-    )
-
-
-def resolve_decode_id_map(predictor, images_dir: str | None, *,
-                          scope: tuple[str | None, str | None] | None = None) -> dict | None:
-    """This run's name->id map for recording + decoding predictions.
-
-    The training run's own recorded map (``config["data"]["id_map"]``) when present; otherwise one
-    derived from the live registry of ``images_dir``'s dataset for ``scope``, or ``None`` when the
-    scope names no subject, no ``images_dir`` is given, or an attribute scope finds no
-    ``subjects.json``. A registry read that fails for a real reason (corrupted file, an id-space
-    mismatch) propagates.
-
-    ``scope`` is the ``(subject, attribute)`` the registry derivation reads, defaulting to the
-    predictor's own recorded training scope.
-    """
-    recorded = run_scope(predictor)
-    if recorded.id_map is not None:
-        return recorded.id_map
-    subject, attribute = scope if scope is not None else (recorded.subject, recorded.attribute)
-    if not (subject and images_dir):
-        return None
-
-    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, resolved_subjects_path
-
-    # Precondition, not a broad except: an attribute-scoped run with no subjects.json here returns
-    # None so unmapped_classified_run composes the write_subject_registry remedy, rather than crashing.
-    if attribute is not None and resolved_subjects_path(images_dir) is None:
-        return None
-    _reg, id_map = resolve_registry_id_map(images_dir, subject, attribute)
-    return id_map
 
 
 @mcp.tool()
@@ -368,9 +288,10 @@ def run_inference(
         selection_dir: ``images_dir`` regime only. Restrict the calibration universe to a
             selection's ``calibration`` samples under ``calibration_labels_dir``
             (``pipelines.data.selection.read_selection``). A checkpoint bound to a different
-            selection than the one named here is refused by name. The scope is the selection's own.
-            The response carries ``n_excluded_training_stems`` and ``n_excluded_validation_stems``,
-            the members the selection put elsewhere under this scope, beside
+            selection than the one named here is refused by name. The selection supplies
+            membership; the ground truth is read under the checkpoint's own recorded scope. The
+            response carries ``n_excluded_training_stems`` and ``n_excluded_validation_stems``,
+            the members the selection put elsewhere, beside
             ``n_excluded_incomplete_attribute``.
         experiment_id: The run that produced the checkpoint, by its record id
             (``tcip_mcp.experiments``), for provenance. Resolved best-effort (checkpoint's own
@@ -693,7 +614,6 @@ class _PreparedPass:
     paths: list[str | Path | BandGroupRef]
     identity: dict
     scope: ClassScope
-    id_map: dict | None
     geometry: TileGeometry
     slicing: dict | None
     cross_tile_nms: ResolvedParam
@@ -727,9 +647,7 @@ class _PreparedPass:
             "produced_at": datetime.now(timezone.utc).isoformat(),
             "operating_point": provenance["operating_point"],
             "slicing": provenance["slicing"],
-            "id_map": self.id_map,
-            "subject": self.scope.subject,
-            "attribute": self.scope.attribute,
+            "scope": self.scope,
             "shippable_issues": [],
             "dataset_hash": None,
             "gate_evidence_summary": None,
@@ -757,8 +675,7 @@ def _prepare_pass(
     """Resolve a pass from a loaded checkpoint and what its caller stated (``None`` for anything
     unstated), over ``images_dir``'s logical images or, with ``images_dir`` ``None``, over no
     image list (a raster pass), or the refusal naming why it cannot run: a stated tile edge the
-    checkpoint's recorded geometry contradicts, a tiled run with no basis for its scale, or a
-    classified run with no map to decode its predictions."""
+    checkpoint's recorded geometry contradicts, or a tiled run with no basis for its scale."""
     from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.predictor import (
@@ -804,16 +721,11 @@ def _prepare_pass(
             "tile_size %d derived from this checkpoint's own uniform untiled training frame%s",
             resolved_tile, resize_note)
 
-    # A classified run with no id_map refuses before any pass, so no calibration is spent on it.
-    scope = run_scope(predictor)
-    id_map = resolve_decode_id_map(predictor, images_dir)
-    refusal = unmapped_classified_run(scope, id_map, images_dir=images_dir)
-    if refusal is not None:
-        return refusal
     slicing = slicing_record(geometry.overlap, geometry.tile_resize, postprocess) if tiled else None
     return _PreparedPass(
         checkpoint_path=checkpoint.path, predictor=predictor, images_dir=images_dir, paths=paths,
-        identity=identity, scope=scope, id_map=id_map, geometry=geometry, slicing=slicing,
+        identity=identity, scope=ClassScope.of(checkpoint.data_config), geometry=geometry,
+        slicing=slicing,
         cross_tile_nms=resolve_cross_tile_nms(cross_tile_nms, slicing),
         conf=conf, max_dets=applied_max_dets,
         conf_stated=conf_threshold is not None, max_dets_stated=max_dets is not None,
@@ -994,7 +906,7 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
     from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.pipelines.resolution import seal_validation, write_sidecar
 
-    id_map, subject, attribute = stamp_body["id_map"], stamp_body["subject"], stamp_body["attribute"]
+    scope = ClassScope.of(stamp_body)
     written: list[str] = []
     names: dict[str, str] = {}
     dropped, mask_binarize = 0, None
@@ -1002,18 +914,11 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
         out.mkdir(parents=True, exist_ok=True)
         for r in predictions:
             image = Path(r["image"])
-            unmapped = unmapped_label_ids([r], id_map) if attribute is not None else []
-            if unmapped:
-                raise ValueError(
-                    f"{image.stem}: this classified run decoded to id(s) {unmapped}, not keys of "
-                    f"its recorded id_map ({sorted((id_map or {}).values())}).")
             # Read before the write: a drop can empty a mask list that was genuinely there.
             if r.get("masks"):
                 mask_binarize = r["mask_binarize"]
             document = out / label_filename(image.stem)
-            dropped += write_predictions_json(
-                document, r, created_by=producer, id_map=id_map, subject=subject,
-                attribute=attribute)
+            dropped += write_predictions_json(document, r, created_by=producer, scope=scope)
             written.append(str(document))
             names[image.stem] = image.name
         stamp_body["image_filenames"] = names
@@ -1143,8 +1048,7 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
         result["operating_point"], slicing=result["slicing"], validated=draft is not None,
         validated_by=None,
         tile_size_validated=tile_size_validated, shippable_issues=result["shippable_issues"],
-        id_map=result["id_map"], subject=result["subject"], attribute=result["attribute"],
-        trait=trait, dataset_hash=result["dataset_hash"],
+        scope=result["scope"], trait=trait, dataset_hash=result["dataset_hash"],
         checkpoint=Path(result["checkpoint"]).stem, checkpoint_sha256=sha,
         experiment_id=result["experiment_id"], images_dir=result["images_dir"],
         raster_path=result["raster_path"], produced_at=result["produced_at"],
@@ -2297,7 +2201,7 @@ def deliver_per_image_counts(
         "operating_point_conf": (op.get("conf") or {}).get("value"),
     }
     try:
-        csv_path, tail, summary, _event_recorded = export_detection_csv(
+        csv_path, tail, summary = export_detection_csv(
             csv_rows, output_path, provenance=provenance, trait=trait,
             operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
@@ -2491,7 +2395,7 @@ def per_image_counts_from_bucket(
         "operating_point_conf": (op.get("conf") or {}).get("value"),
     }
     try:
-        csv_path, tail, summary, event_recorded = export_detection_csv(
+        csv_path, tail, summary = export_detection_csv(
             image_results, output_path, provenance=provenance, trait=trait,
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
             acknowledgment=acknowledgment, project_root=project_root,
@@ -2523,6 +2427,5 @@ def per_image_counts_from_bucket(
         "checkpoint_sha256": sidecar["checkpoint_sha256"],
         "experiment_id": sidecar["experiment_id"],
         "predictions_dir": str(bucket_path),
-        "delivery_event_recorded": event_recorded,
     }
     return out

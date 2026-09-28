@@ -37,8 +37,15 @@ import tcip_store as ts  # noqa: E402
 def _model_source() -> dict:
     return {"builder": "tests.bespoke_models:build_bespoke_detector",
             "builder_kwargs": {"gt_boxes_wh": [[15, 36], [16, 40], [17, 44]],
-                               "num_classes": 1, "min_size": 64, "max_size": 128},
-            "task": "detection", "in_chans": 3, "source_files": [__file__]}
+                               "min_size": 64, "max_size": 128},
+            "task": "detection", "source_files": [__file__]}
+
+
+_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
+"""The data section a one-subject, three-band run records, which its checkpoint carries."""
+
+_DIMS = {"in_chans": 3, "num_classes": 1}
+"""What :func:`~tcip_mcp.pipelines.model_build.recorded_model_dims` reads off :data:`_DATA`."""
 
 
 # --------------------------------------------------------------------------
@@ -172,13 +179,11 @@ def test_every_snapshotted_file_reads_back_through_the_store_with_the_manifests_
 # KIND_TCIP_MODULE stamping + structural fallback
 # --------------------------------------------------------------------------
 
-def test_stamp_and_kind_fallback():
-    payload = stamp_model_ref({"model_state_dict": {}}, {"model_source": _model_source()})
+def test_stamp_names_the_kind_from_the_config_and_the_sniff_reads_it():
+    payload = stamp_model_ref({"model_state_dict": {},
+                               "config": {"model_source": _model_source()}})
     assert payload["kind"] == KIND_TCIP_MODULE
-    assert payload["model_source"] == _model_source()
-
-    # An unstamped bespoke checkpoint is recognized structurally.
-    assert _kind_from_ckpt({"model_source": _model_source(), "model_state_dict": {}}, "x.pt") == KIND_TCIP_MODULE
+    assert _kind_from_ckpt(payload, "x.pt") == KIND_TCIP_MODULE
 
 
 def test_stamp_model_ref_refuses_a_payload_with_no_weights():
@@ -187,7 +192,8 @@ def test_stamp_model_ref_refuses_a_payload_with_no_weights():
     import pytest
 
     with pytest.raises(ValueError, match="model_state_dict"):
-        stamp_model_ref({"metrics": {"val_loss": 0.2}}, {"model_source": _model_source()})
+        stamp_model_ref({"metrics": {"val_loss": 0.2},
+                         "config": {"model_source": _model_source()}})
 
 
 # --------------------------------------------------------------------------
@@ -198,13 +204,13 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     from PIL import Image
 
     src = _model_source()
-    model = build_model({"model_source": src})
+    model = build_model({"model_source": src}, _DIMS)
     assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
 
     ckpt = tmp_path / "model_best.pt"
     payload = stamp_model_ref(
         {"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
-         "config": {"model_source": src}}, {"model_source": src})
+         "config": {"model_source": src, "data": _DATA}})
     torch.save(payload, ckpt)
 
     assert detect_kind(str(ckpt)) == KIND_TCIP_MODULE  # kind sniffed from disk
@@ -228,19 +234,20 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     assert {"boxes", "scores", "labels", "count"} <= set(out)  # measurable detection output
 
 
-def test_predictor_loads_at_two_channels_when_in_chans_is_declared_only_in_builder_kwargs(tmp_path):
-    """run_in_chans is the one reader GenericPredictor, resolve_contract_dims and
-    generic_trainer's channel check all go through; a two-band config declaring in_chans only in
-    builder_kwargs must load its images at two channels, not silently default to 3."""
+def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
+    """The width a run records on its data section is the one its model was built at, and the
+    predictor reads that checkpoint's images at it: a two-band run loads at two channels, not a
+    silent default of 3."""
     import numpy as np
 
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
 
-    src = {"builder": "tests.bespoke_models:build_bespoke_classifier",
-          "builder_kwargs": {"num_classes": 2, "in_chans": 2}, "task": "classification"}
-    model = build_model({"model_source": src})
+    src = {"builder": "tests.bespoke_models:build_bespoke_classifier", "task": "classification"}
+    config = {"model_source": src, "data": {"num_channels": 2, "num_classes": 2, "scope": {}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    payload = stamp_model_ref({"model_state_dict": model.state_dict()}, {"model_source": src})
+    payload = stamp_model_ref({"model_state_dict": model.state_dict(), "config": config})
     torch.save(payload, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -270,11 +277,11 @@ def test_register_round_trips_bespoke_kind(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
 
     src = _model_source()
-    model = build_model({"model_source": src})
+    model = build_model({"model_source": src}, _DIMS)
     ckpt = tmp_path / "model_best.pt"
     payload = stamp_model_ref(
-        {"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1}},
-        {"model_source": src})
+        {"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
+         "config": {"model_source": src, "data": _DATA}})
     torch.save(payload, ckpt)
 
     create_experiment("expB", {"model_source": src}, data_source="imgs")

@@ -14,11 +14,15 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
+from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     build_coco_image_record,
     coco_detection_metrics,
     evaluate,
 )
+
+_DIMS = {"in_chans": 3, "num_classes": 1}
+"""What a one-subject detector over three-band sources is built at."""
 
 # No built-in traits: seed_bud_trait_spec (conftest.py) writes a real
 # bud.yml into this test's pinned platform state root so trait="bud_opening" call sites keep resolving.
@@ -99,7 +103,7 @@ def test_val_loss_forwards_all_negative_images():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([1, 0]), _det_batch([0])]  # mixed batch, then all-negative batch
-    evaluate(model, loader, torch.device("cpu"), "detection")
+    evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS)
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
     assert stub.calls == [(2, 4), (1, 0)]
 
@@ -108,7 +112,7 @@ def test_all_negative_only_loader_is_not_skipped():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
-    result = evaluate(model, loader, torch.device("cpu"), "detection")
+    result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS)
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
@@ -197,14 +201,14 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    run = create_run({"data": {"tiling": {"enabled": True, "tile_size": 64}}}, str(tmp_path / "out"),
-                     id="det-measure-tiled")
+    data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64}}
+    run = create_run({"data": data}, str(tmp_path / "out"), id="det-measure-tiled")
     out = Path(run.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt")
+    registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run.id, str(images_dir), str(labels_dir), subject="bud")
+    evaluate_model(run.id, str(images_dir), str(labels_dir))
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     assert captured["tiling"] == {"enabled": True, "tile_size": 64}
@@ -220,7 +224,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir), subject="bud")
+    evaluate_model(ckpt, str(images_dir), str(labels_dir))
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -234,26 +238,31 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
+    scope = {"subject": "bud", "id_map": {"bud": 0}}
     one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
-                                   "max_size": 128, "image_mean": [0.4], "image_std": [0.2]},
-                "task": "detection", "in_chans": 1}
+                "builder_kwargs": {"min_size": 64, "max_size": 128,
+                                   "image_mean": [0.4], "image_std": [0.2]},
+                "task": "detection"}
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="one_band.pt",
-                                 model_source=one_band)
+                                 model_source=one_band, data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir), subject="bud")
+    evaluate_model(ckpt, str(images_dir), str(labels_dir))
     assert captured["ds"].expected_channels == 1
 
-    widthless = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                 "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
-                 "task": "detection"}
-    unstated = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="unstated.pt",
-                                     name="unstated-width", model_source=widthless)
+    from tcip_mcp.tools.model_tools import register_model
 
-    r = evaluate_model(unstated, str(images_dir), str(labels_dir), subject="bud")
+    # A checkpoint whose own data section records no band count, written past the producer.
+    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+    del payload["config"]["data"]["num_channels"]
+    unstated = tmp_path / "unstated.pt"
+    torch.save(payload, str(unstated))
+    assert "error" not in register_model(name="unstated-width", checkpoint_path=str(unstated),
+                                         config={}, project_path=str(tmp_path))
 
-    assert "records no input width" in r["error"], r
+    r = evaluate_model(str(unstated), str(images_dir), str(labels_dir))
+
+    assert "no band count" in r["error"], r
 
 
 def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str, limit: int = 20):
@@ -265,10 +274,10 @@ def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model, recorded_model_dims
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    model = build_model(payload)
+    model = build_model(payload["config"], recorded_model_dims(payload["config"]))
     model.load_state_dict(payload[STATE_DICT_KEY])
     model.eval()
     set_detector_operating_point(model, score_thresh=0.0)
@@ -314,8 +323,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
         Image.new("RGB", (128, 128), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
     declares_its_point = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128,
-                           "box_score_thresh": 0.6},
+        "builder_kwargs": {"min_size": 64, "max_size": 128, "box_score_thresh": 0.6},
         "task": "detection",
     }
     # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
@@ -329,9 +337,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     build_model = model_build.build_model
     builds = []
 
-    def _spy(payload):
+    def _spy(payload, dims):
         builds.append(payload)
-        return build_model(payload)
+        return build_model(payload, dims)
 
     monkeypatch.setattr(model_build, "build_model", _spy)
     monkeypatch.setattr(generic_predictor, "build_model", _spy)
@@ -348,13 +356,13 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
     # the same weights differ in that one metric by more than float noise.
     torch.manual_seed(777)
-    measured = evaluate_model(ckpt, str(images_dir), str(labels_dir),
-                              subject="bud")
+    measured = evaluate_model(ckpt, str(images_dir), str(labels_dir))
     assert "error" not in measured, measured
     assert len(builds) == 1
 
     torch.manual_seed(777)
-    independent_model = build_model(verified.payload)
+    dims = model_build.recorded_model_dims(verified.payload["config"])
+    independent_model = build_model(verified.payload["config"], dims)
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
     kw = recorded["kw"]
@@ -362,7 +370,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     def _independent() -> dict:
         return evaluate(
             independent_model, recorded["loader"], recorded["device"], recorded["task"],
-            conf_threshold=kw["conf_threshold"], iou_threshold=kw["iou_threshold"],
+            dims=dims, conf_threshold=kw["conf_threshold"], iou_threshold=kw["iou_threshold"],
             iou_type=kw["iou_type"], max_dets=kw["max_dets"], trait=kw["trait"])
 
     independent = _independent()
@@ -387,7 +395,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir), subject="bud",
+    evaluate_model(ckpt, str(images_dir), str(labels_dir),
                    tiling={"enabled": True, "tile_size": 64})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -423,7 +431,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
     # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
     r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="bud", tile_size=64, overlap=0.2)
+                                  tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
@@ -460,7 +468,7 @@ def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, mo
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                  str(tmp_path / "out"), subject="bud", tile_size=64, overlap=0.2)
+                                  str(tmp_path / "out"), tile_size=64, overlap=0.2)
     assert (r["tp"], r["fp"], r["fn"]) == (1, 0, 0)
 
 
@@ -500,8 +508,12 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
 
     monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                              str(tmp_path / "out"), subject="bur", tile_size=64, overlap=0.2)
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    bur = {"num_channels": 3, "scope": {"subject": "bur", "id_map": {"bur": 0}}}
+    run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt", config_data=bur),
+                              str(images_dir), str(labels_dir), str(tmp_path / "out"),
+                              tile_size=64, overlap=0.2)
     assert [g["bbox"] for gt, _ in scored for g in gt] == [[10.1, 10.1, 30.2, 20.2]]
     assert [d["bbox"] for _, dt in scored for d in dt] == [[10.1, 10.1, 30.2, 20.2]]
 
@@ -544,43 +556,10 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="bud", tile_size=64, overlap=0.2)
+                                  tile_size=64, overlap=0.2)
     assert r["contradicted_negatives"] == ["a.png"]
     # scored against the real content, not held out as a still-trusted negative
     assert r["scored_images"] == 1 and r["tp"] == 1 and r["fn"] == 0
-
-
-def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
-    """run_full_frame_evaluation must not let a bare `except Exception` around
-    resolve_registry_id_map swallow an attribute-classification registry refusal and silently
-    score against zero ground truth instead of refusing. An attribute needs a real subjects.json
-    to order its values (resolve_registry_id_map's own deliberate ValueError); no subjects.json
-    exists here, so this must propagate as a real refusal, not a quietly-empty GT read."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
-
-    class _Stub:
-        task = "detection"
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128,
-                    "boxes": [], "scores": [], "labels": [], "count": 0}
-
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    with pytest.raises(ValueError, match="subjects.json"):
-        run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="bud", attribute="opening", tile_size=64, overlap=0.2)
 
 
 # ======================================================================
@@ -720,73 +699,11 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _DerivedGeometryStub()
         r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"), subject="bud")
+                                      str(tmp_path / "out"))
     finally:
         predictor_mod.build_predictor = predictor_mod_build
     assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
     assert r["tile_size"] == 224 and r["tile_size_source"] == "derived"
-
-
-def test_run_inference_no_registry_refuses_naming_write_subject_registry(tmp_path, monkeypatch):
-    """An attribute-scoped run against a dataset with no subjects.json refuses before the pass
-    runs, naming write_subject_registry as the remedy: a classified run with an unresolvable id_map can
-    no longer fall back to a raw-index name, since a value outside any vocabulary is worse than a
-    refusal."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    images_dir = tmp_path / "images"  # no subjects.json anywhere under this root
-    images_dir.mkdir()
-    from PIL import Image
-    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
-
-    class _Stub:
-        task = "detection"
-        config = {"data": {"subject": "bud", "attribute": "state"}}
-
-        def predict_batch(self, paths, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10, 10, 20, 20]], "scores": [0.9], "labels": [1], "count": 1}
-                    for p in paths]
-
-    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
-    assert "error" in r
-    assert "write_subject_registry" in r["error"]
-
-
-def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
-    """The precondition check (resolved_subjects_path) only short-circuits the legitimate
-    no-registry case: a subjects.json that exists but is corrupted is a real, unexpected failure
-    and must still raise loudly, not be silently absorbed by the same precondition that admits
-    the honest degraded case."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    root = tmp_path / "ds"
-    images_dir = root / "images"
-    images_dir.mkdir(parents=True)
-    (root / "subjects.json").write_text("{not valid json", encoding="utf-8")
-    from PIL import Image
-    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
-
-    class _Stub:
-        task = "detection"
-        config = {"data": {"subject": "bud", "attribute": "state"}}
-
-        def predict_batch(self, paths, **kw):
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
-
-    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    with pytest.raises(Exception):  # json.JSONDecodeError (a ValueError subclass), not swallowed
-        run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
 
 
 def test_explicit_tile_size_wins(tmp_path, monkeypatch):
@@ -866,9 +783,10 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "scope": {"subject": "bud"},
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
@@ -1315,7 +1233,8 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
             self.train_tile_size = 64
             self.train_overlap = 0.2
             self.in_chans = 3
-            self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
+            # the run's recorded scope
+            self.config: dict = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
 
         def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
                           tile_batch_size=96, cross_tile_nms=None, postprocess="nms",

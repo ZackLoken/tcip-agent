@@ -75,8 +75,8 @@ nests keys under one is refused by `preflight_config` by name, since nothing wou
 config = {
     "model_source": {  # importable nn.Module builder, see pipeline-design skill
         "builder": "my_module:build_net",
-        "builder_kwargs": {"in_chans": 3, "num_classes": 3},
-        "task": "detection",
+        "builder_kwargs": {"pretrained": False},  # the builder's own options; the platform hands
+        "task": "detection",                      # it in_chans and the class count itself
     },
     # "training_source": "my_module:train",  # optional custom train(ctx) loop, a bare
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
@@ -85,7 +85,8 @@ config = {
         # where this run's ground truth lives, whatever shape it is: a directory of per-image
         # label documents, a directory of <stem>.png masks, or a .csv table of one row per image
         "labels_dir": "data/labels/detect",
-        "task": "detection"
+        # the class space it is admitted under; admission adds the id_map it assigns
+        "scope": {"subject": "fruit", "attribute": None},
     },
     "batch_size": 4,
     "stages": [...],

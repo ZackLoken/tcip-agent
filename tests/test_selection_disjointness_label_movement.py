@@ -517,7 +517,7 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
     flat_cfg = {
         "images_dir": str(root / "images" / DATES[0]),
         "labels_dir": str(root / "annotations" / DATES[0]),
-        "subject": SUBJECT, "attribute": None,
+        "scope": {"subject": SUBJECT},
     }
     train_ds, val_ds, partition = auto_train_val("detection", flat_cfg, None)
     # A drawn run records a partition of its own; what it must not carry is a selection binding.
@@ -584,11 +584,8 @@ def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``resolution.selection_digest`` is the sha256 hex digest over ``RECORD_JSON.encode`` of the
-    selection's own document, and the run's own ``split.json`` (written by
-    ``persist_run_partition``, the bind side) already carries that value in its binding block for
-    the selection it bound to, the same value a caller's own re-encoding produces: the two
-    spellings this test's own independent oracle (``_manifest_sha256``) and the production side
-    must agree on. It is one fact for the run, so it is recorded once, never per scope."""
+    selection's own document, and the run's ``split.json`` carries that value once in its binding
+    block for the selection it bound to."""
     from tcip_mcp.experiments import read_run_partition
     from tcip_mcp.pipelines.resolution import selection_digest
 

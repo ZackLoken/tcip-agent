@@ -87,18 +87,19 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
+                         "task": "detection"},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+                 "scope": {"subject": SUBJECT}},
     }
     with pytest.raises(AmbiguousImageStem):
         preflight_config(cfg)
 
 
-def test_preflight_channel_firewall_sample_reports_a_newer_written_bandgroup_manifest(tmp_path):
+def test_preflight_reports_a_newer_written_bandgroup_manifest(tmp_path):
     """A ``.bandgroup`` manifest above this reader's ceiling propagates as
-    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design; the
-    channel firewall must report that as an issue naming the images tree rather than raising
-    through the tool boundary, the same contract it holds for an ambiguous stem."""
+    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design;
+    preflight must report that as an issue naming the images tree rather than raising through the
+    tool boundary."""
     pytest.importorskip("torch")
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
@@ -116,8 +117,9 @@ def test_preflight_channel_firewall_sample_reports_a_newer_written_bandgroup_man
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
+                         "task": "detection"},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+                 "scope": {"subject": SUBJECT}},
     }
     r = preflight_config(cfg)
     assert any("could not be read" in i and "schema_version 2" in i for i in r["issues"]), r["issues"]
@@ -188,10 +190,9 @@ def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path
 # ── The admitting case: a clean, uncollided bucket lists every image through each routed site ──
 
 
-def test_preflight_channel_firewall_sample_admits_a_clean_multi_image_bucket(tmp_path):
+def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     """The rail's own admitting counterpart: two uncollided images reach ``list_logical_images``
-    without raising, and the sampled image's real channel count (3, an RGB jpg) clears the
-    firewall against a matching declared in_chans."""
+    without raising, and preflight reads the run's sizes off them with nothing to object to."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -200,11 +201,12 @@ def test_preflight_channel_firewall_sample_admits_a_clean_multi_image_bucket(tmp
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT},
+                         "task": "detection"},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+                 "scope": {"subject": SUBJECT}},
     }
     r = preflight_config(cfg)
-    assert not any("in_chans" in i for i in r["issues"]), r["issues"]
+    assert r["issues"] == [], r["issues"]
 
 
 def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path):
@@ -218,8 +220,9 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT,
+                         "task": "detection"},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+                 "scope": {"subject": SUBJECT},
                  "split": {"group_by": "stem"}},
     }
     r = preflight_config(cfg)
@@ -237,8 +240,9 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir), "subject": SUBJECT,
+                         "task": "detection"},
+        "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
+                 "scope": {"subject": SUBJECT},
                  "tiling": {"enabled": True},
                  "split": {"reserve_calibration_fraction": 0.2}},
     }

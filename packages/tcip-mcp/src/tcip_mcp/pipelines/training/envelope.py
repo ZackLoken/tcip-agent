@@ -1,9 +1,5 @@
-"""The audited training envelope + ``TrainContext``.
-
-The envelope is the integrity boundary the platform runs around any training body, the default
-trainer or an agent's custom ``train(ctx)``: the run is on the platform's own audit log end to end,
-its source/env provenance is snapshotted, its experiment status / lineage / registration are wired,
-and any checkpoint it saves through ``ctx`` is stamped + atomic.
+"""The training envelope around any training body, the default trainer or an agent's custom
+``train(ctx)``, and ``TrainContext``.
 
 ``TrainContext`` hands the training code the craft library (data / model / optim / eval utils) plus
 the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artifact`` /
@@ -19,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,14 +28,13 @@ logger = logging.getLogger(__name__)
 class TrainContext:
     """The handle the envelope passes to a training body (default or custom).
 
-    Carries the prebuilt leakage-free loaders + run state, exposes the craft library as thin
-    passthroughs, and owns the audited/immutable sinks a custom loop must route through.
+    Carries the prebuilt loaders and run state, exposes the craft library as thin passthroughs,
+    and owns the sinks a training body records metrics, checkpoints and artifacts through.
     """
 
     run: Any                      # TrainRun
     train_loader: Any
     val_loader: Any | None = None
-    task: str = field(kw_only=True)
     resume_from: str = ""
     experiment_id: str | None = None  # None means no record; nothing reads run.id as this instead
     epoch_hook: Any = None        # (epoch, metrics) -> None; the stock trainer's per-epoch signal
@@ -51,6 +46,13 @@ class TrainContext:
     @property
     def config(self) -> dict:
         return self.run.config
+
+    @property
+    def task(self) -> str:
+        """The task this run's config names (:func:`~tcip_mcp.pipelines.model_build.run_task`)."""
+        from tcip_mcp.pipelines.model_build import run_task
+
+        return run_task(self.config)
 
     @property
     def seed(self) -> Any:
@@ -71,23 +73,20 @@ class TrainContext:
 
     # ---- model ----
     def build_model(self) -> Any:
-        from tcip_mcp.pipelines.model_build import build_model
+        """This run's model, at the width and count its config records
+        (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
+        from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-        return build_model(self.config)
+        return build_model(self.config, recorded_model_dims(self.config))
 
     def _contract_args(self, **overrides: Any) -> dict:
         """What the smoke runs against: the dims this run resolved, or one batch off its own train
         loader when those dims cannot shape a batch (``no_batch_reason``).
         """
-        from tcip_mcp.pipelines.data.datasets import stated_sizes
-        from tcip_mcp.pipelines.data.selection import ClassScope
-        from tcip_mcp.pipelines.model_build import resolve_contract_dims
+        from tcip_mcp.pipelines.model_build import recorded_model_dims, resolve_contract_dims
         from tcip_mcp.pipelines.model_contract import no_batch_reason
 
-        data_cfg = self.config.get("data") or {}
-        dims = resolve_contract_dims(self.config, self.task,
-                                     scope=ClassScope.recorded_in(data_cfg),
-                                     sizes=stated_sizes(data_cfg))
+        dims = resolve_contract_dims(self.config, self.task, recorded_model_dims(self.config))
         if no_batch_reason(self.task, dims, None) is not None:
             batch = next(iter(self.train_loader or []), None)
             if batch is not None:
@@ -114,20 +113,23 @@ class TrainContext:
         selection+early-stop / checkpoint cadence)."""
         from tcip_mcp.pipelines.training.generic_trainer import train
 
-        return train(self.run, self.train_loader, self.val_loader, task=self.task,
+        return train(self.run, self.train_loader, self.val_loader,
                      epoch_callback=self._epoch_sink, resume_from=self.resume_from)
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
     def build_dataset(self, task: str | None = None, *, samples: Any,
                       sizes: "Mapping[str, int] | None" = None, **kwargs: Any) -> Any:
-        """The factory, over the samples you were handed. ``sizes`` unstated resolves from this
-        run's own data config and those samples, so a loader you build here reads at its width."""
-        from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
+        """The factory, over the samples you were handed. ``sizes`` and ``scope`` unstated are the
+        ones this run's data config records, so a loader you build here reads at its width and
+        count whichever subset of samples it holds."""
+        from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
+        from tcip_mcp.pipelines.data.selection import ClassScope
 
         resolved_task = task or self.task
+        data_cfg = self.config.get("data") or {}
         if sizes is None:
-            sizes = resolve_sizes(resolved_task, self.config.get("data") or {}, samples,
-                                  kwargs.get("dataset_source"))
+            sizes = stated_sizes(data_cfg)
+        kwargs.setdefault("scope", ClassScope.of(data_cfg))
         return build_dataset(resolved_task, samples=samples, sizes=sizes, **kwargs)
 
     def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
@@ -204,10 +206,11 @@ class TrainContext:
         return restore_optimizer_state(*args, **kwargs)
 
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
         return evaluate(model, self.val_loader if loader is None else loader,
-                        self.device, self.task, **kwargs)
+                        self.device, self.task, dims=recorded_model_dims(self.config), **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
@@ -240,7 +243,7 @@ class TrainContext:
 
         return instance_geometries(*args, **kwargs)
 
-    # ---- envelope-owned sinks: keep a custom loop audited + immutable ----
+    # ---- envelope-owned sinks ----
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
         """Route one epoch's metrics to the log that owns them, and fire ``epoch_hook`` if attached
         (an HPO trial's per-epoch pruning signal; independent of ``experiment_id``).
@@ -274,21 +277,16 @@ class TrainContext:
                            self.experiment_id or self.run.id, epoch, exc)
 
     def set_final_weights(self, path: str) -> None:
-        """Declare the shippable checkpoint for this run. ``dispatch_train_body`` derives
-        this automatically from the ``model_best.pt``/``model_final.pt`` convention after the
-        training body returns, call this yourself only when your loop's output doesn't follow
-        that convention (e.g. a non-standard tag via ``save_checkpoint``)."""
+        """Declare ``path`` the shippable checkpoint for this run. Unset, the run's
+        ``model_best.pt`` or ``model_final.pt`` is the one declared once the body returns."""
         self.final_weights = path
 
     def report_objective(self, value: float) -> None:
-        """Report a raw scalar directly to the active HPO trial's pruning scheduler, a
-        no-op outside HPO (``trial_report`` is ``None`` on any non-trial run, so this is always
-        safe to call unconditionally). The automatic ``epoch_hook`` path (fired from
-        ``log_metrics``/``_epoch_sink``) only recognizes the stock trainer's own metric keys
-        (``selection``/``val_objective``/``val_loss``); call this instead from a bespoke
-        ``train(ctx)`` whose metrics use different names, with whatever value your loop knows
-        represents trial progress, in the direction the sweep's resolved selection metric
-        declares as better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``), not a fixed convention."""
+        """Report a raw scalar to the active HPO trial's pruning scheduler; a no-op outside HPO.
+        The per-epoch hook reads only the stock trainer's metric keys
+        (``selection``/``val_objective``/``val_loss``), so a body whose metrics use other names
+        reports its trial progress here, in the direction the sweep's resolved selection metric
+        declares better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``)."""
         if self.trial_report is not None:
             self.trial_report(float(value))
 
@@ -302,14 +300,12 @@ class TrainContext:
             self.tb.flush()
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Stamped, atomic checkpoint save. Stamps ``kind`` + ``model_source`` + ``config`` so a
-        hand-rolled loop can't emit an unstamped, un-routable ``.pt``.
+        """Save ``state`` atomically under ``tag``, stamped with ``kind`` and this run's
+        ``config``; returns the path written.
 
-        The tag contract: ``tag="model_best"`` or ``"model_final"`` is found automatically by
-        ``dispatch_train_body`` after your loop returns and becomes the run's registered
-        deliverable. Any other tag, including the default, ``"checkpoint"``, is saved and stamped
-        but is not itself registered; call ``ctx.set_final_weights(path)`` with the path this
-        method returns if you want a non-conventional tag to become the deliverable.
+        ``tag="model_best"`` or ``"model_final"`` becomes the run's registered deliverable once the
+        body returns. Any other tag, including the default, ``"checkpoint"``, is saved and stamped
+        but not registered unless its path is passed to ``ctx.set_final_weights``.
 
         A ``metrics`` key in ``state`` becomes the registered entry's ``metrics``, with
         ``metrics_source="training_source"``: the platform wrote it into the artifact but never
@@ -318,8 +314,7 @@ class TrainContext:
 
         Refuses (``ValueError``) a ``state`` carrying a ``schema_version`` key (the platform's own
         checkpoint-version field) or a ``config`` key (the checkpoint's ``config`` is always this
-        run's launch config, the record a run's ``(subject, attribute, id_map)`` scope is read
-        from).
+        run's launch config, the one record of its scope, task and model source).
         """
         if "schema_version" in state:
             raise ValueError(
@@ -338,7 +333,7 @@ class TrainContext:
 
         payload = dict(state)
         payload["config"] = self.config
-        stamp_model_ref(payload, self.config, experiment_id=self.experiment_id)
+        stamp_model_ref(payload, experiment_id=self.experiment_id)
         path = write_checkpoint(payload, checkpoint_key(self.run.output_dir, tag))
         return str(path)
 
@@ -378,7 +373,8 @@ class TrainContext:
 
 
 def _snapshot_run_provenance(ctx: TrainContext) -> None:
-    """Snapshot env (+ bespoke model source) into the immutable experiment dir. Best-effort.
+    """Copy the run's environment, and a bespoke run's source files, into its experiment dir; a
+    failure is logged, not raised.
 
     ``env.json`` records the library versions, seed and model kind for every run. For a bespoke
     ``model_source`` / ``training_source`` run, the per-file source snapshot is added by

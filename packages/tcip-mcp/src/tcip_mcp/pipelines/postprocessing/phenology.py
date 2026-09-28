@@ -33,14 +33,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from tcip_mcp.dataset_layout import label_filename
 from tcip_mcp.operationalization import OperationalizationBasis
 from tcip_mcp.pipelines.resolution import Acknowledgment, bucket_scope
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.resolution import BucketScope
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -61,8 +61,8 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
 
 
 def milestone_date_columns(spec) -> list[str]:
-    """The milestone/date column names a trait's phenology delivery carries, a proper subset of
-    ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
+    """The milestone/date column names a trait's phenology delivery carries, without its
+    ``plant_id`` and provenance columns.
     """
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
@@ -287,32 +287,16 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
     if not name:
         return None, f"trait {spec.name!r} defines no positive_value"
     for pred_dir in predictions_by_date.values():
-        id_map = bucket_id_map(Path(pred_dir))
+        scope = bucket_scope(Path(pred_dir))
+        id_map = scope.id_map if scope is not None else None
         if id_map is not None and name in id_map:
-            try:
-                return int(id_map[name]), f"resolved {name!r} -> class {id_map[name]} from {pred_dir}"
-            except (TypeError, ValueError):
-                continue
+            return id_map[name], f"resolved {name!r} -> class {id_map[name]} from {pred_dir}"
     return None, (f"no prediction bucket's recorded id_map contains {name!r}, the classifier that "
                   "produced these predictions never assessed this trait's positive class")
 
 
-def bucket_id_map(pred_dir: Path) -> dict | None:
-    """The bucket's recorded ``id_map`` (name -> int) from ``operating_point.json``, or ``None`` if
-    absent or not a dict.
-    """
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    sidecar = read_operating_point_sidecar(pred_dir)
-    if not isinstance(sidecar, dict):
-        return None
-    id_map = sidecar.get("id_map")
-    return id_map if isinstance(id_map, dict) else None
-
-
 def count_by_class(
-    json_path: Path, id_map: dict | None, positive_value: str, *,
-    scope: BucketScope | None,
+    json_path: Path, positive_value: str, *, scope: ClassScope | None,
 ) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
@@ -335,14 +319,14 @@ def count_by_class(
 
     annotations = json_io.detection_annotations(json_path)
     total = len(annotations)
-    if scope is None or not scope.classified or not id_map or positive_value not in id_map:
+    if (scope is None or not scope.classified or not scope.id_map
+            or positive_value not in scope.id_map):
         return total, 0, total
-    assert scope.subject is not None and scope.attribute is not None  # classified implies both
     positive = 0
     for i, a in enumerate(annotations):
         value = json_io.require_classified_record(
-            a, subject=scope.subject, attribute=scope.attribute, vocabulary=set(id_map),
-            source=f"{json_path}#{i}")
+            a, subject=cast(str, scope.subject), attribute=cast(str, scope.attribute),
+            vocabulary=set(scope.id_map), source=f"{json_path}#{i}")
         if value == positive_value:
             positive += 1
     return total, positive, 0
@@ -414,7 +398,6 @@ def per_plant_series(
     for date_str in mapping:
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
-        id_map = bucket_id_map(pred_path) if pred_path is not None else None
         scope = bucket_scope(pred_path) if pred_path is not None else None
         read_stems = stems_delivery_reads(mapping[date_str], pred_dir) if pred_dir else set()
         # [total, positive, unclassified, missing, n_images] per plant: n_images is every stem
@@ -435,7 +418,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                pred_path / label_filename(stem), id_map, positive_value, scope=scope)
+                pred_path / label_filename(stem), positive_value, scope=scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
@@ -553,8 +536,8 @@ def _write_phenology_delivery(
     project_root: str | Path | None,
     plant_mapping: dict,
 ) -> dict:
-    """Gate, compose and write one phenology delivery's provenance cells, then record the delivery,
-    for ``write_phenology_csv`` and ``write_phenology_curve_csv``.
+    """Gate, compose and write one phenology delivery's provenance cells, then record the
+    delivery.
 
     Runs ``check_delivery_gate`` over ``flags``: a gate that does not pass raises ``ValueError``
     with the gate's own reason, and nothing is written. ``acknowledgment`` is the breeder's own
@@ -567,9 +550,7 @@ def _write_phenology_delivery(
     when ``include_majority_marker`` is set, the trait's majority-alias marker through
     ``majority_crossing_unconfirmed_column``) and returns them. Records the delivery through
     ``record_delivery_binding_event`` after the file is written, under the caller-stated ``door``
-    and the explicit ``project_root``, with the gate's own ``effective_acknowledgment()``. That
-    write is best-effort; the returned dict carries ``delivery_event_recorded``, the write's own
-    success bool, beyond the schema's own columns.
+    and the explicit ``project_root``, with the gate's own ``effective_acknowledgment()``.
 
     ``plant_mapping`` is the mapping this delivery attributed detections through, shaped as
     ``delivery_events_schema.PlantMappingDisclosure`` declares
@@ -588,9 +569,9 @@ def _write_phenology_delivery(
             non-empty but ``document_reconciliations`` lacks an entry this writer declares, the
             gate refused, or ``flags`` carries no ``classifier`` dimension; nothing is written in
             any of these cases.
-        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
-            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
-            already written to ``out_path``.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
+            appended, raised by ``record_delivery_binding_event`` after the CSV and the
+            ``delivery_events`` record were written.
     """
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(
@@ -599,16 +580,15 @@ def _write_phenology_delivery(
             "produce one and are the primitives to call; this writer cannot read the record itself, "
             "because it is given a trait spec rather than a project to read from."
         )
-    declared_documents = ("operating_point", "classifier_operating_point")
     if predictions_by_date:
-        missing = [doc for doc in declared_documents if doc not in document_reconciliations]
+        missing = [doc for doc in ("operating_point", "classifier_operating_point")
+                   if doc not in document_reconciliations]
         if missing:
             raise ValueError(
                 f"{door}: predictions_by_date names {len(predictions_by_date)} bucket(s) but "
                 f"document_reconciliations carries no entry for {missing}; a phenology delivery "
-                "declares both operating_point and classifier_operating_point to the event "
-                "writer, so both must be reconciled before the gate runs and before anything "
-                "is written."
+                "reads both operating_point and classifier_operating_point, so both must be "
+                "reconciled before the gate runs and before anything is written."
             )
     op_recon = document_reconciliations.get("operating_point", {})
     bindings = op_recon.get("bindings", {})
@@ -653,13 +633,10 @@ def _write_phenology_delivery(
         for row in rows:
             writer.writerow({**row, **cells})
 
-    # Not a schema column (the CSV above is already written with extrasaction="ignore"), but a
-    # caller composing its own response from these cells needs to know whether it landed.
-    cells["delivery_event_recorded"] = record_delivery_binding_event(
+    record_delivery_binding_event(
         door, str(out_path), list(predictions_by_date.values()),
         document_reconciliations=document_reconciliations,
         dimension_reconciliations=dimension_reconciliations,
-        measurement_documents=list(declared_documents),
         acknowledgment=gate.effective_acknowledgment(),
         trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,

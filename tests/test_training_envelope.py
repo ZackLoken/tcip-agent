@@ -18,7 +18,7 @@ from tcip_mcp.experiments import artifacts_key, env_key, lineage_key  # noqa: E4
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 
 def _audit_events(root, tool="training_run"):
@@ -44,7 +44,8 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
 
     out = tmp_path / "out"
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:_agent_train",
         "device": "cpu",
     }
@@ -52,8 +53,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     update_status("expE", "running")
     run = create_run(config, str(out), id="auto-run-78")
 
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id="expE")
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expE")
     run_training_envelope(ctx)
 
     # Custom loop ran via ctx: its rows land on the experiment's own metrics log (the record
@@ -65,7 +65,8 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert [row["epoch"] for row in read_metrics("expE")] == [1]
     best = torch.load(out / "model_best.pt", weights_only=False)
     assert best["kind"] == KIND_TCIP_MODULE
-    assert best["model_source"] == config["model_source"]
+    assert best["config"]["model_source"] == config["model_source"]
+    assert "model_source" not in best
 
     # Body is bracketed on the append-only audit log (open running + close completed).
     events = _audit_events(tmp_path)
@@ -117,7 +118,8 @@ def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(t
 
     out = tmp_path / "out"
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:_agent_train_default_tag_no_override",
         "device": "cpu",
     }
@@ -125,8 +127,7 @@ def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(t
     update_status("expF", "running")
     run = create_run(config, str(out), id="auto-run-79")
 
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id="expF")
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expF")
     run_training_envelope(ctx)
 
     assert run.status == "failed"
@@ -151,7 +152,8 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_registers_not
 
     out = tmp_path / "out"
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:_agent_train_declares_a_path_it_never_wrote",
         "device": "cpu",
     }
@@ -159,8 +161,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_registers_not
     update_status("expUnwritten", "running")
     run = create_run(config, str(out), id="auto-run-80")
 
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id="expUnwritten")
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expUnwritten")
     run_training_envelope(ctx)
 
     assert run.status == "failed"
@@ -182,7 +183,8 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
 
     out = tmp_path / "out"
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:_agent_train_explicit_override",
         "device": "cpu",
     }
@@ -190,8 +192,7 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
     update_status("expG", "running")
     run = create_run(config, str(out), id="auto-run-81")
 
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id="expG")
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expG")
     run_training_envelope(ctx)
 
     assert run.status == "completed"
@@ -231,16 +232,18 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
         ds = dataset_over("classification", str(images_dir), str(csv_path))
         return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
 
+    _ds, data = run_over("classification", str(images_dir), str(csv_path))
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+                         "task": "classification"},
+        "data": data,
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 2}], "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
     }
     # Generate the resumable checkpoint directly (not through the envelope).
     train(gt_create_run(dict(cfg), str(tmp_path / "out"), id="auto-run-resume-provenance-1"),
-         build_loader(), task="classification")
+         build_loader())
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
@@ -248,7 +251,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     create_experiment("expH", cfg)
     update_status("expH", "running")
     run = gt_create_run(dict(cfg), str(tmp_path / "out2"), id="auto-run-resume-provenance-2")
-    ctx = TrainContext(run=run, train_loader=build_loader(), val_loader=None, task="classification",
+    ctx = TrainContext(run=run, train_loader=build_loader(), val_loader=None,
                        experiment_id="expH", resume_from=str(ckpt))
     run_training_envelope(ctx)
 
@@ -265,14 +268,14 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
 def test_report_objective_calls_trial_report_when_attached(tmp_path):
     run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-82")
     reported: list = []
-    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append, task="detection")
+    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append)
     ctx.report_objective(3.14)
     assert reported == [3.14]
 
 
 def test_report_objective_is_noop_outside_hpo(tmp_path):
     run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-83")
-    ctx = TrainContext(run=run, train_loader=None, task="detection")  # no trial_report, not an HPO trial
+    ctx = TrainContext(run=run, train_loader=None)  # no trial_report, not an HPO trial
     ctx.report_objective(3.14)  # must not raise
 
 
@@ -284,7 +287,7 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
     out.mkdir(parents=True)
     captured = {}
 
-    def _stub_train(run, train_loader, val_loader=None, task="detection",
+    def _stub_train(run, train_loader, val_loader=None,
                     epoch_callback=None, resume_from=""):
         captured["epoch_callback"] = epoch_callback
         captured["called"] = True
@@ -299,7 +302,7 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
     update_status("expD", "running")
     run = create_run(config, str(out), id="auto-run-84")
 
-    ctx = TrainContext(run=run, train_loader=None, experiment_id="expD", task="classification")
+    ctx = TrainContext(run=run, train_loader=None, experiment_id="expD")
     run_training_envelope(ctx)
 
     assert captured.get("called") is True                     # dispatched to default_train

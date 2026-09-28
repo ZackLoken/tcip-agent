@@ -1,10 +1,7 @@
 """Experiment tracking for ML training runs.
 
-An experiment is one run's immutable record: named by the caller before the run or minted at
-launch, and nothing groups runs into anything larger. A relaunch of a record that already has
-history forks a new record instead of reopening it, its ``parent_experiment`` naming the one it
-forked from. ``experiment_id`` is that record's id wherever a store key, a tool parameter, a route
-path or a delivered column carries the term.
+An experiment is one run's record, named by the caller before the run or minted at launch. A
+relaunch of a record that has history forks a new one whose ``parent_experiment`` names it.
 
 Stores experiment state in .tcip/experiments/<experiment_id>/:
   config.json, full training config snapshot
@@ -151,11 +148,10 @@ def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     ``cas``: every writer here reads the document and updates fields inside it, from the training
         subprocess and the tool process at once.
 
-    ``launched_by`` is a mapping naming who launched the run, stamped by
-    :func:`stamp_run_identity`: ``{"launcher": "gui"}`` for a launch through the web app's own
-    route, ``{"launcher": "agent", **agent_identity.audit_fields()}`` for a launch inside an MCP
-    handshake, ``{"launcher": "process"}`` for a launch from neither. Absent on a record whose
-    experiment tracking never reached the stamp, or whose stamp otherwise failed.
+    ``launched_by`` is a mapping naming who launched the run: ``{"launcher": "gui"}`` for a launch
+    through the web app's own route, ``{"launcher": "agent", **agent_identity.audit_fields()}``
+    for a launch inside an MCP handshake, ``{"launcher": "process"}`` for a launch from neither.
+    Absent on a record whose launch was never stamped.
     """
     return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, STATUS_DOCUMENT, root)
 
@@ -380,8 +376,7 @@ def create_experiment(
     refused inside the write's own lock.
 
     ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on,
-    written into the immutable lineage at creation. They are set once here and never via
-    ``update_lineage``.
+    written into the lineage at creation and never via ``update_lineage``.
 
     The config is checked against what JSON can hold before the write, naming the offending field.
     """
@@ -600,9 +595,9 @@ def complete_run(
 
 
 class StampPreconditionFailed(RuntimeError):
-    """Raised by :func:`stamp_run_identity` when the record is not a fresh, unstamped one: its
-    state is not ``"created"``, it already carries an ``output_dir``, or (when the stamp was given
-    a config to write) it already carries a metrics row.
+    """A run identity stamped onto a record that is not a fresh, unstamped one: its state is not
+    ``"created"``, it already carries an ``output_dir``, or (when the stamp was given a config to
+    write) it already carries a metrics row.
     """
 
 
@@ -1435,6 +1430,7 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float) -> d
     entry still carries ``registry: []``). ``same_dataset_fingerprint`` is ``None``, never
     ``True``, when any compared id is an error entry.
     """
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
 
     comparisons: list[dict[str, Any]] = []
@@ -1492,7 +1488,8 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float) -> d
         summary["model"] = model_source.get("builder")
         summary["task"] = run_task(config) if config else None
         data_cfg = config.get("data", {})
-        summary["subject"] = data_cfg.get("subject") if isinstance(data_cfg, dict) else None
+        summary["subject"] = (ClassScope.of(data_cfg).subject
+                              if isinstance(data_cfg, dict) and "scope" in data_cfg else None)
 
         # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.
         lin = exp.get("lineage")

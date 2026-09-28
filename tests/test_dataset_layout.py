@@ -143,9 +143,11 @@ def test_a_bucket_holding_only_its_stamp_offers_no_predictions(tmp_path: Path) -
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_mcp.pipelines.resolution import operating_point_stamp, sidecar_key
 
+    scope = ClassScope(subject="bud", id_map={"bud": 0})
     date = "2026-02-11"
     key = sidecar_key(prediction_dir(tmp_path, "stamped", date))
     stamp_file = FileBackend().path_for(key)
@@ -153,7 +155,7 @@ def test_a_bucket_holding_only_its_stamp_offers_no_predictions(tmp_path: Path) -
     stamp_file.write_bytes(ts.get_descriptor(key.store).codec.encode(operating_point_stamp(
         None, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
         shippable_issues=[],
-        id_map=None, subject="bud", attribute=None, trait=None, dataset_hash=None,
+        scope=scope, trait=None, dataset_hash=None,
         checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None)))
     assert [f.name for f in stamp_file.parent.iterdir()] == ["operating_point.json"]
@@ -163,7 +165,7 @@ def test_a_bucket_holding_only_its_stamp_offers_no_predictions(tmp_path: Path) -
         published / "IMG_1.json", {"image": "IMG_1.jpg", "width": 64, "height": 64,
                                    "boxes": [[4.0, 4.0, 20.0, 20.0]], "scores": [0.9],
                                    "labels": [1], "count": 1},
-        created_by="test-producer", subject="bud", attribute=None, id_map={"bud": 0})
+        created_by="test-producer", scope=scope)
 
     assert models_with_predictions(tmp_path, date) == ["published"]
 

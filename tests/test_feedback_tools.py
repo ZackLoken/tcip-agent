@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
 
 # The prediction bucket these verdicts were recorded against, as bucket_key_of spells one.
@@ -400,15 +402,17 @@ def test_unresolvable_proposal_engine_raises_valueerror():
 
 
 def _bespoke_checkpoint_payload() -> dict:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     src = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"min_size": 64, "max_size": 128},
         "task": "detection",
     }
-    model = build_model({"model_source": src})
-    return {"model_source": src, "model_state_dict": model.state_dict()}
+    config = {"model_source": src,
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
+    return {"config": config, "model_state_dict": model.state_dict()}
 
 
 def _registered_checkpoint_from_experiment(tmp_path: Path, experiment_id: str) -> str:
@@ -485,10 +489,10 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
     ckpt = registered_checkpoint(
         tmp_path, project_root=tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
-                      "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
-                                         "max_size": 128, "image_mean": [0.4],
+                      "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
                                          "image_std": [0.2]},
-                      "task": "detection", "in_chans": 1})
+                      "task": "detection"},
+        data={"num_channels": 1, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
     images = tmp_path / "images"
     images.mkdir()
     for stem in ("a", "b"):
@@ -794,8 +798,9 @@ def _stamp_classified_bucket(dataset_root: Path, bucket_rel: str = CLASSIFIED_BU
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     bucket_dir = dataset_root / bucket_rel
-    write_sidecar(bucket_dir, {"id_map": {"healthy": 0, "diseased": 1},
-                              "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE})
+    write_sidecar(bucket_dir, {"scope": {"subject": CLASSIFIED_SUBJECT,
+                                         "attribute": CLASSIFIED_ATTRIBUTE,
+                                         "id_map": {"healthy": 0, "diseased": 1}}})
     return bucket_dir
 
 
@@ -834,61 +839,6 @@ def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_tru
     anns = read_annotations(str(tmp_path / "out" / "annotations" / "imgA.json"))
     assert anns[0].subject == CLASSIFIED_SUBJECT
     assert anns[0].attributes == {CLASSIFIED_ATTRIBUTE: "healthy"}
-
-
-def test_materialize_refuses_a_classified_scope_bucket_recording_no_id_map(tmp_path):
-    """The tool's own pre-check refuses by name before any write when the reviewed bucket's
-    stamp records no id_map at all: a classified scope's confirmed values have nothing to check
-    against, and passing an empty vocabulary through unchecked would let the write rail refuse
-    every value with a bare ``[]`` instead of naming the bucket that lacks a map. The admitting
-    case (a bucket whose stamp records a real map) is
-    test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape."""
-    from tcip_mcp.pipelines.resolution import write_sidecar
-
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
-    bucket_dir = dataset_root / CLASSIFIED_BUCKET
-    write_sidecar(bucket_dir, {"id_map": None,
-                              "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE})
-    source = _source_dataset_with_registry(tmp_path)
-    out = tmp_path / "out"
-
-    r = materialize_review_dataset(
-        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
-
-    assert "error" in r
-    assert "records no id_map" in r["error"]
-    assert not out.exists()
-
-
-def test_materialize_refuses_a_positive_under_a_classified_scope_with_an_empty_id_map(tmp_path):
-    """An empty recorded id_map names no vocabulary either: ``write_sidecar``'s own
-    ``scope_consistent_with_map`` rail refuses an empty id_map outright, so no live producer can
-    stamp this shape, and the bucket here is seeded through a raw store write instead. The tool's
-    own pre-check only refuses an absent map (``bucket_id_map`` answering ``None``); an empty one
-    reaches ``materialize_dataset``'s own write rail (``_write_positive_label``), which refuses
-    each accepted verdict's positive the same way an absent vocabulary refuses. The admitting
-    case is test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape."""
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
-    dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
-    bucket_dir = dataset_root / CLASSIFIED_BUCKET
-    tcip_store.replace(sidecar_key(bucket_dir, "operating_point"),
-                       {"id_map": {}, "subject": CLASSIFIED_SUBJECT,
-                        "attribute": CLASSIFIED_ATTRIBUTE},
-                       expect=tcip_store.Version.ABSENT)
-    source = _source_dataset_with_registry(tmp_path)
-    out = tmp_path / "out"
-
-    r = materialize_review_dataset(
-        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
-
-    assert "error" not in r
-    assert r["positive"] == 0
-    assert [e["image"] for e in r["boundary_refused"]] == ["imgA.png"]
-    assert "requires the bucket's own recorded vocabulary" in r["boundary_refused"][0]["reason"]
 
 
 def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path):
@@ -956,6 +906,20 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
     assert "error" in r
     assert "already holds a subject registry" in r["error"]
     assert (out / "subjects.json").read_text(encoding="utf-8") == '{"other": {}}'
+
+
+@pytest.mark.parametrize("subject", [CLASSIFIED_SUBJECT, ""])
+def test_materialize_refuses_a_subject_stated_beside_a_stamped_bucket(tmp_path, subject):
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    source = _source_dataset_with_registry(tmp_path)
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(tmp_path / "out"),
+        bucket=CLASSIFIED_BUCKET, subject=subject)
+
+    assert "would be a second one" in r.get("error", ""), r
 
 
 def test_materialize_refuses_an_undecodable_stamp(tmp_path):

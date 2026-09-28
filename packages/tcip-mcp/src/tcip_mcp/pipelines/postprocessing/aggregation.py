@@ -264,7 +264,7 @@ def export_aggregated_csv(
     plant_mapping: dict | None = None,
     acknowledgment: Acknowledgment | None = None,
     project_root: str | Path | None = None,
-) -> tuple[str, dict, bool]:
+) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
 
     The ``fieldnames`` list below is the schema: plant_id, crop, delivered_phenotype, value, units,
@@ -345,9 +345,8 @@ def export_aggregated_csv(
             to. ``None`` resolves against this process's pinned platform root.
 
     Returns:
-        ``(path, tail, event_recorded)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS``
-        tail ``delivered_tail`` composed and wrote into every row, and whether the best-effort
-        delivery-event write landed (``record_delivery_binding_event``'s own return).
+        ``(path, tail)``: the path to the written CSV and the ``_PROVENANCE_COLUMNS`` tail
+        ``delivered_tail`` composed and wrote into every row.
 
     Raises:
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
@@ -358,9 +357,9 @@ def export_aggregated_csv(
             first check; carries the failed check and no counts.
         ValueError: any other refusal (a statement or unit problem the results carry); carries no
             gate result.
-        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
-            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
-            already written to ``output_path``.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
+            appended, raised by ``record_delivery_binding_event`` after the CSV and the
+            ``delivery_events`` record were written.
     """
     from tcip_mcp.pipelines.resolution import (
         MEASUREMENT_DOCUMENTS,
@@ -539,17 +538,16 @@ def export_aggregated_csv(
         **({"tile_size": tile_recon} if tile_recon is not None else {}),
         **({"scale": scale_recon} if scale_recon is not None else {}),
     }
-    event_recorded = record_delivery_binding_event(
+    record_delivery_binding_event(
         door, output_path, pred_dirs,
         document_reconciliations=(
             {measurement_document: operating_point_recon} if operating_point_recon is not None
             else {}
         ),
         dimension_reconciliations=dimension_reconciliations,
-        measurement_documents=[measurement_document],
         acknowledgment=gate.effective_acknowledgment(), trait=trait, delivery_kind=delivery_kind,
         project_root=project_root, plant_mapping=plant_mapping)
-    return output_path, stamp, event_recorded
+    return output_path, stamp
 
 
 def _resolve_statement(
