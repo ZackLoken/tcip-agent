@@ -24,7 +24,8 @@ def stub_pass(predictor: Any, *, tile_size: int | None = None, postprocess: str 
               cross_tile_nms: float | None = None, tile_batch_size: int = 8) -> Any:
     """A prepared pass (``inference_tools._PreparedPass``) around ``predictor``, untiled unless a
     ``postprocess`` is named, its geometry and merge threshold resolved by the platform's own
-    resolvers; identity and scope are placeholders a calibration never reads."""
+    resolvers. Its scope is the one the predictor's config records, or a one-subject ``bud``
+    class space for a stub recording none; its identity is a placeholder."""
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
     from tcip_mcp.tools.inference_tools import _PreparedPass
@@ -32,10 +33,12 @@ def stub_pass(predictor: Any, *, tile_size: int | None = None, postprocess: str 
     tiled = postprocess is not None
     geometry = resolve_tile_geometry(predictor, tiled=tiled, tile_size=tile_size, overlap=None)
     slicing = slicing_record(geometry.overlap, geometry.tile_resize, postprocess) if tiled else None
+    data = (getattr(predictor, "config", None) or {}).get("data") or {}
     return _PreparedPass(
         checkpoint_path="stub.pt", predictor=predictor, images_dir=None, paths=[],
         identity={"sha256": "stub", "experiment_id": None},
-        scope=ClassScope.recorded_in(getattr(predictor, "config", {}).get("data") or {}),
-        id_map=None, geometry=geometry, slicing=slicing,
+        scope=(ClassScope.of(data) if "scope" in data
+               else ClassScope(subject="bud", id_map={"bud": 0})),
+        geometry=geometry, slicing=slicing,
         cross_tile_nms=resolve_cross_tile_nms(cross_tile_nms, slicing), conf=0.5, max_dets=None,
         conf_stated=False, max_dets_stated=False, tile_batch_size=tile_batch_size)

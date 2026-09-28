@@ -19,6 +19,7 @@ from PIL import Image
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import prediction_dir
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tcip_mcp.prediction_buckets import stage_prediction_shapes
 from tcip_web.app import app
@@ -57,8 +58,9 @@ def _stage(dataset_root: Path, *, value: str) -> dict:
 def _stamp_bucket(bucket: Path) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], id_map=ID_MAP,
-        subject=SUBJECT, attribute=ATTRIBUTE, trait=ATTRIBUTE, dataset_hash="H",
+        tile_size_validated=None, shippable_issues=[],
+        scope=ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP),
+        trait=ATTRIBUTE, dataset_hash="H",
         checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
         images_dir=None, raster_path=None, produced_at="2026-04-01T00:00:00+00:00",
     )

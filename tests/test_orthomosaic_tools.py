@@ -66,16 +66,18 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_siz
     """Write a bespoke detection checkpoint and register it in explicit mode against the
     platform state root the caller has already pinned (``TCIP_STATE_ROOT``), so a caller can
     hand its bare path to a door that resolves the registry itself."""
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": in_chans,
-                                      "min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "detection", "in_chans": in_chans}
-    model = build_model({"model_source": model_source})
+                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
+                    "task": "detection"}
+    config = {"model_source": model_source,
+              "data": {"num_channels": in_chans,
+                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
     result = register_model(name="test-model", checkpoint_path=str(ckpt), config={})
     assert "error" not in result, result
     return str(ckpt)
@@ -848,7 +850,7 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     write_sidecar(bucket_dir, {"validated": False, "raster_content_identity": identity,
-                              "subject": "0", "attribute": None},
+                              "scope": {"subject": "0", "attribute": None, "id_map": None}},
                  "operating_point")
 
     # Arbitrary geolocation, never derived from the rotated raster itself (which refuses to
@@ -903,19 +905,21 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
 
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.pipelines.resolution import read_delivery_events
 
-    # The bucket now sits under a real dataset root, so this event files in the dataset's own
-    # log (record_delivery_binding_event's own scoping), not the project's.
+    (record,) = [r for r in read_delivery_events()
+                 if r["door"] == "deliver_orthomosaic_plant_counts"]
+    bindings = record["document_reconciliations"]["operating_point"]["bindings"]
+    assert bindings[str(bucket_dir)]["record_digest"]
+    # The bucket sits under a real dataset root, so the delivery's one line files in the dataset's
+    # own log naming the event, with no call line beside it in either log.
     emitted = ts.read_log(audit_log_key(bucket_dir.parents[1])).records
-    door = [e for e in emitted if e["tool"] == "deliver_orthomosaic_plant_counts"
-            and "verified_buckets" in e]
-    assert len(door) == 1, emitted
-    assert door[0]["verified_buckets"][str(bucket_dir)]["record"] != ""
-    assert door[0]["record_digests"] != []
-    # That event is the delivery's one line: no call line beside it in either log.
     platform = ts.read_log(audit_log_key()).records
-    assert [e for e in [*emitted, *platform] if e["tool"] == "deliver_orthomosaic_plant_counts"
-            and "verified_buckets" not in e] == []
+    lines = [e for e in [*emitted, *platform] if e["tool"] == "delivery_event"]
+    assert [e["arguments"] for e in lines] == [{"event_id": record["event_id"]}]
+    assert lines[0] in emitted
+    assert not [e for e in [*emitted, *platform]
+                if e["tool"] == "deliver_orthomosaic_plant_counts"]
 
 
 def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path, monkeypatch):
@@ -1090,8 +1094,8 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registered_csv_deleted_after
 def test_deliver_orthomosaic_plant_counts_delivers_once_registry_csv_bytes_verify(
     tmp_path, monkeypatch,
 ):
-    """The rail admits valid work: an unmodified registry CSV still delivers, so the byte check
-    above refuses only a genuinely rewritten file, never a legitimately unchanged one."""
+    """An unmodified registry CSV still delivers: the byte check above refuses only a rewritten
+    file."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 

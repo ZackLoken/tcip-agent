@@ -38,7 +38,8 @@ def _start(tmp_path, experiment_id, body_name):
     from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
 
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:{body_name}",
         "device": "cpu",
     }
@@ -46,8 +47,7 @@ def _start(tmp_path, experiment_id, body_name):
     update_status(experiment_id, "running")
     draw_seed_if_unset(config)
     run = create_run(config, str(tmp_path / "out"), id="auto-run-26")
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id=experiment_id)
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id=experiment_id)
     run_training_envelope(ctx)
     return ctx
 
@@ -204,15 +204,15 @@ def test_a_wall_clock_refusal_needs_no_audit_line_to_reconcile(tmp_path, monkeyp
 
     experiment_id = "expWallClockUnaudited"
     config = {
-        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {"num_channels": 3},
         "training_source": f"{__name__}:_train_races_the_wall_clock_watchdog",
         "device": "cpu",
     }
     create_experiment(experiment_id, config, data_source="imgs")
     update_status(experiment_id, "running")
     run = create_run(config, str(tmp_path / "out"), id="auto-run-27")
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
-                       experiment_id=experiment_id)
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id=experiment_id)
 
     def _boom(tool, *a, **k):
         raise AuditEntryNotWritten(tool, OSError("simulated audit append failure"))

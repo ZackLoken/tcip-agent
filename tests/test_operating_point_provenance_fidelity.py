@@ -196,6 +196,7 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
 # -- which floor a scalar calibration gate was held to -----------------------------------------
 
 _RANKS = [0, 1, 2, 3, 4] * 4
+_NUM_RANKS = 5  # the five-rank scale _RANKS spans
 
 
 def _ordinal_items(prefix: str, true_ranks: list[int], pred_ranks: list[int]) -> list[dict]:
@@ -230,7 +231,8 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
-        holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
+        holdout_items=_ordinal_items("h", _RANKS, pred), num_ranks=_NUM_RANKS,
+        experiment_id=None)
 
     score = res["gate_evidence"]["score"]
     # Real agreement, above the platform placeholder and below the authored bar: exactly the band
@@ -291,7 +293,8 @@ def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_place
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
-        holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
+        holdout_items=_ordinal_items("h", _RANKS, pred), num_ranks=_NUM_RANKS,
+        experiment_id=None)
 
     assert res["gate_evidence"]["floor_source"] == "default"
     assert res["failures"] == []

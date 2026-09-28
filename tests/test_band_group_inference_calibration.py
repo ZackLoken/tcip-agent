@@ -39,22 +39,23 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {
-            "num_classes": 1, "in_chans": 2, "min_size": TILE, "max_size": TILE * 2,
+            "min_size": TILE, "max_size": TILE * 2,
             "image_mean": [0.5, 0.5], "image_std": [0.25, 0.25],
         },
         "task": "detection",
     }
-    model = build_model({"model_source": model_source})
+    # The run's recorded width and scope, which a calibration reads its reference under.
+    config = {"model_source": model_source,
+              "data": {"num_channels": 2, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    # The run's recorded subject, which a calibration reads its reference under.
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict(),
-                "config": {"data": {"subject": "bud"}}}, str(ckpt))
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     result = register_model(name="band-group-test-model", checkpoint_path=str(ckpt), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result

@@ -79,7 +79,8 @@ def test_a_classified_stamp_admits_its_own_subject_and_omits_a_value_name(
     d = tmp_path / "predictions" / "classifier" / "2026-05-10"
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0010.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"id_map": {"open": 0, "closed": 1}, "subject": SUBJECT, "attribute": ATTRIBUTE})
+    _seed_sidecar(d, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
+                                "id_map": {"open": 0, "closed": 1}}})
     dataset_root = _dataset_root(tmp_path)
 
     own_subject = client.post("/api/review/mark_complete", json={
@@ -104,7 +105,8 @@ def test_an_undecodable_stamp_omits_the_entry_and_still_completes(
     d = tmp_path / "predictions" / "classifier" / "2026-05-12"
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0030.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"id_map": {"open": 0, "closed": 1}, "subject": SUBJECT, "attribute": ATTRIBUTE})
+    _seed_sidecar(d, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
+                                "id_map": {"open": 0, "closed": 1}}})
     _damage_sidecar(d)
     dataset_root = _dataset_root(tmp_path)
 

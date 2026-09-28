@@ -140,7 +140,7 @@ def _train_on(selection_dir: Path, out_dir: Path, project_root: Path, experiment
     loader = DataLoader(train_ds, batch_size=2, collate_fn=collate)
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=collate)
     run = create_run(config, str(out_dir), id=experiment_id)
-    completed = train(run, loader, val_loader=val_loader, task="detection")
+    completed = train(run, loader, val_loader=val_loader)
     assert completed.status == "completed", completed.status
 
     checkpoint = out_dir / "model_best.pt"

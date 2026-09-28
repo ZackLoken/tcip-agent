@@ -442,7 +442,7 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
                        json={**diverted, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 403
     assert not (b / "results_export").exists()
-    assert not any(r["tool"] == "results.export_csv"
+    assert not any(r["tool"] in ("results.export_csv", "delivery_event")
                    for r in tcip_store.read_log(audit_log_key(b)).records)
 
 

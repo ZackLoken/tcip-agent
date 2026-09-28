@@ -1,15 +1,12 @@
-"""What ``model_build`` must get right for a run to stay reproducible and provable.
-
-Three standing promises of the module, each checked against the real collaborator rather than a
-restated literal: the smoke contract resolves the class count the loader will actually train at
-(no second background offset), the provenance snapshot copies the module a dotted reference names
-(not its top-level package), and the checkpoint stamp records the source that produced the weights
-(a value the caller already placed in the payload is never replaced by the config's).
+"""``model_build``: the smoke contract's class count is the loader's, the provenance snapshot copies
+the module a dotted reference names (not its top-level package), a saved checkpoint rebuilds from
+its own config's model source, and the dimensions a builder is handed are the run's own.
 """
 
 from __future__ import annotations
 
 import importlib
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -19,9 +16,11 @@ torch = pytest.importorskip("torch")
 from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.dataset_layout import subjects_path  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, detect_kind  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
+    recorded_model_dims,
     resolve_contract_dims,
     snapshot_model_source,
     stamp_model_ref,
@@ -31,12 +30,8 @@ from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 
 def build_probe_net(*, num_classes: int = 2, in_chans: int = 3):
-    """A tiny module whose parameter shapes follow its builder kwargs.
-
-    Both kwargs differ from the defaults in every config below, so a rebuild that silently loses
-    them produces different shapes rather than the same model twice. Its forward is never run
-    here; these tests read parameter shapes only.
-    """
+    """A tiny module whose parameter shapes follow its builder kwargs. Its forward is never run
+    here; these tests read parameter shapes only."""
     import torch.nn as nn
 
     class ProbeNet(nn.Module):
@@ -116,45 +111,42 @@ def test_contract_dims_take_the_admitted_count_without_the_loader_background_off
             [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
                         attributes={"condition": condition})], 64, 64)
 
+    scope = admit_over(images_dir, labels_dir, subject="leaf", attribute="condition").scope
+    assert scope.id_map is not None and len(scope.id_map) == 2  # the class space this run trains over
     cfg = {
-        "model_source": {"builder_kwargs": {"num_classes": 9, "in_chans": 5}},
-        "data": {"subject": "leaf", "attribute": "condition", "labels_dir": str(labels_dir),
+        "model_source": {"builder_kwargs": {}, "task": "detection"},
+        "data": {"scope": asdict(scope), "num_channels": 5, "labels_dir": str(labels_dir),
                  "tiling": {"enabled": True, "tile_size": 640}},
     }
-    scope = admit_over(images_dir, labels_dir, subject="leaf", attribute="condition").scope
-    assert len(scope.id_map) == 2  # the class space this run trains over
 
     _write_registry(dataset_root)  # a third condition value declared since
-    _registry, id_map = resolve_registry_id_map(str(labels_dir), "leaf", "condition")
+    _registry, id_map = resolve_registry_id_map(
+        str(labels_dir), ClassScope(subject="leaf", attribute="condition"))
     assert len(id_map) == 3
 
-    dims = resolve_contract_dims(cfg, "detection", scope=scope, sizes={})
+    dims = resolve_contract_dims(cfg, "detection", recorded_model_dims(cfg))
 
     assert dims == {"in_chans": 5, "num_classes": 2, "img_size": 640}
     assert dims["num_classes"] != len(id_map)
-    assert dims["num_classes"] != cfg["model_source"]["builder_kwargs"]["num_classes"]
 
 
 def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path):
     """An instance_seg scope with no attribute trains one class, the subject itself. The resolved
     count stays at that one class rather than gaining a background slot."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
     dataset_root = tmp_path / "chestnut_2026"
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir(parents=True)
     _write_registry(dataset_root)
 
-    cfg = {
-        "model_source": {"builder_kwargs": {"num_classes": 9}},
-        "data": {"subject": "bud", "labels_dir": str(labels_dir)},
-    }
-    _registry, id_map = resolve_registry_id_map(str(labels_dir), "bud", None)
+    _registry, id_map = resolve_registry_id_map(str(labels_dir), ClassScope(subject="bud"))
     assert len(id_map) == 1
+    cfg = {
+        "model_source": {"builder_kwargs": {}, "task": "instance_seg"},
+        "data": {"scope": {"subject": "bud", "id_map": id_map}, "num_channels": 3,
+                 "labels_dir": str(labels_dir)},
+    }
 
-    dims = resolve_contract_dims(cfg, "instance_seg",
-                                 scope=ClassScope(subject="bud", id_map=id_map),
-                                 sizes={"num_channels": 3})
+    dims = resolve_contract_dims(cfg, "instance_seg", recorded_model_dims(cfg))
 
     assert dims["num_classes"] == len(id_map)
 
@@ -209,23 +201,15 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(tmp_p
     assert manifest["snapshot_errors"] == []
 
 
-def test_a_model_source_the_caller_placed_in_the_payload_is_not_replaced_by_the_config():
-    """A hand-rolled loop that built its model from one source and saves through the envelope must
-    keep that source on the checkpoint. Overwriting it with the config's would record a builder
-    that never produced these weights, so a rebuild at inference would load them into a different
-    architecture."""
-    caller_source = {"builder": "agent_code.nets:build_wide_detector",
-                     "builder_kwargs": {"num_classes": 7, "in_chans": 5}, "task": "detection"}
-    config_source = {"builder": "agent_code.nets:build_narrow_detector",
-                     "builder_kwargs": {"num_classes": 2, "in_chans": 3}, "task": "instance_seg"}
+def test_the_stamp_reads_the_model_source_off_the_payloads_own_config():
+    """The checkpoint's config is the one place its model source lives: the stamp names the kind
+    from it and writes no second copy beside it."""
+    config = {"model_source": {"builder": "agent_code.nets:build_detector", "task": "detection"}}
 
-    payload = stamp_model_ref(
-        {"model_state_dict": {}, "model_source": caller_source},
-        {"model_source": config_source})
+    payload = stamp_model_ref({"model_state_dict": {}, "config": config})
 
-    assert payload["model_source"] == caller_source
-    assert payload["model_source"]["builder"] != config_source["builder"]
     assert payload["kind"] == KIND_TCIP_MODULE
+    assert "model_source" not in payload
 
 
 def test_a_missing_or_empty_builder_refuses_through_the_one_callee_message():
@@ -234,16 +218,91 @@ def test_a_missing_or_empty_builder_refuses_through_the_one_callee_message():
     rather than two different messages from a duplicated caller-side check."""
     for builder in (None, ""):
         with pytest.raises(ValueError, match="non-empty 'module:function' string"):
-            build_model({"model_source": {"builder": builder}})
+            build_model({"model_source": {"builder": builder}}, {"in_chans": 3})
 
 
 def _probe_config() -> dict:
+    """A classification run's recorded config: table ground truth records the empty scope."""
     return {
-        "model_source": {"builder": f"{__name__}:build_probe_net",
-                         "builder_kwargs": {"num_classes": 7, "in_chans": 5},
-                         "task": "detection", "in_chans": 5},
+        "model_source": {"builder": f"{__name__}:build_probe_net", "task": "classification"},
+        "data": {"num_channels": 5, "num_classes": 7, "scope": {}},
         "device": "cpu",
     }
+
+
+@pytest.mark.parametrize("restated", ["in_chans", "num_classes", "num_ranks"])
+def test_builder_kwargs_restating_a_dimension_refuses_by_name(restated):
+    """The band count and the one count reach the builder from the run's data section alone; a
+    builder_kwargs carrying any dimension refuses naming it before any build, the rank count
+    included though this run resolves none."""
+    config = _probe_config()
+    config["model_source"]["builder_kwargs"] = {restated: 4}
+
+    with pytest.raises(ValueError, match=restated):
+        build_model(config, recorded_model_dims(config))
+
+
+def test_a_model_source_stating_its_own_width_refuses_at_the_build():
+    """A width stated on the model source itself refuses at the build, by name."""
+    config = _probe_config()
+    config["model_source"]["in_chans"] = 4
+
+    with pytest.raises(ValueError, match="in_chans"):
+        build_model(config, recorded_model_dims(config))
+
+
+def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
+    """A checkpoint's rank count is read at the recorded-dimension boundary, which names what is
+    missing rather than failing on a bare key."""
+    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "ordinal"},
+              "data": {"num_channels": 3, "scope": {}}}
+
+    with pytest.raises(ValueError, match="records no num_ranks"):
+        recorded_model_dims(config)
+
+
+def test_a_scoped_run_recording_a_second_count_refuses():
+    """A scoped run's class count is its map's length; a count recorded beside the map would be a
+    second one, so the dimensions refuse rather than choose."""
+    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
+              "data": {"num_channels": 3, "num_classes": 5,
+                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+
+    with pytest.raises(ValueError, match="two counts"):
+        recorded_model_dims(config)
+
+
+def test_a_run_builds_at_the_width_and_count_its_admitted_data_records(tmp_path):
+    """The admitting case, through the producer: a run whose data section the platform wrote from
+    its own admission builds a model reading that run's band count and scoring its class map. The
+    single-band sources and the three-value map both differ from ``build_probe_net``'s defaults,
+    so a build that dropped either would come out at the default shape."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    from tests._producer_fixtures import run_over
+
+    dataset_root = tmp_path / "hazel_2026"
+    images_dir, labels_dir = dataset_root / "images", dataset_root / "annotations"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    _write_registry(dataset_root)
+    for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild"), ("leaf_c", "severe")):
+        Image.new("L", (64, 64)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24),
+                        attributes={"condition": condition})], 64, 64)
+    _dataset, data = run_over("detection", images_dir, labels_dir, subject="leaf",
+                              attribute="condition")
+    config = {"model_source": {"builder": f"{__name__}:build_probe_net", "task": "detection"},
+              "data": data}
+
+    shapes = _param_shapes(build_model(config, recorded_model_dims(config)))
+
+    assert shapes["stem.weight"][1] == data["num_channels"] == 1
+    assert shapes["head.weight"][0] == len(data["scope"]["id_map"]) == 3
 
 
 def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path):
@@ -252,32 +311,17 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     are produced here by the real build path, so a stamp that records less than the builder was
     called with shows up as a shape difference rather than passing on a restated literal."""
     config = _probe_config()
-    trained = build_model(config)
-    assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the config's kwargs took effect
+    trained = build_model(config, recorded_model_dims(config))
+    assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the recorded count took effect
 
-    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-40"), train_loader=None, task="detection")
+    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-40"),
+                       train_loader=None)
     path = ctx.save_checkpoint({"model_state_dict": trained.state_dict()}, "model_best")
 
     loaded = torch.load(path, map_location="cpu", weights_only=False)
-    rebuilt = build_model(loaded)
+    assert detect_kind(path) == KIND_TCIP_MODULE
+    rebuilt = build_model(loaded["config"], recorded_model_dims(loaded["config"]))
     assert _param_shapes(rebuilt) == _param_shapes(trained)
-
-
-def test_a_saved_checkpoint_is_recognized_after_its_kind_stamp_is_dropped(tmp_path):
-    """The structural fallback recognizes a tcip checkpoint from the markers the save path itself
-    writes, so it keeps working for a checkpoint whose kind was never stamped. Feeding it the real
-    writer's output, rather than a hand-built dict, is what ties the two ends together."""
-    config = _probe_config()
-    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-41"), train_loader=None, task="detection")
-    path = ctx.save_checkpoint(
-        {"model_state_dict": build_model(config).state_dict()}, "model_best")
-
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    assert payload.pop("kind") == KIND_TCIP_MODULE
-    unstamped = tmp_path / "unstamped.pt"
-    torch.save(payload, unstamped)
-
-    assert detect_kind(str(unstamped)) == KIND_TCIP_MODULE
 
 
 def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(tmp_path, monkeypatch):

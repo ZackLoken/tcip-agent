@@ -51,10 +51,6 @@ class BaseDataset(Dataset, ABC):
 
     @property
     @abstractmethod
-    def num_classes(self) -> int: ...
-
-    @property
-    @abstractmethod
     def num_samples(self) -> int: ...
 
     @property
@@ -83,23 +79,22 @@ class BaseImageDataset(BaseDataset):
 
     ``ground_truth_shape`` is the one shape this loader reads
     (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass and
-    refused in :meth:`refuse_other_shapes`. ``takes`` names the class-space facts this loader is
-    built with beyond its samples and transforms. ``reads_geometry`` declares which geometries
-    answer for this loader's measurement, for the loaders whose ground truth is a document.
+    refused in :meth:`refuse_other_shapes`. ``ground_truth_count`` names the count that ground
+    truth derives for a loader whose ground truth carries its own classes (:func:`resolve_sizes`).
+    ``reads_geometry`` declares which geometries answer for this loader's measurement, for the
+    loaders whose ground truth is a document.
     """
 
     ground_truth_shape: str = DOCUMENT
-    takes: tuple[str, ...] = ()
+    ground_truth_count: str | None = None
     reads_geometry: "Callable[[Any], bool] | None" = None
     reads_description: str = ""
-    subject: str | None = None
+    scope: ClassScope = ClassScope()
     transforms: Any = None
     sample_sources: dict[str, str]
     sample_ground_truth: dict[str, str]
     sample_members: dict[str, str]
     _keys: list[str]
-    id_map: dict[str, int] | None
-    _num_classes: int
 
     @property
     def stems(self) -> list[str]:
@@ -168,32 +163,17 @@ class BaseImageDataset(BaseDataset):
         wrong = []
         for sample in samples:
             mine = [a for a in json_io.read_annotations(sample.ground_truth)
-                    if a.subject == self.subject]
+                    if a.subject == self.scope.subject]
             if mine and not any(reads(a.geometry) for a in mine):
                 wrong.append(sample.identity)
         if wrong:
             raise ValueError(
-                f"{len(wrong)} sample(s) carry {self.subject!r} only in geometries a "
+                f"{len(wrong)} sample(s) carry {self.scope.subject!r} only in geometries a "
                 f"{self.task_type} loader does not read ({wrong[:5]}): it reads "
                 f"{self.reads_description}, and training an image whose real objects it cannot "
                 f"read would teach them as background. Run a task whose loader reads what these "
                 f"documents carry, or supply a builder that reads them."
             )
-
-    def _init_class_ids_from_draw(self, id_map: dict[str, int] | None) -> None:
-        """Set the class ids a sample-built geometry loader reads targets under.
-
-        ``id_map`` is required and is the draw's own: recorded samples can span label trees, so
-        there is no single registry beside them to resolve class ids from.
-        """
-        if not id_map:
-            raise ValueError(
-                f"a {self.task_type} dataset built from recorded samples needs the draw's own "
-                "id_map: its samples can span label trees, so there is no single registry beside "
-                "them to resolve class ids from."
-            )
-        self.id_map = dict(id_map)
-        self._num_classes = len(id_map)
 
     def _resolve_path(self, stem: str) -> Path | BandGroupRef:
         """The logical image one sample key names: the sample's own recorded source (a
@@ -316,28 +296,16 @@ def instance_targets(targets: list[dict]) -> list[dict]:
 
 class DocumentDataset(BaseImageDataset):
     """A loader over samples whose ground truth is a per-image label document, read under the
-    run's own subject, attribute and ``id_map``."""
+    run's own admitted class space (``scope``)."""
 
     ground_truth_shape = DOCUMENT
-    takes = ("subject", "attribute", "id_map")
 
     def __init__(
-        self,
-        samples: Sequence[Sample],
-        transforms: Any = None,
-        subject: str | None = None,
-        attribute: str | None = None,
-        id_map: dict[str, int] | None = None,
+        self, samples: Sequence[Sample], transforms: Any = None, *, scope: ClassScope,
     ) -> None:
         self.transforms = transforms
-        self.subject = subject
-        self.attribute = attribute
+        self.scope = scope
         self._init_from_samples(samples)
-        self._init_class_ids_from_draw(id_map)
-
-    @property
-    def num_classes(self) -> int:
-        return self._num_classes
 
     @property
     def num_samples(self) -> int:
@@ -362,8 +330,7 @@ class DetectionDataset(DocumentDataset):
         held out, so the unlabeled count ``json_det_targets`` also returns is always 0 here.
         """
         target, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
-            reads=self.reads_geometry)
+            str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
         return target
 
     @property
@@ -691,10 +658,6 @@ class TiledDetectionDataset(BaseImageDataset):
                                     "boxes": tb, "labels": fl[rows], "iscrowd": fc[rows]})
 
     @property
-    def num_classes(self) -> int:
-        return self.base.num_classes
-
-    @property
     def num_samples(self) -> int:
         return len(self._index)
 
@@ -796,8 +759,7 @@ class InstanceSegDataset(DocumentDataset):
         w, h = self._image_size(img)
 
         target, _n_unlabeled = json_det_targets(
-            str(self._label_path(stem)), self.subject, self.attribute, self.id_map,
-            reads=self.reads_geometry)
+            str(self._label_path(stem)), self.scope, reads=self.reads_geometry)
         masks = []
         for polygon in target["geometry"]:
             # Rasterize every ring into the same instance mask, a multi-ring instance is one
@@ -830,28 +792,16 @@ class SemanticSegDataset(BaseImageDataset):
     """PNG mask images where pixel values are class IDs, over a recorded sample list.
 
     Membership is exactly what the producer recorded and each sample reads the mask it names, so
-    the dataset spans whatever capture dates the draw did. ``num_classes`` is the run's own count,
-    resolved once for the run (:func:`resolve_sizes`), never read off this half's own masks.
+    the dataset spans whatever capture dates the draw did.
     """
 
     task_type = "semantic_seg"
     ground_truth_shape = MASK
-    takes = ("num_classes",)
+    ground_truth_count = "num_classes"
 
-    def __init__(
-        self,
-        samples: Sequence[Sample],
-        transforms: Any = None,
-        *,
-        num_classes: int,
-    ) -> None:
+    def __init__(self, samples: Sequence[Sample], transforms: Any = None) -> None:
         self.transforms = transforms
         self._init_from_samples(samples)
-        self._num_classes = num_classes
-
-    @property
-    def num_classes(self) -> int:
-        return self._num_classes
 
     @property
     def num_samples(self) -> int:
@@ -888,29 +838,17 @@ class ClassificationDataset(BaseImageDataset):
     """Image classification over a recorded sample list.
 
     Each sample reads the row its ``row_key`` names in the table it names, so the dataset spans
-    whatever tables the producer admitted. ``num_classes`` is the run's own count, resolved once
-    for the run (:func:`resolve_sizes`).
+    whatever tables the producer admitted.
     """
 
     task_type = "classification"
     ground_truth_shape = TABLE
-    takes = ("num_classes",)
+    ground_truth_count = "num_classes"
 
-    def __init__(
-        self,
-        samples: Sequence[Sample],
-        transforms: Any = None,
-        *,
-        num_classes: int,
-    ) -> None:
+    def __init__(self, samples: Sequence[Sample], transforms: Any = None) -> None:
         self.transforms = transforms
         self._init_from_samples(samples)
         self._labels = [int(v) for v in _values_by_sample(samples)]
-        self._num_classes = num_classes
-
-    @property
-    def num_classes(self) -> int:
-        return self._num_classes
 
     @property
     def num_samples(self) -> int:
@@ -933,28 +871,16 @@ class ClassificationDataset(BaseImageDataset):
 
 class OrdinalDataset(BaseImageDataset):
     """Ordinal regression over a recorded sample list: each sample reads the rank its ``row_key``
-    names in the table it names. ``num_ranks`` is the run's own count, resolved once for the run
-    (:func:`resolve_sizes`)."""
+    names in the table it names."""
 
     task_type = "ordinal"
     ground_truth_shape = TABLE
-    takes = ("num_ranks",)
+    ground_truth_count = "num_ranks"
 
-    def __init__(
-        self,
-        samples: Sequence[Sample],
-        transforms: Any = None,
-        *,
-        num_ranks: int,
-    ) -> None:
+    def __init__(self, samples: Sequence[Sample], transforms: Any = None) -> None:
         self.transforms = transforms
         self._init_from_samples(samples)
         self._ranks = [int(v) for v in _values_by_sample(samples)]
-        self._num_ranks = num_ranks
-
-    @property
-    def num_classes(self) -> int:
-        return self._num_ranks
 
     @property
     def num_samples(self) -> int:
@@ -994,10 +920,6 @@ class RegressionDataset(BaseImageDataset):
         self._values = [float(v) for v in _values_by_sample(samples)]
 
     @property
-    def num_classes(self) -> int:
-        return 1
-
-    @property
     def num_samples(self) -> int:
         return len(self.stems)
 
@@ -1021,22 +943,19 @@ _DATASET_MAP: dict[str, type[BaseImageDataset]] = {
     "ordinal": OrdinalDataset,
     "regression": RegressionDataset,
 }
-"""The one place a task name selects code: which built-in loader reads a run's samples. A task
-outside this map reaches a dataset only through a bespoke ``dataset_source`` builder, which is
-handed the same samples the producer named for any other task."""
+"""Which built-in loader reads a run's samples, by task. A task outside this map reaches a dataset
+only through a bespoke ``dataset_source`` builder."""
 
 def build_from_dataset_source(
     dataset_source: dict, *, task: str, samples: Sequence[Sample],
-    id_map: dict[str, int] | None, transforms: Any,
+    scope: ClassScope, transforms: Any,
 ) -> Dataset:
-    """Import the agent's dataset builder and call it, the bespoke-task escape (mirrors
-    ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
-    module.
+    """Import the agent's dataset builder and call it.
 
     The builder is called with a context of ``samples`` (the sample list for the side being built),
-    ``id_map`` (the class map those samples were admitted under; ``None`` where the ground-truth
-    shape carries its own classes, a mask raster or a table row, whose class space the builder
-    derives from the ground truth it was handed), ``task`` and ``transforms``.
+    ``scope`` (the :class:`~tcip_mcp.pipelines.data.selection.ClassScope` those samples were
+    admitted under, every field ``None`` where the ground truth carries its own classes), ``task``
+    and ``transforms``.
 
     ``builder_kwargs`` configure the builder; a key the context already states refuses by name.
     Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
@@ -1045,9 +964,8 @@ def build_from_dataset_source(
 
         {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
          "builder_kwargs": {...},          # optional, the builder's own configuration
-         "source_files": [...],            # optional, provenance (snapshot_model_source copies
-         these)
-         "task": "..."}                    # optional, measurement/eval routing
+         "source_files": [...]}            # optional, provenance (snapshot_model_source copies
+                                           # these)
     """
     if not isinstance(dataset_source, dict):
         raise ValueError("dataset_source must be a dict")
@@ -1057,14 +975,12 @@ def build_from_dataset_source(
     builder_kwargs = dataset_source.get("builder_kwargs") or {}
     if not isinstance(builder_kwargs, dict):
         raise ValueError("dataset_source.builder_kwargs must be a dict")
-    # What a bespoke builder is handed, and all it is handed: the membership the platform's own
-    # producer named, the class map it admitted it under, the task and the augmentation.
-    context = {"task": task, "samples": samples, "id_map": id_map, "transforms": transforms}
+    context = {"task": task, "samples": samples, "scope": scope, "transforms": transforms}
     restated = sorted(set(context) & set(builder_kwargs))
     if restated:
         raise ValueError(
             f"dataset_source.builder_kwargs restates {restated}: the samples this run trains on, "
-            f"the class map they were admitted under, the task and the augmentation are the "
+            f"the class space they were admitted under, the task and the augmentation are the "
             f"platform's to state, and a builder given a second value for one of them would build "
             f"over something the run's own record does not describe. Drop {restated} from "
             "builder_kwargs."
@@ -1108,18 +1024,15 @@ def _band_count(samples: Sequence[Sample]) -> int:
 
 
 GROUND_TRUTH_COUNTS = ("num_classes", "num_ranks")
-"""The sizes ground truth carrying its own classes states, as a loader declares them in ``takes``.
-A stated one below what that ground truth reaches refuses; the band count beside them is a
-property of the source, so a caller narrowing it (reading an RGB source as one channel) states how
-to read rather than a vocabulary smaller than the data holds."""
+"""The counts ground truth carrying its own classes derives, as a loader declares its own in
+``ground_truth_count``."""
 
 SIZE_NAMES = GROUND_TRUTH_COUNTS + ("num_channels",)
 """Every size a loader is built at, in the spelling a config and a caller state them by."""
 
 
 def stated_sizes(stated: "Mapping[str, Any]") -> dict[str, int]:
-    """The sizes a mapping states, absent where it states none: the one read of a config, for what
-    it states before a run and for what that run recorded on it after."""
+    """The sizes a mapping (a config's data section) states, absent where it states none."""
     return {name: int(stated[name]) for name in SIZE_NAMES if stated.get(name) is not None}
 
 
@@ -1132,39 +1045,46 @@ def resolve_sizes(
 
     Read over every sample the loaders are built from: a class reaching only one side sizes both,
     and two sources disagreeing about their band count refuse. A stated band count is taken as
-    given and nothing is probed; a stated class or rank count below what the ground truth reaches
-    refuses.
+    given and nothing is probed. A built-in loader's ground truth derives at most one count, its
+    ``ground_truth_count``, and that derived count is the one resolved: a stated count other than
+    it refuses, and a stated count that ground truth does not derive refuses (a scoped run's class
+    count is its map's length).
 
-    Only what the caller states, for a task no built-in loader reads and for a bespoke
-    ``dataset_source``.
+    For a task no built-in loader reads and for a bespoke ``dataset_source``, the band count the
+    sources carry and only the counts the caller states.
     """
     resolved = stated_sizes(stated)
-    cls = _DATASET_MAP.get(task)
-    if cls is None or dataset_source is not None:
-        return resolved
-    # Asked before any ground truth is read: reading a size off a sample this loader cannot read
-    # is what the refusal exists to stop.
-    cls.refuse_other_shapes(samples)
+    cls = _DATASET_MAP.get(task) if dataset_source is None else None
+    if cls is not None:
+        # Asked before any ground truth is read: reading a size off a sample this loader cannot
+        # read is what the refusal exists to stop.
+        cls.refuse_other_shapes(samples)
     if "num_channels" not in resolved:
         resolved["num_channels"] = _band_count(samples)
-    names = [name for name in cls.takes if name in GROUND_TRUTH_COUNTS]
-    if not names:
+    if cls is None:
+        return resolved
+    name = cls.ground_truth_count
+    underived = [stated for stated in GROUND_TRUTH_COUNTS if stated in resolved and stated != name]
+    if underived:
+        raise ValueError(
+            f"this {task} run states {underived}, a count its ground truth does not derive: a "
+            f"second count beside the one the run's own ground truth or class map carries would "
+            f"size a head the record does not describe. Drop {underived} from data."
+        )
+    if name is None:
         return resolved
     ids = (Counter(int(v) for s in samples
                    for v in np.unique(cls.read_mask(Path(s.ground_truth))))
            if cls.ground_truth_shape == MASK
            else Counter(int(value) for value in _values_by_sample(samples)))
     held = num_classes_from_distribution(ids)
-    for name in names:
-        if name not in resolved:
-            resolved[name] = held
-        elif resolved[name] < held:
-            raise ValueError(
-                f"the ground truth this run was handed reaches {held - 1}, which needs "
-                f"{name} >= {held}, but {name}={resolved[name]} was configured: a head sized "
-                f"under what the ground truth carries would index past its own outputs, or train "
-                f"every value beyond its last as that last one. Fix {name} or the ground truth."
-            )
+    if resolved.get(name, held) != held:
+        raise ValueError(
+            f"this {task} run states {name}={resolved[name]}, and the ground truth it was handed "
+            f"derives {name}={held}: a built-in loader's count is the one its ground truth "
+            f"derives. Drop {name} from data, or fix the ground truth."
+        )
+    resolved[name] = held
     return resolved
 
 
@@ -1179,27 +1099,24 @@ def tile_kwargs_from_tiling(tiling: dict) -> dict:
 
 def build_dataset(
     task: str, dataset_source: dict | None = None, *,
-    samples: Sequence[Sample], sizes: "Mapping[str, int]", transforms: Any = None,
-    scope: ClassScope | None = None, tiling: dict | None = None, **unowned: Any,
+    samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
+    transforms: Any = None, tiling: dict | None = None, **unowned: Any,
 ) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
     ``samples`` is the producer's own sample list, required on every route: each sample reads its
     own source and the ground truth that answers for it, its own label document, its own mask
     raster or the row its ``row_key`` names. ``scope`` is the class space those samples were
-    admitted under (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), ``None`` for ground
-    truth that carries its own classes.
+    admitted under (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), handed to a loader
+    over label documents and to a bespoke builder.
 
-    ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`), the band count its
-    sources are read at and the class or rank count its ground truth carries. Each recipient is
-    handed exactly what it declares: a built-in loader its own :attr:`BaseImageDataset.takes`, a
-    bespoke builder the context :func:`build_from_dataset_source` states. Anything given that no
-    recipient could take refuses by name.
+    ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`); a loader reads its
+    sources at its band count. Anything given that no recipient could take refuses by name.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac, dedup_iou,
     skip_empty, keep_regions}``) wraps the detection dataset in a :class:`TiledDetectionDataset`; a
-    bespoke builder composes its own tiling and sizes itself. An unknown task with no builder
-    raises ``Unknown task``.
+    bespoke builder composes its own tiling, and a ``tiling`` beside it refuses. An unknown task
+    with no builder raises ``Unknown task``.
     """
     if unowned:
         raise ValueError(
@@ -1210,27 +1127,21 @@ def build_dataset(
             f"Drop {sorted(unowned)}; a bespoke builder's own configuration goes in "
             "dataset_source.builder_kwargs."
         )
-    scope = scope or ClassScope()
     if dataset_source is not None:
-        platform_owned = sorted(name for name, value in {"tiling": tiling, **dict(sizes)}.items()
-                                if value is not None)
-        if platform_owned:
+        if tiling is not None:
             raise ValueError(
-                f"build_dataset was given {platform_owned} beside a dataset_source: a bespoke "
-                f"builder composes its own tiling, band count and class count over the samples it "
-                f"was handed, so the platform states none of them for a dataset it does not "
-                f"build. Drop {platform_owned}, or put them in dataset_source.builder_kwargs."
+                "build_dataset was given ['tiling'] beside a dataset_source: a bespoke builder "
+                "composes its own tiling over the samples it was handed, so the platform states "
+                "none for a dataset it does not build. Drop ['tiling'], or put it in "
+                "dataset_source.builder_kwargs."
             )
         return build_from_dataset_source(
-            dataset_source, task=task, samples=samples, id_map=scope.id_map,
-            transforms=transforms)
+            dataset_source, task=task, samples=samples, scope=scope, transforms=transforms)
 
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
-    available: dict[str, Any] = {"subject": scope.subject, "attribute": scope.attribute,
-                                 "id_map": scope.id_map, **sizes}
-    declared = {name: available[name] for name in cls.takes if available.get(name) is not None}
+    declared = {"scope": scope} if cls.ground_truth_shape == DOCUMENT else {}
     # Each loader declares its own constructor keywords, so the call is made through the class
     # object rather than a signature this factory restates.
     construct: Any = cls

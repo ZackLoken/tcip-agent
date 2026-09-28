@@ -750,7 +750,7 @@ def test_load_derives_subjects_excludes_a_bucket_sidecar(
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
     write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None,
-                       "subject": "bud", "attribute": None})
+                       "scope": {"subject": "bud", "attribute": None}})
 
     load = client.get(
         "/api/subjects/load",

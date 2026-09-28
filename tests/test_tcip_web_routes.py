@@ -1250,8 +1250,8 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
                        100, 80)
     _write_operating_point_sidecar(
         pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
-                   "subject": "bud", "attribute": "phenology_stage",
-                   "id_map": {"closed": 0, "open": 1}})
+                   "scope": {"subject": "bud", "attribute": "phenology_stage",
+                             "id_map": {"closed": 0, "open": 1}}})
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1280,8 +1280,8 @@ def test_review_action_records_unresolvable_class_id_as_none(
                        100, 80)
     _write_operating_point_sidecar(
         pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
-                   "subject": "bud", "attribute": "phenology_stage",
-                   "id_map": {"closed": 0, "open": 1}})
+                   "scope": {"subject": "bud", "attribute": "phenology_stage",
+                             "id_map": {"closed": 0, "open": 1}}})
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1949,6 +1949,7 @@ def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
     own producer of this state); the worker is stubbed, so the stamp's own bytes are not asserted
     here."""
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 
     ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
@@ -1960,9 +1961,7 @@ def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
         validated_by=None,
         tile_size_validated=None,
         shippable_issues=[],
-        id_map=None,
-        subject="bud",
-        attribute=None,
+        scope=ClassScope(subject="bud", id_map={"bud": 0}),
         trait=None,
         dataset_hash="abc123",
         checkpoint="baseline",

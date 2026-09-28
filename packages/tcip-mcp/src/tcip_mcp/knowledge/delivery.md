@@ -164,22 +164,22 @@ prediction bucket is written under, and can never clear a phenotype's own delive
 (`operating_point`, `classifier`, `scale`).
 
 `record_delivery_binding_event`'s own project-scoped `delivery_events` record files under the
-caller's project (an MCP tool's process-pinned root, or a web route's guarded, resolved one); its
-dataset-scoped audit-log line files under the buckets' own shared dataset root regardless, and is
-unaffected by a caller's project root.
+caller's project (an MCP tool's process-pinned root, or a web route's guarded, resolved one), and
+a record that cannot be written refuses the delivery; its audit-log line, written after the
+record and naming only its `event_id`, files under the buckets' own shared dataset root
+regardless, and is unaffected by a caller's project root.
 
 - `deliver_phenology_milestones` and the web `/export_csv` phenology branch both reconcile the positive-state
   classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`,
-  which holds a prediction bucket to its own recorded `id_map` when it has one and, for a bucket
-  that records none, to the registry its ground truth's own dataset root carries, refusing a split
-  under no such root)
+  which reads a stamped prediction bucket under its own recorded scope and, for a bucket with no
+  stamp, under the subject and attribute the caller states, held to the registry its ground
+  truth's own dataset root carries, refusing a split under no such root)
   and the count operating point, then hand the reconciled state to `write_phenology_csv` /
   `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate
   itself, composes every provenance cell and records the delivery event, so a CSV from either door
-  carries the same schema and the same composition. The delivery event is a best-effort second
-  write after the CSV already exists, so an already-delivered file can outlive a failed event
-  write; the web export route's own `X-TCIP-Delivery-Event-Recorded` response header says whether
-  this delivery's event actually landed. Both phenology doors derive the count's conf and
+  carries the same schema and the same composition. The delivery event is written after the CSV
+  already exists, so an already-written file can outlive a failed event write, which refuses the
+  delivery by raising. Both phenology doors derive the count's conf and
   validity from the buckets' own stamps and take neither from a caller. The producer tail
   (`producer_model_sha256`, `producing_experiment_id`, `validation_record`) is filled from the
   verified bindings, so a

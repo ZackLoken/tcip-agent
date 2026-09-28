@@ -13,6 +13,7 @@ from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.pipelines.data.selection import ClassScope
 
 
 def _write_image(path: Path, size=(200, 150)) -> None:
@@ -54,8 +55,8 @@ def test_a_count_before_the_write_counts_what_the_write_stores(tmp_path: Path):
 
     counted, scores = positive_detections(result())
     written = result()
-    write_predictions_json(tmp_path / "a.json", written, subject="bur", attribute=None,
-                           id_map={"bur": 0})
+    write_predictions_json(tmp_path / "a.json", written,
+                           scope=ClassScope(subject="bur", id_map={"bur": 0}))
     assert counted == len(read_annotations(tmp_path / "a.json")) == written["count"] == 1
     assert scores == written["scores"] == [0.8]
 
@@ -376,7 +377,7 @@ def test_write_predictions_json_drops_a_degenerate_box_and_reports_the_count(tmp
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
+    dropped = write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
 
     assert dropped == 1
     saved = json.loads(out.read_text(encoding="utf-8"))
@@ -398,7 +399,7 @@ def test_write_predictions_json_drops_a_box_that_rounds_to_zero_extent(tmp_path)
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
+    dropped = write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
 
     assert dropped == 1
     assert len(read_annotations(out)) == 1
@@ -414,7 +415,7 @@ def test_write_predictions_json_refuses_a_reserved_stem(tmp_path):
     result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
 
     with pytest.raises(ValueError, match="operating_point"):
-        write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
+        write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
     assert not out.exists()
 
 
@@ -425,7 +426,7 @@ def test_write_predictions_json_still_writes_an_ordinary_stem(tmp_path):
     out = tmp_path / "IMG_0001.json"
     result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
 
-    write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
+    write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
     assert len(read_annotations(out)) == 1
 
 

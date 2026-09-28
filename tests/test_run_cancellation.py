@@ -1,7 +1,7 @@
 """Training-run cancellation (cancel_run / cancel_training; graceful stop)."""
 
 import pytest
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import run_over  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -37,17 +37,18 @@ def test_cancel_before_training_yields_canceled(tmp_path):
         rows.append(f"img{i},{i % 2}")
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
-    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"))
+    ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"))
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+                         "task": "classification"},
+        "data": data,
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
         "mixed_precision": False, "early_stopping": {"enabled": False},
     }
     run = create_run(cfg, str(tmp_path / "out"), id="cancel-run-2")
     run.cancel_event.set()  # request cancellation before any epoch runs
-    run = train(run, loader, task="classification")
+    run = train(run, loader)
 
     assert run.status == "canceled"
     assert run.current_epoch == 0                                  # stopped before training

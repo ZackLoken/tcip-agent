@@ -1,10 +1,7 @@
 """``record_delivery_binding_event``'s project-scoped document axis (``delivery_events``).
 
-``deliver_phenology_milestones`` already writes an audit-log line naming which buckets stood behind a
-delivery (``test_phenology_tools.py``'s own
-``test_deliver_phenology_milestones_records_what_verification_found_in_the_datasets_own_log``); this
-persistence step is a second, enumerable write beside that unchanged one, carrying the real
-per-bucket ``StampBinding`` evidence the door already computed rather than a coarse gate stamp.
+The record carries the real per-bucket ``StampBinding`` evidence the delivering door computed, and
+the delivery's audit line names only the record's ``event_id``.
 """
 
 from __future__ import annotations
@@ -47,15 +44,8 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     )
     assert "error" not in res, res
 
-    # The existing dataset-scoped audit-log binding event still lands, unchanged.
     from tcip_mcp.audit import audit_log_key
 
-    page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
-    audit_events = [e for e in page.records
-                    if e["tool"] == "deliver_phenology_milestones" and "verified_buckets" in e]
-    assert len(audit_events) == 1, page.records
-
-    # The new project-scoped delivery_events record lands beside it.
     records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 1, records
     record = records[0]
@@ -63,17 +53,20 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     assert record["delivery_kind"] == STATE_CROSSING_DATES
     assert record["output_path"] == str(out_csv)
 
-    # The documents are the real StampBinding data this delivery computed, not a placeholder.
-    audit_verified = audit_events[0]["verified_buckets"]
-    assert set(record["documents"]) == set(audit_verified)
-    for bucket, doc in record["documents"].items():
+    page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
+    audit_events = [e for e in page.records if e["tool"] == "delivery_event"
+                    and e.get("arguments") == {"event_id": record["event_id"]}]
+    assert len(audit_events) == 1, page.records
+
+    bindings = record["document_reconciliations"]["operating_point"]["bindings"]
+    assert set(bindings) == {str(d1), str(d2)}
+    for bucket, doc in bindings.items():
         assert doc["ok"] is True
         assert doc["claimed"] is True
         assert doc["experiment_id"] == "exp-record-" + Path(bucket).name
         assert doc["producing_experiment_id"] == "exp-producer"
         assert doc["checkpoint_sha256"] == sha
         assert doc["record_digest"]
-        assert doc["record_digest"] == audit_verified[bucket]["record"].split(":")[-1]
 
 
 def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_with_its_reconciliations(
@@ -104,8 +97,9 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
 
     assert set(record["document_reconciliations"]) == {
         "operating_point", "classifier_operating_point"}
-    assert set(record["document_reconciliations"]["operating_point"]["bindings"]) == (
-        set(record["documents"]))
+    assert set(record["document_reconciliations"]["operating_point"]["bindings"]) == {
+        str(d1), str(d2)}
+    assert "documents" not in record
     classifier_entry = record["document_reconciliations"]["classifier_operating_point"]
     assert classifier_entry["bound_validated"] == classifier_entry["validated"]
     assert record["dimension_reconciliations"]["tile_size"]["operative"] is False
@@ -198,25 +192,29 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
     assert list(ts.read_log(audit_log_key(tmp_path)).records) == before
 
 
-def test_record_delivery_binding_event_reports_a_failed_store_write_without_raising(
+def test_record_delivery_binding_event_raises_on_a_failed_store_write_before_any_audit_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The event write is best effort: a store failure after the artifact already shipped is a
-    provenance gap the caller can disclose, never a reason to raise on an already-completed
-    delivery. The return value says whether the write actually landed."""
+    """A delivery whose record cannot be written raises into the delivering door, and no audit
+    line names an event that was never recorded."""
+    from tcip_mcp.audit import audit_log_key
+
     def _boom(*a, **kw):
         raise OSError("disk full")
 
     monkeypatch.setattr(ts, "replace", _boom)
 
-    recorded = resolution.record_delivery_binding_event(
-        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
-        delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
-    )
+    with pytest.raises(OSError, match="disk full"):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+            acknowledgment=None, trait="astringency",
+            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+        )
 
-    assert recorded is False
+    monkeypatch.undo()
     assert _delivery_event_records(tmp_path.resolve()) == []
+    events = ts.read_log(audit_log_key(tmp_path)).records
+    assert not any(e["tool"] == "delivery_event" for e in events)
 
 
 def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapping_fails_validation(
@@ -239,64 +237,11 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     with pytest.raises(ValidationError):
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-            measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
+            acknowledgment=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
         )
 
     assert _delivery_event_records(tmp_path) == []
-
-
-def test_record_delivery_binding_event_refuses_when_the_declared_documents_entry_is_absent(
-    tmp_path: Path,
-) -> None:
-    """A caller stating what its gate reconciled in measurement_documents but not reconciling it
-    is a deterministic defect in the caller: pred_dirs is non-empty, the sole declared document
-    has no entry in document_reconciliations, and the writer refuses by name with the audit line
-    already on the log and no record built."""
-    d = str(tmp_path / "bucket")
-
-    with pytest.raises(ValueError, match="operating_point"):
-        resolution.record_delivery_binding_event(
-            "test_door", None, [d], document_reconciliations={}, dimension_reconciliations={},
-            measurement_documents=["operating_point"], acknowledgment=None,
-            trait="astringency", delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path,
-            plant_mapping=None,
-        )
-
-    from tcip_mcp.audit import audit_log_key
-
-    events = ts.read_log(audit_log_key(tmp_path)).records
-    assert any(e["tool"] == "test_door" for e in events)
-    assert _delivery_event_records(tmp_path.resolve()) == []
-
-
-def test_record_delivery_binding_event_refuses_naming_the_classifier_document_when_only_the_count_is_given(
-    tmp_path: Path,
-) -> None:
-    """Every document measurement_documents declares is checked, not only the first: a two-
-    document delivery with the count entry alone still refuses, naming the missing classifier
-    document specifically."""
-    from tcip_mcp.pipelines.resolution import StampBinding
-
-    from tests._binding_fixtures import document_reconciliation
-
-    d = str(tmp_path / "bucket")
-    binding = StampBinding(ok=True, claimed=True, experiment_id="exp-1",
-                           producing_experiment_id="exp-1", checkpoint_sha256="0" * 64,
-                           record_digest="digest-1")
-    recon = document_reconciliation(
-        {d: binding}, validated="held_out_annotations", per_bucket={d: "held_out_annotations"},
-        unvalidated_buckets=[], missing_sidecars=[], on_disk_validated=True)
-
-    with pytest.raises(ValueError, match="classifier_operating_point"):
-        resolution.record_delivery_binding_event(
-            "test_door", None, [d], document_reconciliations={"operating_point": recon},
-            dimension_reconciliations={},
-            measurement_documents=["operating_point", "classifier_operating_point"], acknowledgment=None, trait="astringency",
-            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
-        )
-
-    assert _delivery_event_records(tmp_path.resolve()) == []
 
 
 def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_the_reconciler_returns(
@@ -322,7 +267,7 @@ def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_th
     with pytest.raises(KeyError, match="per_bucket"):
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
-            dimension_reconciliations={}, measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
+            dimension_reconciliations={}, acknowledgment=None, trait="astringency",
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
@@ -351,7 +296,6 @@ def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_t
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={"tile_size": tile},
-            measurement_documents=["operating_point"],
             acknowledgment=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
             project_root=tmp_path, plant_mapping=None,
         )
@@ -404,7 +348,7 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
             "event_id": "e", "trait": None, "delivery_kind": None, "door": "d",
             "output_path": None, "output_sha256": None,
             "acknowledged_by": None, "acknowledgment_reason": None,
-            "plant_mapping": pm, "documents": {}, "document_reconciliations": {},
+            "plant_mapping": pm, "document_reconciliations": {},
             "dimension_reconciliations": {}, "produced_at": "t",
         }
         return DeliveryEventRecord.model_validate(record).plant_mapping

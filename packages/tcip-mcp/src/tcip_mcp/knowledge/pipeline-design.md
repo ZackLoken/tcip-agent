@@ -107,25 +107,33 @@ Three seams support bespoke work; the platform guarantees integrity around it:
 
 - `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
   `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
-  "builder_kwargs": {...}, "source_files": [...], "task": "..."}`, mirroring `model_source`). It
-  receives the samples the platform's own producer named for the side being built and the class
-  map they were admitted under (`samples` / `id_map` / `transforms` / `task`), sizing the dataset
-  it builds itself, plus your own
+  "builder_kwargs": {...}, "source_files": [...]}`, mirroring `model_source`). It receives the
+  samples the platform's own producer named for the side being built and the class space they
+  were admitted under (`samples` / `scope` / `transforms` / `task`), sizing the dataset it builds
+  itself, plus your own
   `builder_kwargs`, and must return a torch `Dataset`. Never a directory, a document path or a
   format flag, on any route including your own `ctx.build_dataset` call, which is this same
   factory: the platform names the samples and your builder builds over them, so a strip split
   over your own samples composes the tiled wrapper inside `train(ctx)`. `builder_kwargs`
-  configure your builder and may not restate `samples`, `id_map`, `task` or `transforms`; a
+  configure your builder and may not restate `samples`, `scope`, `task` or `transforms`; a
   builder that did would train on membership or a class space the run's own record does not
-  describe, so the seam refuses it by name, as it refuses any kwarg beyond those four. `id_map` is
-  `None` where the ground truth carries its own classes and no map was admitted (a mask raster, a
-  table row): derive the class space from the ground truth you were handed. A task with no
+  describe, so the seam refuses it by name, as it refuses any kwarg beyond those four. `scope` is
+  a `ClassScope` (`subject`, `attribute`, `id_map`), every field `None` where the ground truth
+  carries its own classes (a mask raster, a table row): derive the class space from the ground
+  truth you were handed. A task with no
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
   truth `data.labels_dir` points at, whatever the task, so your builder receives the same samples
   a built-in loader would. Registry-free, imported like any module, never `exec`'d.
-- `pipelines.model_build.build_model(config)` builds from a `model_source`: an *importable*
+- `pipelines.model_build.build_model(config, dims)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
-  "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d.
+  "source_files": [...], "task": "detection"}`). It is imported, never `exec`'d. The platform
+  hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
+  sources carry) and the count its ground truth derives, as `num_classes` (the admitted class map's
+  length, or the class count the ground truth carries) or `num_ranks` for ordinal ground truth;
+  a regression run carries no count. Your builder accepts those keywords, and `builder_kwargs`
+  restating one refuses by name. A bespoke `dataset_source` whose loader composes its own bands
+  states `data.num_channels` for the width it hands the model, and one over ground truth that
+  carries its own classes states `data.num_classes` or `data.num_ranks`.
   `pipelines.model_contract`
   states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
@@ -150,7 +158,7 @@ Three seams support bespoke work; the platform guarantees integrity around it:
 
   `state` reserves two top-level keys: `schema_version` (the platform's own checkpoint-version
   field) and `config` (always this run's own launch config, the record every publishing door
-  reads a run's `(subject, attribute, id_map)` scope from). A `state` carrying either refuses;
+  reads a run's `data.scope` from). A `state` carrying either refuses;
   name a bespoke loop's own field something else.
 
   Registration needs one more fact your loop states explicitly. A checkpoint saved via

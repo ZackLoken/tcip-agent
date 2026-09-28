@@ -20,6 +20,8 @@ torch = pytest.importorskip("torch")
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 IMG = 32
+# The width and count a three-band, one-class detector run is built at.
+_DIMS = {"in_chans": 3, "num_classes": 1}
 
 
 def test_holder_resolves_to_the_module_itself_with_no_detector():
@@ -64,8 +66,8 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
 
     model = build_model({"model_source": {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
-        "task": "detection"}})
+        "builder_kwargs": {"min_size": 64, "max_size": 128},
+        "task": "detection"}}, _DIMS)
     assert hasattr(model.detector, "roi_heads") and hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
 
@@ -94,19 +96,13 @@ def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
-    from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    model_source = {"builder": f"tests.bespoke_models:{builder}",
-                    "builder_kwargs": {"in_chans": 3}, "task": "detection"}
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source,
-                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
-                "config": {"data": {"tiling": {"enabled": False}, "subject": "bud"}}}, str(ckpt))
-    reg = register_model(name=builder, checkpoint_path=str(ckpt), config={},
-                         project_path=str(tmp_path))
-    assert "error" not in reg, reg
-    return str(ckpt)
+    return registered_checkpoint(
+        tmp_path, project_root=tmp_path, name=builder,
+        model_source={"builder": f"tests.bespoke_models:{builder}", "task": "detection"},
+        data={"tiling": {"enabled": False}, "num_channels": 3,
+              "scope": {"subject": "bud", "id_map": {"bud": 0}}})
 
 
 def _labeled_reference(tmp_path):
@@ -207,10 +203,10 @@ def test_model_contract_records_the_holders_own_knobs():
 
     with_knob = build_model({"model_source": {
         "builder": "tests.bespoke_models:build_bare_score_thresh_detector",
-        "builder_kwargs": {"in_chans": 3}, "task": "detection"}})
+        "task": "detection"}}, _DIMS)
     without_knob = build_model({"model_source": {
         "builder": "tests.bespoke_models:build_bare_no_knob_detector",
-        "builder_kwargs": {"in_chans": 3}, "task": "detection"}})
+        "task": "detection"}}, _DIMS)
 
     dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
     assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [

@@ -8,6 +8,7 @@ single-source spatial-strip split) and persists the drawn/bound membership as th
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -374,8 +375,7 @@ def run_sizes(
     task: str, data_cfg: dict, samples: "Sequence[Sample]", dataset_source=None,
 ) -> dict[str, int]:
     """This run's own sizes (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`), recorded on
-    its data config as the class space is
-    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.onto`).
+    its data config beside its ``scope``.
     """
     from tcip_mcp.pipelines.data.datasets import SIZE_NAMES, resolve_sizes
 
@@ -444,7 +444,7 @@ def _drawn_split(
     require_admitted(admitted)
     # The scope the producer admitted under becomes this run's whether or not it holds a map, so
     # a stale one a relaunched config carried cannot survive as this run's recorded vocabulary.
-    admitted.scope.onto(data_cfg)
+    data_cfg["scope"] = asdict(admitted.scope)
 
     # A route that draws nothing groups each member alone, the ``stem`` policy, recorded by name.
     each_its_own_group = recorded_group_key_fn("stem", date=admitted.date)
@@ -550,7 +550,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
     Two routes, and a run of any task takes one of them:
       1. ``data.split.selection_dir`` set -> train on the selection's own ``train`` and ``val``
         samples instead of drawing a split, each sample reading the source and the ground truth the
-        draw recorded for it, under the selection's own subject, attribute and id map. Checked
+        draw recorded for it, under the selection's own scope. Checked
         ahead of ``auto_val``; every conflict, empty-side refusal and build failure raises. The
         loader refuses by name when the task reads another shape than the samples name. The
         calibration side never builds a loader.
@@ -604,7 +604,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         selection = read_selection(selection_dir)
         # The bind's own refusals, stated once so the preflight that offered this selection and
         # the launch that binds it say the same thing.
-        bind_issues = _selection_dependent_issues(selection, selection_dir)
+        bind_issues = _selection_dependent_issues(selection, selection_dir, data_cfg)
         if bind_issues:
             raise ValueError(" ".join(bind_issues))
 
@@ -625,7 +625,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         bound = train_samples + val_samples + calibration_samples
         # The selection's own scope and exact map become this run's, so the checkpoint records
         # the vocabulary it trained in rather than one rediscovered from a live registry.
-        selection.scope.onto(data_cfg)
+        data_cfg["scope"] = asdict(selection.scope)
         split_cfg = data_cfg.setdefault("split", {})
         # The selection's own named policy, not "explicit_map": the per-stem map the partition
         # records covers this run's members, and a stem outside it is what a policy name answers.

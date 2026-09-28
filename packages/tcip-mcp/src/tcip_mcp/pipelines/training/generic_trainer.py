@@ -16,6 +16,7 @@ import math
 import random
 import time
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -28,10 +29,10 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
 from tcip_mcp.pipelines.model_contract import TCIPModel
 from tcip_mcp.pipelines.model_build import (
-    MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
     build_model,
-    run_in_chans,
+    recorded_model_dims,
+    run_task,
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
@@ -266,9 +267,8 @@ def checkpoint_key(output_dir: Path | str, name: str) -> Key:
 def write_checkpoint(payload: dict, key: Key) -> Path:
     """Write one checkpoint's bytes and return where they landed.
 
-    A crash or an OOM mid-save cannot destroy the previous checkpoint, and a concurrent reader
-    (the GUI's inference tab) never observes a half-written file: the stream becomes the
-    checkpoint only on a clean exit.
+    The stream becomes the checkpoint only on a clean exit, so a failed save leaves the previous
+    checkpoint in place and no reader observes a half-written file.
     """
     with store.write_blob(key) as handle:
         torch.save(payload, handle)
@@ -296,9 +296,8 @@ def _save_checkpoint(
     stage_idx: int, stage_epoch: int, run: "TrainRun",
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
-    """Write a resumable periodic checkpoint carrying ``model_source``, the weights and the run's
-    width.
-    """
+    """Write a resumable periodic checkpoint carrying the run's config, the weights and the resume
+    state."""
     state = {
         STATE_DICT_KEY: model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
@@ -316,7 +315,7 @@ def _save_checkpoint(
     write_checkpoint(stamp_model_ref({
         **{k: state[k] for k in _RESUME_KEYS}, "config": config, "seed": seed,
         "metrics": _checkpoint_metrics(metrics),
-    }, config), key)
+    }), key)
 
 
 # ====================================================================
@@ -344,7 +343,7 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 @torch.no_grad()
 def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
-    conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
+    dims: Mapping[str, int], conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     trait: str | None = None,
 ) -> dict:
@@ -361,7 +360,7 @@ def _validate(
     detection count/F1 instead of the IoU@0.5 comparability convention (see ``evaluate``).
     """
     metrics = evaluate(
-        model, val_loader, device, task,
+        model, val_loader, device, task, dims=dims,
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=max_dets, score_weights=score_weights,
         trait=trait,
@@ -499,16 +498,14 @@ def apply_stage_freeze(
 
 
 def _validate_input_channels(config: dict, loader: DataLoader) -> None:
-    """Fail loudly if the data's channel count doesn't match the width this run reads at.
+    """Fail loudly if the first batch's channel count is not the band count the model was built
+    at, ``data.num_channels``.
 
-    Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
-    conv-shape error deep in the first forward pass. The width is the run's own
-    (:func:`run_in_chans`), and a run that states none anywhere states nothing here to disagree
-    with, which is a dataset the platform did not build.
+    A built-in loader reads every source at that count; a bespoke ``dataset_source`` builder
+    composes its own bands and can hand the model another, which this names before an opaque
+    conv-shape error deep in the first forward pass.
     """
-    expected = run_in_chans(config.get(MODEL_SOURCE_KEY), config.get("data"))
-    if expected is None:
-        return
+    expected = config["data"]["num_channels"]
     batch = next(iter(loader), None)
     if batch is None:
         return
@@ -519,8 +516,9 @@ def _validate_input_channels(config: dict, loader: DataLoader) -> None:
     channels = int(sample.shape[-3])
     if channels != expected:
         raise ValueError(
-            f"Input images have {channels} channels but this run reads at in_chans={expected}. "
-            f"Set model_source.in_chans={channels}, or hand it data at {expected} bands."
+            f"Input images have {channels} channels but this run's model is built at "
+            f"data.num_channels={expected}. State data.num_channels={channels}, or hand it data "
+            f"at {expected} bands."
         )
 
 
@@ -533,13 +531,13 @@ def train(
     train_loader: DataLoader,
     val_loader: DataLoader | None = None,
     *,
-    task: str,
     epoch_callback=None,
     resume_from: str = "",
 ) -> TrainRun:
     """Execute a task-agnostic training run.
 
-    The model is built from run.config["model_source"] via build_model().
+    The model is built from run.config["model_source"] via build_model(), for the task that
+    model source names (``model_build.run_task``).
     ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the run's
     metrics log and, under HPO, the pruner. It may raise to abort the run (e.g.
     ``optuna.TrialPruned``).
@@ -605,7 +603,9 @@ def train(
         if seed is not None:
             set_seed(int(seed), deterministic=config.get("deterministic", False))
 
-        model = build_model(config)
+        task = run_task(config)
+        dims = recorded_model_dims(config)
+        model = build_model(config, dims)
         model.to(device)
         _validate_input_channels(config, train_loader)
 
@@ -829,7 +829,7 @@ def train(
                 val_metrics = {}
                 if val_loader is not None:
                     val_metrics = _validate(
-                        model, val_loader, device, task,
+                        model, val_loader, device, task, dims=dims,
                         # A fixed default unless eval_cfg explicitly overrides it, not the
                         # resolved ship-point conf (that is derived later by resolve_operating_point).
                         conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),
@@ -893,7 +893,7 @@ def train(
                             "config": config,
                             "metrics": _checkpoint_metrics(epoch_metrics),
                             "stage": stage_idx, "epoch": run.current_epoch,
-                        }, config), checkpoint_key(out_dir, "model_best"))
+                        }), checkpoint_key(out_dir, "model_best"))
                     except PermissionError:
                         # Windows: a concurrent reader can hold model_best.pt open past the
                         # replace retries; keep the previous best rather than failing the run.
@@ -943,7 +943,7 @@ def train(
                 STATE_DICT_KEY: model.state_dict(),
                 "config": config,
                 "metrics": _checkpoint_metrics(last_epoch_metrics),
-            }, config), checkpoint_key(out_dir, "model_final"))
+            }), checkpoint_key(out_dir, "model_final"))
 
         if diverged:
             logger.info("Training run %s stopped: %s", run.id, run.error)

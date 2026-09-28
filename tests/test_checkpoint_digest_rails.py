@@ -11,19 +11,21 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
+from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def _bespoke_checkpoint(path: Path, *, stamp: dict | None = None, tile_size: int = 64) -> str:
-    """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
+    """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape: a
+    three-band run scoped to one subject."""
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": tile_size,
-                                       "max_size": tile_size * 2},
+                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "detection"}
-    payload = {"model_source": model_source,
-              "model_state_dict": build_model({"model_source": model_source}).state_dict()}
+    config = {"model_source": model_source,
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    payload = {"config": config,
+               "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict()}
     if stamp:
         payload.update(stamp)
     torch.save(payload, str(path))
@@ -225,7 +227,7 @@ def test_calibrate_scalar_operating_point_refuses_an_unregistered_checkpoint(
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     r = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="ordinal", checkpoint_path=ckpt,
+        trait_name="bud_opening", checkpoint_path=ckpt,
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path),
@@ -552,7 +554,7 @@ def test_a_registration_that_committed_nothing_at_completion_leaves_no_line(
     from tcip_mcp.audit import audit_log_key
 
     before = list(tcip_store.read_log(audit_log_key(tmp_path)).records)
-    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt), task="detection")
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt))
     _finalize_run(ctx)
 
     assert list(tcip_store.read_log(audit_log_key(tmp_path)).records) == before
@@ -625,7 +627,7 @@ def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_
     from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-3")
-    ctx = TrainContext(run=run, train_loader=None, task="detection")
+    ctx = TrainContext(run=run, train_loader=None)
 
     with pytest.raises(ValueError, match="schema_version"):
         ctx.save_checkpoint({"model_state_dict": {}, "schema_version": 2})
@@ -638,7 +640,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, mon
     from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"), id="auto-run-4")
-    ctx = TrainContext(run=run, train_loader=None, task="detection")
+    ctx = TrainContext(run=run, train_loader=None)
 
     path = ctx.save_checkpoint({"model_state_dict": {}})
     assert Path(path).is_file()
@@ -797,7 +799,7 @@ def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
     from tcip_annotation.state import Annotation, BBox
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = _bespoke_checkpoint(tmp_path / "m.pt", stamp={"config": {"data": {"subject": "bud"}}})
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     _register(tmp_path, ckpt)
 
     images_dir = tmp_path / "images"

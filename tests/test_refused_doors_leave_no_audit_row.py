@@ -95,11 +95,11 @@ def _calibrate_count_over_an_unstamped_bucket(tmp_path: Path):
         str(tmp_path), str(bucket))
 
 
-def _calibrate_scalar_with_no_such_task(tmp_path: Path):
+def _calibrate_scalar_over_an_unregistered_checkpoint(tmp_path: Path):
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     return calibrate_scalar_operating_point(
-        "cyme count", "histogram", str(tmp_path / "m.pt"), str(tmp_path / "images"),
+        "cyme count", str(tmp_path / "m.pt"), str(tmp_path / "images"),
         str(tmp_path / "t.csv"), "mae", str(tmp_path / "out"), str(tmp_path))
 
 
@@ -108,8 +108,8 @@ def _calibrate_classifier_for_no_such_trait(tmp_path: Path):
 
     labels = str(tmp_path / "labels")
     return calibrate_classifier_operating_point(
-        "no-such-trait", "cyme", "stage", labels, labels, labels, labels,
-        str(tmp_path / "out"), str(tmp_path))
+        "no-such-trait", labels, labels, labels, labels, str(tmp_path / "out"), str(tmp_path),
+        subject="cyme", attribute="stage")
 
 
 def _calibrate_scale_for_no_such_trait(tmp_path: Path):
@@ -131,7 +131,7 @@ def _terminal_status_refusal(tmp_path: Path):
 DOORS = [_register_model, _deliver_per_image_counts, _import_coco, _build_plant_mapping,
          _redraw_calibration_holdout, _deliver_per_plant_csv, _deliver_orthomosaic_plant_counts,
          _deliver_phenology_milestones, _save_annotations_on_a_missing_image,
-         _calibrate_count_over_an_unstamped_bucket, _calibrate_scalar_with_no_such_task,
+         _calibrate_count_over_an_unstamped_bucket, _calibrate_scalar_over_an_unregistered_checkpoint,
          _calibrate_classifier_for_no_such_trait, _calibrate_scale_for_no_such_trait,
          _terminal_status_refusal]
 

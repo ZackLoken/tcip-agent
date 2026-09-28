@@ -27,7 +27,7 @@ class _StubPredictor:
         self.max_dets = None
         self.score_threshold = 0.5
         self.model = object()
-        self.config = {"data": {"subject": "bud", "id_map": {"bud": 1}}}
+        self.config = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 1}}}}
 
     def predict_batch(self, image_paths, **kwargs):
         return [{"boxes": [], "scores": [], "labels": [], "count": 0, "width": 100, "height": 100}

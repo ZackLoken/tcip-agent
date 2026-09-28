@@ -68,7 +68,7 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None, trait="astringency",
+        acknowledgment=None, trait="astringency",
         delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=None,
     )
     event = _one_event(tmp_path, door="test_door")
@@ -208,7 +208,7 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_a_recorded_field
         "event_id": replacement_id, "trait": "currant_bloom",
         "delivery_kind": "state_crossing_dates", "door": "deliver_phenology_milestones",
         "output_path": str(tmp_path / "out2.csv"), "output_sha256": "1" * 64,
-        "plant_mapping": None, "documents": {}, "produced_at": "2026-02-11T00:00:00+00:00",
+        "plant_mapping": None, "produced_at": "2026-02-11T00:00:00+00:00",
     })
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

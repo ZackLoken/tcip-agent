@@ -267,6 +267,7 @@ def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
     from tests._dense_op_fixtures import dense_records
 
     from tcip_mcp.experiments import read_validations, validation_digest
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, seal_validation,
     )
@@ -291,10 +292,10 @@ def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
     stamp = operating_point_stamp(
         draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
         validated_by=None,
-        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
+        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
         trait="bud_opening", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
         experiment_id=None, images_dir=None, raster_path=None,
-        produced_at="2026-03-04T12:00:00+00:00", subject="bud", attribute=None,
+        produced_at="2026-03-04T12:00:00+00:00", scope=ClassScope(subject="bud"),
     )
     stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
     experiment_id = stamped["validated_by"]["experiment_id"]

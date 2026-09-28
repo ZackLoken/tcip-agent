@@ -37,7 +37,8 @@ def _train_loader(batch_size: int = 2) -> DataLoader:
 def _config(builder: str, builder_kwargs: dict, *, epochs: int) -> dict:
     return {
         "model_source": {"builder": builder, "builder_kwargs": builder_kwargs,
-                         "task": "regression", "in_chans": 1},
+                         "task": "regression"},
+        "data": {"num_channels": 1, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": epochs}],
@@ -54,7 +55,7 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     at exactly the same epoch with the same wording."""
     train_loader = _train_loader(batch_size)
     run = create_run(_config(DIVERGED_BUILDER, {}, epochs=30), str(tmp_path / "out"), id="auto-run-9")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
     assert DIVERGED_PASSES_PHRASE in run.error
@@ -67,7 +68,7 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     text, proving the counter never fires on a model that never produces a bad batch."""
     train_loader = _train_loader()
     run = create_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), str(tmp_path / "out"), id="auto-run-10")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
     assert "diverged" not in run.error
@@ -81,7 +82,7 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
     run = create_run(
         _config(TRANSIENT_BUILDER, {"bad_batches": 3, "init_weight": 0.0}, epochs=3),
         str(tmp_path / "out"), id="auto-run-11")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
     assert "diverged" not in run.error
@@ -96,7 +97,7 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
     run = create_run(
         _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, epochs=2),  # epoch 1's middle batch only
         str(tmp_path / "out"), id="auto-run-12")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
     assert len(run.metrics_history) == 2
@@ -109,7 +110,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, epochs=2)
     config["stages"] = [{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}]
     run = create_run(config, str(tmp_path / "out"), id="auto-run-13")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
     assert run.current_epoch == 4
@@ -124,7 +125,7 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     out_dir = str(tmp_path / "out")
     on_forward = CancelSentinelAtCall(out_dir, at_call=5)
     run = create_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir, id="auto-run-14")
-    run = train(run, train_loader, val_loader=None, task="regression")
+    run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
     assert DIVERGED_PASSES_PHRASE in run.error
@@ -148,7 +149,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
 
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_pixel_sum_divide_model",
-                         "task": "regression", "in_chans": 3},
+                         "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 5}],
                      "mixed_precision": False, "device": "cpu",

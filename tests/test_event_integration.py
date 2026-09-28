@@ -520,10 +520,10 @@ class TestTrainingToolOutputSchema:
 
         cfg = {
             "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                             "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                             "builder_kwargs": {"min_size": 64, "max_size": 128},
                              "task": "detection"},
             "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "subject": "bud"},
+                     "scope": {"subject": "bud"}},
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
         }
@@ -572,22 +572,15 @@ class TestInferenceToolOutputSchema:
         Every value here is distinct, so a dimension reported in another's place is visible rather
         than hidden behind two fields that happen to share a default.
         """
-        import torch
-
-        from tcip_mcp.pipelines.model_build import build_model
         from tcip_mcp.tools.inference_tools import run_inference
-        from tcip_mcp.tools.model_tools import register_model
+        from tests._verified_checkpoint_fixtures import registered_checkpoint
 
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-        model_source = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                        "builder_kwargs": {"in_chans": 3}, "task": "detection"}
-        ckpt = tmp_path / "detector.pt"
-        torch.save({"model_source": model_source,
-                    "model_state_dict": build_model({"model_source": model_source}).state_dict()},
-                   str(ckpt))
-        assert "error" not in register_model(name="blob", checkpoint_path=str(ckpt), config={},
-                                             project_path=str(tmp_path))
-        res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        ckpt = registered_checkpoint(
+            tmp_path, project_root=tmp_path, name="blob", filename="detector.pt",
+            model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
+                          "task": "detection"})
+        res = run_inference(ckpt, images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
                             dry_run=True, tile=True,
                             tile_size=512, overlap=0.35, conf_threshold=0.17, max_dets=37,
                             cross_tile_nms=0.55, postprocess="nmm")

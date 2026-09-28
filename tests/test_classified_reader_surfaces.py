@@ -12,6 +12,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines import resolution
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 
 SUBJECT = "bud"
@@ -27,10 +28,9 @@ def test_count_by_class_a_detector_map_keyed_by_the_positive_value_name_never_co
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="open", geometry=BBox(1, 1, 3, 3), score=0.9)], 8, 8)
-    id_map = {"open": 0}
-    scope = resolution.BucketScope(subject="open", attribute=None)
+    scope = ClassScope(subject="open", id_map={"open": 0})
 
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
+    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
 
     assert (total, positive, unclassified) == (1, 0, 1)
 
@@ -77,8 +77,8 @@ def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> Non
         pred_dir / "s1.json",
         [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), attributes={ATTRIBUTE: "open"})],
         8, 8)
-    _seed_sidecar(pred_dir, {"id_map": {"open": 0, "closed": 1}, "subject": SUBJECT,
-                            "attribute": ATTRIBUTE})
+    _seed_sidecar(pred_dir, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
+                                       "id_map": {"open": 0, "closed": 1}}})
     _damage_sidecar(pred_dir)
     mapping = {"2026-05-02": [_Assignment("s1", "P1")]}
 
@@ -107,7 +107,7 @@ def test_legend_name_shows_the_classified_value_under_a_classified_scope() -> No
 
     pred = Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5), score=0.9,
                       attributes={ATTRIBUTE: "open"})
-    scope = resolution.BucketScope(subject=SUBJECT, attribute=ATTRIBUTE)
+    scope = ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map={"open": 0, "closed": 1})
 
     assert _legend_name(pred, scope=scope) == "open"
 

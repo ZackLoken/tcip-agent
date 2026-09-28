@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tests import _operationalization_fixtures as fx
@@ -28,13 +29,11 @@ def _classified_bucket(tmp_path: Path) -> Path:
     bucket = tmp_path / "predictions" / "classifier" / "2026-05-20"
     result = {"width": 100, "height": 100, "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 40.0, 60.0, 60.0]],
              "scores": [0.9, 0.8], "labels": [1, 2]}
-    write_predictions_json(bucket / "img1.json", result, created_by="test-producer",
-                           subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
+    scope = ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
+    write_predictions_json(bucket / "img1.json", result, created_by="test-producer", scope=scope)
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[], id_map=ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE,
-        trait=fx.COUNT_TRAIT,
+        tile_size_validated=None, shippable_issues=[], scope=scope, trait=fx.COUNT_TRAIT,
         dataset_hash="H", checkpoint="m", checkpoint_sha256="f" * 64, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
         produced_at="2026-05-20T00:00:00+00:00", image_filenames={"img1": "img1.png"},

@@ -472,7 +472,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
     assert (dest / "curated" / "curated_manifest.json").is_file()
-    assert ts.read(selection_key(dest / "curated" / "splits"))["subject"] == "bud"
+    assert ts.read(selection_key(dest / "curated" / "splits"))["scope"]["subject"] == "bud"
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
@@ -525,9 +525,10 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     hpo_result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                                      "task": "detection"},
                      "data": {"images_dir": str(root / "images"),
-                              "labels_dir": str(root / "annotations"), "subject": "bud"}},
+                              "labels_dir": str(root / "annotations"),
+                              "scope": {"subject": "bud"}}},
         n_trials=1, search_seed=0
     )
     study = hpo_result["study_name"]
@@ -576,4 +577,4 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         assert ts.read(tt.trial_config_key(dest / ".tcip" / "hpo" / study, trial_dirs[0].name))
 
         selection = ts.read(selection_key(dest / "splits_out"))
-        assert selection["subject"] == "bud"
+        assert selection["scope"]["subject"] == "bud"

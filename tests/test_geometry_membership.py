@@ -133,7 +133,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
     stems = [f"src{i}_0_0" for i in range(4)]
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
+                "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
 
     train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
 
@@ -149,7 +149,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT, "auto_val": False}
+                "scope": {"subject": SUBJECT}, "auto_val": False}
 
     train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
 
@@ -169,7 +169,7 @@ def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, ca
     stems = ["a_0_0", "b_0_0"]
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": SUBJECT, "auto_val": True,
+                "scope": {"subject": SUBJECT}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1,
                           "group_key_map": {s: "one_group" for s in stems}}}
 
@@ -192,7 +192,8 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     stem = "mosaic"
     images_dir, labels_dir = _big_source(tmp_path / "ds", stem, 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT,
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "scope": {"subject": SUBJECT},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -220,12 +221,12 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
     images_dir, labels_dir = _labeled(tmp_path / "train_ds", stems)
 
     whole_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": SUBJECT, "auto_val": False}
+                 "scope": {"subject": SUBJECT}, "auto_val": False}
     whole = _persisted("exp-whole", whole_cfg,
                        *auto_train_val("detection", whole_cfg, None))
 
     drawn_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": SUBJECT, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
+                 "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
     drawn = _persisted("exp-drawn", drawn_cfg, *auto_train_val("detection", drawn_cfg, None))
 
     scope = str(labels_dir)

@@ -30,8 +30,8 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
                                  confirmation_bucket="bud/2026-03-04",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
-            subject="bud", attribute=None, id_map={"bud": 0}, seed=42, group_by="stem",
-            dataset_fingerprint="7ac1",
+            scope=selection.ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
+            group_by="stem", dataset_fingerprint="7ac1",
         ),
     ))
     golden = REGISTERED["selection"].golden

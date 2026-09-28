@@ -368,7 +368,9 @@ class TestExperiments:
     def test_get_experiment_lineage(self):
         import tcip_mcp.experiments as exp
 
-        exp.create_experiment("exp-l", {"data": {"images_dir": "/data/images", "task": "detection"}},
+        exp.create_experiment("exp-l", {"model_source": {"builder": "m:f", "task": "detection"},
+                                        "data": {"images_dir": "/data/images",
+                                                 "scope": {"subject": "bud"}}},
                              data_source="/data/images")
         exp.update_lineage("exp-l", predictions="/preds/best")
 

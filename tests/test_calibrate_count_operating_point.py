@@ -11,7 +11,8 @@ import pytest
 
 pytest.importorskip("torch")
 
-from tests._producer_fixtures import admission_of
+from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tests._producer_fixtures import admission_of  # noqa: E402
 
 
 class _Dataset:
@@ -60,7 +61,7 @@ def _stub_dense_pass(monkeypatch, cal_stems=("a",), hold_stems=("b",), cal_recor
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
                         lambda *a, samples=None, **kw: _Dataset(samples))
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines",
-                        lambda label_path, **kw: 1)
+                        lambda label_path, scope=None: 1)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
         lambda stems, **kw: {"calibration": cal_stems, "holdout": hold_stems})
@@ -119,10 +120,10 @@ def _existing_bucket(tmp_path, *, checkpoint_sha256="stub-sha256", tile_size_val
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, slicing=None, validated=False, validated_by=None, tile_size_validated=tile_size_validated,
-        shippable_issues=[], id_map={trait: 0}, trait=trait, dataset_hash="H",
-        checkpoint="m", checkpoint_sha256=checkpoint_sha256, experiment_id=None,
+        shippable_issues=[], scope=ClassScope(subject=trait, id_map={trait: 0}), trait=trait,
+        dataset_hash="H", checkpoint="m", checkpoint_sha256=checkpoint_sha256, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject=trait, attribute=None,
+        produced_at="2024-01-01T00:00:00Z",
     )
     write_sidecar(pred_dir, stamp)
     if with_prediction:
@@ -176,14 +177,14 @@ def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
     ckpt = registered_checkpoint(
         tmp_path, project_root=tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
-                      "builder_kwargs": {"num_classes": 1, "in_chans": 1, "min_size": 64,
-                                         "max_size": 128, "image_mean": [0.4],
+                      "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
                                          "image_std": [0.2]},
-                      "task": "detection", "in_chans": 1})
+                      "task": "detection"},
+        data={"num_channels": 1, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
 
     resolved = resolve_count_operating_point(
         ckpt, "bud_opening", str(labels_dir), str(images_dir), str(tmp_path), str(tmp_path),
-        subject="bud", device="cpu")
+        device="cpu")
 
     assert resolved.bundle.get("conf") is not None
     assert resolved.checkpoint_sha256
@@ -236,7 +237,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     assert on_disk["validated"] is True
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(production_conf)
     assert on_disk["validated_by"]["experiment_id"]
-    assert on_disk["id_map"] == {"bud_opening": 0}
+    assert on_disk["scope"]["id_map"] == {"bud_opening": 0}
     assert on_disk["images_dir"] == str(tmp_path / "images")
     assert on_disk["checkpoint_sha256"] == "stub-sha256"
     assert on_disk["trait"] == "bud_opening"
@@ -439,10 +440,9 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, slicing=None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
-        checkpoint_sha256="stub-sha256", experiment_id=None, images_dir=None,
+        scope=ClassScope(subject="bud", id_map={"bud": 0}), trait="bud_opening", dataset_hash="H",
+        checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None, images_dir=None,
         raster_path=str(tmp_path / "mosaic.tif"), produced_at="2024-01-01T00:00:00Z",
-        subject="bud", attribute=None,
     )
     write_sidecar(pred_dir, stamp)
 
@@ -488,10 +488,10 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, slicing=None, validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
-        checkpoint_sha256="stub-sha256", experiment_id=None,
+        scope=ClassScope(subject="bud", id_map={"bud": 0}), trait="bud_opening", dataset_hash="H",
+        checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject="bud", attribute=None,
+        produced_at="2024-01-01T00:00:00Z",
     )
     # A genuine, producer-filed record behind validated_by (tests._binding_fixtures does what
     # seal_validation does for a producer), not a hand-typed pointer naming no real record.
@@ -536,10 +536,11 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
     stamp = operating_point_stamp(
         op, slicing=None, validated=True,
         validated_by={"experiment_id": "exp-nonexistent", "record_digest": "deadbeef"},
-        tile_size_validated=None, shippable_issues=[], id_map={"bud": 0}, trait="bud_opening",
+        tile_size_validated=None, shippable_issues=[],
+        scope=ClassScope(subject="bud", id_map={"bud": 0}), trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject="bud", attribute=None,
+        produced_at="2024-01-01T00:00:00Z",
     )
     write_sidecar(pred_dir, stamp)
 
@@ -706,123 +707,3 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
             pred_dir=str(pred_dir),
         )
     assert len(calls) == 2
-
-
-def _producer_bucket(tmp_path, *, subject="bud", attribute=None):
-    """A stamped bucket built through the platform's own writers
-    (``write_predictions_json``, ``operating_point_stamp``, ``write_sidecar``), scoped to
-    ``(subject, attribute)``, for the scope-agreement tests below."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_mcp.pipelines.resolution import (
-        ResolvedBundle, derived, operating_point_stamp, write_sidecar,
-    )
-
-    dataset_root = tmp_path / "dataset"
-    pred_dir = dataset_root / "predictions"
-    pred_dir.mkdir(parents=True)
-    id_map = {subject: 0}
-    result = {"image": "a.png", "width": 100, "height": 100,
-             "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1]}
-    write_predictions_json(pred_dir / "a.json", result, created_by="test-producer",
-                           subject=subject, attribute=attribute, id_map=id_map)
-    op = ResolvedBundle(trait=subject, dataset_hash="H", params={
-        "conf": derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
-                        derived_from="x", validated_against="false"),
-        **_untiled_regime(),
-    }).to_provenance()["operating_point"]
-    stamp = operating_point_stamp(
-        op, slicing=None, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map=id_map, trait=subject, dataset_hash="H", checkpoint="m",
-        checkpoint_sha256="stub-sha256", experiment_id=None,
-        images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject=subject, attribute=attribute,
-    )
-    write_sidecar(pred_dir, stamp)
-    return dataset_root, pred_dir
-
-
-def test_calibrate_count_operating_point_defaults_to_the_bucket_own_scope_when_neither_key_stated(
-    monkeypatch, tmp_path,
-):
-    """Ordinary detector calibration over a bucket a producer stamped states neither key: the
-    bucket's own recorded scope governs the pass rather than refusing over the tool's own
-    ``(None, None)`` defaults."""
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
-    _stub_predictor(monkeypatch)
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
-
-    calls: list[dict] = []
-
-    def _stub(*args, **kwargs):
-        calls.append(kwargs)
-        raise RuntimeError("stub-count-calibration-called")
-
-    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.resolve_count_operating_point", _stub)
-
-    with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
-        calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
-            images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
-            pred_dir=str(pred_dir),
-        )
-
-    assert len(calls) == 1
-    assert calls[0]["subject"] == "bud"
-    assert calls[0]["attribute"] is None
-
-
-def test_calibrate_count_operating_point_refuses_a_disagreeing_stated_pair(tmp_path):
-    """A caller that states a pair disagreeing with the bucket's own recorded scope refuses by
-    name, naming both pairs, rather than silently trusting the stated one."""
-    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
-
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
-
-    result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
-        images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
-        pred_dir=str(pred_dir), subject="other-subject", attribute=None,
-    )
-
-    assert "error" in result
-    assert "bud" in result["error"]
-    assert "other-subject" in result["error"]
-
-
-def test_calibrate_count_operating_point_succeeds_when_stated_pair_matches_bucket_scope(
-    monkeypatch, tmp_path,
-):
-    """A caller that states the bucket's own scope explicitly is admitted exactly as one stating
-    neither key."""
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
-    _stub_predictor(monkeypatch)
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
-
-    calls: list[dict] = []
-
-    def _stub(*args, **kwargs):
-        calls.append(kwargs)
-        raise RuntimeError("stub-count-calibration-called")
-
-    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.resolve_count_operating_point", _stub)
-
-    with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
-        calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
-            images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
-            pred_dir=str(pred_dir), subject="bud", attribute=None,
-        )
-
-    assert len(calls) == 1

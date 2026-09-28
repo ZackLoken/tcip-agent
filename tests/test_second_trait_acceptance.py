@@ -77,11 +77,15 @@ def _currant_bloom_fixture(
     than asserting one, since a stamp that claims validated is refused unless a record outside the
     bucket answers for it.
     """
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import write_bound_sidecar
 
     _seed_currant_bloom_trait(tmp_path)
+    scope = ClassScope(subject="flower", attribute="bloom_state", id_map=_ID_MAP)
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     # A covered-bucket key is relative to a dataset root, recognized by its annotations/predictions segment.
     root = tmp_path / "ds"
@@ -99,10 +103,10 @@ def _currant_bloom_fixture(
                 {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
                  "labels": [_ID_MAP[s] + 1 for s in subjects],
                  "scores": [0.9] * detections, "width": 100, "height": 100},
-                subject="flower", attribute="bloom_state", id_map=_ID_MAP)
+                scope=scope)
             assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                             "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
-        sidecar: dict = {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"}
+        sidecar: dict = {"scope": asdict(scope)}
         if validated:
             sidecar.update({
                 "validated": True,

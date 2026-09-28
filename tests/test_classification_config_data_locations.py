@@ -42,7 +42,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4)
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
-                         "task": "classification", "in_chans": 3},
+                         "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
@@ -64,7 +64,7 @@ def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_pat
     images_dir.mkdir()
     cfg = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_classifier",
-                         "task": "classification", "in_chans": 3},
+                         "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "gone.csv")},
     }
 
@@ -82,7 +82,7 @@ def test_a_detection_config_still_needs_its_labels_directory(tmp_path: Path) -> 
     images_dir.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "builder_kwargs": {}, "task": "detection"},
         "data": {"images_dir": str(images_dir)},
     }
 

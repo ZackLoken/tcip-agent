@@ -1,23 +1,17 @@
 """A selection: which samples train, which validate, which are held back to calibrate on.
 
 A selection lists, per sample, the image source, where that sample's ground truth lives, the group
-key that keeps related samples together, and the side the draw put it on. It states no capture
-date and no directory scope of its own: every sample names its own source and its own ground
-truth, so one selection spans as many capture dates as the draw admitted, and two dates holding a
-same-named image are two samples rather than one identity that has to be told apart from itself.
-
-The group key is what a leakage rail rests on: every sample sharing a group key is on one side,
-so the tiles cropped from one parent image, or the captures of one tree, cannot be split across
-training and validation. A source identity (the source path, and the rect when a sample is a
-region of a larger raster) is what a disjointness check rests on: two selections overlap when
-they share a group key or a source identity.
+key that keeps related samples together, and the side the draw put it on, plus the class space the
+draw admitted under. Every sample sharing a group key is on one side. Two selections overlap when
+they share a group key or a source identity (the source path, and the rect when a sample is a
+region of a larger raster).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
@@ -38,17 +32,14 @@ TABLE = "table"
 """Ground truth that is one row of a table, named by the row's own key."""
 
 GROUND_TRUTH_SHAPES = (DOCUMENT, MASK, TABLE)
-"""The three shapes ground truth has here. A shape is a property of the ground truth itself, read
-off what a record names rather than decided by the task a run states, so one admission and one
-re-admission serve every task."""
+"""The three shapes ground truth has here, read off what a record names, never off a run's task."""
 
 SHAPE_DESCRIPTIONS = {
     DOCUMENT: "its own per-image label document",
     MASK: "a <stem>.png mask raster of its own",
     TABLE: "a row of a table, named by its row key",
 }
-"""How each shape reads in a refusal, stated once so a loader, an admission and a document all
-name one shape the same way."""
+"""How each shape reads in a refusal."""
 
 
 def shape_of(ground_truth: str, row_key: str | None) -> str:
@@ -131,87 +122,91 @@ class Sample:
 
 @dataclass(frozen=True)
 class ClassScope:
-    """The class space a run's ground truth was admitted under.
+    """The class space a run's ground truth was admitted under, recorded whole as one ``scope``
+    mapping (:func:`dataclasses.asdict`) on a run's data config, a selection and a prediction
+    bucket's stamp.
 
     ``subject`` is the object class a document admission read confirmations and targets for,
     ``attribute`` the value vocabulary it was scoped to when one was named, and ``id_map`` the
-    ``assign_class_ids`` map its loader reads targets under. A mask raster and a table row carry
-    their own classes, so a run over them has no scope and every field is ``None``.
+    ``assign_class_ids`` map its loader reads targets and decodes predictions under. A mask raster
+    and a table row carry their own classes: a run over them records a scope whose every field is
+    ``None``.
+
+    An empty subject, attribute or map is ``None``; an attribute with no subject refuses by name.
     """
 
     subject: str | None = None
     attribute: str | None = None
     id_map: dict[str, int] | None = None
 
-    @classmethod
-    def recorded_in(cls, data_cfg: "Mapping[str, Any]") -> "ClassScope":
-        """The class space a run's own data config records. An empty subject, attribute or map
-        reads as "none", the same fact as a missing key.
-        """
-        id_map = data_cfg.get("id_map")
-        return cls(
-            subject=data_cfg.get("subject") or None,
-            attribute=data_cfg.get("attribute") or None,
-            id_map=({str(name): int(cid) for name, cid in id_map.items()}
-                    if isinstance(id_map, dict) and id_map else None),
-        )
-
-    def named_subject(self, source: str) -> str:
-        """The subject this class space names, refused by ``source`` when it names none. A run or
-        draw over a mask raster or a table records none, and neither a trait nor a labels directory
-        supplies it.
-        """
-        if self.subject is None:
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subject", self.subject or None)
+        object.__setattr__(self, "attribute", self.attribute or None)
+        object.__setattr__(self, "id_map", (
+            {str(name): int(cid) for name, cid in self.id_map.items()} if self.id_map else None))
+        if self.attribute is not None and self.subject is None:
             raise ValueError(
-                f"{source} records no subject (data.subject), so nothing names the class whose "
-                "records of a per-image label document it reads: neither a trait nor a labels "
-                "directory supplies one. State the subject the run or draw is scoped by."
+                f"attribute {self.attribute!r} is stated with no subject: a value with no object "
+                "class names nothing a reader could hold it to. State the subject beside it."
             )
-        return self.subject
 
-    def selection_fields(self, documents: bool) -> dict:
-        """The ``subject``/``attribute``/``id_map`` a :class:`Selection` drawn under this class
-        space records: this space over label documents, none over a mask raster or a table row,
-        which are admitted by existing and scope no class space.
+    @classmethod
+    def of(cls, record: "Mapping[str, Any]") -> "ClassScope":
+        """The class space ``record`` carries under ``scope``: a run's data section, a selection
+        document or a prediction bucket's stamp. A record carrying no ``scope`` refuses by name.
         """
-        if not documents:
-            return {"subject": None, "attribute": None, "id_map": {}}
-        return {"subject": self.subject, "attribute": self.attribute,
-                "id_map": dict(self.id_map or {})}
+        if "scope" not in record:
+            raise ValueError(
+                "this record carries no scope: the class space its ground truth was admitted "
+                "under is not recorded, so no reader can hold targets or predictions to it. "
+                "Produce it through an admission, which records one."
+            )
+        return cls(**record["scope"])
 
-    def onto(self, data_cfg: "MutableMapping[str, Any]") -> None:
-        """Record this class space on a run's own data config: ``None`` where nothing scopes the
-        run, never an empty map beside a missing key.
+    @property
+    def classified(self) -> bool:
+        """Whether this class space classifies its subject along an attribute."""
+        return self.attribute is not None
+
+    def admitted_for(self, shape: str, source: str) -> "ClassScope":
+        """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
+        under it: per-image label documents are read for a named subject under its class map, and a
+        mask raster or a table row, carrying its own classes, only under the empty class space.
         """
-        data_cfg["subject"] = self.subject
-        data_cfg["attribute"] = self.attribute
-        data_cfg["id_map"] = dict(self.id_map) if self.id_map else None
+        if shape != DOCUMENT and self != ClassScope():
+            raise ValueError(
+                f"{source} states a class space ({self}) over {SHAPE_DESCRIPTIONS[shape]}, which "
+                "carries its own classes and reads no subject, attribute or map. State the empty "
+                "scope for it."
+            )
+        if shape == DOCUMENT and self.subject is None:
+            raise ValueError(
+                f"{source} records no subject (data.scope.subject), so nothing names the class "
+                "whose records of a per-image label document it reads. State the subject the run "
+                "or draw is scoped by."
+            )
+        if shape == DOCUMENT and self.id_map is None:
+            raise ValueError(
+                f"{source} records no id_map: per-image label documents are read under the class "
+                "map their admission assigned."
+            )
+        return self
 
 
 @dataclass(frozen=True)
 class Selection:
     """A drawn partition: its samples, the scope they were admitted under, and how they were drawn.
 
-    ``subject``/``attribute``/``id_map`` are the scope the draw admitted through; ``id_map`` is the
-    ``assign_class_ids`` map the admission used. All three are empty for a draw over ground truth
-    no registry scopes, a mask raster or a table row, whose class space a binding run derives from
+    ``scope`` is the class space the draw admitted through, empty for a draw over ground truth no
+    registry scopes, a mask raster or a table row, whose class space a binding run derives from
     that ground truth once (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`).
     """
 
     samples: tuple[Sample, ...]
     seed: int
     group_by: str
-    subject: str | None = None
-    attribute: str | None = None
-    id_map: dict[str, int] = field(default_factory=dict)
+    scope: ClassScope
     dataset_fingerprint: str | None = None
-
-    @property
-    def scope(self) -> ClassScope:
-        """The class space this selection was drawn under, empty for ground truth no registry
-        scopes."""
-        return ClassScope.recorded_in(
-            {"subject": self.subject, "attribute": self.attribute, "id_map": self.id_map})
 
     def on(self, side: str) -> list[Sample]:
         """This selection's samples on one side, in recorded order."""
@@ -230,19 +225,6 @@ class Selection:
 
     def identities(self) -> set[str]:
         return {s.identity for s in self.samples}
-
-
-def unscoped_document_issue(selection: Selection, selection_dir: str | Path) -> str | None:
-    """Why a selection over per-image label documents that records no subject cannot be read, or
-    ``None`` when it can. A selection over a mask raster or a table row records no subject and is
-    not refused.
-    """
-    if selection.samples and selection.samples[0].shape == DOCUMENT:
-        try:
-            selection.scope.named_subject(f"the selection at {selection_dir}")
-        except ValueError as exc:
-            return str(exc)
-    return None
 
 
 def overlap(left: Iterable[Sample], right: Iterable[Sample]) -> dict[str, list[str]]:
@@ -358,9 +340,7 @@ def selection_document(selection: Selection) -> dict[str, Any]:
     """The JSON shape a selection is written as, the one :func:`as_selection` reads back."""
     return {
         "samples": [_sample_document(s) for s in selection.samples],
-        "subject": selection.subject,
-        "attribute": selection.attribute,
-        "id_map": dict(selection.id_map),
+        "scope": asdict(selection.scope),
         "seed": selection.seed,
         "group_by": selection.group_by,
         "dataset_fingerprint": selection.dataset_fingerprint,
@@ -375,8 +355,9 @@ def as_selection(document: Any, *, where: str) -> Selection:
     ``samples`` list, a sample missing ``source``/``ground_truth``/``group``/``side``, a side
     outside :data:`SIDES`, a malformed ``rect``, a sample whose ground truth is its own label
     document and which names no ``confirmation_bucket`` (the bucket whose human confirmations
-    admitted it, which that shape's admission always reads), and a partition whose sides cross
-    (:func:`refuse_crossing_sides`).
+    admitted it, which that shape's admission always reads), a partition whose sides cross
+    (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
+    (:meth:`ClassScope.admitted_for`).
     """
     if not isinstance(document, dict):
         raise ValueError(
@@ -431,11 +412,10 @@ def as_selection(document: Any, *, where: str) -> Selection:
                 "the bucket it read is part of the sample. Draw the selection again.")
         samples.append(sample)
     refuse_crossing_sides(samples)
+    scope = ClassScope.of(document).admitted_for(samples[0].shape, f"the selection at {where}")
     return Selection(
         samples=tuple(samples),
-        subject=document["subject"],
-        attribute=document["attribute"],
-        id_map=dict(document["id_map"]),
+        scope=scope,
         seed=document["seed"],
         group_by=document["group_by"],
         dataset_fingerprint=document["dataset_fingerprint"],
@@ -445,13 +425,14 @@ def as_selection(document: Any, *, where: str) -> Selection:
 def write_selection(selection_dir: str | Path, selection: Selection) -> Selection:
     """Write ``selection`` under ``selection_dir`` and answer it back.
 
-    Refuses a crossing partition before anything is written, so a selection on disk is always one
-    a reader will accept.
+    Refuses, before anything is written, whatever :func:`as_selection` refuses, so a selection on
+    disk is always one a reader will accept.
     """
-    refuse_crossing_sides(selection.samples)
+    document = selection_document(selection)
+    as_selection(document, where=str(selection_dir))
     out_dir = Path(selection_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    tcip_store.replace(selection_key(out_dir), selection_document(selection))
+    tcip_store.replace(selection_key(out_dir), document)
     return selection
 
 

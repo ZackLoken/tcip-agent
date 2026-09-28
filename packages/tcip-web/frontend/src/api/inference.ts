@@ -145,7 +145,6 @@ export interface OnsetRow {
  *  (never a rendering of null/undefined) when nothing was unvalidated or acknowledged. */
 export interface ExportCountCsvHeaders {
   savedTo: string;
-  deliveryEventRecorded: boolean;
   unvalidatedDimensions: string;
   acknowledgedBy: string;
 }
@@ -579,7 +578,6 @@ export const resultsApi = {
       blob,
       headers: {
         savedTo: resp.headers.get("X-TCIP-Saved-To") ?? "",
-        deliveryEventRecorded: resp.headers.get("X-TCIP-Delivery-Event-Recorded") === "true",
         unvalidatedDimensions: resp.headers.get("X-TCIP-Unvalidated-Dimensions") ?? "",
         acknowledgedBy: decodeURIComponent(resp.headers.get("X-TCIP-Acknowledged-By") ?? ""),
       },

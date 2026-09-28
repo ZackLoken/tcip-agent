@@ -23,7 +23,7 @@ from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
     build_model,
-    run_in_chans,
+    recorded_model_dims,
 )
 from tcip_mcp.pipelines.image_utils import (
     BandGroupRef, display_source_path, load_image, pil_to_tensor, pixel_array,
@@ -55,8 +55,8 @@ class WindowedRasterReader(Protocol):
 class GenericPredictor:
     """Load any bespoke ``model_source`` checkpoint and run inference.
 
-    The checkpoint must carry the model reference and the weights (``model_build``'s
-    ``MODEL_SOURCE_KEY`` / ``STATE_DICT_KEY``). Task type is read from the model_source.
+    The checkpoint must carry its run config, whose ``model_source`` names the builder and the
+    task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
 
     The input geometry the run trained at travels on the checkpoint's embedded config and is
     exposed as-recorded: ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice),
@@ -81,10 +81,9 @@ class GenericPredictor:
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
         ckpt = checkpoint.payload
-        # A bespoke checkpoint carries the importable-builder ref; build_model re-imports it.
-        self.model_source = ckpt.get(MODEL_SOURCE_KEY)
         self.kind = KIND_TCIP_MODULE
         self.config = ckpt.get("config", {})
+        self.model_source = self.config.get(MODEL_SOURCE_KEY)
 
         # Training tile geometry, so inference can derive the tile scale from the checkpoint instead
         # of a mismatched default. None when this checkpoint carried no tiling geometry.
@@ -95,7 +94,10 @@ class GenericPredictor:
         self.train_native_size = (self.config.get("data") or {}).get("train_native_size")
         self.train_augmentation = self.config.get("augmentation")
 
-        self.model = build_model(ckpt)  # re-imported bespoke builder (no exec)
+        # The width and count the run that produced this checkpoint recorded on its own config.
+        dims = recorded_model_dims(self.config)
+        self.in_chans = dims["in_chans"]
+        self.model = build_model(self.config, dims)  # re-imported bespoke builder (no exec)
         self.model.load_state_dict(ckpt[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
@@ -106,20 +108,7 @@ class GenericPredictor:
         set_detector_operating_point(self.model, score_thresh=score_threshold,
                                      detections_per_img=max_dets)
 
-        # The width comes from the run this checkpoint came out of, its model's declaration or its
-        # data config's recorded one.
-        src = self.model_source or {}
         self.task = checkpoint.task
-        width = run_in_chans(src, self.config.get("data"))
-        if width is None:
-            raise ValueError(
-                f"{checkpoint.path} records no input width: its model_source declares no in_chans "
-                f"and its run config no data.num_channels, so how many bands to read an image at "
-                f"is unknown, and reading at a guess would feed the model something other than "
-                f"what it trained on. Re-register a checkpoint from a run this platform trained, "
-                "or declare model_source.in_chans."
-            )
-        self.in_chans = width
 
     def model_input(self, image_path: str | Path | BandGroupRef) -> tuple[torch.Tensor, int, int]:
         """One source as this model reads it: EXIF-oriented at the model's own width, as a

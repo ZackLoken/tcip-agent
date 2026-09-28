@@ -58,7 +58,8 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
 
     config = {
         "model_source": {"builder": CLASSIFIER_BUILDER, "builder_kwargs": {"init_weight": -1.0},
-                         "task": "classification", "in_chans": 1},
+                         "task": "classification"},
+        "data": {"num_channels": 1, "num_classes": 2, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 3}],
@@ -68,7 +69,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
     }
     out_dir = tmp_path / "out"
     run = create_run(config, str(out_dir), id="auto-run-42")
-    run = train(run, train_loader, val_loader=val_loader, task="classification")
+    run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error
 
     tb_dir = out_dir / "tensorboard"
@@ -83,10 +84,10 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     images_dir, labels_dir, val_images, val_labels = _seed_leaf_detection_dataset(tmp_path / "ds")
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": "leaf"},
+                 "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }
@@ -118,7 +119,8 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
 
     config = {
         "model_source": {"builder": CLASSIFIER_BUILDER, "builder_kwargs": {"init_weight": -1.0},
-                         "task": "classification", "in_chans": 1},
+                         "task": "classification"},
+        "data": {"num_channels": 1, "num_classes": 2, "scope": {}},
         "device": "cpu",
         "mixed_precision": False,
         "stages": [{"freeze_to": 0, "epochs": 2}],
@@ -128,7 +130,7 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
     }
     run = create_run(config, str(tmp_path / "out"), id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
-        run = train(run, train_loader, val_loader=val_loader, task="classification")
+        run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error
 
     epoch_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Epoch")]

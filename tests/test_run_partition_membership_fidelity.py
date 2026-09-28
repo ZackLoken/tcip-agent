@@ -38,7 +38,8 @@ def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> 
 def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
     cfg = {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1}
     cfg.update(split)
-    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+            "scope": {"subject": "bud"},
             "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
             "split": cfg}
 

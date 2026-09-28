@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines import resolution as res
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
@@ -258,13 +259,12 @@ def test_export_detection_csv_records_the_gates_effective_acknowledgment(tmp_pat
     already means for an untiled bucket."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-    _path, tail, summary, event_recorded = export_detection_csv(
+    _path, tail, summary = export_detection_csv(
         [{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="a look now"))
     assert tail["acknowledged_by"] == "user:tester"
     assert tail["acknowledgment_reason"] == "a look now"
     assert tail["operating_point_validated"] == VALIDATED_FALSE
-    assert event_recorded is True
     assert summary["tile_size_operative"] is False
     assert summary["tile_size_validated"] is None
 
@@ -325,8 +325,9 @@ def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_b
         }
 
     pred_path = tmp_path / "img_a.json"
-    dropped = write_predictions_json(pred_path, _raw(), subject=fx.COUNT_SUBJECT, attribute=None,
-                                     id_map={fx.COUNT_SUBJECT: 0})
+    dropped = write_predictions_json(
+        pred_path, _raw(),
+        scope=ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0}))
     assert dropped == 1
     persisted = json.loads(pred_path.read_text())["annotations"]
 
@@ -367,7 +368,7 @@ def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
     stamp = {"validated": validated, "trait": fx.COUNT_TRAIT, "operating_point": op,
-             "subject": fx.COUNT_SUBJECT, "attribute": None}
+             "scope": {"subject": fx.COUNT_SUBJECT}}
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
@@ -579,7 +580,7 @@ def test_export_aggregated_csv_records_the_gates_effective_acknowledgment(tmp_pa
     dimension_reconciliations are both empty rather than carrying a stand-in entry."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    _path, tail, event_recorded = export_aggregated_csv(
+    _path, tail = export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
         str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
@@ -587,7 +588,6 @@ def test_export_aggregated_csv_records_the_gates_effective_acknowledgment(tmp_pa
     assert tail["acknowledged_by"] == "user:tester"
     assert tail["acknowledgment_reason"] == "a look now"
     assert tail["operating_point_validated"] == VALIDATED_FALSE
-    assert event_recorded is True
 
     records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_aggregated_csv"]
     assert len(records) == 1, records
@@ -605,7 +605,7 @@ def test_export_aggregated_csv_discards_an_acknowledgment_that_cleared_nothing(t
              "operating_point": {"regression": {"validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(d, stamp, document="regression_operating_point",
                         dataset_root=tmp_path / "ds", experiment_id="exp-ack-validated")
-    _path, tail, _event = export_aggregated_csv(
+    _path, tail = export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
         str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter", pred_dirs=[str(d)],
@@ -783,6 +783,7 @@ def _fake_run_inference_with(*, conf_ref, tile_size_prov=None):
             op["tile_size"] = tile_size_prov
         return run_result(op, [{"image": "a.png", "width": 64, "height": 64, "count": 3,
                                 "scores": [0.9]}],
+                          subject=fx.COUNT_SUBJECT,
                           validated=conf_ref == VALIDATED_HELD_OUT, conf_source="calibration")
     return _fake
 
@@ -913,10 +914,10 @@ def test_deliver_per_image_counts_bucket_regime_takes_no_acknowledgment(tmp_path
         bucket / "a.json", {"image": "a.png", "width": 100, "height": 100,
                            "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                            "count": 1},
-        created_by="test-producer", subject=fx.COUNT_SUBJECT, attribute=None,
-        id_map={fx.COUNT_SUBJECT: 0})
+        created_by="test-producer",
+        scope=ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0}))
     stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "validated": True, "subject": fx.COUNT_SUBJECT, "attribute": None,
+             "validated": True, "scope": {"subject": fx.COUNT_SUBJECT},
              "image_filenames": {"a": "a.png"},
              "operating_point": {
                  "conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
@@ -962,6 +963,7 @@ def _earned_run_inference_result(tmp_path, *, trait="bud_opening", **calibration
         results=[{"image": "a.png", "width": 100, "height": 100,
                   "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                   "count": 1}],
+        subject={fx.COUNT_TRAIT: fx.COUNT_SUBJECT}.get(trait, "bud"),
         **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
                                 **calibration))
 
@@ -1058,7 +1060,7 @@ def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monk
     import tcip_mcp.model_registry as model_registry_mod
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.inference import generic_predictor as gp_mod
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools import inference_tools as itools
 
     def _never_called(*a, **kw):
@@ -1067,15 +1069,15 @@ def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monk
     monkeypatch.setattr(gp_mod.GenericPredictor, "predict_batch", _never_called)
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
-                                       "max_size": 128},
+                    "builder_kwargs": {"min_size": 64, "max_size": 128},
                     "task": "detection"}
-    model = build_model({"model_source": model_source})
+    config = {"model_source": model_source,
+              "data": {"num_channels": 3, "scope": {"subject": fx.COUNT_SUBJECT,
+                                                    "id_map": {fx.COUNT_SUBJECT: 0}}},
+              "augmentation": {}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "m.pt"
-    torch.save({
-        "model_source": model_source, "model_state_dict": model.state_dict(),
-        "config": {"data": {}, "augmentation": {}},
-    }, str(ckpt))
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     payload = torch.load(str(ckpt), weights_only=False)
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: VerifiedCheckpoint(
@@ -1241,7 +1243,7 @@ def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=No
         op["tile_size"] = tile_size_prov
     is_validated = (conf_ref == VALIDATED_HELD_OUT) if validated is None else validated
     stamp = {"validated": is_validated, "trait": trait, "operating_point": op,
-             "subject": fx.COUNT_SUBJECT, "attribute": None}
+             "scope": {"subject": fx.COUNT_SUBJECT}}
     if is_validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
@@ -1465,7 +1467,7 @@ def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_pat
     }
     stamp = {
         "validated": True, "trait": "plant_surface_area", "operating_point": op,
-        "subject": fx.COUNT_SUBJECT, "attribute": None,
+        "scope": {"subject": fx.COUNT_SUBJECT},
         "claim_scope_validated": VALIDATED_SAME_MOSAIC_IDENTITY,
     }
     write_bound_sidecar(d, stamp, dataset_root=root, experiment_id="exp-preds")
@@ -1483,7 +1485,7 @@ def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_pat
     assert set(record["document_reconciliations"]) == {"operating_point"}
     op_entry = record["document_reconciliations"]["operating_point"]
     assert op_entry["validated"] == VALIDATED_HELD_OUT
-    assert op_entry["bindings"] == record["documents"]
+    assert "documents" not in record
 
     dims = record["dimension_reconciliations"]
     assert set(dims) == {"claim_scope", "tile_size", "scale"}
@@ -1491,12 +1493,12 @@ def test_export_aggregated_csv_records_every_reconciliation_the_gate_ran(tmp_pat
     assert dims["tile_size"]["validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert dims["scale"]["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
-    audit_rows = _audit_rows(root, "export_aggregated_csv")
+    # The bucket's binding lives on the record; the audit line names that record and nothing else.
+    assert op_entry["bindings"][str(d)]["ok"] is True
+    audit_rows = _audit_rows(root, "delivery_event")
     assert len(audit_rows) == 1, audit_rows
-    assert audit_rows[0]["verified_buckets"] == {
-        str(d): {"verified": True, "record": f"exp-preds:{op_entry['bindings'][str(d)]['record_digest']}",
-                 "note": ""}
-    }
+    assert audit_rows[0]["arguments"] == {"event_id": record["event_id"]}
+    assert "verified_buckets" not in audit_rows[0]
 
 
 def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_sidecar(tmp_path):
@@ -1609,9 +1611,9 @@ def test_export_aggregated_csv_refuses_a_dimensional_operating_point_delivery_wi
 
 
 def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with_no_scale(tmp_path):
-    """The rail must admit valid work: a regression head's prediction is in the trait's declared
-    unit by construction, so a dimensional delivery under regression_operating_point with no stated
-    scale_document ships cleanly, unlike the same shape under operating_point above."""
+    """A regression head's prediction is in the trait's declared unit by construction, so a
+    dimensional delivery under regression_operating_point with no stated scale_document ships
+    cleanly, unlike the same shape under operating_point above."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     fx.confirm_aggregate(tmp_path, "fruit_diameter", op.PER_PLANT_REGRESSION_AGGREGATE,
@@ -1823,7 +1825,7 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
     assert row["producing_experiment_id"] == "exp-preds"
     assert row["producer_model_sha256"] == ""
     assert row["operating_point_conf"] == "0.4"
-    assert len(_audit_rows(tmp_path / "ds", "export_detection_csv")) == 1
+    assert len(_audit_rows(tmp_path / "ds", "delivery_event")) == 1
 
 
 def _audit_rows(root, tool):
@@ -1835,9 +1837,10 @@ def _audit_rows(root, tool):
     return [r for r in page.records if r["tool"] == tool]
 
 
-def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
-    """What stood behind a delivered number is a fact about the dataset, so it travels with it. The
-    audited decorator records arguments and status only, which is why the door emits this itself."""
+def test_the_delivery_records_what_it_verified_and_names_it_in_the_dataset_own_log(tmp_path):
+    """What stood behind a delivered number is recorded once, on the delivery's own record: each
+    bucket's binding and the validation record it was earned from. The dataset's own log names
+    that record, so the fact travels with the dataset without being spelled twice."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
@@ -1847,13 +1850,16 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     pointer = read_operating_point_sidecar(d)["validated_by"]
-    rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
+    (record,) = [r for r in res.read_delivery_events(tmp_path)
+                 if r["door"] == "export_aggregated_csv"]
+    binding = record["document_reconciliations"]["operating_point"]["bindings"][d]
+    assert binding["ok"] is True
+    assert binding["record_digest"] == pointer["record_digest"]
+    assert binding["experiment_id"] == pointer["experiment_id"]
+    rows = _audit_rows(tmp_path / "ds", "delivery_event")
     assert len(rows) == 1, rows
-    assert rows[0]["record_digests"] == [pointer["record_digest"]]
-    assert rows[0]["verified_buckets"][d]["verified"] is True
-    assert rows[0]["verified_buckets"][d]["record"] == (
-        f"{pointer['experiment_id']}:{pointer['record_digest']}")
-    assert _audit_rows(tmp_path, "export_aggregated_csv") == []
+    assert rows[0]["arguments"] == {"event_id": record["event_id"]}
+    assert _audit_rows(tmp_path, "delivery_event") == []
 
 
 def test_a_non_tiled_unit_free_count_delivery_records_claim_scope_and_a_non_operative_tile_size(
@@ -1897,14 +1903,16 @@ def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     record_delivery_binding_event(
         "export_aggregated_csv", str(tmp_path / "o.csv"), [d],
         document_reconciliations={"operating_point": recon}, dimension_reconciliations={},
-        measurement_documents=["operating_point"], acknowledgment=None,
-        trait=fx.COUNT_TRAIT, delivery_kind=op.PER_PLANT_COUNT_AGGREGATE)
+        acknowledgment=None, trait=fx.COUNT_TRAIT, delivery_kind=op.PER_PLANT_COUNT_AGGREGATE)
 
-    rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
+    (record,) = [r for r in res.read_delivery_events(tmp_path)
+                 if r["door"] == "export_aggregated_csv"]
+    binding = record["document_reconciliations"]["operating_point"]["bindings"][d]
+    assert binding["ok"] is False
+    assert "validated_by" in binding["note"]
+    rows = _audit_rows(tmp_path / "ds", "delivery_event")
     assert len(rows) == 1, rows
-    assert rows[0]["verified_buckets"][d]["verified"] is False
-    assert "validated_by" in rows[0]["verified_buckets"][d]["note"]
-    assert rows[0]["record_digests"] == []
+    assert rows[0]["arguments"] == {"event_id": record["event_id"]}
 
 
 def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(tmp_path, monkeypatch):
@@ -1924,10 +1932,13 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
                                predictions_dir=str(bucket))
 
     assert "error" not in r, r
-    rows = _audit_rows(tmp_path / "ds", "export_detection_csv")
+    rows = _audit_rows(tmp_path / "ds", "delivery_event")
     assert len(rows) == 1, rows
-    assert rows[0]["arguments"]["pred_dirs"] == [str(bucket)]
-    assert _audit_rows(tmp_path, "export_detection_csv") == []
+    (record,) = [r for r in res.read_delivery_events(tmp_path)
+                 if r["door"] == "export_detection_csv"]
+    assert rows[0]["arguments"] == {"event_id": record["event_id"]}
+    assert set(record["document_reconciliations"]["operating_point"]["bindings"]) == {str(bucket)}
+    assert _audit_rows(tmp_path, "delivery_event") == []
 
 
 # ── calibrate_physical_scale: the producer for resolve_scale.json ─────────

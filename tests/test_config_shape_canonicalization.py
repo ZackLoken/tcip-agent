@@ -15,10 +15,10 @@ from tcip_mcp.pipelines.schemas import (
 FLAT_CONFIG = {
     "model_source": {
         "builder": "module:build_net",
-        "builder_kwargs": {"num_classes": 1},
+        "builder_kwargs": {},
         "task": "detection",
     },
-    "data": {"images_dir": "", "labels_dir": "", "task": "detection"},
+    "data": {"images_dir": "", "labels_dir": ""},
     "batch_size": 4,
     "num_workers": 0,
     "mixed_precision": True,
@@ -82,11 +82,10 @@ def test_model_source_refuses_an_undeclared_key_by_name():
 
 
 def test_model_source_admits_every_declared_key():
-    """The rail admits valid work: every declared key, including the sixth
-    (image_stats_sampling), validates with no issue."""
+    """Every declared key, including the fifth (image_stats_sampling), validates with no issue."""
     issues = validate_train_config_schema({"model_source": {
         "builder": "m:f", "builder_kwargs": {"image_mean": [0.1], "image_std": [0.2]},
-        "task": "detection", "in_chans": 1, "source_files": ["m.py"],
+        "task": "detection", "source_files": ["m.py"],
         "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
                                  "pixel_fraction": 1.0, "window_size": None,
                                  "max_windows_per_image": None},
@@ -94,13 +93,9 @@ def test_model_source_admits_every_declared_key():
     assert issues == []
 
 
-def test_two_band_config_declaring_in_chans_only_in_builder_kwargs_is_checked_at_two():
-    """run_in_chans is the one reader the trainer, the predictor and the contract dims share; a
-    config that only declares in_chans inside builder_kwargs must not silently check against 3.
-    A run that declares none reads at the width its own data config recorded."""
-    from tcip_mcp.pipelines.model_build import run_in_chans
-
-    model_source = {"builder": "m:f", "builder_kwargs": {"num_classes": 1, "in_chans": 2}}
-    assert run_in_chans(model_source, {"num_channels": 5}) == 2
-    assert run_in_chans({"builder": "m:f"}, {"num_channels": 5}) == 5
-    assert run_in_chans({"builder": "m:f"}, {}) is None
+def test_a_width_stated_on_the_model_source_is_refused_by_name():
+    """The width is the run's own ``data.num_channels``, handed to the builder; a model source
+    stating one beside it is refused by name rather than read as a second spelling."""
+    issues = validate_train_config_schema(
+        {"model_source": {"builder": "m:f", "task": "detection", "in_chans": 2}})
+    assert any("model_source.in_chans" in issue for issue in issues), issues

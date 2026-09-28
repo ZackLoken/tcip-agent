@@ -344,8 +344,8 @@ def _validate_delivery_buckets(
     classifier_dirs = []
     for date, bucket in preds_by_date.items():
         sidecar = {
-            "id_map": _ID_MAP, "validated": True, "trait": "currant_bloom",
-            "subject": "flower", "attribute": "bloom_state",
+            "validated": True, "trait": "currant_bloom",
+            "scope": {"subject": "flower", "attribute": "bloom_state", "id_map": _ID_MAP},
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "experiment_id": producing, "checkpoint_sha256": "abc123",
         }

@@ -30,8 +30,8 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         # launch_training's own default stage shape: freeze_to + epochs, no lr.
         "batch_size": 2,
         "stages": [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}],
@@ -61,8 +61,8 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
     lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
     }
     nested_keys = {"batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 5}]}
     r = preflight_config({**cfg, "training": nested_keys})
@@ -106,10 +106,10 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     lbls.mkdir()
     return {
         "model_source": {"builder": builder,
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
-                                            "max_size": 96, "detector": "fcos"},
+                         "builder_kwargs": {"min_size": 64, "max_size": 96, "detector": "fcos"},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
+                 "num_channels": 3},
         "batch_size": 2,
     }
 
@@ -183,8 +183,8 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
         "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}],
     }
@@ -219,8 +219,8 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     r = preflight_config(cfg)
@@ -253,8 +253,8 @@ def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     r = preflight_config(cfg)
@@ -279,8 +279,8 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     assert preflight_config(cfg)["warnings"] == []
@@ -312,8 +312,8 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     r = preflight_config(cfg)
@@ -343,10 +343,10 @@ def test_preflight_reports_the_admission_refusal_the_launch_would_raise(tmp_path
     (lbls / "zzz-export.json").write_text(json.dumps(
         {"images": [{"id": 1, "file_name": "a.jpg"}], "annotations": [], "categories": []}))
 
-    data_cfg = {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"}
+    data_cfg = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}}
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": dict(data_cfg), "batch_size": 2,
     }
     r = preflight_config(cfg)
@@ -387,9 +387,8 @@ def test_preflight_admits_the_run_once(tmp_path):
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud",
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2},
                  "split": {"reserve_calibration_fraction": 0.15, "val_ratio": 0.2,
                            "test_ratio": 0.1, "seed": 1}},
@@ -429,8 +428,8 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tm
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
     r = preflight_config(cfg)
@@ -448,8 +447,8 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     lbls.mkdir()
     base_cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
 
@@ -486,8 +485,8 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     lbls.mkdir()
     base_cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
     }
 
@@ -525,8 +524,8 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     lbls.mkdir()
     cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
         "evaluation": "not_a_mapping",
     }
@@ -582,7 +581,7 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
     images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "classification"},
+                         "task": "classification"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "split": {"reserve_calibration_fraction": 0.15}},
         "batch_size": 2,
@@ -611,8 +610,8 @@ def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_pat
             [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 32, 32, keep_empty=True)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 32},
                  "split": {"reserve_calibration_fraction": 0.15}},
         "batch_size": 2,
@@ -628,8 +627,8 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
     images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  # Nothing left for a real train fraction at this mosaic size.
                  "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
@@ -655,8 +654,8 @@ def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_n
     bad.write_bytes(b"{not json")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
@@ -667,17 +666,17 @@ def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_n
 
 
 def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_path):
-    """The rail-admits-valid-work paired test: a real, feasible reserve_calibration_fraction
-    config produces no reserve_calibration_fraction issue under smoke=True."""
+    """A real, feasible reserve_calibration_fraction config produces no
+    reserve_calibration_fraction issue under smoke=True."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
     images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 128, "max_size": 256},
+                         "builder_kwargs": {"min_size": 128, "max_size": 256},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
@@ -699,7 +698,7 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                             "builder_kwargs": {"num_classes": 1}, "task": "detection"}}
+                             "task": "detection"}}
     out = _apply_hpo_params(base, {"lr": 3e-3, "weight_decay": 2e-4})
 
     # Mirror generic_trainer.train()'s reads exactly (top-level keys + defaults).
@@ -834,7 +833,7 @@ class _TiledFakeDataset(_FakeDataset):
 def _detection_base() -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                         "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls"},
         "batch_size": 2,
     }
@@ -867,7 +866,7 @@ def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch, tmp_
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         for epoch, value in enumerate([50.0, 40.0, 30.0]):
             if epoch_callback:
@@ -888,7 +887,7 @@ def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         if epoch_callback:
             epoch_callback(0, {"val_objective": 99.0, "selection": 12.0})
@@ -908,7 +907,7 @@ def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         raise RuntimeError("CUDA out of memory")
 
@@ -924,7 +923,7 @@ def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(m
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    def fake_train(run, train_loader, val_loader, task="classification",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         for epoch, value in enumerate([0.5, 0.9, 0.6]):
             if epoch_callback:
@@ -937,7 +936,7 @@ def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(m
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+                         "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
         "evaluation": {"selection_metric": "accuracy"},
@@ -958,7 +957,7 @@ def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direc
 
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+                         "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
         "evaluation": {"selection_metric": "accuracy"},
@@ -995,7 +994,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
     captured: dict = {}
 
-    def fake_train(run, train_loader, val_loader, task="classification",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         captured["model_source"] = run.config["model_source"]
         run.best_metric = 1.0
@@ -1005,7 +1004,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+                         "task": "classification"},
         "data": {"images_dir": "imgs"},
         "batch_size": 2,
         "augmentation": {"horizontal_flip": 0.5},
@@ -1026,7 +1025,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
     captured: dict = {}
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         run.best_metric = 1.0
         run.status = "completed"
@@ -1057,7 +1056,7 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_resolved_config_snapshot(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         run.best_metric = 1.0
         run.status = "completed"
@@ -1085,7 +1084,7 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         run.best_metric = 1.0
         run.status = "completed"
@@ -1117,14 +1116,14 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.25, "test_ratio": 0.1}},
         "batch_size": 2,
     }
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         run.best_metric = 1.0
         run.status = "completed"
@@ -1155,7 +1154,7 @@ def test_run_hpo_trial_resolved_config_records_seed_actually_trained_under(monke
 
     captured: dict = {}
 
-    def fake_train(run, train_loader, val_loader, task="detection",
+    def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         captured["seed"] = run.config.get("seed")
         run.best_metric = 1.0
@@ -1189,9 +1188,8 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
 
     base_config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_diverges_after_model",
-                         "builder_kwargs": {"good_calls": 1}, "task": "regression", "in_chans": 3},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "task": "regression",
-                 "auto_val": False},
+                         "builder_kwargs": {"good_calls": 1}, "task": "regression"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},
         "device": "cpu",
         "mixed_precision": False,
         "batch_size": 4,
@@ -1444,8 +1442,8 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     lbls.mkdir()
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
+                         "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
     }
     result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
@@ -1617,7 +1615,7 @@ def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_r
     from tcip_mcp.tools.training_tools import list_launchable_configs
 
     create_experiment("exp-crashed", {"model_source": {"builder": "m:f", "task": "detection"},
-                                      "data": {"images_dir": "/d", "subject": "bud"}})
+                                      "data": {"images_dir": "/d", "scope": {"subject": "bud"}}})
     with tcip_store.transaction(status_key("exp-crashed")) as txn:
         txn.write(status_key("exp-crashed"), {"state": "running", "started": None, "ended": None})
 
@@ -1649,7 +1647,7 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
     base_config = {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression", "in_chans": 3},
+                         "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
                      "mixed_precision": False, "device": "cpu",

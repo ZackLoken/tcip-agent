@@ -388,7 +388,7 @@ def run_result(
     slicing: dict | None = None,
     checkpoint_sha256: str = "deadbeef",
     experiment_id: str | None = None,
-    subject: str | None = None,
+    subject: str = "bud",
     attribute: str | None = None,
     id_map: dict | None = None,
     images_dir: str = "images",
@@ -397,13 +397,15 @@ def run_result(
     """A run's own facts built through the pass' own skeleton (``_PreparedPass.result``), for a
     test standing in for the inference pass: ``operating_point`` and ``slicing`` are what its
     bundle states, ``fields`` the run's calibrated or raw extras (``validated``, ``conf_source``
-    and the like), ``results`` its per-image predictions."""
+    and the like), ``results`` its per-image predictions. Its scope is ``subject`` under
+    ``attribute`` with ``id_map``, a detector's one-subject map when no map is given."""
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tests._regime_fixtures import stub_pass
 
     prepared = stub_pass(None)
     prepared.checkpoint_path, prepared.images_dir = "model_best.pt", images_dir
     prepared.identity = {"sha256": checkpoint_sha256, "experiment_id": experiment_id}
-    prepared.scope, prepared.id_map = ClassScope(subject=subject, attribute=attribute), id_map
+    prepared.scope = ClassScope(subject=subject, attribute=attribute,
+                                id_map=id_map if id_map is not None else {subject: 0})
     return {**prepared.result({"operating_point": operating_point, "slicing": slicing}, fields),
             "results": results}

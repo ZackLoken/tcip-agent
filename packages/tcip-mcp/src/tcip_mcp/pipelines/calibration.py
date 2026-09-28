@@ -93,14 +93,14 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
     (``cal_holdout_scope_root``), which ``redraw_calibration_holdout`` states to address it.
 
     Raises ``ValueError`` when the lock references a stem whose image/label no longer exists or its
-    lock file is corrupt; when the run's recorded scope (``run_scope``) names no subject; when an
-    attribute run resolves no id map; and through ``json_io.require_reference_ground_truth`` when
-    ``labels_dir`` is not an admissible reference.
+    lock file is corrupt, and through ``json_io.require_reference_ground_truth`` when
+    ``labels_dir`` is not an admissible reference. Ground truth is read under the run's recorded
+    class space (``p.scope``).
 
     ``selection_dir`` restricts the calibration universe to the ``calibration`` samples of a
-    selection whose label documents live under ``labels_dir``. A checkpoint bound to a different
-    selection, or trained for a subject or attribute the selection was not drawn for, is refused by
-    name, and so is ``group_by``/``group_key_map`` passed beside a selection. Without a selection,
+    selection whose label documents live under ``labels_dir``, re-admitted under ``p.scope``. A
+    checkpoint bound to a different selection is refused by name, and so is
+    ``group_by``/``group_key_map`` passed beside a selection. Without a selection,
     ``group_by`` defaults to ``splits.DEFAULT_GROUP_BY``. The identity (``dh``, the lock, the
     evidence's ``split_identity_hash``) is ``dataset_hash(labels_dir, stems=universe)`` under a
     selection.
@@ -117,16 +117,13 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.evaluation import gt_records
-    from tcip_mcp.tools.inference_tools import (
-        resolve_decode_id_map, run_scope, unmapped_classified_run,
-    )
+
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     predictor = p.predictor
-    # The run's own recorded class space, through the one reader of it: calibration GT reads
-    # under the same scope the training targets did, so the swept count cannot diverge from it.
-    _checkpoint_scope = run_scope(predictor)
-    _subject = _checkpoint_scope.named_subject(repr(getattr(predictor, "path", predictor)))
-    _attribute = _checkpoint_scope.attribute
+    # The run's own recorded class space: calibration GT reads under the same scope the training
+    # targets did, so the swept count cannot diverge from it.
+    scope = p.scope.admitted_for(DOCUMENT, f"the run calibrating against {labels_dir}")
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
     policy_conflict = selection_policy_conflict(selection_dir, group_by, group_key_map)
@@ -146,7 +143,6 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
         )
     excluded = None
     selection_sha256 = None
-    selection_id_map: dict[str, int] | None = None
     if selection_dir is not None:
         from tcip_mcp.pipelines.data.selection import read_selection
         from tcip_mcp.pipelines.data.splits import selection_calibration_universe
@@ -155,18 +151,8 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
 
         selection = read_selection(selection_dir)
         selection_sha256 = selection_digest(selection)
-        if (_subject or None, _attribute or None) != (
-                selection.subject or None, selection.attribute or None):
-            raise ValueError(
-                f"this checkpoint was trained for subject={_subject!r}, attribute="
-                f"{_attribute!r}, and the selection at {selection_dir!r} was drawn for "
-                f"subject={selection.subject!r}, attribute={selection.attribute!r}: the model "
-                "only speaks its training vocabulary, so it cannot be measured against a "
-                "reference drawn for another class space."
-            )
-        selection_id_map = dict(selection.id_map) if selection.id_map else None
         stems, group_by, group_key_map, excluded, annotation_counts, universe_samples = \
-            selection_calibration_universe(selection, labels_dir)
+            selection_calibration_universe(selection, labels_dir, scope)
         # Each stem's own recorded source and ground truth, never a directory listing's: two
         # directories can hold identically named files.
         stem_to_image = {s: resolve_source_path(universe_samples[s].source) for s in stems}
@@ -179,21 +165,11 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
         stems, stem_to_image = label_image_stems(labels_dir, images_dir)
         # The one caller here holding a name rather than a record composes its path once, here.
         gt_path_of = {s: str(labels_p / label_filename(s)) for s in stems}
-    # A selection states the exact map its samples were admitted under; it wins over the run's
-    # own decode map for a selection-restricted measurement.
-    _cal_id_map = selection_id_map or resolve_decode_id_map(
-        predictor, str(labels_p), scope=(_subject, _attribute))
-    unmapped = unmapped_classified_run(_checkpoint_scope, _cal_id_map, images_dir=str(labels_p))
-    if unmapped is not None:
-        raise ValueError(unmapped)
     dh = dataset_hash(labels_dir, stems=(stems if selection_dir is not None else None))
     # The whole-directory universe holds names, and counts each member's document by the path it
     # composed; a selection's universe returned its own counts above.
     if selection_dir is None:
-        annotation_counts = {
-            s: count_label_lines(gt_path_of[s], subject=_subject, attribute=_attribute)
-            for s in stems
-        }
+        annotation_counts = {s: count_label_lines(gt_path_of[s], scope) for s in stems}
     # Detector-cap censoring: derive the collection-pass cap from this split's own density (same
     # formula tcip calibrate-operating-point uses), not the caller's possibly-unrelated max_dets.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
@@ -217,7 +193,7 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
     # GT read the way the run's training targets were; a stem with an unlabeled instance is counted.
     gt_of = {}
     for s in cal_stems + hold_stems:
-        target, n_unlabeled = json_det_targets(gt_path_of[s], _subject, _attribute, _cal_id_map)
+        target, n_unlabeled = json_det_targets(gt_path_of[s], scope)
         if not n_unlabeled:
             gt_of[s] = gt_records(target)
     n_excluded_incomplete_attribute = len(cal_stems) + len(hold_stems) - len(gt_of)

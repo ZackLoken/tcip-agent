@@ -17,16 +17,18 @@ torchvision = pytest.importorskip("torchvision")
 
 def _bespoke_checkpoint(path: Path, *, extra: dict | None = None) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
-        "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+        "builder_kwargs": {"min_size": 64, "max_size": 128},
         "task": "detection",
     }
+    config = {"model_source": model_source,
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
     payload = {
-        "model_source": model_source,
-        "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+        "config": config,
+        "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
     }
     if extra:
         payload.update(extra)

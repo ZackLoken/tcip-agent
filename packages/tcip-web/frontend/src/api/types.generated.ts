@@ -399,7 +399,6 @@ export interface DeliveryEventRecord {
   acknowledged_by: string | null;
   acknowledgment_reason: string | null;
   plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
-  documents: Record<string, DocumentBinding>;
   document_reconciliations: Record<string, ReconciledDocument>;
   dimension_reconciliations: Record<string, ReconciledDimension>;
   produced_at: string;

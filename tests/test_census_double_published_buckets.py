@@ -16,6 +16,7 @@ import tcip_store as ts
 from tcip_annotation.json_io import write_annotations
 from tcip_mcp.dataset_layout import prediction_dir
 from tcip_mcp.experiments import create_experiment, validations_key
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tcip_mcp.prediction_buckets import bucket_content_digest
 from tcip_mcp.tools.project_tools import initialize_project, register_dataset
@@ -51,8 +52,8 @@ def _project(tmp_path: Path, monkeypatch) -> Path:
 def _stamp(bucket: Path, named: list[str]) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
-        attribute=None, trait=None, dataset_hash="H", checkpoint="m",
+        tile_size_validated=None, shippable_issues=[], scope=ClassScope(subject="bud"),
+        trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
         image_filenames={stem: f"{stem}.png" for stem in named},
@@ -216,8 +217,8 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_is_unjudgeable(tmp_
     bucket = _bucket(project, "baseline", ["a", "b"])
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
-        attribute=None, trait=None, dataset_hash="H", checkpoint="m",
+        tile_size_validated=None, shippable_issues=[], scope=ClassScope(subject="bud"),
+        trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
     )
@@ -245,8 +246,8 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_and_holds_no_docume
     bucket = _bucket(project, "baseline", [])
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], id_map=None, subject="bud",
-        attribute=None, trait=None, dataset_hash="H", checkpoint="m",
+        tile_size_validated=None, shippable_issues=[], scope=ClassScope(subject="bud"),
+        trait=None, dataset_hash="H", checkpoint="m",
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
     )

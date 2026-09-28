@@ -50,7 +50,7 @@ def _bespoke_task_dataset(**_kwargs):
     return _DS()
 
 
-def _strict_bespoke_dataset(samples=None, id_map=None, transforms=None, task=None):
+def _strict_bespoke_dataset(samples=None, scope=None, transforms=None, task=None):
     """Declares only what the training path passes: no `**kwargs` catch-all to absorb stray keys."""
     from torch.utils.data import Dataset
 
@@ -68,7 +68,7 @@ def _unbuildable_dataset(**_kwargs):
     raise RuntimeError("cannot open the source for this task")
 
 
-def _bespoke_classification_dataset(samples=None, id_map=None, transforms=None, task=None):
+def _bespoke_classification_dataset(samples=None, scope=None, transforms=None, task=None):
     """An agent-authored classification dataset that owns its own class space: the platform
     resolves no count for a run built through a builder, which is why such a run must smoke the
     batch it holds rather than one synthesized at a count nobody resolved."""
@@ -128,48 +128,44 @@ def _bespoke_task_model(**_kwargs):
 # --------------------------------------------------------------------------
 
 def test_resolve_contract_dims_prefers_tile_edge_over_default():
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    cfg = {"model_source": {"task": "detection"},
+           "data": {"tiling": {"enabled": True, "tile_size": 512}}}
 
-    cfg = {
-        "model_source": {"builder_kwargs": {"in_chans": 4}, "task": "detection"},
-        "data": {"tiling": {"enabled": True, "tile_size": 512}},
-    }
-
-    dims = resolve_contract_dims(cfg, "detection", scope=ClassScope(),
-                                 sizes={"num_classes": 5})
+    dims = resolve_contract_dims(cfg, "detection", {"in_chans": 4, "num_classes": 5})
     assert dims == {"in_chans": 4, "num_classes": 5, "img_size": 512}
 
 
-def test_resolve_contract_dims_answers_none_rather_than_inventing_a_size():
-    """A run that states no width has no synthetic shape at all and says so; a run that states no
-    count states none here, leaving the contract to say whether its own task needed one. The rank
-    count answers for an ordinal run, and img_size is the only value this resolver supplies."""
+def test_model_dims_states_only_what_the_run_holds():
+    """A run that records no width refuses by name rather than building at a guess; a run that
+    holds no count states none, leaving the contract to say whether its own task needed one; a rank
+    count answers for an ordinal run under its own name, and img_size is the only value the
+    contract resolver adds."""
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.model_build import model_dims
 
     cfg, scope = {"model_source": {}}, ClassScope()
 
-    assert resolve_contract_dims(cfg, "detection", scope=scope, sizes={}) is None
-    assert resolve_contract_dims(cfg, "detection", scope=scope, sizes={"num_channels": 3}) == {
+    with pytest.raises(ValueError, match="data.num_channels"):
+        model_dims(scope, {})
+    detector = model_dims(scope, {"num_channels": 3})
+    assert detector == {"in_chans": 3}
+    assert resolve_contract_dims(cfg, "detection", detector) == {
         "in_chans": 3, "img_size": 224}  # a detector's synthetic box needs no count
-    assert resolve_contract_dims(cfg, "ordinal", scope=scope,
-                                 sizes={"num_channels": 3, "num_ranks": 4}) == {
+    ordinal = model_dims(scope, {"num_channels": 3, "num_ranks": 4})
+    assert ordinal == {"in_chans": 3, "num_ranks": 4}
+    assert resolve_contract_dims(cfg, "ordinal", ordinal) == {
         "in_chans": 3, "num_classes": 4, "img_size": 224}
 
 
-def test_resolve_contract_dims_takes_the_admitted_map_over_the_heads_declared_count(tmp_path):
-    """The count the smoke forwards at is the one the run's samples were admitted under, whatever
-    the head declares: a smoke proving a model against a head wider than the run's own class space
-    proves it against a model that will not train."""
+def test_model_dims_counts_the_admitted_map():
+    """The count a scoped run's model is built at is its admitted map's length: the class space
+    its samples were admitted under, never a count stated beside it."""
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.model_build import model_dims
 
-    cfg = {
-        "model_source": {"builder_kwargs": {"num_classes": 5}},
-        "data": {"subject": "bud", "attribute": "opening", "labels_dir": str(tmp_path / "labels")},
-    }
     scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
 
-    assert resolve_contract_dims(cfg, "detection", scope=scope,
-                                 sizes={"num_channels": 3})["num_classes"] == 2
+    assert model_dims(scope, {"num_channels": 3}) == {"in_chans": 3, "num_classes": 2}
 
 
 # --------------------------------------------------------------------------
@@ -182,9 +178,8 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
 
     imgs, lbls = _admitted_tree(tmp_path)
     cfg = {
-        "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection",
-                         "in_chans": 3},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf"},
+        "model_source": {"builder": f"{__name__}:_broken_builder", "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
@@ -203,10 +198,9 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
     imgs, lbls = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
-                                            "max_size": 128},
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     r = preflight_config(cfg, smoke=True, overfit=True)
@@ -220,10 +214,10 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
 # no task taxonomy, and no run launching with the contract silently skipped.
 # --------------------------------------------------------------------------
 
-def test_preflight_smokes_at_the_count_the_run_resolved_not_the_heads(tmp_path, monkeypatch):
-    """The smoke forwards at the class count this run's own ground truth carries, read the way
-    its loaders read it: a head declared wider than the data never widens the batch the contract
-    is earned against."""
+def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, monkeypatch):
+    """The model is built and smoked at the class count this run's own ground truth carries, read
+    the way its loaders read it, and at the band count its sources carry: the platform hands the
+    builder both, so no head can be declared wider than the data."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
     from tests.test_mask_and_table_membership import _three_class_masks
@@ -231,7 +225,6 @@ def test_preflight_smokes_at_the_count_the_run_resolved_not_the_heads(tmp_path, 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
-                         "builder_kwargs": {"num_classes": 9, "in_chans": 3},
                          "task": "semantic_seg"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -261,7 +254,6 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
         Image.fromarray(np.zeros((32, 32), dtype=np.uint8), mode="L").save(masks_dir / f"{stem}.png")
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_semantic_seg",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3},
                          "task": "semantic_seg"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -279,7 +271,9 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
 
     batch, why = _one_real_batch("semantic_seg", cfg)
     assert batch is not None, why
-    assert check_model_contract(build_model(cfg), "semantic_seg", sample_batch=batch)["ok"]
+    smoked = synthetic["smoke"]["dims"]
+    model = build_model(cfg, {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
+    assert check_model_contract(model, "semantic_seg", sample_batch=batch)["ok"]
 
 
 def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
@@ -291,7 +285,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     imgs, lbls = _admitted_tree(tmp_path)
     cfg = {
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
                  "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -321,7 +315,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs, lbls = _admitted_tree(tmp_path)
-    data = {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
+    data = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
 
@@ -338,7 +332,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     imgs, lbls = _admitted_tree(tmp_path)
     cfg = {  # structurally valid, but the dataset cannot produce an item
         "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "leaf",
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
                  "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
@@ -358,18 +352,19 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 # ctx surface: a custom loop self-proves + reuses the craft primitives
 # --------------------------------------------------------------------------
 
-def _ctx_for(task: str, builder: str, data: dict | None = None, **builder_kwargs):
-    config = {"model_source": {"builder": builder, "builder_kwargs": builder_kwargs, "task": task},
-              "device": "cpu", "data": data or {}}
+def _ctx_for(task: str, builder: str, data: dict):
+    """A context over a run whose table ground truth recorded the empty scope admission writes."""
+    config = {"model_source": {"builder": builder, "task": task}, "device": "cpu",
+              "data": {"scope": {}, **data}}
     run = create_run(config, "out", id="auto-run-6")
-    return TrainContext(run=run, train_loader=None, val_loader=None, task=task)
+    return TrainContext(run=run, train_loader=None, val_loader=None)
 
 
 def test_ctx_check_contract_and_overfit_check():
-    """The smoke forwards at what the run recorded: its own width and class count, the sizes its
-    loaders were built at."""
+    """The model is built and smoked at what the run recorded: its own width and class count, the
+    sizes its loaders were built at."""
     ctx = _ctx_for("classification", "tests.bespoke_models:build_bespoke_classifier",
-                   data={"num_channels": 3, "num_classes": 2}, num_classes=2, in_chans=3)
+                   data={"num_channels": 3, "num_classes": 2})
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.
@@ -377,51 +372,10 @@ def test_ctx_check_contract_and_overfit_check():
     assert over["passed"], over["issue"]
 
 
-def test_ctx_smokes_against_its_own_batch_when_the_run_records_no_width(tmp_path):
-    """A hand-rolled loop whose run states no width has its own train loader, and that batch is
-    what the contract is proved against: the smoke never invents a width to synthesize one at."""
-    import csv
-
-    from PIL import Image
-    from torch.utils.data import DataLoader
-
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tests._producer_fixtures import dataset_over
-
-    images_dir, csv_path = tmp_path / "images", tmp_path / "labels.csv"
-    images_dir.mkdir()
-    rows = []
-    for index in range(4):
-        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(images_dir / f"img{index}.png")
-        rows.append((f"img{index}", index % 2))
-    with open(csv_path, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("stem", "label"))
-        writer.writerows(rows)
-    loader = DataLoader(dataset_over("classification", str(images_dir), str(csv_path)),
-                        batch_size=2, collate_fn=task_collate("classification"))
-
-    config = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                               "builder_kwargs": {"num_classes": 2}, "task": "classification"},
-              "device": "cpu"}
-    ctx = TrainContext(run=create_run(config, str(tmp_path / "out"), id="auto-run-61"),
-                       train_loader=loader, val_loader=None, task="classification")
-
-    report = ctx.check_contract()
-
-    assert report["not_smokeable"] is None, report
-    assert report["ok"], report["issues"]
-    assert report["train_loss"] is not None
-
-
-def test_ctx_smokes_its_own_batch_when_the_run_states_a_width_but_no_count(tmp_path, monkeypatch):
-    """A run whose model declares a width and whose bespoke dataset owns its class count holds a
-    loader, and that batch is what both proofs run against.
-
-    Its resolved dimensions name the width and no count, which is a shape nothing can be
-    synthesized at; the loader answers for it. A caller deciding that for itself, by asking only
-    whether dimensions exist, refuses work the contract would admit.
-    """
+def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path, monkeypatch):
+    """A bespoke dataset owns its class space, so its run states the count on its data section;
+    the platform records the band count its sources carry beside it and builds the model at both,
+    and both proofs run at those dimensions."""
     import csv
 
     from PIL import Image
@@ -441,17 +395,16 @@ def test_ctx_smokes_its_own_batch_when_the_run_states_a_width_but_no_count(tmp_p
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
         writer.writerows(rows)
-    data = {"images_dir": str(imgs), "labels_dir": str(table),
-            "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset",
-                               "task": "classification"}}
+    data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
+            "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset"}}
     config = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
-                               "builder_kwargs": {"num_classes": 3, "in_chans": 3},
                                "task": "classification"},
               "device": "cpu", "data": data}
     train_ds, _val_ds, _partition = auto_train_val("classification", data, None)
+    assert (data["num_channels"], data["num_classes"]) == (3, 3)
     loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("classification"))
     ctx = TrainContext(run=create_run(config, str(tmp_path / "out"), id="auto-run-62"),
-                       train_loader=loader, val_loader=None, task="classification")
+                       train_loader=loader, val_loader=None)
 
     report = ctx.check_contract()
     over = ctx.overfit_check(steps=3)
@@ -462,27 +415,24 @@ def test_ctx_smokes_its_own_batch_when_the_run_states_a_width_but_no_count(tmp_p
     assert over["issue"] is None, over
 
 
-def test_ctx_says_one_thing_when_it_can_smoke_nothing():
-    """A classification run recording no class count, holding no batch to smoke, gets the same
-    named condition from both proofs: a batch shaped at a count nobody resolved would prove the
-    model against a class space the run does not train in."""
-    ctx = _ctx_for("classification", "tests.bespoke_models:build_bespoke_classifier",
-                   num_classes=2, in_chans=3)
+def test_ctx_refuses_a_classification_run_recording_no_class_count():
+    """A classification run recording no class count is refused by name by both proofs: a batch
+    shaped at a count nobody resolved would prove the model against a class space the run does
+    not train in."""
+    ctx = _ctx_for("classification", f"{__name__}:_bespoke_task_model",
+                   data={"num_channels": 3})
 
-    report = ctx.check_contract()
-    over = ctx.overfit_check(steps=2)
-
-    assert report["not_smokeable"] == over["issue"]
-    assert "no dimensions to synthesize a classification batch at" in report["not_smokeable"]
-    assert "class count" in report["not_smokeable"]
-    assert report["ok"] is False and over["passed"] is False
+    with pytest.raises(ValueError, match="records no num_classes"):
+        ctx.check_contract()
+    with pytest.raises(ValueError, match="records no num_classes"):
+        ctx.overfit_check(steps=2)
 
 
 def test_ctx_apply_stage_freeze_matches_trainer_guard():
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-    ctx = TrainContext(run=create_run({}, "out", id="auto-run-7"), train_loader=None, task="classification")
+    ctx = TrainContext(run=create_run({}, "out", id="auto-run-7"), train_loader=None)
     full = ctx.apply_stage_freeze(model, 0)
     assert full == sum(p.numel() for p in model.parameters())
     # A shrink relative to the previous stage violates the monotonic guard.

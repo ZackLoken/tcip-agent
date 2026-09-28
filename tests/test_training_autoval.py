@@ -65,7 +65,7 @@ def test_auto_train_val_refuses_a_missing_location_in_preflights_own_words(
     refuses through the one missing-key refusal preflight states, naming the key. An unset value
     never reaches a path as an empty string or a ``None``."""
     images_dir, real_labels, _stems = _detection_dataset(tmp_path / "ds")
-    data_cfg: dict = {"images_dir": str(images_dir), "subject": "bud"}
+    data_cfg: dict = {"images_dir": str(images_dir), "scope": {"subject": "bud"}}
     if labels_dir == "absent":
         data_cfg["labels_dir"] = str(tmp_path / "gone")
 
@@ -83,7 +83,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "bud",
+        "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
@@ -105,7 +105,7 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "bud",
+        "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"group_by": "not_a_real_grouping_key"},
     }
@@ -121,7 +121,7 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "bud",
+        "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
@@ -180,7 +180,7 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     )
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "auto_val": True}
+                "scope": {"subject": "bud"}, "auto_val": True}
     _train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # single group -> no leakage-free val possible
 
@@ -198,7 +198,7 @@ def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
         IMG, IMG, keep_empty=True,
     )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "auto_val": True}
+                "scope": {"subject": "bud"}, "auto_val": True}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None
     assert not hasattr(train_ds, "tile_size")
@@ -227,7 +227,7 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     degrading to no validation, train and val tiles sharing no tile and no strip identity."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -253,7 +253,7 @@ def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_pa
     ``seed`` key; the assertion guards that absence alone."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.2},
     }
@@ -275,7 +275,7 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
     manifest carries no ``seed`` key; the assertion guards that absence alone."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.15, "reserve_calibration_fraction": 0.15},
     }
@@ -295,7 +295,7 @@ def test_spatial_manifest_pins_train_val_and_test_regions_for_distinct_fractions
     regions are pinned against this exact width, height, tile_size, overlap and fractions."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -313,7 +313,7 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     for every side, not only the reserved test area."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -333,7 +333,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     keep_regions kwarg the spatial split passes explicitly."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2,
                   "keep_regions": [(0, 0, 100, 100)]},
@@ -358,7 +358,7 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
             IMG, IMG, keep_empty=True,
         )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "auto_val": True,
+                "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
@@ -383,7 +383,7 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
         )
     group_key_map = {s: "one_group_for_everything" for s in stems}
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "auto_val": True,
+                "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
@@ -398,7 +398,7 @@ def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
     the same train/val/test regions for this layout)."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -416,7 +416,7 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     probing its own source back to three."""
     images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "num_channels": 1,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
@@ -452,7 +452,7 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     for stem in ("a", "b"):
         _multiband_source(images_dir, labels_dir, stem, 5)
     split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
-    base_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
+    base_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"}}
 
     train_ds, val_ds, _ = auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
     assert val_ds is not None
@@ -495,7 +495,7 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: 
             [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24, keep_empty=True)
     probed = _probe_spy(monkeypatch)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "bud", "num_channels": 1,
+                "scope": {"subject": "bud"}, "num_channels": 1,
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
@@ -513,7 +513,7 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(tmp_path: Path, m
     for stem in ("a", "b", "c", "d"):
         _multiband_source(images_dir, labels_dir, stem, 5)
     probed = _probe_spy(monkeypatch)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
@@ -532,10 +532,9 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
     images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64,
-                                            "max_size": 128},
+                         "builder_kwargs": {"min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1,
                            "reserve_calibration_fraction": 0.15}},
@@ -557,14 +556,15 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
     images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
     for stem in ("a", "b"):
         _multiband_source(images_dir, labels_dir, stem, 5)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
     train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     assert data_cfg["num_channels"] == train_ds.expected_channels == 5
-    from tcip_mcp.pipelines.model_build import run_in_chans
-    assert run_in_chans({"builder": "m:f"}, data_cfg) == 5
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
+    config = {"model_source": {"task": "detection"}, "data": data_cfg}
+    assert recorded_model_dims(config)["in_chans"] == 5
 
 
 def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_path: Path):
@@ -572,7 +572,7 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
     disjoint from train/val/test."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
@@ -637,7 +637,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve
     (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # not a dict: unreadable
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1},  # no reserve_calibration_fraction
     }
@@ -651,7 +651,7 @@ def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path
     size/tile size. Explicitly requested -> raises by name."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         # A calibration fraction that leaves nothing after val+test on a mosaic this size.
         "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
@@ -683,7 +683,7 @@ def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: 
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True,
         "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2, "skip_empty": True},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
@@ -698,7 +698,7 @@ def test_reserve_calibration_fraction_records_raster_content_identity(tmp_path: 
     raster_content_identity in the same spatial_manifest a claim-scope check later reads back."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -715,7 +715,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "bud",
+        "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
@@ -726,8 +726,9 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                         "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                          "task": "detection"},
+        "data": data_cfg,
         "device": "cpu",
         "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
@@ -735,7 +736,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "early_stopping": {"enabled": False},
     }
     run = create_run(cfg, str(tmp_path / "out"), id="auto-run-77")
-    run = train(run, train_loader, val_loader=val_loader, task="detection")
+    run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
     assert "val_loss" in run.metrics_history[-1]

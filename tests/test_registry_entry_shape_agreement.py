@@ -53,7 +53,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
         ckpt = leak_dir / f"{name}.pt"
         ckpt.write_bytes(content)
         reg.register_model(
-            name, str(ckpt), {"data": {"subject": "bud"}},
+            name, str(ckpt), {"data": {"scope": {"subject": "bud"}}},
             metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
             metrics_source="caller",
         )
@@ -203,7 +203,7 @@ def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights-a")
     entry = ModelRegistry(str(root)).register_model(
-        "currant_bud_detector_v1", str(ckpt), {"data": {"subject": "bud"}},
+        "currant_bud_detector_v1", str(ckpt), {"data": {"scope": {"subject": "bud"}}},
         metrics={"val_map50": 0.5}, tags=["detector"], metrics_source="caller",
     )
 

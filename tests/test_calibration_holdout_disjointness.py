@@ -66,7 +66,8 @@ class _CalStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config: dict = {"data": {"subject": "bud"}}  # the run's recorded subject
+        # The run's recorded scope, the one its admission wrote.
+        self.config: dict = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
 
     def predict_batch(self, paths, **kw):
         return [{"image": p, "width": IMG, "height": IMG,
@@ -139,7 +140,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
     group_key_map = {"imgA0": "gA", "imgA1": "gA", "imgB0": "gB", "imgB1": "gB"}
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": dict(group_key_map)},
     }
@@ -188,7 +189,7 @@ def test_a_drawn_validation_side_is_checked_end_to_end(tmp_path):
 
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", ["t0", "t1", "v0", "v1"])
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
     }
     _train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
@@ -225,7 +226,7 @@ def test_a_record_with_no_per_scope_membership_is_unresolvable_for_the_selection
 
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", ["t0", "t1", "v0", "v1"])
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
     }
     _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
@@ -282,15 +283,13 @@ def _dated_detection_dataset(root: Path) -> tuple[Path, Path, list[str]]:
 
 
 def _dated_run_config(images_dir: Path, labels_dir: Path) -> dict:
-    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
             "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
 
 
 def test_a_drawn_run_and_a_drawn_selection_spell_one_group_key(tmp_path):
-    """A run that draws its own split and a selection ``draw_splits`` writes are two producers of
-    one fact. The key each records for one stem under one directory is compared directly: two
-    spellings of it are a leak the check reads as no leak, whichever way the reader happens to
-    guess."""
+    """A run that draws its own split and a selection ``draw_splits`` writes record the same group
+    key for one stem under one directory."""
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.tools.data_tools import draw_splits
@@ -314,10 +313,7 @@ def test_a_drawn_run_and_a_drawn_selection_spell_one_group_key(tmp_path):
 
 
 def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch):
-    """Preflight resolves a grouping policy the way the producer that will run resolves it. A
-    check spelling the key a second way refuses, at the primary launch door, exactly the map the
-    draw needs, and one accepting either spelling could no longer tell an incomplete map from a
-    differently spelled one."""
+    """Preflight and the launch door admit the group_key_map the run's own draw accepts."""
     import subprocess
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
@@ -344,7 +340,7 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
                      for index, stem in enumerate(stems)}
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 64},
+                         "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
         "data": {**_dated_run_config(images_dir, labels_dir),
                  "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}},
@@ -364,9 +360,8 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
 
 
 def test_a_crop_annotated_after_a_drawn_run_is_caught_as_its_parents_group(tmp_path):
-    """The consequence of one spelling: a sibling crop of a training parent, annotated after the
-    run, is in no recorded map, and only the policy says which parent it belongs to. It is caught
-    as a leak of that parent's own recorded group."""
+    """A sibling crop of a training parent, annotated after the run and in no recorded map, is
+    caught as a leak of that parent's own recorded group."""
     from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
     from tcip_mcp.pipelines.operating_point import _train_disjointness
@@ -581,7 +576,7 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -635,7 +630,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -918,7 +913,6 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
     monkeypatch.setattr(splits_mod, "resolve_locked_cal_holdout_split", _capture)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "bud"}}
     calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
         seed=1, holdout_ratio=0.5,
@@ -1027,7 +1021,8 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
         ], IMG, IMG)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "bud", "attribute": "state"}}
+    stub.config = {"data": {"scope": {"subject": "bud", "attribute": "state",
+                                      "id_map": {"open": 0, "closed": 1}}}}
 
     _bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
@@ -1037,30 +1032,9 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     assert n_excluded == 2  # partial_a + partial_b, wherever the split put them
 
 
-def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
-    """calibrate_operating_point's bare `except Exception` around resolve_registry_id_map must
-    not silently degrade an attribute-classification calibration to a single-class GT read when
-    the registry read fails for a real reason, sitting directly on the calibration/
-    operating-point rail, worse than the delivery-grade-eval instance of the same bug. No
-    subjects.json exists here for an attribute-scoped config, so this must refuse."""
-    import tcip_mcp.pipelines.calibration as calibration
-
-    stems = ["a_0_0", "a_0_1"]
-    images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
-
-    stub = _CalStub()
-    stub.config = {"data": {"subject": "bud", "attribute": "state"}}  # no subjects.json written
-
-    with pytest.raises(ValueError, match="subjects.json"):
-        calibration.calibrate_operating_point(
-            stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-            group_by="stem", seed=0, holdout_ratio=0.5,
-        )
-
-
 # ===========================================================================
 # Calibration's GT-side id-map resolution must prefer the training-recorded map over a fresh
-# registry read, the same preference resolve_decode_id_map already applies to decode: a
+# registry read, the same map decode reads through run_scope: a
 # subjects.json whose declared attribute-value order was edited since training must not silently
 # relabel the calibration GT.
 # ===========================================================================
@@ -1081,8 +1055,8 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     stub = _CalStub()
     # A recorded map present: the registry read must never even be attempted, regardless of what
     # a fresh subjects.json (absent here) would derive.
-    stub.config = {"data": {"subject": "bud", "attribute": "state",
-                            "id_map": {"open": 0, "closed": 1}}}
+    stub.config = {"data": {"scope": {"subject": "bud", "attribute": "state",
+                                      "id_map": {"open": 0, "closed": 1}}}}
 
     def _boom(*a, **kw):
         raise AssertionError(
@@ -1099,17 +1073,6 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     )
     assert n_excluded == 0
     assert bundle is not None
-
-
-def test_the_recorded_class_space_carries_no_map_until_the_config_records_one():
-    from tcip_mcp.tools.inference_tools import run_scope
-
-    stub = _CalStub()
-    stub.config = {"data": {"subject": "bud", "attribute": "state"}}
-    assert run_scope(stub).id_map is None
-
-    stub.config["data"]["id_map"] = {"open": 0, "closed": 1}
-    assert run_scope(stub).id_map == {"open": 0, "closed": 1}
 
 
 # --- Minor: resolve_model_identity off a load_registered_checkpoint object. -------------------

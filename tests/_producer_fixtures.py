@@ -15,11 +15,13 @@ def admit_over(
     images_dir, ground_truth, *, subject: str | None = None, attribute: str | None = None,
     members: list[str] | None = None,
 ):
-    """The admission over one place holding ground truth, refusing an empty one by name."""
-    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
+    """The admission over one place holding ground truth under a fresh statement of subject and
+    attribute (:func:`~tcip_mcp.pipelines.data.label_queries.stated_scope`), refusing an empty one
+    by name."""
+    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted, stated_scope
 
-    admitted = admit(images_dir, ground_truth, subject=subject, attribute=attribute,
-                     members=members)
+    admitted = admit(images_dir, ground_truth,
+                     scope=stated_scope(ground_truth, subject, attribute), members=members)
     require_admitted(admitted)
     return admitted
 
@@ -38,30 +40,39 @@ def admission_of(members: list[str]):
     test driving a door's own pass rather than the admission under it. Every projection a door
     takes off it (its samples, its counts, its scope) is the producer's own."""
     from tcip_mcp.pipelines.data.label_queries import Admission, Admitted
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
+    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope
 
     return Admission(
         shape=DOCUMENT, images_dir="images", ground_truth="labels",
         records=[Admitted(member=name, source=f"{name}.jpg", ground_truth=f"{name}.json")
                  for name in members],
-        counts={"annotated": len(members)},
+        counts={"annotated": len(members)}, scope=ClassScope(),
     )
 
 
-def dataset_over(
+def run_over(
     task: str, images_dir, ground_truth, *, subject: str | None = None,
     attribute: str | None = None, members: list[str] | None = None,
     stated: dict[str, Any] | None = None, **kwargs: Any,
 ):
-    """A loader for ``task`` over one place holding ground truth, through the producer.
+    """A loader for ``task`` over one place holding ground truth and the data section a run over
+    it records (its ``scope`` and sizes), both through the producer.
 
     ``stated`` is what a config would state about the sizes (a band count, a class count); the
     rest are resolved off the admitted samples the way a run resolves them."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.split_construction import run_sizes
 
     admitted = admit_over(images_dir, ground_truth, subject=subject, attribute=attribute,
                           members=members)
     samples = admitted.every_sample()
-    return build_dataset(
-        task, samples=samples, scope=admitted.scope,
-        sizes=resolve_sizes(task, stated or {}, samples, kwargs.get("dataset_source")), **kwargs)
+    data = {**(stated or {}), "scope": asdict(admitted.scope)}
+    sizes = run_sizes(task, data, samples, kwargs.get("dataset_source"))
+    return build_dataset(task, samples=samples, scope=admitted.scope, sizes=sizes, **kwargs), data
+
+
+def dataset_over(task: str, images_dir, ground_truth, **kwargs: Any):
+    """The loader :func:`run_over` builds."""
+    return run_over(task, images_dir, ground_truth, **kwargs)[0]

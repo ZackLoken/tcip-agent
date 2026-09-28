@@ -81,16 +81,17 @@ def _write_plant_csv(path: Path) -> None:
 
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, tile_size: int = TILE) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3,
-                                      "min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "detection", "in_chans": 3}
-    model = build_model({"model_source": model_source})
+                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
+                    "task": "detection"}
+    config = {"model_source": model_source,
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     result = register_model(name="block-calibration-bespoke", checkpoint_path=str(ckpt),
                             config={}, project_path=str(tmp_path))
     assert "error" not in result, result
@@ -128,7 +129,8 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": reserve_frac},
@@ -275,11 +277,9 @@ def test_every_band_pass_runs_under_the_export_pass_slicing(tmp_path: Path, monk
 
 
 def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
-    """The rail-admits-valid-work paired test: once every reserved cell is attested complete, the
-    same call that refused above resolves a real bundle with real per-band cal/hold records. Also
-    proves, over this real persisted record rather than a hand-built one, that the attached
-    split_policy carries no seed: the spatial-strip split places every side by declared order,
-    never a seed, and nothing here claims otherwise."""
+    """Once every reserved cell is attested complete, the same call that refused above resolves a
+    real bundle with real per-band cal/hold records, and its split_policy carries no seed: the
+    spatial-strip split places every side by declared order."""
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
@@ -309,24 +309,20 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     assert "seed" not in conf.gate_evidence["split_policy"]
 
 
-def test_block_calibration_refuses_a_run_that_recorded_no_subject(tmp_path: Path):
-    """The run's scope is read through its one reader, where an empty subject is none, and a run
-    recording none is refused by name before any ground truth is read."""
-    from tcip_store import store
+def test_block_calibration_refuses_a_pass_whose_run_recorded_no_subject(tmp_path: Path):
+    """A pass whose checkpoint recorded a class space naming no subject is refused by name before
+    any reserved-region ground truth is read under it."""
+    from dataclasses import replace
 
-    from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     exp = _build_experiment(tmp_path)
-    data_cfg = {**store.read(config_key(exp["experiment_id"]))["data"], "subject": ""}
-    create_experiment("exp_no_subject", {"data": data_cfg})
-    persist_run_partition("exp_no_subject", data_cfg)
-    export_pass = _export_pass(exp, tmp_path)
+    export_pass = replace(_export_pass(exp, tmp_path), scope=ClassScope())
 
-    with pytest.raises(ValueError, match="experiment 'exp_no_subject' records no subject"):
+    with pytest.raises(ValueError, match=f"experiment {exp['experiment_id']!r} records no subject"):
         resolve_block_calibration_records(
-            export_pass, trait_name="bud_opening", experiment_id="exp_no_subject")
+            export_pass, trait_name="bud_opening", experiment_id=exp["experiment_id"])
 
 
 def test_block_band_counts_and_spacing_count_objects_not_crowd_regions(tmp_path: Path):
@@ -913,6 +909,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
 
     from tcip_mcp.pipelines.block_calibration import _band_records
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tcip_mcp.pipelines.data.selection import ClassScope
 
     class _OneDetection:
         def predict_sliced(self, view, **kwargs):
@@ -923,7 +920,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
         Annotation(subject="bur", geometry=BBox(20.3, 20.7, 40.1, 60.9)),
         Annotation(subject="bur", geometry=BBox(100.0, 100.0, 180.0, 180.0), iscrowd=True)],
         200, 200)
-    target, _ = json_det_targets(str(label), "bur", None, {"bur": 0})
+    target, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
     gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
           "labels": np.asarray(target["labels"], dtype=np.int64),
           "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
@@ -1076,14 +1073,14 @@ def _build_attribute_scoped_experiment(
     dataset's registry reordered after the run resolved and stamped its own name->id map.
 
     ``trained_values`` is the attribute-value order declared while the run's producer admitted its
-    samples (the map ``subprocess_worker`` stamps onto ``config['data']['id_map']``, which every
-    checkpoint embeds and ``GenericPredictor`` reads back as ``predictor.config``); ``reordered_values`` is
+    samples (the map the admission records on ``config['data']['scope']``, which every checkpoint
+    embeds and ``GenericPredictor`` reads back as ``predictor.config``); ``reordered_values`` is
     the order the registry on disk declares now. ``labeled_value`` is the value every annotation
     carries. Returns the same keys ``_build_experiment`` does plus ``recorded_id_map``.
     """
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
@@ -1107,17 +1104,16 @@ def _build_attribute_scoped_experiment(
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
-        "attribute": "stage", "auto_val": True,
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "scope": {"subject": "bud", "attribute": "stage"}, "auto_val": True,
         "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
-    recorded_scope = ClassScope.recorded_in(data_cfg)
+    recorded_scope = ClassScope.of(data_cfg)
     assert recorded_scope.subject and recorded_scope.id_map
-    recorded_scope.onto(data_cfg)
     recorded_id_map = recorded_scope.id_map
     create_experiment(experiment_id, {"data": data_cfg})
     persist_run_partition(experiment_id, data_cfg)
@@ -1125,12 +1121,12 @@ def _build_attribute_scoped_experiment(
     _write_registry(reordered_values)
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3,
-                                      "min_size": TILE, "max_size": TILE * 2},
-                    "task": "detection", "in_chans": 3}
+                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
+                    "task": "detection"}
+    config = {"model_source": model_source, "data": data_cfg}
     checkpoint_path = tmp_path / "model_best_attribute.pt"
-    torch.save({"model_source": model_source, "config": {"data": data_cfg},
-                "model_state_dict": build_model({"model_source": model_source}).state_dict()},
+    torch.save({"config": config,
+                "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict()},
                str(checkpoint_path))
     result = register_model(name=experiment_id, checkpoint_path=str(checkpoint_path),
                             config={}, project_path=str(tmp_path))
@@ -1178,53 +1174,9 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     assert live_entry["tp"] + live_entry["fn"] == 0
 
 
-def _drop_the_checkpoints_recorded_id_map(checkpoint_path: str, *, project_root: Path) -> None:
-    """Strip ``config['data']['id_map']`` from a saved checkpoint, leaving a run whose decode map
-    can only come from the dataset's registry, and re-register the rewritten bytes under their own
-    new digest so the mutated file is still a checkpoint the registry names."""
-    from tcip_mcp.tools.model_tools import register_model
-
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    payload["config"]["data"].pop("id_map", None)
-    torch.save(payload, checkpoint_path)
-    result = register_model(name="block-calibration-no-id-map", checkpoint_path=checkpoint_path,
-                            config={}, project_path=str(project_root))
-    assert "error" not in result, result
-
-
-def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path):
-    """An attribute-scoped run whose checkpoint recorded no map and whose dataset has no registry
-    has nothing to decode the mosaic's ground truth with. The decode resolver every
-    prediction-writing door already calls carries that precondition, so this path refuses by name
-    instead of restating the prefer-recorded-else-derive rule and reaching the registry read."""
-    exp = _build_attribute_scoped_experiment(
-        tmp_path, trained_values=("closed", "open", "shed"),
-        reordered_values=("closed", "open", "shed"), labeled_value="open",
-        experiment_id="exp_block_no_id_map")
-    _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"], project_root=tmp_path)
-    (exp["root"] / "subjects.json").unlink()
-
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.block_calibration import (
-        BlockCalibrationRefused, resolve_block_calibration_records,
-    )
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
-    from tests._regime_fixtures import stub_pass
-
-    # The export door's own pass preparation refuses this run earlier, having no images_dir to
-    # decode through; block calibration's refusal is reached with the reserved labels in hand.
-    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
-    export_pass = stub_pass(build_predictor(checkpoint, device="cpu", score_threshold=0.01),
-                            tile_size=TILE, postprocess="nms")
-    with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
-        resolve_block_calibration_records(
-            export_pass, trait_name="bud_opening",
-            experiment_id=exp["experiment_id"])
-
-
 def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tmp_path: Path):
-    """The refusal above must not swallow the legitimate case: a checkpoint that carries its own
-    recorded map needs no registry at all, so calibration resolves with subjects.json gone."""
+    """A checkpoint that carries its own recorded map needs no registry at all, so calibration
+    resolves with subjects.json gone."""
     exp = _build_attribute_scoped_experiment(
         tmp_path, trained_values=("closed", "open", "shed"),
         reordered_values=("closed", "open", "shed"), labeled_value="open",

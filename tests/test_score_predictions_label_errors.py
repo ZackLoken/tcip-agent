@@ -102,7 +102,7 @@ def test_score_predictions_folder_refuses_an_undecodable_stamp(tmp_path: Path) -
                       [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
     write_annotations(preds / "IMG_0000.json",
                       [Annotation(subject="open", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
-    _seed_sidecar(preds, {"id_map": {"open": 0}})
+    _seed_sidecar(preds, {"scope": {"id_map": {"open": 0}}})
     _damage_sidecar(preds)
 
     res = score_predictions(str(root))
@@ -133,7 +133,8 @@ def test_score_predictions_over_a_conformed_classified_bucket_scores_the_object_
                    attributes={"opening": "open"})],
         100, 80,
     )
-    write_sidecar(preds, {"id_map": {"open": 0}, "subject": "bud", "attribute": "opening"})
+    write_sidecar(preds, {"scope": {"subject": "bud", "attribute": "opening",
+                                    "id_map": {"open": 0}}})
 
     res = score_predictions(str(img))
 

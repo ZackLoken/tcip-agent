@@ -104,7 +104,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
@@ -149,7 +149,7 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
     }

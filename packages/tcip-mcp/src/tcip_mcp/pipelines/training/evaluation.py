@@ -957,21 +957,20 @@ def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num
 
 
 def quadratic_weighted_kappa(
-    pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int | None = None,
+    pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int,
 ) -> float | None:
-    """Chance-corrected ordinal agreement: squared rank-distance weights, expected agreement from
-    the scored set's own observed rank marginals, the ordinal counterpart to
-    :func:`tcip_mcp.pipelines.operating_point._classification_kappa`. ``None`` when undefined: no
-    items, or expected disagreement is zero (every populated true/predicted pair shares one rank).
-
-    ``num_ranks`` is the run's own rank count. Absent, the scale is ``max(pred, gt) + 1``.
+    """Chance-corrected ordinal agreement over ``num_ranks``, the run's own rank count: squared
+    rank-distance weights, expected agreement from the scored set's own observed rank marginals,
+    the ordinal counterpart to :func:`tcip_mcp.pipelines.operating_point._classification_kappa`.
+    ``None`` when undefined: no items, or expected disagreement is zero (every populated
+    true/predicted pair shares one rank).
     """
     pred = pred_ranks.detach().cpu().round().long()
     gt = gt_ranks.detach().cpu().round().long()
     n = gt.numel()
     if n == 0:
         return None
-    k = num_ranks if num_ranks is not None else int(max(pred.max(), gt.max()).item()) + 1
+    k = num_ranks
     if k < 2:
         return None
     observed = torch.zeros((k, k))
@@ -1121,20 +1120,20 @@ def effective_iou_type(task: str, iou_type: str | None) -> str:
 
 @torch.no_grad()
 def evaluate(
-    model, loader, device, task: str, *,
+    model, loader, device, task: str, *, dims: Mapping[str, int],
     conf_threshold: float = 0.25, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     trait: str | None = None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys.
 
+    ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
+    a class or rank count is read from it, never off the half being scored.
+
     ``trait``: when set, a count trait's derived localization criterion (traits.py, e.g. a
         center-match at half the class-average size) governs the reported detection count and the
         f1 the selection composite optimizes; map50 stays a labeled comparability metric. Absent ->
         the IoU@``iou_threshold`` convention governs.
-
-    A class or rank count is read off the head the predictions come out of, never off the half
-    being scored.
     """
     is_detection = task in ("detection", "instance_seg")
     is_instance_seg = task == "instance_seg"
@@ -1255,14 +1254,14 @@ def evaluate(
         ))
     elif task == "classification" and cls_p:
         result.update(_reported_metrics(classification_metrics(
-            torch.cat(cls_p), torch.cat(cls_g), model.heads[0].num_classes)))
+            torch.cat(cls_p), torch.cat(cls_g), dims["num_classes"])))
     elif task == "ordinal" and ord_p:
         result.update(_reported_metrics(ordinal_metrics(
-            torch.cat(ord_p), torch.cat(ord_g), model.heads[0].num_ranks)))
+            torch.cat(ord_p), torch.cat(ord_g), dims["num_ranks"])))
     elif task == "regression" and reg_p:
         result.update(_reported_metrics(regression_metrics(torch.cat(reg_p), torch.cat(reg_g))))
     elif task == "semantic_seg" and seg_p:
         result.update(_reported_metrics(semantic_seg_metrics(
-            torch.cat(seg_p), torch.cat(seg_g), model.heads[0].num_classes)))
+            torch.cat(seg_p), torch.cat(seg_g), dims["num_classes"])))
 
     return result

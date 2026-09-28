@@ -13,7 +13,6 @@ const BASE: DeliveryEventRecord = {
   output_sha256: "a".repeat(64),
   acknowledged_by: null,
   acknowledgment_reason: null,
-  documents: {},
   document_reconciliations: {},
   dimension_reconciliations: {},
   produced_at: "2026-02-03T12:00:00+00:00",
@@ -33,7 +32,17 @@ describe("DeliveryEventsPanel reconciled validity", () => {
           missing_sidecars: [],
           unvalidated_buckets: [],
           binding_notes: {},
-          bindings: {},
+          bindings: {
+            "C:/data/predictions/baseline/2026-01-08": {
+              ok: true,
+              claimed: true,
+              experiment_id: null,
+              producing_experiment_id: null,
+              checkpoint_sha256: null,
+              record_digest: null,
+              note: "",
+            },
+          },
           conf: 0.4,
           confs: {},
           per_bucket: {},
@@ -69,6 +78,9 @@ describe("DeliveryEventsPanel reconciled validity", () => {
     expect(within(row).getByText("Reconciled validity")).toBeInTheDocument();
     expect(
       within(row).getByText("operating_point: held_out_annotations, 0 unvalidated bucket(s)"),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText("C:/data/predictions/baseline/2026-01-08: verified"),
     ).toBeInTheDocument();
     expect(
       within(row).getByText(

@@ -313,10 +313,9 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     import torch
 
     from tcip_mcp.pipelines.derivations import band_normalization_stats
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
-    builder_kwargs = {"num_classes": 1, "in_chans": in_chans,
-                       "min_size": tile_size, "max_size": tile_size * 2}
+    builder_kwargs: dict = {"min_size": tile_size, "max_size": tile_size * 2}
     if in_chans != 3:
         stats = band_normalization_stats([str(raster_path)], in_chans)
         assert stats is not None
@@ -325,10 +324,13 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
         builder_kwargs["image_std"] = std
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": builder_kwargs, "task": "detection", "in_chans": in_chans}
-    model = build_model({"model_source": model_source})
+                    "builder_kwargs": builder_kwargs, "task": "detection"}
+    config = {"model_source": model_source,
+              "data": {"num_channels": in_chans,
+                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
     return str(ckpt)
 
 
@@ -370,15 +372,17 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
     for this end-to-end mask-shape test)."""
     import torch
 
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": in_chans,
-                                      "min_size": tile_size, "max_size": tile_size * 2},
-                    "task": "instance_seg", "in_chans": in_chans}
-    model = build_model({"model_source": model_source})
+                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
+                    "task": "instance_seg"}
+    config = {"model_source": model_source,
+              "data": {"num_channels": in_chans,
+                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+    model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
     return str(ckpt)
 
 
@@ -445,6 +449,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -464,7 +469,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
 
     out = tmp_path / "pred.json"
-    write_predictions_json(out, result, subject="leaf", attribute=None)
+    write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
     anns = json_io.read_annotations(str(out))
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]

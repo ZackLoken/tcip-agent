@@ -300,7 +300,7 @@ def test_refusal_classified_scope(
     tcip_store.replace(sidecar_key(bucket, "operating_point"), {
         "checkpoint_sha256": "sha-classified", "experiment_id": None, "validated": True,
         "validated_by": {"experiment_id": "exp-classified", "record_digest": "0" * 16},
-        "id_map": {"open": 0, "closed": 1}, "subject": "bud", "attribute": "state",
+        "scope": {"subject": "bud", "attribute": "state", "id_map": {"open": 0, "closed": 1}},
         "slicing": None, "operating_point": {"conf": {"value": 0.1}},
     }, expect=tcip_store.Version.ABSENT)
 
@@ -311,7 +311,6 @@ def test_refusal_classified_scope(
         "pred_path": str(bucket / f"{_STEM}.json"),
         "det_type": "fp", "class_name": "open", "conf": 0.9, "iou": None,
         "gt_idx": None, "pred_idx": 0, "bbox": list(_BOX), "action": "accepted",
-        "subject": "bud", "attribute": "state",
     }
     ordinary = client.post("/api/review/action", json=payload)
     assert ordinary.status_code == 200, ordinary.text

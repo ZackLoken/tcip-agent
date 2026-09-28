@@ -30,13 +30,13 @@ def test_compose_and_forward_4_channel_model():
 
 
 def test_train_start_channel_guard():
+    """A loader handing the model a batch at a width other than the run's recorded one (a bespoke
+    dataset composing its own bands) refuses at the first batch; a matching one trains."""
     from tcip_mcp.pipelines.training.generic_trainer import _validate_input_channels
     with pytest.raises(ValueError, match="channels"):
-        _validate_input_channels({"model_source": {"builder": "x:y", "in_chans": 4}},
-                                 [(torch.rand(2, 3, 16, 16), {})])
+        _validate_input_channels({"data": {"num_channels": 4}}, [(torch.rand(2, 3, 16, 16), {})])
     # matching channel counts -> no error
-    _validate_input_channels({"model_source": {"builder": "x:y", "in_chans": 3}},
-                             [(torch.rand(2, 3, 16, 16), {})])
+    _validate_input_channels({"data": {"num_channels": 3}}, [(torch.rand(2, 3, 16, 16), {})])
 
 
 def _nchan_adapter(in_chans: int):
@@ -305,31 +305,31 @@ def _classification_run(tmp_path, *, num_channels: int | None):
 
 
 def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
-    """A model that declares no in_chans trained at the width its run resolved, so that recorded
-    width is what every later reader reads at: the contract dims and the predictor both take the
-    run's own one channel over three-band sources rather than assuming RGB."""
+    """A model is built at the width its run resolved, so that recorded width is what every later
+    reader reads at: the builder, the contract dims and the predictor all take the run's own one
+    channel over three-band sources rather than assuming RGB."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.data.datasets import stated_sizes
-    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.predictor import build_predictor
-    from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims, run_in_chans
+    from tcip_mcp.pipelines.model_build import (
+        build_model, recorded_model_dims, resolve_contract_dims,
+    )
     from tcip_mcp.tools.model_tools import register_model
 
     data_cfg, train_ds, image = _classification_run(tmp_path, num_channels=1)
     assert data_cfg["num_channels"] == train_ds.expected_channels == 1
 
-    model_source = {"builder": "tests.bespoke_models:build_single_band_classifier",
-                    "builder_kwargs": {"num_classes": 2}, "task": "classification"}
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                    "task": "classification"}
     config = {"model_source": model_source, "data": data_cfg}
-    assert run_in_chans(model_source, data_cfg) == 1  # nothing model-side states it
-    dims = resolve_contract_dims(config, "classification", scope=ClassScope(),
-                                 sizes=stated_sizes(data_cfg))
     # The run recorded both: the width it read at and the count its own table carried.
-    assert dims == {"in_chans": 1, "num_classes": 2, "img_size": 224}
+    dims = recorded_model_dims(config)
+    assert dims == {"in_chans": 1, "num_classes": 2}
+    assert resolve_contract_dims(config, "classification", dims) == {
+        "in_chans": 1, "num_classes": 2, "img_size": 224}
 
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source, "config": config,
-                "model_state_dict": build_model(config).state_dict()}, str(ckpt))
+    torch.save({"config": config, "model_state_dict": build_model(config, dims).state_dict()},
+               str(ckpt))
     assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
                                          config={}, project_path=str(tmp_path))
     predictor = build_predictor(
@@ -346,9 +346,10 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(tmp_path):
 
     assert data_cfg["num_channels"] == train_ds.expected_channels == 3
 
-    from tcip_mcp.pipelines.model_build import run_in_chans
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
 
-    assert run_in_chans({"builder": "m:f", "builder_kwargs": {}}, data_cfg) == 3
+    config = {"model_source": {"task": "classification"}, "data": data_cfg}
+    assert recorded_model_dims(config)["in_chans"] == 3
 
 
 def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(tmp_path):

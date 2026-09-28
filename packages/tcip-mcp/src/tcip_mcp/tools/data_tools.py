@@ -3,6 +3,7 @@ the ``doctor`` command's ``check_data_quality``."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 import tcip_store
@@ -25,10 +26,10 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     Reads the run's ``split.json`` (through ``read_run_partition_checked``: a record that will not
     decode refuses) and its durable config, and refuses, naming the primitive, when: no split
     record exists for ``experiment_id`` or it does not decode; the split is spatial (region
-    identities, not stems); the run's val side is empty; the config's ``data`` section carries no
-    ``subject`` or ``id_map`` for ground truth that is per-image label documents; a
-    member's ground truth has moved since the run (the file the record names now digests
-    differently, the moved members named); or a selection already exists at the output directory.
+    identities, not stems); the run's val side is empty; a member's ground truth has moved since
+    the run (the file the record names now digests differently, the moved members named); a
+    selection already exists at the output directory; or the selection its config's ``scope``
+    composes is one :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
 
     The frozen selection's ``calibration`` side is always empty, so the calibration doors' own
     floor refuses any calibration measurement against it by name; this tool's answer carries a
@@ -47,7 +48,7 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.label_queries import Admitted, samples_over
     from tcip_mcp.pipelines.data.selection import (
-        DOCUMENT, ClassScope, Sample, Selection, read_selection_checked, shape_of, write_selection,
+        ClassScope, Sample, Selection, read_selection_checked, write_selection,
     )
     from tcip_mcp.pipelines.resolution import members_moved_since
 
@@ -65,13 +66,11 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
 
     config = read_member(config_key(experiment_id), {})
     config = config if isinstance(config, dict) else {}
-    # The run's own class space, through its one reader, so what this selection records is what
-    # the checkpoint records.
-    scope = ClassScope.recorded_in(config.get("data") or {})
+    # The run's own class space, so what this selection records is what the checkpoint records.
+    scope = ClassScope.of(config.get("data") or {})
     # Composed scope by scope, the way the record is written: a bare member name means one image
     # only within its own scope, so two scopes' same-named members stay two members here.
     moved: list[str] = []
-    shapes: set[str] = set()
     samples: list[Sample] = []
     n_train = n_val = 0
     for _, block in sorted(split["members"].items()):
@@ -83,7 +82,6 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         records = [Admitted(member=m, source=block["sources"][m], ground_truth=recorded[m],
                             row_key=block["row_keys"].get(m))
                    for m in here]
-        shapes.update(shape_of(r.ground_truth, r.row_key) for r in records)
         try:
             moved.extend(members_moved_since(recorded, digests, here))
         except ValueError as exc:
@@ -99,17 +97,6 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     if not n_val:
         return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
                          "a partition no bind can use."}
-    if DOCUMENT in shapes:
-        # A label document's admission is subject-scoped and reads the class map the run trained
-        # in; a mask raster and a table row are admitted by existing and scope no class space.
-        try:
-            scope.named_subject(f"{experiment_id!r}'s durable config")
-        except ValueError as exc:
-            return {"error": str(exc)}
-        if not scope.id_map:
-            return {"error": f"{experiment_id!r}'s durable config carries no id_map: a selection "
-                             "over per-image label documents records the class map its run "
-                             "trained in."}
     if moved:
         return {"error": f"the ground truth of {len(moved)} member(s) changed since "
                          f"{experiment_id!r} trained ({sorted(moved)[:5]}): a selection "
@@ -136,10 +123,13 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot fingerprint the dataset for the frozen selection: {exc}"}
 
-    write_selection(out_dir, Selection(
-        samples=tuple(samples), **scope.selection_fields(DOCUMENT in shapes),
-        seed=split["seed"], group_by=split["group_by"], dataset_fingerprint=fingerprint,
-    ))
+    try:
+        write_selection(out_dir, Selection(
+            samples=tuple(samples), scope=scope, seed=split["seed"], group_by=split["group_by"],
+            dataset_fingerprint=fingerprint,
+        ))
+    except ValueError as exc:
+        return {"error": f"{experiment_id!r}'s durable config: {exc}"}
     return {
         "selection_dir": str(out_dir), "train": n_train, "val": n_val, "calibration": 0,
         "note": "the calibration side is empty (a training run's own drawn partition records "
@@ -491,9 +481,9 @@ def draw_splits(
     # producer's own admission for that shape.
     from tcip_mcp.dataset_layout import resolve_images_dir
     from tcip_mcp.pipelines.data.label_queries import (
-        Admission, Admitted, admit, foreground_counts, require_admitted,
+        Admission, Admitted, admit, foreground_counts, require_admitted, stated_scope,
     )
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope, with_sides
+    from tcip_mcp.pipelines.data.selection import with_sides
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import ground_truth_digests
 
@@ -502,11 +492,6 @@ def draw_splits(
         sources: list[tuple[Path, str]] = [
             (resolve_images_dir(folder_path, None), ground_truth)]
     else:
-        if not subject:
-            return {"error": "draw_splits needs subject to write a selection (output_path given) "
-                             "over the per-image label tree: pass the object class the run will "
-                             "admit under, name a ground_truth of another shape, or drop "
-                             "output_path for a stats-only call."}
         date_dirs = _split_date_dirs(folder_path)
         if not date_dirs:
             return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ "
@@ -539,7 +524,7 @@ def draw_splits(
     try:
         for where, (source_images, source_ground_truth) in enumerate(sources):
             admitted = admit(source_images, source_ground_truth,
-                             subject=subject, attribute=attribute)
+                             scope=stated_scope(source_ground_truth, subject, attribute))
             admissions.append(admitted)
             for key, value in admitted.counts.items():
                 admission_counts[key] = admission_counts.get(key, 0) + value
@@ -575,7 +560,6 @@ def draw_splits(
         except ValueError as exc:
             return {"error": f"{exc} Searched {searched} ({admission_counts}).{unpaired}"}
 
-    shape = admissions[0].shape
     try:
         group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     except ValueError as exc:
@@ -633,8 +617,7 @@ def draw_splits(
         written = write_selection(out_dir, with_sides(Selection(
             samples=tuple(sample for _identity, sample in sorted(sample_of.items())
                           if sample.identity in drew),
-            **ClassScope(subject=subject, attribute=attribute or None,
-                         id_map=admissions[0].id_map).selection_fields(shape == DOCUMENT),
+            scope=admissions[0].scope,
             seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
         ), drew))
     except ValueError as exc:
@@ -644,7 +627,7 @@ def draw_splits(
     total_drawn = sum(sizes.values())
     return _draw_response(
         drawn, sizes, annotation_counts, stems, group_key_fn, seed=seed,
-        group_by=resolved_group_by, subject=written.subject, attribute=written.attribute,
+        group_by=resolved_group_by, scope=asdict(written.scope),
         admission_counts=admission_counts, selection_dir=str(out_dir),
         calibration_foreground_groups=calibration_foreground_groups,
         realized_ratios={k: (sizes[k] / total_drawn if total_drawn else 0.0) for k in sizes})
@@ -652,7 +635,7 @@ def draw_splits(
 
 def _draw_response(parts: dict, sizes: dict[str, int], annotation_counts: dict | None,
                    stems: list[str], group_key_fn, **recorded) -> dict:
-    """What a ``draw_splits`` call answers: each kept side's size (``sizes``) and foreground
+    """A draw's response: each kept side's size (``sizes``) and foreground
     annotations over ``parts``, the totals, the group count and whether the draw stratified by
     ``annotation_counts``, beside the call's own ``recorded`` facts.
     """

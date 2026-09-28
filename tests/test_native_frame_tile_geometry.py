@@ -23,6 +23,8 @@ from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # n
 
 TILE = 64
 IMAGE = 128
+# The band count and class space a three-band, one-subject run records on its data section.
+_RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
 
 
 class _GeometryStub:
@@ -203,18 +205,19 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
 
 def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
+                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "detection"}
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source,
-                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
-                "config": {"data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE]},
-                           "augmentation": {"resize": [32, 32]}}}, str(ckpt))
+    config = {"model_source": model_source,
+              "data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE],
+                       **_RUN_DATA},
+              "augmentation": {"resize": [32, 32]}}
+    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
+                "config": config}, str(ckpt))
     result = register_model(name="native-frame-carry", checkpoint_path=str(ckpt), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result
@@ -359,18 +362,18 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
 
 
 def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = None) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": TILE,
-                                       "max_size": TILE * 2},
+                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                     "task": "detection"}
-    config: dict = {"data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE]}}
+    config: dict = {"model_source": model_source,
+                    "data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE],
+                             **_RUN_DATA}}
     if augmentation is not None:
         config["augmentation"] = augmentation
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_source": model_source,
-                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
                 "config": config}, str(ckpt))
     return str(ckpt)
 
@@ -498,13 +501,11 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _persisted_regime_predictor()
         persisted = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"),
-            subject="bud")
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"))
 
         predictor_mod.build_predictor = lambda *a, **kw: _native_frame_regime_predictor()
         native = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_native"),
-            subject="bud")
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_native"))
     finally:
         predictor_mod.build_predictor = build
 
@@ -563,7 +564,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     try:
         predictor_mod.build_predictor = _spy_predictor
         r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
-                                      str(labels_dir), str(tmp_path / "out"), subject="bud")
+                                      str(labels_dir), str(tmp_path / "out"))
     finally:
         predictor_mod.build_predictor = build
 
@@ -648,31 +649,30 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": tile_size,
-                                       "max_size": tile_size * 2},
+                    "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2},
                     "task": "detection"}
-    config = {"data": {"tiling": {"tile_size": tile_size, "overlap": 0.2}}}
+    config = {"model_source": model_source,
+              "data": {"tiling": {"tile_size": tile_size, "overlap": 0.2}, **_RUN_DATA}}
     ckpt = tmp_path / "model_tiled.pt"
-    torch.save({"model_source": model_source,
-                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
                 "config": config}, str(ckpt))
     return str(ckpt)
 
 
 def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": size,
-                                       "max_size": size * 2},
+                    "builder_kwargs": {"min_size": size, "max_size": size * 2},
                     "task": "detection"}
-    config = {"data": {"tiling": {"enabled": False}, "train_native_size": [size, size]}}
+    config = {"model_source": model_source,
+              "data": {"tiling": {"enabled": False}, "train_native_size": [size, size],
+                       **_RUN_DATA}}
     ckpt = tmp_path / "model_native.pt"
-    torch.save({"model_source": model_source,
-                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+    torch.save({"model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
                 "config": config}, str(ckpt))
     return str(ckpt)
 

@@ -61,8 +61,10 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
+    from dataclasses import asdict
+
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, build_predictor
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.model_contract import overfit_check
     from tcip_mcp.pipelines.operating_point import records_over_loader, resolve_operating_point
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
@@ -93,10 +95,11 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     config = {
         "model_source": {
             "builder": "tests.bespoke_models:build_bespoke_detector",
-            "builder_kwargs": {"gt_boxes_wh": gt_wh, "num_classes": 1,
-                               "min_size": IMG, "max_size": IMG * 2},
-            "task": "detection", "in_chans": 3, "source_files": [src_file],
+            "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
+            "task": "detection", "source_files": [src_file],
         },
+        # What a run over this data records: the band count and the admitted class space.
+        "data": {"num_channels": 3, "scope": asdict(dataset.scope)},
         "training_source": "tests.bespoke_models:train_bespoke",
         "device": "cpu", "epochs": 2, "seed": 0,
     }
@@ -105,7 +108,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     update_status("expBespoke", "running")
     run = create_run(config, str(out), id="auto-run-1")
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="detection", experiment_id="expBespoke")
+                       experiment_id="expBespoke")
 
     run_training_envelope(ctx)
 
@@ -133,7 +136,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # ---- (b) the custom loop's checkpoint is stamped bespoke; provenance snapshot present ----
     best = torch.load(ckpt, weights_only=False)
     assert best["kind"] == KIND_TCIP_MODULE
-    assert best["model_source"]["builder"].endswith(":build_bespoke_detector")
+    assert best["config"]["model_source"]["builder"].endswith(":build_bespoke_detector")
 
     import tcip_store as ts
     from tcip_mcp.experiments import env_key
@@ -167,7 +170,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
     # ---- the module actually learns; resolve_operating_point + predict close the measurement loop ----
-    overfit = overfit_check(build_model(config), "detection", steps=30, lr=5e-3,
+    overfit = overfit_check(build_model(config, recorded_model_dims(config)), "detection",
+                            steps=30, lr=5e-3,
                             dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
     assert overfit["passed"], overfit["issue"]
 

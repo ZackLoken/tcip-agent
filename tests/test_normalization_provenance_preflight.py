@@ -20,7 +20,7 @@ def _cfg(images_dir, labels_dir, *, builder_kwargs, image_stats_sampling=None):
     return {
         "model_source": model_source,
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": SUBJECT},
+                 "scope": {"subject": SUBJECT}},
     }
 
 
@@ -44,8 +44,7 @@ def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
     imgs, lbls = tmp_path / "images", tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 2,
-                                           "image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]})
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]})
 
     r = preflight_config(cfg)
     assert r["valid"] is False
@@ -66,8 +65,7 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
     outside = tmp_path / "elsewhere.jpg"
     Image.new("RGB", (16, 16)).save(outside)
 
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 3,
-                                           "image_mean": [0.1, 0.2, 0.3],
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2, 0.3],
                                            "image_std": [0.1, 0.1, 0.1]},
               image_stats_sampling={"windows": [[str(outside), None]], "seed": None,
                                     "pixel_fraction": 1.0, "window_size": None,
@@ -92,8 +90,7 @@ def test_preflight_admits_a_sampling_record_naming_images_inside_images_dir(tmp_
     Image.new("RGB", (16, 16)).save(a)
     _label(lbls, "a")
 
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 3,
-                                           "image_mean": [0.1, 0.2, 0.3],
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2, 0.3],
                                            "image_std": [0.1, 0.1, 0.1]},
               image_stats_sampling={"windows": [[str(a), None]], "seed": None,
                                     "pixel_fraction": 1.0, "window_size": None,
@@ -114,8 +111,7 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     cfg = {
         "model_source": {
             "builder": "tests.bespoke_models:build_bespoke_detection",
-            "builder_kwargs": {"num_classes": 1, "in_chans": 2,
-                              "image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+            "builder_kwargs": {"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
             "task": "detection",
             "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
                                      "pixel_fraction": 1.0, "window_size": None,
@@ -149,8 +145,7 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     result = band_normalization_stats([a], 3)
     assert result is not None
     mean, std, _ = result
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 3,
-                                           "image_mean": mean, "image_std": std},
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": mean, "image_std": std},
               image_stats_sampling=image_stats_provenance(result))
 
     r = preflight_config(cfg)
@@ -180,8 +175,7 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
     result = band_normalization_stats_sampled(
         [a], 3, seed=1, window_size=8, max_windows_per_image=4)
     assert result is not None
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 3,
-                                           "image_mean": result.mean, "image_std": result.std},
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": result.mean, "image_std": result.std},
               image_stats_sampling=image_stats_provenance(
                   result, window_size=8, max_windows_per_image=4))
 
@@ -216,8 +210,7 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     result = band_normalization_stats([ref], 2)
     assert result is not None
     mean, std, _ = result
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 2,
-                                           "image_mean": mean, "image_std": std},
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": mean, "image_std": std},
               image_stats_sampling=image_stats_provenance(result))
 
     r = preflight_config(cfg)
@@ -250,8 +243,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     assert {Path(s.source).parent.name for s in bound} == set(DATES)
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"num_classes": 1, "in_chans": 3,
-                                       "image_mean": [0.1, 0.2, 0.3],
+                    "builder_kwargs": {"image_mean": [0.1, 0.2, 0.3],
                                        "image_std": [0.1, 0.1, 0.1]},
                     "task": "detection",
                     "image_stats_sampling": {
@@ -275,8 +267,7 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
     imgs, lbls = tmp_path / "images", tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1, "in_chans": 2,
-                                           "image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+    cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
               image_stats_sampling={"note": "derived by hand, not through either derivation"})
 
     r = preflight_config(cfg)
@@ -286,9 +277,8 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
 
 def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_path):
     """Preflight reads the run's own sizes the way the run reads them, over every source it
-    admits and whether or not the model declares a width to compare against: a second source of
-    another band count is named here, rather than one source being probed and the rest trained at
-    its count, or the whole read being skipped because nothing declared a comparison width."""
+    admits: a second source of another band count is named here, rather than one source being
+    probed and the rest trained at its count."""
     pytest.importorskip("torch")
     import numpy as np
     import tifffile
@@ -303,11 +293,10 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
     tifffile.imwrite(str(imgs / "b.tif"), np.zeros((16, 16, 5), dtype=np.uint8))
     _label(lbls, "a", "b")
 
-    for builder_kwargs in ({"num_classes": 1, "in_chans": 3}, {"num_classes": 1}):
-        r = preflight_config(_cfg(imgs, lbls, builder_kwargs=builder_kwargs))
+    r = preflight_config(_cfg(imgs, lbls, builder_kwargs={}))
 
-        assert r["valid"] is False, builder_kwargs
-        assert any("different band counts" in i for i in r["issues"]), r["issues"]
+    assert r["valid"] is False
+    assert any("different band counts" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):
@@ -317,7 +306,7 @@ def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):
     imgs, lbls = tmp_path / "images", tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
-    cfg = _cfg(imgs, lbls, builder_kwargs={"num_classes": 1})
+    cfg = _cfg(imgs, lbls, builder_kwargs={})
 
     r = preflight_config(cfg)
     assert not any("image_stats_sampling" in i for i in r["issues"])

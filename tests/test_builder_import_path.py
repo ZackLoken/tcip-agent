@@ -117,7 +117,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4)
     cfg = {
         "model_source": {"builder": "agentpkg_launch.model:build", "task": "classification",
-                         "in_chans": 3, "source_files": [str(model)]},
+                         "source_files": [str(model)]},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         "batch_size": 4, "stages": [{"freeze_to": 0, "epochs": 1}],
         "mixed_precision": False, "device": "cpu",
@@ -152,7 +152,7 @@ def test_preflight_imports_a_builder_through_its_source_files(
     cfg = {
         "model_source": {"builder": "probe_builder:build_probe", "task": "classification",
                          "source_files": [str(src / "probe_builder.py")]},
-        "data": {"images_dir": str(images_dir), "task": "classification"},
+        "data": {"images_dir": str(images_dir)},
     }
 
     result = preflight_config(cfg)

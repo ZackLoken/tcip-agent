@@ -29,6 +29,8 @@ from tcip_mcp.traits import registered_crops
 from tests._binding_fixtures import register_plant_registry_for
 from tests.test_second_trait_acceptance import _ID_MAP, _seed_currant_bloom_trait
 
+_SCOPE = {"subject": "flower", "attribute": "bloom_state", "id_map": _ID_MAP}
+
 PLANTS = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
     {"plot": "P2", "accession": "acc-B", "lat": 43.19670, "lon": -90.058037},
@@ -102,8 +104,7 @@ def _write_scene(
                 bucket / f"{stem}.json",
                 [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                            attributes={"bloom_state": "open"})], 8, 8)
-        write_sidecar(bucket, {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"},
-                     "operating_point")
+        write_sidecar(bucket, {"scope": _SCOPE}, "operating_point")
         preds_by_date[date] = str(bucket)
 
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
@@ -133,8 +134,7 @@ def _validate_buckets(
         bucket = Path(bucket_str)
         write_bound_sidecar(
             bucket, {
-                "id_map": _ID_MAP, "validated": True, "trait": trait,
-                "subject": "flower", "attribute": "bloom_state",
+                "scope": _SCOPE, "validated": True, "trait": trait,
                 "operating_point": {"conf": {"value": 0.6,
                                              "validated_against": VALIDATED_HELD_OUT}},
             },
@@ -273,8 +273,7 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
                    attributes={"bloom_state": "open"})], 8, 8)
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(extra, {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"},
-                 "operating_point")
+    write_sidecar(extra, {"scope": _SCOPE}, "operating_point")
     preds_by_date[extra_date] = str(extra)
 
     res = deliver_phenology_milestones(
@@ -823,7 +822,7 @@ def _cite_mapping(tmp_path: Path, name: str) -> None:
     record_delivery_binding_event(
         "test_delivery_door", None, None,
         document_reconciliations={}, dimension_reconciliations={},
-        measurement_documents=[], acknowledgment=None,
+        acknowledgment=None,
         plant_mapping=disclosure, project_root=tmp_path,
     )
 

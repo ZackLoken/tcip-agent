@@ -20,6 +20,7 @@ from PIL import Image
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     NEAREST_MATCH_FACTOR,
     plant_mapping_key,
@@ -33,11 +34,14 @@ from tcip_mcp.tools.phenology_tools import (
 )
 from tests._binding_fixtures import write_bound_sidecar
 
+BUD_OPENING = {"subject": "bud", "attribute": "opening"}
+"""The subject and attribute a caller states for a bare prediction split."""
+
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 from tests._population import mapped_plants
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import run_over  # noqa: E402
 
 
 def _plant_csv(path: Path) -> None:
@@ -218,11 +222,9 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
         "validated": validated,
         "trait": trait,
         "operating_point": op,
-        "id_map": id_map,
         "experiment_id": experiment_id,
         "checkpoint_sha256": checkpoint_sha256,
-        "subject": subject,
-        "attribute": attribute,
+        "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
     }
     if validated:
         write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
@@ -1048,7 +1050,7 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
     from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
 
     key = sidecar_key(cal_pred, "operating_point")
-    ts.replace(key, {"id_map": {"bud": 0}}, expect=ts.Version.ABSENT)
+    ts.replace(key, {"scope": {"subject": "bud", "id_map": {"bud": 0}}}, expect=ts.Version.ABSENT)
     name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
     if name == FILE_BACKEND:
         from tcip_store.store import _backend
@@ -1444,7 +1446,7 @@ def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> Non
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        num_ranks=3, experiment_id=None)
 
     assert res["passed"] is True, res
     assert res["failures"] == []
@@ -1462,7 +1464,7 @@ def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() ->
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        num_ranks=3, experiment_id=None)
 
     assert res["passed"] is False
     assert "not_disjoint" in res["failures"]
@@ -1481,7 +1483,7 @@ def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() ->
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        num_ranks=3, experiment_id=None)
 
     assert res["gate_evidence"]["score"] is not None
     assert res["gate_evidence"]["score"] <= res["gate_evidence"]["floor"]
@@ -1494,7 +1496,7 @@ def test_resolve_ordinal_operating_point_fails_closed_on_missing_items() -> None
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=None, holdout_items=None,
-        experiment_id=None)
+        num_ranks=3, experiment_id=None)
 
     assert res["passed"] is False
     assert res["failures"] == ["no_calibration_or_holdout"]
@@ -1509,7 +1511,7 @@ def test_resolve_ordinal_operating_point_unknown_criterion_raises() -> None:
             "bud_opening", criterion="not_a_real_criterion",
             calibration_items=[{"image_id": "c0", "true_rank": 0, "predicted_rank": 0}],
             holdout_items=[{"image_id": "h0", "true_rank": 0, "predicted_rank": 0}],
-            experiment_id=None)
+            num_ranks=3, experiment_id=None)
 
 
 def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> None:
@@ -1721,8 +1723,8 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
     # Split-wide avg char_size = (200 + 20) / 2 = 110 -> tolerance = 0.5 * 110 = 55px, comfortably
     # above both the small image's 15px offset and the big image's 40px offset.
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                                  positive_value="open", attribute="opening")
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                  **BUD_OPENING, positive_value="open")
 
     by_image = {it["image_id"]: it for it in items}
     assert "small" in by_image, (
@@ -1736,13 +1738,8 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
 
 def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> None:
-    """A labels dir isn't guaranteed to hold only one kind of
-    annotation: a dataset that also isolates an enabling subject (e.g. "bush", root CLAUDE.md's
-    "a subject is not a trait") must not let that unrelated box enter the match pool. Here a "bush"
-    annotation sits exactly on the prediction's center (distance 0) while the real "bud" GT is a
-    few px off: if subject weren't scoped, greedy center-match (closest first) would steal the
-    match for "bush" and either drop the real bud pair or attribute it to the wrong box/attribute
-    entirely."""
+    """A "bush" annotation sitting exactly on the prediction's center stays out of the match pool
+    of a "bud" run, so the real bud GT a few px off is the one paired."""
     root = _ds_root(tmp_path)
     _write_bud_opening_registry(root)
     gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
@@ -1762,8 +1759,8 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
                    attributes={"opening": "open"}),
     ], 400, 400)
 
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                                  positive_value="open", attribute="opening")
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                  **BUD_OPENING, positive_value="open")
 
     assert len(items) == 1
     assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the bud box, not bush's
@@ -1791,7 +1788,7 @@ def test_classification_items_never_pair_a_crowd_region(tmp_path: Path) -> None:
     ], 400, 400)
 
     items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
-                                  subject="bud", positive_value="open", attribute="opening")
+                                  **BUD_OPENING, positive_value="open")
 
     assert [it["bbox"] for it in items] == [[10.0, 10.0, 40.0, 40.0]]
 
@@ -1812,7 +1809,7 @@ def test_a_crowd_prediction_pairs_no_ground_truth_object(tmp_path: Path) -> None
                    iscrowd=True)], 400, 400)
 
     assert _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
-                                 subject="bud", positive_value="open", attribute="opening") == []
+                                 **BUD_OPENING, positive_value="open") == []
 
 
 def _write_pair(gt_dir: Path, pred_dir: Path, *, gt_value: str, pred_value: str = "open") -> Path:
@@ -1839,20 +1836,19 @@ def test_classification_items_refuses_a_bare_split_with_no_registry(tmp_path: Pa
     _write_pair(gt_dir, pred_dir, gt_value="open")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                              positive_value="open", attribute="opening")
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                              **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
     assert str(Path(pred_dir)) in message and str(Path(gt_dir)) in message
     assert "dataset root" in message
 
 
-def test_classification_items_refuses_a_classified_bucket_with_no_map_and_no_registry(
+def test_classification_items_refuses_a_stated_scope_beside_a_stamped_bucket(
     tmp_path: Path,
 ) -> None:
-    """A classified stamp recording no usable id_map falls to the same registry requirement a
-    bare bucket does; with no registry under the ground truth's own root, this refuses the same
-    way, naming the classified scope's own absent map rather than a bare directory."""
+    """A stamped bucket records its own class space, so a subject and attribute stated beside it
+    would be a second one; the door refuses rather than choose between them."""
     from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
@@ -1860,19 +1856,20 @@ def test_classification_items_refuses_a_classified_bucket_with_no_map_and_no_reg
     stamp = operating_point_stamp(
         {}, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
         shippable_issues=[],
-        id_map=None, subject="bud", attribute="opening", trait=None, dataset_hash=None,
-        checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
-        raster_path=None, produced_at=None,
+        scope=ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "open": 1}),
+        trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,
+        experiment_id=None, images_dir=None, raster_path=None, produced_at=None,
     )
     write_sidecar(pred_dir, stamp)
 
-    with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                              positive_value="open", attribute="opening")
-
-    message = str(exc.value)
-    assert str(Path(pred_dir)) in message and str(Path(gt_dir)) in message
-    assert "classified scope with no usable id_map" in message
+    for stated in (BUD_OPENING, {"subject": "", "attribute": None}):
+        with pytest.raises(ValueError, match="would be a second one"):
+            _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                  **stated, positive_value="open")
+    # Admits valid work: the same stamped bucket with nothing stated beside it pairs its item.
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                                  subject=None, attribute=None, positive_value="open")
+    assert [it["is_true_positive"] for it in items] == [True]
 
 
 def test_classification_items_refuses_a_registry_not_declaring_the_positive_value(
@@ -1896,8 +1893,8 @@ def test_classification_items_refuses_a_registry_not_declaring_the_positive_valu
     _write_pair(gt_dir, pred_dir, gt_value="closed", pred_value="closed")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                              positive_value="open", attribute="opening")
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                              **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
     assert "'open'" in message
@@ -1917,15 +1914,16 @@ def test_classification_items_refuses_an_id_map_not_declaring_the_positive_value
     stamp = operating_point_stamp(
         {}, slicing=None, validated=False, validated_by=None, tile_size_validated=None,
         shippable_issues=[],
-        id_map={"closed": 0, "other": 1}, subject="bud", attribute="opening", trait=None,
+        scope=ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "other": 1}),
+        trait=None,
         dataset_hash=None, checkpoint=None, checkpoint_sha256=None, experiment_id=None,
         images_dir=None, raster_path=None, produced_at=None,
     )
     write_sidecar(pred_dir, stamp)
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                              positive_value="open", attribute="opening")
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                              subject=None, attribute=None, positive_value="open")
 
     message = str(exc.value)
     assert str(Path(pred_dir)) in message
@@ -1946,8 +1944,8 @@ def test_classification_items_refuses_a_ground_truth_value_outside_the_registry(
     gt_file = _write_pair(gt_dir, pred_dir, gt_value="budding")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
-                              positive_value="open", attribute="opening")
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+                              **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
     assert str(gt_file) in message
@@ -1982,12 +1980,13 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset = dataset_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
+    dataset, data = run_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
-    model_source = _model_source("build_bespoke_ordinal", num_ranks=3, in_chans=3)
+    model_source = _model_source("build_bespoke_ordinal")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"), id="auto-run-44")
-    run = train(run, loader, val_loader=None, task="ordinal")
+    run = create_run({**_train_config(model_source, data), "seed": 0}, str(tmp_path / "out"),
+                     id="auto-run-44")
+    run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
     from tcip_mcp.tools.model_tools import register_model
@@ -1998,7 +1997,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="ordinal",
+        trait_name="bud_opening",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
@@ -2046,12 +2045,13 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     csv_path = tmp_path / "values.csv"
     _write_csv(csv_path, rows, ("stem", "value"))
 
-    dataset = dataset_over("regression", str(images_dir), str(csv_path))
+    dataset, data = run_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
-    model_source = _model_source("build_bespoke_regressor", in_chans=3)
+    model_source = _model_source("build_bespoke_regressor")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"), id="auto-run-45")
-    run = train(run, loader, val_loader=None, task="regression")
+    run = create_run({**_train_config(model_source, data), "seed": 0}, str(tmp_path / "out"),
+                     id="auto-run-45")
+    run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
     from tcip_mcp.tools.model_tools import register_model
@@ -2061,7 +2061,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="regression",
+        trait_name="bud_opening",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="r_squared", output_dir=str(tmp_path / "calib"),
@@ -2083,15 +2083,30 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     assert "gate_evidence" in sidecar and sidecar["gate_evidence"]["criterion"] == "r_squared"
 
 
-def test_calibrate_scalar_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
+def test_calibrate_scalar_operating_point_refuses_a_checkpoint_of_another_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checkpoint's own task routes the door, so a classification checkpoint refuses by its
+    task rather than being calibrated as a scalar."""
+    torch = pytest.importorskip("torch")
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
+    from tcip_mcp.tools.model_tools import register_model
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    checkpoint = tmp_path / "model_best.pt"
+    torch.save({"model_state_dict": {}, "kind": "tcip_module",
+                "config": {"model_source": {"task": "classification"},
+                           "data": {"num_channels": 3, "num_classes": 2, "scope": {}}}},
+               checkpoint)
+    assert "error" not in register_model(name="classifier", checkpoint_path=str(checkpoint),
+                                         config={}, project_path=str(tmp_path))
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="classification", checkpoint_path="m.pt",
+        trait_name="bud_opening", checkpoint_path=str(checkpoint),
         images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(tmp_path),
     )
-    assert "error" in result
+    assert "'classification' checkpoint" in result["error"], result
 
 
 def _rank_csv(csv_path: Path, ranks: dict[str, int]) -> None:
@@ -2130,7 +2145,10 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
     assert dataset_root_of(frames) is None
     torch = pytest.importorskip("torch")
     checkpoint = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "kind": "tcip_module"}, checkpoint)
+    torch.save({"model_state_dict": {}, "kind": "tcip_module",
+                "config": {"model_source": {"task": "ordinal"},
+                           "data": {"num_channels": 3, "num_ranks": 3, "scope": {}}}},
+               checkpoint)
 
     from tcip_mcp.tools.model_tools import register_model
 
@@ -2147,7 +2165,7 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
                         lambda *a, **kw: _RecordedRanks())
 
     res = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="ordinal", checkpoint_path=str(checkpoint),
+        trait_name="bud_opening", checkpoint_path=str(checkpoint),
         images_dir=str(frames), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path), group_by="stem",
@@ -2188,7 +2206,7 @@ def test_calibrate_scalar_operating_point_refuses_a_dataset_root_its_images_cont
     _rank_csv(csv_path, {f"img{i}": i % 3 for i in range(4)})
 
     res = calibrate_scalar_operating_point(
-        trait_name="bud_opening", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
+        trait_name="bud_opening", checkpoint_path=str(tmp_path / "model_best.pt"),
         images_dir=str(ds / "images"), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
         dataset_root=str(stated),
@@ -2309,8 +2327,8 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
 def test_deliver_phenology_milestones_records_what_verification_found_in_the_datasets_own_log(
     tmp_path: Path,
 ) -> None:
-    """The delivery's one line says which buckets stood behind the numbers and which records
-    answered for them, in the log that travels with the data, with no call line beside it."""
+    """The delivery's one line, in the log that travels with the data, names the delivery_events
+    record that says which buckets stood behind the numbers, with no call line beside it."""
     from tests._binding_fixtures import record_producing_run
 
     sha = record_producing_run(tmp_path, "exp-producer")
@@ -2329,12 +2347,14 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
 
     page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
     assert page.records, "the delivery wrote nothing to the log of the dataset its buckets sit in"
-    events = [e for e in page.records if e["tool"] == "deliver_phenology_milestones" and "verified_buckets" in e]
-    assert len(events) == 1, page.records
-    verified = events[0]["verified_buckets"]
-    assert set(verified) == {str(d1), str(d2)}
-    assert all(v["verified"] for v in verified.values())
-    assert events[0]["record_digests"], events[0]
+    from tcip_mcp.pipelines.resolution import read_delivery_events
+
+    (record,) = [r for r in read_delivery_events(tmp_path)
+                 if r["door"] == "deliver_phenology_milestones"]
+    bindings = record["document_reconciliations"]["operating_point"]["bindings"]
+    assert set(bindings) == {str(d1), str(d2)}
+    assert all(doc["ok"] and doc["record_digest"] for doc in bindings.values())
     platform = ts.read_log(audit_log_key()).records
-    assert [e for e in [*page.records, *platform] if e["tool"] == "deliver_phenology_milestones"
-            and "verified_buckets" not in e] == []
+    lines = [e for e in [*page.records, *platform] if e["tool"] == "delivery_event"]
+    assert [e["arguments"] for e in lines] == [{"event_id": record["event_id"]}]
+    assert lines[0] in page.records

@@ -1,20 +1,11 @@
-"""A hand-written bespoke detector and custom training loop, used as a proof fixture for the
-platform's audited envelope.
+"""Bespoke builders and a custom training loop the tests name by dotted reference.
 
-This is *agent-authored* model code the platform runs through its audited envelope. It exercises
-two things the CV-scientist boundary must support:
+  (a) a from-scratch ``GroupNorm`` backbone and tiny FPN feeding a torchvision Faster R-CNN whose
+      ``AnchorGenerator`` is built from the dataset's own GT box shapes
+      (``pipelines.derivations.gt_aspect_ratios`` and the GT size distribution); and
 
-  (a) modified architecture internals: a from-scratch backbone + tiny FPN that use ``GroupNorm``
-      (detector batches are tiny, so BatchNorm statistics are unreliable), fed into a torchvision
-      Faster R-CNN whose ``AnchorGenerator`` is built from *this dataset's* GT box shapes
-      (aspect ratios via ``pipelines.derivations.gt_aspect_ratios``, sizes from the GT size
-      distribution) rather than torchvision's fixed defaults; and
-
-  (b) a custom ``train(ctx)`` loop (``train_bespoke``), not ``ctx.default_train()``, that drives
-      training through the envelope's ``ctx`` sinks so it stays audited, immutable, and provenanced.
-
-Importable-builder only (the envelope re-imports it, never ``exec``). Not a ``test_*`` module: it is
-imported by ``test_bespoke_model_e2e.py`` via its dotted name.
+  (b) a custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks
+      rather than ``ctx.default_train()``.
 """
 
 from __future__ import annotations
@@ -135,11 +126,8 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
 # ---------------------------------------------------------------------------
 
 def train_bespoke(ctx) -> None:
-    """A from-scratch training loop (not ``ctx.default_train``).
-
-    Composes the envelope's craft utilities (``build_optimizer`` / ``build_scheduler`` / ``evaluate``)
-    and routes every metric + checkpoint through the audited/immutable ctx sinks, so integrity is the
-    envelope's guarantee, not this loop's responsibility.
+    """A from-scratch training loop composing the envelope's craft utilities (``build_optimizer`` / ``build_scheduler`` /
+    ``evaluate``) and records every metric and checkpoint through the ctx sinks.
     """
     ctx.set_seed()
     device = ctx.device
@@ -288,14 +276,6 @@ def build_bespoke_classifier(*, num_classes: int, in_chans: int = 3, dropout: fl
     return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes, dropout=dropout))
 
 
-def build_single_band_classifier(*, num_classes: int):
-    """A classifier whose input width is a property of its own architecture, declared nowhere in
-    its ``model_source``: the case a run's own recorded width has to answer for."""
-    bb = _resnet18(1)
-    neck = GlobalAvgPoolNeck(bb.out_channels)
-    return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes))
-
-
 def build_bespoke_ordinal(*, num_ranks: int, in_chans: int = 3):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
@@ -324,6 +304,34 @@ def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector
                             min_size: int = 800, max_size: int = 1333, **det_kwargs):
     return BespokeDetection(num_classes, in_chans=in_chans, detector=detector,
                             min_size=min_size, max_size=max_size, **det_kwargs)
+
+
+class FixedMaskSegmenter(nn.Module):
+    """An instance segmenter whose eval forward returns, per image, one box over its central half
+    scored 0.9 and a mask of ones filling that box, so every pass carries a real mask."""
+
+    def __init__(self, in_chans: int = 3) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(in_chans, 1, 1)
+        self.score_thresh = 0.0
+
+    def forward(self, images, targets=None):
+        if self.training:
+            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+        results = []
+        for im in images:
+            h, w = int(im.shape[-2]), int(im.shape[-1])
+            y0, y1, x0, x1 = h // 4, 3 * h // 4, w // 4, 3 * w // 4
+            mask = torch.zeros((1, 1, h, w))
+            mask[..., y0:y1, x0:x1] = 1.0
+            results.append({"boxes": torch.tensor([[x0, y0, x1, y1]], dtype=torch.float32),
+                            "scores": torch.tensor([0.9]), "labels": torch.tensor([1]),
+                            "masks": mask})
+        return results
+
+
+def build_fixed_mask_instance_seg(*, num_classes: int = 1, in_chans: int = 3):
+    return FixedMaskSegmenter(in_chans=in_chans)
 
 
 # A non-torchvision detector, no .detector to route through.
@@ -372,11 +380,11 @@ class BareNoKnobDetector(nn.Module):
         return results
 
 
-def build_bare_score_thresh_detector(*, in_chans: int = 3):
+def build_bare_score_thresh_detector(*, in_chans: int = 3, num_classes: int = 1):
     return BareScoreThreshDetector(in_chans=in_chans)
 
 
-def build_bare_no_knob_detector(*, in_chans: int = 3):
+def build_bare_no_knob_detector(*, in_chans: int = 3, num_classes: int = 1):
     return BareNoKnobDetector(in_chans=in_chans)
 
 
@@ -475,7 +483,7 @@ class BrightRegionDetector(nn.Module):
         return results
 
 
-def build_bright_region_detector(*, in_chans: int = 3, bright: float = 0.5,
+def build_bright_region_detector(*, in_chans: int = 3, num_classes: int = 1, bright: float = 0.5,
                                  decoy_score: float = 0.03) -> BrightRegionDetector:
     """``model_source`` builder for :class:`BrightRegionDetector`, deterministic in its inputs."""
     return BrightRegionDetector(in_chans=in_chans, bright=bright, decoy_score=decoy_score)
@@ -532,7 +540,7 @@ class BrightBlobDetector(nn.Module):
         return results
 
 
-def build_bright_blob_detector(*, in_chans: int = 3, with_masks: bool = False,
+def build_bright_blob_detector(*, in_chans: int = 3, num_classes: int = 1, with_masks: bool = False,
                                classes_by_channel: bool = False) -> BrightBlobDetector:
     """``model_source`` builder for :class:`BrightBlobDetector`."""
     return BrightBlobDetector(in_chans=in_chans, with_masks=with_masks,

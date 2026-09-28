@@ -50,13 +50,15 @@ def _write_real_prediction(bucket, stem: str, *, score: float = 0.9) -> None:
     detection (not the bare content-hashing stand-in ``write_prediction`` writes) to count."""
     from pathlib import Path
 
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     Path(bucket).mkdir(parents=True, exist_ok=True)
     result = {"image": f"{stem}.png", "width": 100, "height": 100,
              "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [score], "labels": [1], "count": 1}
-    write_predictions_json(Path(bucket) / f"{stem}.json", result, created_by="test-producer",
-                           subject=fx.COUNT_SUBJECT, attribute=None, id_map={fx.COUNT_SUBJECT: 0})
+    write_predictions_json(
+        Path(bucket) / f"{stem}.json", result, created_by="test-producer",
+        scope=ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0}))
 
 
 def _unvalidated_run_result(*, experiment_id=None, stem="a"):
@@ -67,7 +69,8 @@ def _unvalidated_run_result(*, experiment_id=None, stem="a"):
         {"conf": {"value": 0.5}},
         [{"image": f"{stem}.png", "width": 100, "height": 100,
           "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}],
-        experiment_id=experiment_id, validated=False, conf_source="default")
+        experiment_id=experiment_id, subject=fx.COUNT_SUBJECT, validated=False,
+        conf_source="default")
 
 
 def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, stem="a"):
@@ -77,6 +80,7 @@ def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, stem="a"):
         results=[{"image": f"{stem}.png", "width": 100, "height": 100,
                   "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                   "count": 1}],
+        subject=fx.COUNT_SUBJECT,
         **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef"))
 
 
@@ -124,7 +128,7 @@ def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, v
 
     bucket = tmp_path / "preds"
     write_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -145,7 +149,7 @@ def test_a_live_only_parameter_stated_at_its_own_default_is_silently_admitted(tm
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -182,7 +186,7 @@ def test_bucket_regime_refuses_a_mosaic_bucket(tmp_path):
 
     bucket = tmp_path / "mosaic_preds"
     write_prediction(bucket, "tile_0")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": "mosaic.tif",
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": "mosaic.tif",
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -197,7 +201,7 @@ def test_bucket_regime_refuses_a_stamp_naming_neither_images_dir_nor_raster_path
 
     bucket = tmp_path / "bare_preds"
     write_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -215,7 +219,7 @@ def test_bucket_regime_refuses_a_stamp_naming_an_empty_string_images_dir(tmp_pat
 
     bucket = tmp_path / "empty_images_dir_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": "", "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": "", "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -244,7 +248,7 @@ def test_bucket_regime_refuses_a_trait_contradiction_even_unvalidated(tmp_path):
 
     bucket = tmp_path / "other_trait_preds"
     write_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -265,7 +269,7 @@ def test_bucket_regime_admits_a_stamp_naming_no_trait_at_all(tmp_path):
 
     bucket = tmp_path / "no_trait_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -282,7 +286,7 @@ def test_bucket_regime_refuses_a_stamped_bucket_with_no_prediction_documents(tmp
     import tcip_mcp.tools.inference_tools as itools
 
     bucket = tmp_path / "empty_preds"
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -317,8 +321,9 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
 
     bucket = tmp_path / "id_mapped_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
-             "id_map": {fx.COUNT_SUBJECT: 0},
+    stamp = {"image_filenames": {"a": "a.png"},
+             "scope": {"subject": fx.COUNT_SUBJECT, "id_map": {fx.COUNT_SUBJECT: 0}},
+             "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -342,7 +347,7 @@ def test_bucket_regime_returns_an_error_dict_for_an_unknown_trait(tmp_path):
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": "no-such-trait", "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": "no-such-trait", "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -389,7 +394,7 @@ def test_publish_bracket_refuses_a_fabricated_tile_with_the_bucket_left_absent(t
              "tile_size": {"value": 640, "requires_validation": True,
                            "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}},
             [{"image": "a.png", "count": 1, "scores": [0.9]}],
-            validated=True, conf_source="calibration")
+            subject=fx.COUNT_SUBJECT, validated=True, conf_source="calibration")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
@@ -464,7 +469,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -521,7 +526,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regim
 def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -624,13 +629,13 @@ def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch)
     assert "error" not in live, live
     earned = ["calibration_experiment_created", "experiment_validation_recorded",
               "prediction_bucket_published", "stamp_written"]
-    assert _audit_tools(root) == sorted(earned + ["export_detection_csv"])
+    assert _audit_tools(root) == sorted(earned + ["delivery_event"])
 
     delivered = itools.deliver_per_image_counts(predictions_dir=str(bucket),
                                                 output_path=str(tmp_path / "b.csv"),
                                                 trait=fx.COUNT_TRAIT)
     assert "error" not in delivered, delivered
-    assert _audit_tools(root) == sorted(earned + ["export_detection_csv"] * 2)
+    assert _audit_tools(root) == sorted(earned + ["delivery_event"] * 2)
 
 
 def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
@@ -639,8 +644,8 @@ def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
     import tcip_mcp.tools.inference_tools as itools
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
-    from tcip_mcp.pipelines.resolution import BucketScope
 
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
@@ -648,7 +653,7 @@ def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
     crowd = bucket / "b.json"
     json_io.write_annotations(crowd, [Annotation(subject=fx.COUNT_SUBJECT, iscrowd=True, score=0.9,
                                                  geometry=BBox(10.0, 10.0, 60.0, 60.0))], 100, 100)
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "validated": True,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "image_filenames": {"a": "a.png", "b": "b.png"},
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
@@ -660,8 +665,8 @@ def test_a_crowd_only_prediction_document_delivers_a_count_of_zero(tmp_path):
     assert "error" not in r, r
     counts = {row["image"]: row["detection_count"] for row in csv.DictReader(out_csv.open())}
     assert counts == {"a.png": "1", "b.png": "0"}
-    scope = BucketScope(subject=fx.COUNT_SUBJECT, attribute=None)
-    assert count_by_class(crowd, {fx.COUNT_SUBJECT: 0}, "x", scope=scope)[0] == 0
+    scope = ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0})
+    assert count_by_class(crowd, "x", scope=scope)[0] == 0
 
 
 @pytest.mark.parametrize("image_filenames", [None, {"a": "a.png"}, ["a.png", "b.png"]],
@@ -679,7 +684,7 @@ def test_bucket_regime_refuses_a_bucket_whose_stamp_does_not_name_each_document(
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
     _write_real_prediction(bucket, "b")
-    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False,
+    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "validated": False,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     if image_filenames is not None:
@@ -821,7 +826,7 @@ def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_pa
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -866,6 +871,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
     seal_validation) over the bucket a terminal experiment's own lineage already names."""
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, seal_validation, write_sidecar,
     )
@@ -903,7 +909,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
         draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
         validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
-        id_map={fx.COUNT_SUBJECT: 0}, subject=fx.COUNT_SUBJECT, attribute=None,
+        scope=ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0}),
         trait=fx.COUNT_TRAIT, dataset_hash="H", checkpoint="best", checkpoint_sha256="deadbeef",
         experiment_id=exp_id, images_dir=str(tmp_path), raster_path=None,
         produced_at="2026-01-01T00:00:00Z", image_filenames={"a": "a.png"},
@@ -970,7 +976,7 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    unvalidated_stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    unvalidated_stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
                         "raster_path": None,
                         "operating_point": {"conf": {"value": 0.5,
                                                      "validated_against": VALIDATED_FALSE}}}
@@ -987,7 +993,8 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
 
     earned_op_point = {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}
     bound = file_validation_record(
-        {"operating_point": earned_op_point}, dataset_root=tmp_path / "ds", pred_dirs=[bucket],
+        {"operating_point": earned_op_point, "scope": unvalidated_stamp["scope"]},
+        dataset_root=tmp_path / "ds", pred_dirs=[bucket],
         trait=fx.COUNT_TRAIT, experiment_id="exp-promotion-earned")
 
     def _promote(stored: dict) -> dict:
@@ -1039,7 +1046,7 @@ def _real_store_error(tmp_path, name: str):
     from tcip_mcp.pipelines.resolution import bucket_scope
 
     scratch = tmp_path / name
-    _write_raw_stamp(scratch, {"checkpoint_sha256": "f" * 64, "subject": "s", "attribute": None})
+    _write_raw_stamp(scratch, {"checkpoint_sha256": "f" * 64, "scope": {"subject": "s"}})
     _damage_stamp_bytes(scratch)
     with pytest.raises(StoreError) as excinfo:
         bucket_scope(scratch)
@@ -1086,7 +1093,7 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"image_filenames": {"a": "a.png"}, "subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "validated": True,
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)

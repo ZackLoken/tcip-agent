@@ -21,7 +21,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store as ts
-from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_web.app import app
 
 from tests.test_selection_binding import DATES, OTHER_SUBJECT, SUBJECT, _draw, \
@@ -36,14 +35,22 @@ def client() -> TestClient:
 def _bespoke_config(images_dir: Path, labels_dir: Path, *, subject: str = SUBJECT) -> dict:
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 64},
+                         "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": subject},
+                 "scope": {"subject": subject}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
+
+
+def _bound_config(root: Path, selection_dir: Path) -> dict:
+    """A bespoke config bound to the selection at ``selection_dir``, stating no scope of its own."""
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["split"] = {"selection_dir": str(selection_dir)}
+    del config["data"]["scope"]
+    return config
 
 
 # -- selection_compatibility ---------------------------------------------------
@@ -58,8 +65,7 @@ def _selection_with_an_empty_val_side(root: Path, out: Path):
     drawn = _draw(root, out)
     return write_selection(out, Selection(
         samples=tuple(s for s in drawn.samples if s.side != "val"),
-        subject=drawn.subject, attribute=drawn.attribute, id_map=drawn.id_map,
-        seed=drawn.seed, group_by=drawn.group_by,
+        scope=drawn.scope, seed=drawn.seed, group_by=drawn.group_by,
     ))
 
 
@@ -69,10 +75,8 @@ def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     selection = _selection_with_an_empty_val_side(root, out)
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    config["data"]["split"] = {"selection_dir": str(out)}
 
-    issues = selection_compatibility(config, selection, str(out))
+    issues = selection_compatibility(_bound_config(root, out), selection, str(out))
 
     assert any("empty side" in i for i in issues)
 
@@ -85,10 +89,8 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(tmp_path: 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _selection_with_an_empty_val_side(root, out)
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    config["data"]["split"] = {"selection_dir": str(out)}
 
-    result = preflight_config(config)
+    result = preflight_config(_bound_config(root, out))
 
     assert any("empty side" in i for i in result["issues"])
 
@@ -103,10 +105,8 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     selection = _draw(root, out)
-    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    config["data"]["split"] = {"selection_dir": str(out)}
 
-    assert selection_compatibility(config, selection, str(out)) == []
+    assert selection_compatibility(_bound_config(root, out), selection, str(out)) == []
 
 
 def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
@@ -257,9 +257,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
     elsewhere = tmp_path / "elsewhere"
     _draw(root, elsewhere, seed=2)
-    bound_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    bound_cfg["data"]["split"] = {"selection_dir": str(elsewhere)}
-    launched = launch_training(bound_cfg, str(tmp_path / "out_bound"))
+    launched = launch_training(_bound_config(root, elsewhere), str(tmp_path / "out_bound"))
     assert "error" not in launched, launched
 
     other_subject_dir = tmp_path / "other_subject"
@@ -290,12 +288,12 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     assert elsewhere_entry["enabled"] is True
     assert elsewhere_entry["train"] > 0 and elsewhere_entry["val"] > 0
 
-    # A partition drawn for another subject is a real offer: choosing it empties the recorded
-    # scope, since a bound run reads subject, attribute and class map off the selection.
+    # A partition drawn for another subject is a real offer: choosing it drops the recorded
+    # scope, since a bound run reads its scope off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
     assert other_subject_entry["enabled"] is True
     chosen = candidate_config_with_selection(picked_cfg, str(other_subject_dir))
-    assert ClassScope.recorded_in(chosen["data"]) == ClassScope()
+    assert "scope" not in chosen["data"]
 
     broken_entry = by_dir[str(broken_dir)]
     assert broken_entry["enabled"] is False
@@ -679,7 +677,8 @@ def test_relaunch_route_leaves_the_snapshots_data_unchanged_when_no_partition_is
 
     monkeypatch.setattr(training_tools_module, "launch_training", fake_launch_training)
 
-    drawn_data = {"images_dir": "/data/images", "labels_dir": "/data/labels", "subject": SUBJECT}
+    drawn_data = {"images_dir": "/data/images", "labels_dir": "/data/labels",
+                  "scope": {"subject": SUBJECT}}
     create_experiment("exp-drawn", {
         "model_source": {"builder": "m:f", "task": "detection"}, "data": dict(drawn_data),
     })
@@ -687,8 +686,8 @@ def test_relaunch_route_leaves_the_snapshots_data_unchanged_when_no_partition_is
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == drawn_data
 
-    bound_data = {"images_dir": "/data/images", "labels_dir": "/data/labels", "subject": SUBJECT,
-                 "split": {"selection_dir": "/some/manifest"}}
+    bound_data = {"images_dir": "/data/images", "labels_dir": "/data/labels",
+                  "scope": {"subject": SUBJECT}, "split": {"selection_dir": "/some/manifest"}}
     create_experiment("exp-bound", {
         "model_source": {"builder": "m:f", "task": "detection"}, "data": dict(bound_data),
     })
@@ -725,7 +724,7 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
     _draw(root, chosen)
 
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
-    cfg["data"]["subject"] = SUBJECT
+    cfg["data"]["scope"] = {"subject": SUBJECT}
     create_experiment("exp-choose-partition", cfg)
 
     resp = client.post("/api/training/runs", json={
@@ -735,7 +734,7 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
 
     snapshot = read_member(config_key("exp-choose-partition"))
     assert snapshot["data"]["split"] == {"selection_dir": str(chosen)}
-    assert ClassScope.recorded_in(snapshot["data"]) == ClassScope()
+    assert "scope" not in snapshot["data"]
 
 
 def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_directory(

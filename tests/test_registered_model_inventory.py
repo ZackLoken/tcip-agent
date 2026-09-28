@@ -35,7 +35,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         run_dir.mkdir(parents=True)
         ckpt = run_dir / "model_best.pt"
         ckpt.write_bytes(content)
-        reg.register_model(name, str(ckpt), {"data": {"subject": "bud"}},
+        reg.register_model(name, str(ckpt), {"data": {"scope": {"subject": "bud"}}},
                            metrics={"val_map50": 0.42}, metrics_source="caller")
 
     models_dir = root / ".tcip" / "models"

@@ -115,7 +115,7 @@ _DEFAULT_COUNT_BIAS_TOLERANCE_FRAC = 0.01
 # call the caller makes explicitly (the ``criterion`` argument, required, no default), never a
 # platform prescription. Register a new criterion here (a function of ``(pred, gt)`` returning
 # ``float | None``) rather than widening either function's own logic to special-case a new statistic.
-ORDINAL_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
+ORDINAL_CRITERIA: dict[str, Callable[[Any, Any, int], float | None]] = {
     "quadratic_weighted_kappa": quadratic_weighted_kappa,
 }
 REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
@@ -1512,6 +1512,7 @@ def resolve_ordinal_operating_point(
     trait_name: str,
     *,
     criterion: str,
+    num_ranks: int,
     calibration_items: list[dict] | None = None,
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
@@ -1521,7 +1522,8 @@ def resolve_ordinal_operating_point(
     """Ordinal-mode calibration gate for a trait's rank prediction.
 
     ``criterion`` is required (see ``ORDINAL_CRITERIA`` for the registered toolkit); a name no
-    registered ordinal criterion carries raises ``ValueError`` before any other work.
+    registered ordinal criterion carries raises ``ValueError`` before any other work. It is scored
+    over ``num_ranks``, the producing run's own rank count.
 
     Each item in ``calibration_items``/``holdout_items`` is one image's rank prediction:
     ``{"image_id": str, "true_rank": int, "predicted_rank": int}``. Returns the shape
@@ -1542,7 +1544,8 @@ def resolve_ordinal_operating_point(
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
     return _resolve_scalar_operating_point(
-        trait_name, criterion=criterion, criteria=ORDINAL_CRITERIA,
+        trait_name, criterion=criterion,
+        criteria={criterion: lambda pred, gt: ORDINAL_CRITERIA[criterion](pred, gt, num_ranks)},
         true_key="true_rank", pred_key="predicted_rank", floor_field="ordinal_agreement_floor",
         default_floor=_DEFAULT_ORDINAL_AGREEMENT_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,

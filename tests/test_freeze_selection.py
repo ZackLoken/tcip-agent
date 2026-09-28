@@ -16,7 +16,6 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.experiments import create_experiment
-from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
 from tcip_mcp.pipelines.data.selection import read_selection
 from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
@@ -31,24 +30,17 @@ def _real_drawn_experiment(
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset (through auto_train_val,
     the identical function a training run's own draw calls) and persists it as ``experiment_id``'s
-    ``split.json`` (through persist_run_partition, the one writer), plus a durable config the
-    real subprocess worker would have stamped ``subject``/``labels_dir``/``images_dir``/``id_map``
-    onto. Returns the resolved ``data`` section used.
+    ``split.json`` (through persist_run_partition, the one writer), plus the durable config that
+    same draw records its admitted ``scope`` onto. Returns the resolved ``data`` section used.
     """
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     data_cfg: dict = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                      "subject": subject, "attribute": attribute, "auto_val": auto_val}
-    # data_cfg keeps the caller's raw attribute; the registry lookup needs "no attribute" as None.
-    _reg, id_map = resolve_registry_id_map(str(labels_dir), subject, attribute or None)
-
-    config = {
-        "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {**data_cfg, "id_map": id_map},
-    }
-    create_experiment(experiment_id, config)
+                      "scope": {"subject": subject, "attribute": attribute}, "auto_val": auto_val}
 
     _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
+    create_experiment(experiment_id, {
+        "model_source": {"builder": BUILDER, "task": "detection"}, "data": data_cfg})
     persist_run_partition(experiment_id, data_cfg,
                           dataset_id=None, dataset_fingerprint=None, partition=partition)
     return data_cfg
@@ -136,7 +128,7 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
     assert "error" not in result, result
 
     frozen = read_selection(result["selection_dir"])
-    assert frozen.attribute is None
+    assert frozen.scope.attribute is None
 
     second_cfg: dict[str, Any] = {
         "model_source": {"builder": BUILDER, "task": "detection"},
@@ -173,7 +165,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
     assert {s.member for s in train} == {s.member for s in train[:1]}, (
         "both dates must contribute the same member name for this to bite")
 
-    data_cfg = {"subject": SUBJECT, "id_map": {SUBJECT: 0},
+    data_cfg = {"scope": {"subject": SUBJECT, "id_map": {SUBJECT: 0}},
                 "split": {"resolved_group_by": "stem", "resolved_seed": 0}}
     create_experiment("exp-two-scope", {"data": data_cfg})
     persist_run_partition("exp-two-scope", data_cfg,
@@ -201,16 +193,14 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT,
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+               "scope": {"subject": SUBJECT},
                "split": {"group_key_map":
                         {member_identity(DATES[0], s): "g1" for s in ("a", "b", "c")}
                         | {member_identity(DATES[0], s): "g2" for s in ("d", "e", "f")}}}
-    _reg, id_map = resolve_registry_id_map(str(labels_dir), SUBJECT, None)
-    create_experiment("exp-explicit-map", {
-        "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {**data_cfg, "id_map": id_map},
-    })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    create_experiment("exp-explicit-map", {
+        "model_source": {"builder": BUILDER, "task": "detection"}, "data": data_cfg})
     persist_run_partition("exp-explicit-map", data_cfg, partition=partition)
 
     result = freeze_selection("exp-explicit-map")
@@ -244,14 +234,10 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
                         seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in drawn, drawn
 
-    labels_dir = root / "annotations" / DATES[0]
     data_cfg = {"split": {"selection_dir": str(selection_dir), **split_extra}}
-    _reg, id_map = resolve_registry_id_map(str(labels_dir), SUBJECT, None)
-    create_experiment(experiment_id, {
-        "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {**data_cfg, "subject": SUBJECT, "id_map": id_map},
-    })
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    create_experiment(experiment_id, {
+        "model_source": {"builder": BUILDER, "task": "detection"}, "data": data_cfg})
     persist_run_partition(experiment_id, data_cfg, partition=partition)
 
 
@@ -374,16 +360,18 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
 
 
 def test_freeze_selection_refuses_a_config_missing_id_map(tmp_path: Path):
+    """A durable config edited past the producer to drop its scope's map composes a selection the
+    selection writer refuses, and the door answers with that refusal."""
+    import tcip_store as ts
+
+    from tcip_mcp.experiments import config_key
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT}
-    create_experiment("exp-no-id-map", {
-        "model_source": {"builder": BUILDER, "task": "detection"}, "data": data_cfg,
-    })
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    persist_run_partition("exp-no-id-map", data_cfg, partition=partition)
+    _real_drawn_experiment(root, "exp-no-id-map")
+    config = ts.read(config_key("exp-no-id-map"))
+    config["data"]["scope"]["id_map"] = None
+    ts.replace(config_key("exp-no-id-map"), config)
 
     result = freeze_selection("exp-no-id-map")
     assert "error" in result and "id_map" in result["error"]

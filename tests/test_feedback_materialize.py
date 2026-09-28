@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset,
     partition_review_verdicts,
@@ -65,7 +66,7 @@ def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
         "imgB.png": {"img_status": "completed", "detections": [
             {"action": "rejected", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
-    r = materialize_dataset(state, str(src), str(out))
+    r = materialize_dataset(state, str(src), str(out), scope=ClassScope())
     assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (1, 1, 1)
 
     from tcip_annotation import json_io
@@ -87,7 +88,7 @@ def test_materialize_skips_missing_source_images(tmp_path):
     src.mkdir()  # empty
     state = {"image": {"ghost.png": {"img_status": "completed", "detections": [
         {"action": "accepted", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}}
-    r = materialize_dataset(state, str(src), str(tmp_path / "out"))
+    r = materialize_dataset(state, str(src), str(tmp_path / "out"), scope=ClassScope())
     assert r["missing_images"] == 1 and r["positive"] == 0
     assert not (tmp_path / "out" / "images" / "ghost.png").exists()
 
@@ -123,7 +124,7 @@ def test_hard_negatives_survive_into_training(tmp_path):
             {"action": "rejected", "class_name": "bud", "iscrowd": False, "reviewed_by": "", "conf": None, "class_id": None, "producer_identity": None, "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": None,
              "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
-    materialize_dataset(state, str(src), str(out))
+    materialize_dataset(state, str(src), str(out), scope=ClassScope())
 
     labels_out = out / "annotations"
     assert confirmed_negative_names(labels_out, subject="bud", date=None) == {"imgB.png"}

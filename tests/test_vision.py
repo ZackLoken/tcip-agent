@@ -380,7 +380,7 @@ class TestVisualizePredictions:
 
         img = str(viz_dataset / "images" / "img_001.jpg")
         preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"id_map": {"bud": 0}})
+        _seed_sidecar(preds_dir, {"scope": {"subject": "bud", "id_map": {"bud": 0}}})
         _damage_sidecar(preds_dir)
 
         result = visualize("predictions", img)
@@ -427,7 +427,7 @@ class TestVisualizeComparison:
 
         img = str(viz_dataset / "images" / "img_001.jpg")
         preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"id_map": {"bud": 0}})
+        _seed_sidecar(preds_dir, {"scope": {"subject": "bud", "id_map": {"bud": 0}}})
         _damage_sidecar(preds_dir)
 
         result = visualize("comparison", img)

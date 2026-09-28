@@ -63,11 +63,10 @@ def redraw_calibration_holdout(
             audit log alongside the old and new split membership.
         selection_dir: Restrict the redraw's universe to a selection's ``calibration`` samples
             under ``labels_dir`` (``pipelines.data.selection.read_selection``), the restriction
-            ``run_inference`` applies. Requires ``labels_dir``. The scope is the selection's own; a
-            selection over per-image label documents that records no subject refuses by name. The
-            identity is ``dataset_hash(labels_dir, stems=universe)``.
+            ``run_inference`` applies. Requires ``labels_dir``. The scope is the selection's own.
+            The identity is ``dataset_hash(labels_dir, stems=universe)``.
         subject: The object class this redraw's foreground is counted for, for the whole-directory
-            universe. A selection states its own and overrides it.
+            universe; refused beside ``selection_dir``, whose selection records its own.
         attribute: The attribute the foreground count is scoped to, the same way.
     """
     if not reason or not reason.strip():
@@ -78,6 +77,10 @@ def redraw_calibration_holdout(
         if not labels_dir:
             return {"error": "selection_dir requires labels_dir: the universe is drawn "
                              "from the selection's held-out samples under that directory."}
+        if subject is not None or attribute is not None:
+            return {"error": "subject and attribute state a whole-directory universe's class "
+                             "space; a selection records its own, so a statement beside "
+                             "selection_dir would be a second one. Drop subject and attribute."}
         from tcip_mcp.pipelines.data.splits import selection_policy_conflict
 
         policy_conflict = selection_policy_conflict(selection_dir, group_by, group_key_map)
@@ -96,25 +99,15 @@ def redraw_calibration_holdout(
 
     selection_stems: list[str] | None = None
     if selection_dir is not None:
-        from tcip_mcp.pipelines.data.selection import read_selection, unscoped_document_issue
+        from tcip_mcp.pipelines.data.selection import read_selection
         from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
-        from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
-
         assert labels_dir is not None, "the selection_dir refusal above requires it"
-        selection = read_selection(selection_dir)
-        # The scope is the selection's own, read off it: a subject scopes a document selection
-        # and nothing else, so a mask or table selection redraws without one.
-        unscoped = unscoped_document_issue(selection, selection_dir)
-        if unscoped:
-            return {"error": unscoped}
         try:
+            selection = read_selection(selection_dir)
             (selection_stems, group_by, group_key_map, _excluded, selection_counts,
-             universe_samples) = selection_calibration_universe(selection, labels_dir)
-            # The one re-admission over recorded samples, run before a lock is drawn over them:
-            # a member the calibration that reads this lock would refuse is not lockable here.
-            refuse_inadmissible_samples(
-                [universe_samples[stem] for stem in selection_stems], selection.scope)
+             _universe_samples) = selection_calibration_universe(
+                selection, labels_dir, selection.scope)
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
 
@@ -142,15 +135,16 @@ def redraw_calibration_holdout(
         # independent glob (images_dir omitted degrades to the labels-only scan).
         from tcip_mcp.dataset_layout import label_filename
 
+        from tcip_mcp.pipelines.data.selection import ClassScope
+
         stems, _ = label_image_stems(labels_dir, images_dir)
         try:
+            stated = ClassScope(subject=subject, attribute=attribute)
             # The one caller here holding a name rather than a record composes its path, here.
             annotation_counts = {
-                s: count_label_lines(Path(labels_dir) / label_filename(s),
-                                     subject=subject, attribute=attribute)
-                for s in stems
+                s: count_label_lines(Path(labels_dir) / label_filename(s), stated) for s in stems
             }
-        except UnreadableLabelDocument as exc:
+        except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
     else:
         # No labels to re-scan: the library takes the existing lock's own members as the universe.
@@ -201,7 +195,6 @@ _ORDINAL_REGRESSION_TASKS = {
 @mcp.tool()
 def calibrate_scalar_operating_point(
     trait_name: str,
-    task: str,
     checkpoint_path: str,
     images_dir: str,
     csv_path: str,
@@ -236,10 +229,11 @@ def calibrate_scalar_operating_point(
     Record and stamp carry ``checkpoint_sha256`` from ``resolve_model_identity`` over the
     checkpoint this door ran.
 
+    The checkpoint's own task, ordinal or regression, dispatches which criterion toolkit, item
+    shape and sidecar file apply; any other task refuses.
+
     Args:
         trait_name: The registered trait whose rank/value prediction is being calibrated.
-        task: ``"ordinal"`` or ``"regression"``, dispatches which criterion toolkit, item shape and
-            sidecar file apply.
         checkpoint_path: The trained checkpoint to calibrate. Must be registered under this
             process's platform state root (``register_model``, explicit mode for a foreign or
             bespoke checkpoint) or this door refuses before loading it.
@@ -260,16 +254,13 @@ def calibrate_scalar_operating_point(
         policy, same semantics as ``run_inference``'s own calibration arguments; only the first
         call for this CSV's identity draws the split.
     """
-    if task not in _ORDINAL_REGRESSION_TASKS:
-        return {"error": f"task must be one of {sorted(_ORDINAL_REGRESSION_TASKS)}, got {task!r}"}
-
     from tcip_mcp.tools.phenology_tools import _stated_root_disagreement
 
     disagreement = _stated_root_disagreement(dataset_root, {"images_dir": images_dir})
     if disagreement:
         return {"error": disagreement}
 
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.splits import cal_holdout_scope_root, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
@@ -284,10 +275,17 @@ def calibrate_scalar_operating_point(
     except TraitUnknownError as e:
         return {"error": str(e)}
 
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
+
     try:
         checkpoint = load_registered_checkpoint(checkpoint_path)
-    except UnregisteredCheckpoint as exc:
+        task = checkpoint.task
+        dims = recorded_model_dims(checkpoint.payload.get("config") or {})
+    except ValueError as exc:
         return {"error": str(exc)}
+    if task not in _ORDINAL_REGRESSION_TASKS:
+        return {"error": f"{checkpoint_path} is a {task!r} checkpoint; this door calibrates "
+                         f"{sorted(_ORDINAL_REGRESSION_TASKS)} predictions."}
 
     shape = _ORDINAL_REGRESSION_TASKS[task]
     is_ordinal = task == "ordinal"
@@ -341,6 +339,9 @@ def calibrate_scalar_operating_point(
     resolver_inputs: dict[str, Any] = {
         "criterion": criterion, "calibration_items": cal_items, "holdout_items": hold_items,
         "calibration_labels_dir": str(csv_path)}
+    if is_ordinal:
+        # The producing run's own rank count, the one its head was built at.
+        resolver_inputs["num_ranks"] = dims["num_ranks"]
     result = resolver(trait_name, experiment_id=experiment_id, **resolver_inputs)
 
     from tcip_mcp.project_paths import resolve_output_path
@@ -401,8 +402,6 @@ def calibrate_count_operating_point(
     dataset_root: str,
     pred_dir: str,
     *,
-    subject: str | None = None,
-    attribute: str | None = None,
     experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
@@ -416,9 +415,9 @@ def calibrate_count_operating_point(
 
     Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point`: one
     low-threshold pass, sliced and merged as ``pred_dir``'s stamp records its own pass was, over a
-    disjoint, locked calibration/holdout split of ``labels_dir``, resolved into the count-unbiased
-    conf and its held-out count-bias gate. A validated stamp is
-    written only when the earned conf equals the conf ``pred_dir``'s own stamp already records as
+    disjoint, locked calibration/holdout split of ``labels_dir`` read under the class space the
+    checkpoint records, resolved into the count-unbiased conf and its held-out count-bias gate. A
+    validated stamp is written only when the earned conf equals the conf ``pred_dir``'s own stamp already records as
     its production conf (``operating_point.conf.value``, read before the pass runs). Any other
     earned conf refuses by name, stating both values, and points at ``run_inference``, whose
     calibrated path re-predicts a bucket at the earned conf; this is decided before
@@ -453,9 +452,6 @@ def calibrate_count_operating_point(
             beneath; the labels' dataset root, or ``labels_dir`` itself when the layout places it
             under none.
         pred_dir: The already-published prediction bucket this claim covers.
-        subject / attribute: The object class / assessed attribute the labeled reference is scoped
-        to; when ``pred_dir``'s stamp already records a scope, an omitted pair takes the bucket's
-        own recorded scope and a stated pair must equal it, refusing by name otherwise.
         experiment_id: The checkpoint's own training run's record id (``tcip_mcp.experiments``), if
             known, gates train-disjointness; ``None`` (a foreign/unregistered checkpoint) skips
             that check.
@@ -475,12 +471,11 @@ def calibrate_count_operating_point(
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
     from tcip_mcp.pipelines.resolution import (
-        bucket_relative_key, bucket_scope, claim_payload, fold_tile_validation, open_validation,
+        bucket_relative_key, claim_payload, fold_tile_validation, open_validation,
         read_operating_point_sidecar, seal_validation, stamp_names_raster, update_sidecar,
         verify_stamp_binding,
     )
     from tcip_mcp.project_paths import platform_state_root
-    from tcip_store import StoreError
     from tcip_store.errors import SchemaVersionRefused, StoreBusy
 
     root = Path(dataset_root).resolve()
@@ -495,22 +490,6 @@ def calibrate_count_operating_point(
         return {"error": f"{bucket} carries no operating_point.json stamp; "
                          "calibrate_count_operating_point earns a claim over an already-"
                          "published inference bucket, never an empty one."}
-    try:
-        existing_scope = bucket_scope(bucket)
-    except StoreError as exc:
-        return {"error": str(exc)}
-    if subject is None and attribute is None:
-        if existing_scope is not None:
-            subject, attribute = existing_scope.subject, existing_scope.attribute
-    elif existing_scope is not None and (existing_scope.subject, existing_scope.attribute) != (
-            subject, attribute):
-        return {"error": (
-            f"{bucket}'s stamp records scope (subject={existing_scope.subject!r}, "
-            f"attribute={existing_scope.attribute!r}), not the (subject={subject!r}, "
-            f"attribute={attribute!r}) this calibration states: evidence earned under one scope "
-            "is never merged into a bucket stamped for another. State the bucket's own scope, or "
-            "calibrate a bucket that matches the scope you intend."
-        )}
     if stamp_names_raster(existing):
         return {"error": f"{bucket} is a whole-raster bucket (its stamp records raster_path): "
                          "the count-unbiased calibration reasons over per-image predictions, "
@@ -556,8 +535,7 @@ def calibrate_count_operating_point(
         resolved = resolve_count_operating_point(
             checkpoint_path=checkpoint_path, trait=trait, labels_dir=labels_dir,
             images_dir=images_dir, dataset_root=dataset_root,
-            project_root=str(platform_state_root()), subject=subject, attribute=attribute,
-            experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
+            project_root=str(platform_state_root()), experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
             selection_dir=selection_dir, holdout_ratio=holdout_ratio, seed=seed, device=device,
             regime=regime,
         )
