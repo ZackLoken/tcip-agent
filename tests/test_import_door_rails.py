@@ -476,7 +476,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
-    """initialize_project, register_dataset, a confirmed operationalization, an experiment's members,
+    """initialize_project, register_dataset, a confirmed trait revision, an experiment's members,
     an HPO sweep's members and a project-relative splits manifest, all through their own real
     producers; archived, imported into a fresh destination, and read back through the store
     under the default backend with no ``tcip adopt-store`` run.
@@ -486,14 +486,14 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import config_key, create_experiment, log_metrics, metrics_key, status_key
-    from tcip_mcp.operationalization import PER_IMAGE_COUNT, resolve_trait_and_record
     from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.traits import read_trait
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path, initialize_project, read_datasets, register_dataset,
     )
 
-    from tests._operationalization_fixtures import COUNT_TRAIT, seed_confirmed_count
+    from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
 
     root = tmp_path / "source"
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
@@ -501,7 +501,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     assert "error" not in initialize_project(str(root), site="north orchard")
     assert "error" not in register_dataset(str(root), crop="currant", project_root=str(root))
     confirmed = seed_confirmed_count(root)
-    assert confirmed["confirmed_by"]
+    assert confirmed.confirmed
 
     create_experiment("exp1", {"trait": COUNT_TRAIT})
     log_metrics("exp1", 1, {"loss": 0.5})
@@ -557,10 +557,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         assert entries[0]["path"] == "."
         assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
 
-        _, record, _ = resolve_trait_and_record(COUNT_TRAIT, PER_IMAGE_COUNT, project_root=dest)
-        assert record.value["confirmed_by"] == confirmed["confirmed_by"]
-        assert record.value["confirmed_at"] == confirmed["confirmed_at"]
-        assert record.value["confirmed_fields"] == confirmed["confirmed_fields"]
+        assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
         assert ts.read(config_key("exp1", root=dest))["trait"] == COUNT_TRAIT
         assert ts.read(status_key("exp1", root=dest))["metrics_logged"] is True

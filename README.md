@@ -156,9 +156,8 @@ positive state, such as a phenology milestone, instead calibrates through the
 
 | Tool | Purpose |
 |------|---------|
-| `author_trait_spec(project_root, trait, delivers, rationale)` | Registers a trait that does not yet exist, recording the agent's account of why, in the breeder's own terms; the breeder confirms it from the web GUI before it can back a delivery. |
-| `state_trait_operationalization(project_root, trait, delivery_kind, statement, mechanism, measured_subject, delivered_phenotypes)` | Records what the trait's delivered number means, in the breeder's own terms, for one delivery kind. Writing this does not itself clear the delivery gate; the breeder confirms it in the Results tab, and only that confirmation lets a delivery door proceed. |
-| `deliver_per_image_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the confirmed operationalization and the validated operating point. |
+| `propose_trait(project_root, entry, rationale)` | Proposes a trait's complete entry, its spec fields and what its delivered number means per delivery kind, in the breeder's own terms, as a new unconfirmed revision. The breeder confirms a revision in the Setup tab; only a confirmed revision lets a delivery door proceed, and the delivery event names it. |
+| `deliver_per_image_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the trait's confirmed revision and the validated operating point. |
 | `run_inference` | Runs a checkpoint and persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
 
 Read the `delivery` skill before choosing between `deliver_per_image_counts` and `run_inference`

@@ -585,7 +585,7 @@ def test_an_untouched_validated_bucket_reconciles_across_repeated_deliveries(tmp
         assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
 
 
-def test_a_dataset_moved_to_a_new_absolute_path_still_verifies(tmp_path):
+def test_a_dataset_moved_to_a_new_absolute_path_still_verifies(tmp_path, monkeypatch):
     """Covered buckets are keyed inside the dataset, so moving the dataset whole changes nothing.
 
     Bound to the file backend: the sqlite backend keeps a connection to the pre-move root open
@@ -597,6 +597,8 @@ def test_a_dataset_moved_to_a_new_absolute_path_still_verifies(tmp_path):
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
+    # The module's seeded trait put the pinned root in the database, so this case pins its own.
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "file_backend_state"))
     original = tmp_path / "ds"
     pred_dir = _bucket(original)
     write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=original)

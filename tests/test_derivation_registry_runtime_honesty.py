@@ -9,8 +9,6 @@ for a label is the one that produced the number the label was stamped on.
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import importlib
 
 import pytest
@@ -18,33 +16,14 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS  # noqa: E402
+from tests._dense_op_fixtures import gt_only  # noqa: E402
+from tests._trait_fixtures import confirm_bare  # noqa: E402
 
 
 def _resolve(label: str):
     target = str(DERIVATION_IMPLEMENTATIONS[label])
     module, _, attr = target.rpartition(".")
     return getattr(importlib.import_module(module), attr)
-
-
-def _write_bare_trait(name: str, **extra) -> None:
-    """A minimal trait spec in this test's pinned platform state root, written where the platform's own
-    resolver reads specs from rather than at a location this fixture states on its own."""
-    import tcip_store as ts
-
-    from tcip_mcp.project_paths import resolve_state
-    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH, TRAIT_SPEC_SCHEMA_VERSION, trait_spec_key
-
-    specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
-    ts.replace(
-        trait_spec_key(specs_dir, name),
-        complete_spec_record({"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
-         **extra}),
-        expect=ts.Version.ABSENT,
-    )
-
-
-def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    return [{"gt": [{"bbox": list(b), "category_id": 0, "iscrowd": 0} for b in boxes]}]
 
 
 def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered():
@@ -76,11 +55,11 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
     label resolves to, run on the same GT, has to return that same number. A registry entry that
     names a different-but-importable derivation passes every static check while pointing an
     auditor at code that never produced the value."""
-    _write_bare_trait("leaf", localization="iou_match")
+    confirm_bare("leaf", localization="iou_match")
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     boxes = [(0, 0, 60, 60), (500, 0, 60, 60)]
-    result = resolve_match_criterion("leaf", _per_image(boxes), class_id=0)
+    result = resolve_match_criterion("leaf", gt_only(boxes), class_id=0)
     assert result["kind"] == "iou_match"
 
     label = result["derived_from"]
@@ -111,11 +90,11 @@ def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped
     fraction scaled by the GT's own average characteristic size: both sides of the comparison run
     the real implementations, so the label is checked against the computation rather than against
     a number copied out of one of them."""
-    _write_bare_trait("leaf", localization="center_match")
+    confirm_bare("leaf", localization="center_match")
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size, resolve_match_criterion
 
     boxes = [(0, 0, 20, 20), (40, 0, 20, 20), (80, 0, 20, 20)]
-    per_image = _per_image(boxes)
+    per_image = gt_only(boxes)
     result = resolve_match_criterion("leaf", per_image, class_id=0)
     assert result["kind"] == "center_match"
 

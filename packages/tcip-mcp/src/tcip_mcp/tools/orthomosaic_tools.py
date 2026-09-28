@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PER_PLANT_VALUE_KEY = "count"
-"""The quantity every row of this delivery holds, named once for the aggregation and the check."""
+"""The quantity every row of this delivery holds, named once for the aggregation and its rows."""
 
 
 def orthomosaic_plant_counts(
@@ -36,9 +36,9 @@ def orthomosaic_plant_counts(
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
 
-    Raises rather than returns an error dict: ``operationalization.OperationalizationRefused`` for
-    an unrecorded, unconfirmed, or since-withdrawn ``per_plant_count_aggregate`` meaning (carrying
-    the check, no counts); ``pipelines.resolution.DeliveryRefused`` for the writer's own gate
+    Raises rather than returns an error dict: ``operationalization.OperationalizationRefused``
+    (from ``export_aggregated_csv``, no counts) when no confirmed trait revision states a
+    ``per_plant_count_aggregate`` meaning binding this delivery; ``pipelines.resolution.DeliveryRefused`` for the writer's own gate
     refusal (carrying the gate, with this call's own counts-bearing facts attached);
     ``pipelines.resolution.CountDeliveryRefused`` for every other refusal this door raises (a
     missing bucket or raster, a conflicting regime, an unregistered or rewritten plant registry, an
@@ -81,9 +81,6 @@ def orthomosaic_plant_counts(
     bucket's own ``operating_point.json``) through the ``export_aggregated_csv`` gate. A tiled
     bucket's ``tile_size`` gates the same way. ``acknowledgment`` is the breeder's own act of
     shipping this delivery unvalidated.
-
-    The per-plant-count-aggregate meaning precondition runs first, before the raster identity is
-    resolved or a single prediction is read.
 
     The producer identity this returns is the tail ``export_aggregated_csv`` returns beside the CSV
     path. ``validation_record`` names the record behind a validated count, and is empty otherwise.
@@ -160,29 +157,7 @@ def orthomosaic_plant_counts(
             "file under a new registry name and deliver under that name")
     plant_csv_paths = [e["path"] for e in registry_entries]
 
-    from tcip_mcp.operationalization import (
-        PER_PLANT_COUNT_AGGREGATE,
-        OperationalizationRefused,
-        check_operationalization,
-        resolve_trait_and_record,
-        resolve_trait_for_phenotype,
-    )
-    from tcip_mcp.traits import TraitUnknownError
-
-    # First refusal in this body: how a number was attributed says nothing until it has a meaning.
-    # project_root (the caller's own, unresolved) is what every meaning-record read resolves against.
-    try:
-        trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=project_root)
-        spec, record, _specs_dir = resolve_trait_and_record(
-            trait, PER_PLANT_COUNT_AGGREGATE, project_root=project_root)
-    except (TraitUnknownError, ValueError) as exc:
-        raise CountDeliveryRefused(str(exc)) from exc
-    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
-    stated = check_operationalization(
-        spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=delivered_phenotype,
-        value_keys=[_PER_PLANT_VALUE_KEY], registry=None)
-    if not stated.ok:
-        raise OperationalizationRefused(stated)
+    from tcip_mcp.operationalization import OperationalizationRefused
 
     pred_files = prediction_documents(pred_dir)
     if not pred_files:
@@ -495,7 +470,7 @@ def orthomosaic_plant_counts(
             exc.facts["tile_size_validated"] = exc.gate.stamp["tile_size"]
         raise
     except OperationalizationRefused:
-        # The writer's own raise already carries the failed check and no counts; nothing to add.
+        # The writer's own raise already names the refusal and carries no counts; nothing to add.
         raise
     except ValueError as exc:
         # aggregation.py's own refusal already names what triggered it (a plant, a phenotype, a
@@ -554,7 +529,7 @@ def deliver_orthomosaic_plant_counts(
             canopy_subject=canopy_subject, project_root=None, acknowledgment=None,
         )
     except OperationalizationRefused as exc:
-        return {"error": exc.check.message}
+        return {"error": str(exc)}
     except DeliveryRefused as exc:
         reason = (
             f"{exc}. Calibrate the operating point (or the tile geometry) that produced this "

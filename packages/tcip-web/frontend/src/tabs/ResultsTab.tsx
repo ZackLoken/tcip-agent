@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -11,34 +11,28 @@ import {
 } from "recharts";
 
 import { api } from "@/api/client";
-import { committedOf, StructuredRefusalError } from "@/api/http";
+import { committedOf } from "@/api/http";
 import {
   deliveryGateRefusalOf,
   operationalizationRefusalOf,
   resultsApi,
-  traitSpecAuthoringRefusalOf,
   type DeliveryEventRecord,
   type DeliveryGateRefusal,
   type ExportCountCsvHeaders,
-  type OperationalizationRecord,
   type OperationalizationRefusal,
   type OnsetRow,
   type PerPlantRow,
-  type PlantMappingSummary,
-  type TraitSpecStatementRecord,
+  type ServedTraitRecord,
 } from "@/api/inference";
 import type {
   ExportCountCsvPayload,
   ExportCsvPayload,
-  MatchTolerance,
   PhenologyPayload,
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
-import { flatStatementFields, StatementPanel } from "@/components/StatementPanel";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { UNSET_GLYPH } from "@/lib/glyphs";
-import { fieldValueText, STATEMENT_FIELD_LABELS } from "@/lib/statementFields";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
@@ -46,264 +40,22 @@ interface DateRow {
   [plantId: string]: number | string | null;
 }
 
-/** One operationalization record, addressed by the pair its store is keyed on. */
-function recordKey(record: { trait: string; delivery_kind: string }): string {
-  return `${record.trait}::${record.delivery_kind}`;
-}
-
-// resolve_nn_tolerance_m's own three sources, in the breeder's words; a source string this
-// map does not know renders as its own raw string.
-const TOLERANCE_SOURCE_PHRASES: Record<string, string> = {
-  grid_pitch: "derived from the plot's grid pitch",
-  stated: "the stated value",
-  stated_capped: "the stated value, capped to the grid pitch",
-};
-
-function toleranceSourceText(source: string): string {
-  return TOLERANCE_SOURCE_PHRASES[source] ?? source;
-}
-
-/**
- * A trait-spec authoring statement's field body: `statement_fields` is not a flat field itself,
- * it is a nested snapshot of the authored `TraitSpec` values the statement covers, so it expands
- * into its own labeled rows rather than rendering as one opaque blob. The nested keys are read off
- * whatever the server actually sent, in the order it sent them, rather than a frontend-held list of
- * authored field names that could drift from `traits._AUTHORED_SPEC_FIELDS`.
- */
-function traitSpecFieldsBody(record: TraitSpecStatementRecord, statementFields: string[]) {
+/** A note whose remedy is on the Setup tab, with the one action that opens it. */
+function SetupTabNote({ children }: { children: ReactNode }) {
   return (
-    <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
-      {statementFields.flatMap((field) => {
-        if (field === "statement_fields") {
-          const authored = record.statement_fields ?? {};
-          return Object.entries(authored).map(([authoredField, value]) => (
-            <Fragment key={authoredField}>
-              <dt className="text-tcip-muted">
-                {STATEMENT_FIELD_LABELS[authoredField] ?? authoredField}
-              </dt>
-              <dd>{fieldValueText(value)}</dd>
-            </Fragment>
-          ));
-        }
-        const values: Record<string, unknown> = record;
-        return [
-          <Fragment key={field}>
-            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field] ?? field}</dt>
-            <dd>{fieldValueText(values[field])}</dd>
-          </Fragment>,
-        ];
-      })}
-    </dl>
+    <div className="tcip-panel p-3 text-[11px] text-tcip-fp flex items-center gap-2">
+      <div>{children}</div>
+      <button
+        className="tcip-btn text-[11px]"
+        onClick={() => useStore.getState().setActiveTab("setup")}
+      >
+        Open the Setup tab
+      </button>
+    </div>
   );
 }
 
-// The agent states, the breeder confirms; a correction is a message that proposes no meaning.
-function traitSpecCorrectionRequest(record: TraitSpecStatementRecord): string {
-  const authored = record.statement_fields ?? {};
-  const fields =
-    Object.entries(authored)
-      .map(
-        ([field, value]) => `${STATEMENT_FIELD_LABELS[field] ?? field}: ${fieldValueText(value)}`,
-      )
-      .join("; ") || "nothing authored yet";
-  return (
-    `The trait-spec authoring statement on record for the "${record.trait}" trait is not what I ` +
-    `mean. Why the agent chose this: ${record.rationale ?? "no rationale recorded"} Authored ` +
-    `fields: ${fields}. What should change: `
-  );
-}
-
-function supersededValueText(value: unknown): string {
-  if (value === null || value === undefined) return "nothing";
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
-
-/**
- * The record a 409 carries, or null when the failure is anything else.
- *
- * The confirm route answers a moved record with what is on file now, so the row can re-render the
- * text the breeder has to read before their click means anything.
- */
-function movedRecordFrom(e: unknown): OperationalizationRecord | null {
-  if (!(e instanceof StructuredRefusalError) || e.status !== 409) return null;
-  const record = (e.detail as { record?: unknown }).record;
-  return record && typeof (record as { record_seen?: unknown }).record_seen === "string"
-    ? (record as OperationalizationRecord)
-    : null;
-}
-
-/** The trait-spec statement a 409 carries, or null when the failure is anything else. Reads the
- *  structured `trait_spec_authoring` refusal directly rather than re-parsing `e.detail` by hand,
- *  since the decoder already exists and its own shape is the record, not a nested guess at one. */
-function movedTraitSpecStatementFrom(e: unknown): TraitSpecStatementRecord | null {
-  const refusal = traitSpecAuthoringRefusalOf(e);
-  return refusal ? refusal.record : null;
-}
-
-// The agent states, the breeder confirms; a correction is a message that proposes no meaning.
-function correctionRequest(record: OperationalizationRecord): string {
-  return (
-    `The operationalization on record for the "${record.trait}" trait's ${record.delivery_kind} ` +
-    `delivery is not what I mean. On record: ${record.statement} Decided by: ${record.mechanism} ` +
-    `Measured subject: ${record.measured_subject}. What should change: `
-  );
-}
-
-function OperationalizationPanel({
-  records,
-  statementFields,
-  loadError,
-  refusal,
-  confirmingKey,
-  withdrawingKey,
-  notes,
-  auditWarnings,
-  onConfirm,
-  onWithdraw,
-}: {
-  records: OperationalizationRecord[];
-  statementFields: string[];
-  loadError: string | null;
-  refusal: OperationalizationRefusal | null;
-  confirmingKey: string | null;
-  withdrawingKey: string | null;
-  notes: Record<string, string>;
-  auditWarnings: Record<string, string | null>;
-  onConfirm: (record: OperationalizationRecord) => void;
-  onWithdraw: (record: OperationalizationRecord) => void;
-}) {
-  return (
-    <StatementPanel
-      heading="What the delivered numbers mean"
-      description={
-        <>
-          The agent records what each delivered number means and how the platform decides it. A
-          delivery waits until you confirm the record it would ship under. Read what is on file,
-          then confirm it or send the agent a correction. A confirmation you gave stands until you
-          withdraw it.
-        </>
-      }
-      records={records}
-      loadError={loadError}
-      emptyText="Nothing is recorded for this project yet. The agent records one before a delivery can ship under it."
-      refusalBanner={
-        refusal && (
-          <div className="mb-3 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
-            <div>
-              A delivery for the {refusal.trait} trait's {refusal.delivery_kind} number is waiting
-              on a confirmed record of what that number means.
-            </div>
-            <div className="mt-1 text-tcip-muted">{refusal.message}</div>
-          </div>
-        )
-      }
-      recordKey={recordKey}
-      kindLabelOf={(record) => record.delivery_kind}
-      testIdOf={(record) => `operationalization-${recordKey(record)}`}
-      refusedOf={(record) =>
-        refusal !== null &&
-        refusal.trait === record.trait &&
-        refusal.delivery_kind === record.delivery_kind
-      }
-      headerExtraOf={(record) => (
-        <p className="mt-1 text-[11px] text-tcip-muted">
-          Delivers{" "}
-          {record.delivers.map((d) => `${d.name}: ${d.definition}`).join("; ") ||
-            "nothing this project's crop vocabulary defines"}
-        </p>
-      )}
-      fieldsBodyOf={(record) => flatStatementFields(record, statementFields)}
-      supersededBlockOf={(record) =>
-        record.superseded.length > 0 && (
-          <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
-            <div>Changed since this was confirmed:</div>
-            <ul className="mt-1 list-disc pl-4">
-              {record.superseded.map((s) => (
-                <li key={s.field}>
-                  {s.field}: confirmed as {supersededValueText(s.confirmed_value)}, now{" "}
-                  {supersededValueText(s.current_value)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      }
-      registryProblemBlockOf={(record) =>
-        record.registry_problem !== null && (
-          <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
-            <div>Registry mismatch:</div>
-            <div className="mt-1">{record.registry_problem}</div>
-          </div>
-        )
-      }
-      correctionSeedOf={correctionRequest}
-      correctionAriaLabelOf={(record) => `Correction for ${record.trait}, ${record.delivery_kind}`}
-      confirmingKey={confirmingKey}
-      withdrawingKey={withdrawingKey}
-      notes={notes}
-      auditWarnings={auditWarnings}
-      onConfirm={onConfirm}
-      onWithdraw={onWithdraw}
-    />
-  );
-}
-
-function TraitSpecStatementPanel({
-  records,
-  statementFields,
-  loadError,
-  confirmingKey,
-  withdrawingKey,
-  notes,
-  auditWarnings,
-  onConfirm,
-  onWithdraw,
-}: {
-  records: TraitSpecStatementRecord[];
-  statementFields: string[];
-  loadError: string | null;
-  confirmingKey: string | null;
-  withdrawingKey: string | null;
-  notes: Record<string, string>;
-  auditWarnings: Record<string, string | null>;
-  onConfirm: (record: TraitSpecStatementRecord) => void;
-  onWithdraw: (record: TraitSpecStatementRecord) => void;
-}) {
-  return (
-    <StatementPanel
-      heading="What a trait's own semantics were authored to mean"
-      description={
-        <>
-          The agent authors each trait's measurement semantics and its own account of why. An
-          operationalization can build on a trait whether or not its spec is confirmed here, but the
-          spec itself still waits on your read. Read what is on file, then confirm it or send the
-          agent a correction. A confirmation you gave stands until you withdraw it.
-        </>
-      }
-      records={records}
-      loadError={loadError}
-      emptyText="No trait has been authored for this project yet."
-      recordKey={(record) => record.trait}
-      kindLabelOf={() => ""}
-      testIdOf={(record) => `trait-spec-statement-${record.trait}`}
-      fieldsBodyOf={(record) => traitSpecFieldsBody(record, statementFields)}
-      correctionSeedOf={traitSpecCorrectionRequest}
-      correctionAriaLabelOf={(record) => `Correction for ${record.trait}`}
-      confirmingKey={confirmingKey}
-      withdrawingKey={withdrawingKey}
-      notes={notes}
-      auditWarnings={auditWarnings}
-      onConfirm={onConfirm}
-      onWithdraw={onWithdraw}
-    />
-  );
-}
-
-/**
- * Parse an ISO date (`YYYY-MM-DD`) into a sortable integer. Mirrors the backend `_date_key`
- * in results.py so the chart's date order matches the server-computed onset table.
- */
+/** The message for a delivery written to `savedPath` whose audit line was not recorded. */
 function auditGapExportMessage(savedPath: string, detail: string): string {
   return (
     `The file is already written at ${savedPath}, but its delivery is unrecorded. Exporting ` +
@@ -330,9 +82,8 @@ export function ResultsTab() {
   // acknowledged-export buttons disable themselves before a breeder types a reason for nothing.
   const user = useStore((s) => s.user);
 
+  // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
-  // Every mapping name already persisted under the open project, for the picker below; a name
-  // typed here that isn't in the list is a new mapping this build will create.
   const [mappingNames, setMappingNames] = useState<string[]>([]);
   // True unless a computed run reported that its predictions carried no positive-state class.
   const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
@@ -354,17 +105,6 @@ export function ResultsTab() {
     .split(/[\n,]/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
-
-  // Plant-mapping build inputs.
-  const [plantRegistry, setPlantRegistry] = useState("");
-  const [nnTolerance, setNnTolerance] = useState<number | "">("");
-  // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
-  const [supersedeMapping, setSupersedeMapping] = useState(false);
-  const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
-  const [buildTolerance, setBuildTolerance] = useState<MatchTolerance | null>(null);
-  const [buildMaxMatchDistance, setBuildMaxMatchDistance] = useState<number | null>(null);
-  const [buildMsg, setBuildMsg] = useState<string | null>(null);
-  const [building, setBuilding] = useState(false);
 
   const [curves, setCurves] = useState<PerPlantRow[]>([]);
   const [onset, setOnset] = useState<OnsetRow[]>([]);
@@ -389,33 +129,8 @@ export function ResultsTab() {
   const [showAckExport, setShowAckExport] = useState(false);
   const [ackReason, setAckReason] = useState("");
 
-  // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
-  const [operationalizations, setOperationalizations] = useState<OperationalizationRecord[]>([]);
-  // Which fields a confirmation covers, and their order, as the record's own module names them.
-  const [statementFields, setStatementFields] = useState<string[]>([]);
-  const [operationalizationsError, setOperationalizationsError] = useState<string | null>(null);
   const [operationalizationRefusal, setOperationalizationRefusal] =
     useState<OperationalizationRefusal | null>(null);
-  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
-  const [withdrawingKey, setWithdrawingKey] = useState<string | null>(null);
-  const [confirmNotes, setConfirmNotes] = useState<Record<string, string>>({});
-  // A confirmation that landed but whose audit line did not: not a failure, so it is kept
-  // apart from the error-styled notes above.
-  const [confirmAuditWarnings, setConfirmAuditWarnings] = useState<Record<string, string | null>>(
-    {},
-  );
-
-  // A trait's own authoring statement: sibling state to the operationalization state above, the
-  // same list/confirm/withdraw/moved-record shape.
-  const [traitSpecStatements, setTraitSpecStatements] = useState<TraitSpecStatementRecord[]>([]);
-  const [traitSpecStatementFields, setTraitSpecStatementFields] = useState<string[]>([]);
-  const [traitSpecStatementsError, setTraitSpecStatementsError] = useState<string | null>(null);
-  const [traitSpecConfirmingKey, setTraitSpecConfirmingKey] = useState<string | null>(null);
-  const [traitSpecWithdrawingKey, setTraitSpecWithdrawingKey] = useState<string | null>(null);
-  const [traitSpecNotes, setTraitSpecNotes] = useState<Record<string, string>>({});
-  const [traitSpecAuditWarnings, setTraitSpecAuditWarnings] = useState<
-    Record<string, string | null>
-  >({});
 
   // What has shipped from this project: read-only, no confirm/withdraw state to carry.
   const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEventRecord[]>([]);
@@ -448,17 +163,13 @@ export function ResultsTab() {
   // The trait a delivery is computed for, resolved from this project's own registered traits
   // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
   // error, not a silent guess) when there are zero, offered as a choice when there are several.
-  const [availableTraits, setAvailableTraits] = useState<string[]>([]);
-  // Each trait's declared milestone fractions, straight from its spec: what this tab can compute
-  // for the selected trait follows from them, not from a category the server assigned.
-  const [milestoneFractionsByTrait, setMilestoneFractionsByTrait] = useState<
-    Record<string, number[]>
-  >({});
+  const [traitRecords, setTraitRecords] = useState<ServedTraitRecord[]>([]);
+  const availableTraits = traitRecords.map((r) => r.trait);
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
-  // Trait specs that failed to load, so a breeder can tell "nothing registered" from
+  // Trait records that failed to load, so a breeder can tell "nothing registered" from
   // "something is registered but broken" instead of the two looking identical.
-  const [invalidSpecs, setInvalidSpecs] = useState<{ file: string; reason: string }[]>([]);
+  const [unreadableTraits, setUnreadableTraits] = useState<{ trait: string; reason: string }[]>([]);
 
   useEffect(() => {
     if (!projectRoot) return;
@@ -467,71 +178,29 @@ export function ResultsTab() {
     void resultsApi
       .traits(projectRoot)
       .then((res) => {
-        setAvailableTraits(res.traits);
-        setMilestoneFractionsByTrait(res.milestone_fractions_by_trait);
-        setInvalidSpecs(res.invalid_specs);
+        setTraitRecords(res.traits);
+        setUnreadableTraits(res.unreadable);
         if (res.traits.length === 0) {
           setTraitError("No trait is registered for this project yet.");
         } else if (res.traits.length === 1) {
-          setTrait(res.traits[0]);
+          setTrait(res.traits[0].trait);
         }
       })
       .catch((e) => {
-        setAvailableTraits([]);
-        setMilestoneFractionsByTrait({});
-        setInvalidSpecs([]);
+        setTraitRecords([]);
+        setUnreadableTraits([]);
         setTraitError(
           `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
   }, [projectRoot]);
 
-  const refreshMappingNames = useCallback(() => {
+  useEffect(() => {
+    if (!projectRoot) return;
     void resultsApi
       .listPlantMappings()
       .then((res) => setMappingNames(res.names))
       .catch(() => setMappingNames([]));
-  }, []);
-
-  useEffect(() => {
-    if (!projectRoot) return;
-    refreshMappingNames();
-  }, [projectRoot, refreshMappingNames]);
-
-  useEffect(() => {
-    if (!projectRoot) return;
-    void resultsApi
-      .operationalizations(projectRoot)
-      .then((res) => {
-        setOperationalizations(res.records);
-        setStatementFields(res.statement_fields);
-        setOperationalizationsError(null);
-      })
-      .catch((e) => {
-        setOperationalizations([]);
-        setStatementFields([]);
-        setOperationalizationsError(
-          `Could not load what this project's delivered numbers mean: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
-  }, [projectRoot]);
-
-  useEffect(() => {
-    if (!projectRoot) return;
-    void resultsApi
-      .traitSpecStatements(projectRoot)
-      .then((res) => {
-        setTraitSpecStatements(res.records);
-        setTraitSpecStatementFields(res.statement_fields);
-        setTraitSpecStatementsError(null);
-      })
-      .catch((e) => {
-        setTraitSpecStatements([]);
-        setTraitSpecStatementFields([]);
-        setTraitSpecStatementsError(
-          `Could not load what this project's traits were authored to mean: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
   }, [projectRoot]);
 
   useEffect(() => {
@@ -549,107 +218,6 @@ export function ResultsTab() {
         );
       });
   }, [projectRoot]);
-
-  const replaceOperationalization = useCallback((record: OperationalizationRecord) => {
-    setOperationalizations((prev) =>
-      prev.map((r) => (recordKey(r) === recordKey(record) ? record : r)),
-    );
-  }, []);
-
-  // Withdrawal is the same door with confirmed false, so one writer serves both directions.
-  const writeConfirmation = useCallback(
-    async (record: OperationalizationRecord, confirmed: boolean) => {
-      if (!projectRoot) return;
-      const key = recordKey(record);
-      const setPending = confirmed ? setConfirmingKey : setWithdrawingKey;
-      setPending(key);
-      setConfirmNotes((prev) => ({ ...prev, [key]: "" }));
-      setConfirmAuditWarnings((prev) => ({ ...prev, [key]: null }));
-      try {
-        const res = await resultsApi.confirmOperationalization({
-          project_root: projectRoot,
-          trait: record.trait,
-          delivery_kind: record.delivery_kind,
-          record_seen: record.record_seen,
-          confirmed,
-          user: useStore.getState().user || undefined,
-        });
-        setConfirmAuditWarnings((prev) => ({ ...prev, [key]: res.audit_warning }));
-        replaceOperationalization(
-          await resultsApi.operationalization(projectRoot, record.trait, record.delivery_kind),
-        );
-      } catch (e) {
-        const moved = movedRecordFrom(e);
-        if (moved) {
-          replaceOperationalization(moved);
-          setConfirmNotes((prev) => ({
-            ...prev,
-            [key]: confirmed
-              ? "This record changed since it was shown. Read what is on file above, then confirm that."
-              : "This record changed since it was shown. Read what is on file above, then withdraw that.",
-          }));
-        } else {
-          setConfirmNotes((prev) => ({
-            ...prev,
-            [key]: `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          }));
-        }
-      } finally {
-        setPending(null);
-      }
-    },
-    [projectRoot, replaceOperationalization],
-  );
-
-  const replaceTraitSpecStatement = useCallback((record: TraitSpecStatementRecord) => {
-    setTraitSpecStatements((prev) => prev.map((r) => (r.trait === record.trait ? record : r)));
-  }, []);
-
-  // Withdrawal is the same door with confirmed false, mirroring writeConfirmation above.
-  const writeTraitSpecConfirmation = useCallback(
-    async (record: TraitSpecStatementRecord, confirmed: boolean) => {
-      if (!projectRoot) return;
-      const key = record.trait;
-      const setPending = confirmed ? setTraitSpecConfirmingKey : setTraitSpecWithdrawingKey;
-      setPending(key);
-      setTraitSpecNotes((prev) => ({ ...prev, [key]: "" }));
-      setTraitSpecAuditWarnings((prev) => ({ ...prev, [key]: null }));
-      try {
-        const res = await resultsApi.confirmTraitSpecStatement({
-          project_root: projectRoot,
-          trait: record.trait,
-          record_seen: record.record_seen,
-          confirmed,
-          user: useStore.getState().user || undefined,
-        });
-        setTraitSpecAuditWarnings((prev) => ({ ...prev, [key]: res.audit_warning }));
-        replaceTraitSpecStatement(await resultsApi.traitSpecStatement(projectRoot, record.trait));
-      } catch (e) {
-        const moved = movedTraitSpecStatementFrom(e);
-        if (moved) {
-          replaceTraitSpecStatement(moved);
-          setTraitSpecNotes((prev) => ({
-            ...prev,
-            [key]: confirmed
-              ? "This statement changed since it was shown. Read what is on file above, then confirm that."
-              : "This statement changed since it was shown. Read what is on file above, then withdraw that.",
-          }));
-        } else {
-          setTraitSpecNotes((prev) => ({
-            ...prev,
-            [key]: `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          }));
-        }
-      } finally {
-        setPending(null);
-      }
-    },
-    [projectRoot, replaceTraitSpecStatement],
-  );
 
   const refreshDatasetTree = useCallback(() => {
     if (!datasetRoot) return;
@@ -681,76 +249,6 @@ export function ResultsTab() {
   // tree response. A path assembled here would only agree with the writers by coincidence.
   function predDirFor(date: string, model: string): string {
     return (model && predictionDirs[date]?.[model]) || "";
-  }
-
-  // Selecting an already-built mapping by name shows its own summary and tolerance, the same way
-  // a fresh build does, rather than leaving the picker blind until Compute is clicked.
-  async function loadMapping(name: string) {
-    try {
-      const res = await resultsApi.loadPlantMapping(name);
-      setBuildSummary("per_date" in res.summary ? (res.summary as PlantMappingSummary) : null);
-      setBuildTolerance(res.nn_tolerance_m);
-      setBuildMaxMatchDistance(res.max_match_distance_m);
-    } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Load mapping failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  async function buildMapping() {
-    if (!datasetRoot) return;
-    if (!mappingName) {
-      setBuildMsg("Name the mapping before building.");
-      return;
-    }
-    if (!plantRegistry) {
-      setBuildMsg("Name a registered plant registry before building.");
-      return;
-    }
-    setBuilding(true);
-    setBuildMsg(null);
-    setBuildSummary(null);
-    setBuildTolerance(null);
-    setBuildMaxMatchDistance(null);
-    try {
-      const res = await resultsApi.buildPlantMapping({
-        name: mappingName,
-        images_root: `${datasetRoot}/images`,
-        plant_registry: plantRegistry,
-        supersede: supersedeMapping,
-        ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
-      });
-      setBuildSummary(res.summary);
-      setBuildTolerance(res.nn_tolerance_m);
-      setBuildMaxMatchDistance(res.max_match_distance_m);
-      setBuildMsg(`Mapping built + saved as ${mappingName}`);
-      refreshMappingNames();
-    } catch (e) {
-      const committed = committedOf<Awaited<ReturnType<typeof resultsApi.buildPlantMapping>>>(e);
-      if (committed) {
-        setBuildSummary(committed.summary);
-        setBuildTolerance(committed.nn_tolerance_m);
-        setBuildMaxMatchDistance(committed.max_match_distance_m);
-        refreshMappingNames();
-        setBuildMsg(
-          `Mapping built + saved as ${mappingName}. ` +
-            (e instanceof Error ? e.message : String(e)),
-        );
-        return;
-      }
-      if (e instanceof StructuredRefusalError && e.status === 409) {
-        // A rebuild cited by a delivery event, or an audit-gap refusal with no mapping saved.
-        setBuildMsg(e.message);
-      } else {
-        useStore
-          .getState()
-          .pushToast(`Build mapping failed: ${e instanceof Error ? e.message : String(e)}`);
-        setBuildMsg(null);
-      }
-    } finally {
-      setBuilding(false);
-    }
   }
 
   async function compute(showUnvalidated = false) {
@@ -995,13 +493,13 @@ export function ResultsTab() {
     );
   }
 
-  // The breeder can't author a trait spec from the GUI, so a trait with no milestone fractions
-  // needs a way forward rather than an empty tab.
+  // The breeder can't propose a trait revision from the GUI, so a trait with no milestone
+  // fractions needs a way forward rather than an empty tab.
   function milestoneAbsenceRequest(): string {
     return (
-      `The Results tab has nothing to compute for the "${trait}" trait: its spec declares no ` +
-      "milestone fractions. Please tell me what this trait's measurement delivers and how I get " +
-      "it, and update the spec if milestones are part of it."
+      `The Results tab has nothing to compute for the "${trait}" trait: its confirmed revision ` +
+      "declares no milestone fractions. Please tell me what this trait's measurement delivers " +
+      "and how I get it, and propose a revision if milestones are part of it."
     );
   }
 
@@ -1028,28 +526,23 @@ export function ResultsTab() {
     return Array.from(cols).sort();
   }, [onset]);
 
-  // Curves and milestones are only meaningful for a trait whose spec declares the fractions they
-  // are read off. Nothing else on this tab depends on it.
-  const hasMilestones = (milestoneFractionsByTrait[trait] ?? []).length > 0;
+  // The entry a delivery reads for the selected trait: its latest confirmed revision's, or null.
+  const selectedRecord = traitRecords.find((r) => r.trait === trait);
+  const confirmedEntry =
+    selectedRecord?.revisions.find((r) => r.number === selectedRecord.latest_confirmed)?.entry ??
+    null;
+  // Curves and milestones are only meaningful for a trait whose confirmed revision declares the
+  // fractions they are read off. Nothing else on this tab depends on it.
+  const hasMilestones = (confirmedEntry?.milestone_fractions ?? []).length > 0;
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="results" />
       {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
-      {invalidSpecs.length > 0 && (
-        <div className="tcip-panel p-3 text-[11px] text-tcip-fp">
-          <div>
-            {invalidSpecs.length} trait spec{invalidSpecs.length > 1 ? "s" : ""} failed to load and
-            {invalidSpecs.length > 1 ? " are" : " is"} not registered:
-          </div>
-          <ul className="mt-1 list-disc pl-4">
-            {invalidSpecs.map((s) => (
-              <li key={s.file}>
-                {s.file}: {s.reason}
-              </li>
-            ))}
-          </ul>
-        </div>
+      {unreadableTraits.length > 0 && (
+        <SetupTabNote>
+          These traits' records will not read: {unreadableTraits.map((u) => u.trait).join(", ")}.
+        </SetupTabNote>
       )}
       {availableTraits.length > 1 && (
         <div className="tcip-panel p-3 flex items-center gap-2">
@@ -1070,122 +563,11 @@ export function ResultsTab() {
           </select>
         </div>
       )}
-      {/* Plant mapping: build (from geolocated images + plant CSVs) or point at an existing file */}
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Plant mapping</div>
-        <div className="grid grid-cols-[1fr_1fr] gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="tcip-label">
-              Mapping name (pick one already built under this project, or type a new one)
-            </label>
-            <input
-              className="tcip-input"
-              value={mappingName}
-              onChange={(e) => {
-                const name = e.target.value;
-                setMappingName(name);
-                if (mappingNames.includes(name)) {
-                  void loadMapping(name);
-                } else {
-                  setBuildSummary(null);
-                  setBuildTolerance(null);
-                  setBuildMaxMatchDistance(null);
-                }
-              }}
-              placeholder="valley-2026"
-              list="plant-mapping-names"
-            />
-            <datalist id="plant-mapping-names">
-              {mappingNames.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <label className="tcip-label mt-1">
-              Plant registry name (registered via register_plant_registry)
-            </label>
-            <input
-              className="tcip-input"
-              value={plantRegistry}
-              onChange={(e) => setPlantRegistry(e.target.value)}
-              placeholder="valley-plants"
-            />
-            <label className="tcip-label mt-1 flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={supersedeMapping}
-                onChange={(e) => setSupersedeMapping(e.target.checked)}
-              />
-              Supersede a mapping a delivery event still cites
-            </label>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="tcip-label">Match tolerance (m)</label>
-            <input
-              className="tcip-input"
-              type="number"
-              step="1"
-              min="0"
-              placeholder="derived from grid pitch"
-              value={nnTolerance}
-              onChange={(e) =>
-                setNnTolerance(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)
-              }
-            />
-            <button
-              className="tcip-btn-primary"
-              onClick={buildMapping}
-              disabled={building || !datasetRoot}
-            >
-              {building ? "Building…" : "Build + save mapping"}
-            </button>
-            {buildMsg && <div className="text-[11px] text-tcip-muted">{buildMsg}</div>}
-          </div>
-        </div>
-        {buildSummary && (
-          <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
-            {buildTolerance && buildMaxMatchDistance !== null && (
-              <div className="mb-1">
-                {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
-              </div>
-            )}
-            {Object.entries(buildSummary.per_date).map(([d, s]) => (
-              <div key={d}>
-                {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}`}
-              </div>
-            ))}
-            {buildSummary.totals.n_unattributed > 0 && (
-              <div className="mt-1">
-                {`${buildSummary.totals.n_unattributed} captures across this mapping's dates are attributed to no plant (no readable position, a raster capture, or beyond the accepted match distance)`}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <TraitSpecStatementPanel
-        records={traitSpecStatements}
-        statementFields={traitSpecStatementFields}
-        loadError={traitSpecStatementsError}
-        confirmingKey={traitSpecConfirmingKey}
-        withdrawingKey={traitSpecWithdrawingKey}
-        notes={traitSpecNotes}
-        auditWarnings={traitSpecAuditWarnings}
-        onConfirm={(record) => void writeTraitSpecConfirmation(record, true)}
-        onWithdraw={(record) => void writeTraitSpecConfirmation(record, false)}
-      />
-
-      <OperationalizationPanel
-        records={operationalizations}
-        statementFields={statementFields}
-        loadError={operationalizationsError}
-        refusal={operationalizationRefusal}
-        confirmingKey={confirmingKey}
-        withdrawingKey={withdrawingKey}
-        notes={confirmNotes}
-        auditWarnings={confirmAuditWarnings}
-        onConfirm={(record) => void writeConfirmation(record, true)}
-        onWithdraw={(record) => void writeConfirmation(record, false)}
-      />
+      {trait && selectedRecord && !confirmedEntry && (
+        <SetupTabNote>
+          No revision of {trait} is confirmed, so nothing delivers under it.
+        </SetupTabNote>
+      )}
 
       <DeliveryEventsPanel records={deliveryEvents} loadError={deliveryEventsError} />
 
@@ -1307,9 +689,7 @@ export function ResultsTab() {
           <div className="flex flex-col gap-2">
             {countError && <div className="text-[11px] text-tcip-fp">{countError}</div>}
             {countOperationalizationRefusal && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                {countOperationalizationRefusal.message}
-              </div>
+              <SetupTabNote>{countOperationalizationRefusal.message}</SetupTabNote>
             )}
             {countGateRefusal && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
@@ -1355,12 +735,12 @@ export function ResultsTab() {
         </div>
       </div>
 
-      {trait && !hasMilestones && (
+      {trait && confirmedEntry && !hasMilestones && (
         <div className="tcip-panel p-4 flex flex-col gap-2">
           <div className="tcip-heading">Nothing to compute here for {trait}</div>
           <p className="text-[11px] text-tcip-muted">
-            This trait's spec declares no milestone fractions, so there are no curves or milestones
-            to compute for it.
+            This trait's confirmed revision declares no milestone fractions, so there are no curves
+            or milestones to compute for it.
           </p>
           <button
             className="tcip-btn-primary text-[11px] self-start"
@@ -1435,6 +815,22 @@ export function ResultsTab() {
                 )}
               </div>
               <div className="flex flex-col gap-2">
+                <label className="tcip-label" htmlFor="phenology-mapping">
+                  Plant mapping (built on the Setup tab)
+                </label>
+                <select
+                  id="phenology-mapping"
+                  className="tcip-select text-[11px]"
+                  value={mappingName}
+                  onChange={(e) => setMappingName(e.target.value)}
+                >
+                  <option value="">Choose a mapping…</option>
+                  {mappingNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
                 <label className="tcip-label" htmlFor="phenology-plants">
                   Plants to measure (one id per line)
                 </label>
@@ -1610,6 +1006,11 @@ export function ResultsTab() {
               </div>
             </div>
             {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
+            {operationalizationRefusal && (
+              <div className="mt-2">
+                <SetupTabNote>{operationalizationRefusal.message}</SetupTabNote>
+              </div>
+            )}
           </div>
 
           <div className="tcip-panel p-4 h-80">

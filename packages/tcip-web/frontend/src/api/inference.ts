@@ -4,6 +4,7 @@ import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from 
 import { ROUTES } from "@/api/routes";
 import type {
   CanopySegmentDisclosure,
+  ConfirmRevisionPayload,
   DeliveryEventRecord as StoredDeliveryEventRecord,
   DeliverySupersessionRecord,
   ExportCountCsvPayload,
@@ -13,6 +14,7 @@ import type {
   PhenologyPayload,
   PlantMappingDisclosure,
   PlantRegistryDisclosure,
+  TraitRevision,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
@@ -178,101 +180,41 @@ export interface PhenologyMeasurementResponse {
   images_unattributed: number;
 }
 
-/** One entry of what a trait delivers, in the crop vocabulary's own wording, never paraphrased. */
-export interface DeliveredPhenotypeDefinition {
-  name: string;
-  definition: string;
-}
+/** One revision as the trait routes serve it: the stored revision and whether its confirmation
+ *  stands. */
+export type ServedTraitRevision = TraitRevision & { confirmed: boolean };
 
-/** A field a confirmation covered whose live value has moved since, with both values. */
-export interface OperationalizationSupersession {
-  field: string;
-  confirmed_value: unknown;
-  current_value: unknown;
-}
-
-/**
- * What a trait's delivered number means for one delivery kind, as the browser reads it.
- *
- * The agent states the record and the breeder confirms it; nothing here is authored in the GUI.
- * `confirmed_current` and `superseded` are computed by the backend from the same comparison the
- * delivery doors run, never re-derived here. `record_seen` is the content hash the confirmation
- * posts back, so a click lands on the text that was displayed.
- */
-export type OperationalizationRecord = {
+/** One trait's stored record as the traits route serves it, with the number of the revision a
+ *  delivery reads (`null` while none is confirmed). */
+export interface ServedTraitRecord {
   trait: string;
-  delivery_kind: string;
-  statement: string;
-  mechanism: string;
-  measured_subject: string;
-  delivered_phenotypes: string[];
-  delivered_value_keys: string[];
-  stated_by: string;
-  stated_at: string;
-  relayed_note: string;
-  agent_client_name: string | null;
-  agent_client_version: string | null;
-  agent_session: string | null;
-  terminal_session: string | null;
-  harness_session: string | null;
-  harness_effort_at_connect: string | null;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  identity_from_request: boolean | null;
-  confirmed_current: boolean;
-  superseded: OperationalizationSupersession[];
-  registry_problem: string | null;
-  delivers: DeliveredPhenotypeDefinition[];
-  record_seen: string;
-};
-
-/** The four fields the confirmation writer owns, every one of them null after a withdrawal, plus
- *  the audit-append warning: a confirmation that lands but whose audit line does not is still
- *  a 200, never a refusal, the same shape the trait-spec confirmation route also carries. */
-export interface OperationalizationConfirmation {
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  identity_from_request: boolean | null;
-  confirmed_fields: Record<string, unknown> | null;
-  audit_warning: string | null;
+  revisions: ServedTraitRevision[];
+  latest_confirmed: number | null;
 }
 
-export interface ConfirmOperationalizationBody {
-  project_root: string;
-  trait: string;
-  delivery_kind: string;
-  user?: string;
-  confirmed?: boolean;
-  record_seen: string;
+/** The traits route's one read: every trait's record, each trait whose record its schema refuses,
+ *  and crops.yml's own definition of every phenotype a revision delivers. */
+export interface TraitsListing {
+  traits: ServedTraitRecord[];
+  unreadable: { trait: string; reason: string }[];
+  definitions: Record<string, string>;
 }
 
 /** A delivery door's refusal that a trait's delivered number has no confirmed meaning. */
 export interface OperationalizationRefusal {
   kind: "operationalization";
-  state: number | null;
-  trait: string;
-  delivery_kind: string;
   message: string;
-  registry_problem: string | null;
 }
 
-/**
- * The operationalization refusal a thrown error carries, or null for every other failure.
- *
- * Read by kind off the parsed detail, so this family can never be matched by the prose regex the
- * unvalidated-evidence refusal still dispatches on.
- */
+/** The operationalization refusal a thrown error carries, read by its detail's `kind`, or null for
+ *  every other failure. */
 export function operationalizationRefusalOf(e: unknown): OperationalizationRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
   if (detail.kind !== "operationalization") return null;
   return {
     kind: "operationalization",
-    state: typeof detail.state === "number" ? detail.state : null,
-    trait: String(detail.trait ?? ""),
-    delivery_kind: String(detail.delivery_kind ?? ""),
     message: typeof detail.message === "string" ? detail.message : e.message,
-    registry_problem: typeof detail.registry_problem === "string" ? detail.registry_problem : null,
   };
 }
 
@@ -375,63 +317,6 @@ export function bucketRefusalOf(e: unknown): BucketRefusal | null {
   return null;
 }
 
-/** One trait's authoring statement, as the browser reads it. */
-export type TraitSpecStatementRecord = {
-  trait: string;
-  statement_fields: Record<string, unknown> | null;
-  rationale: string | null;
-  stated_by: string | null;
-  stated_at: string | null;
-  relayed_note: string | null;
-  agent_client_name: string | null;
-  agent_client_version: string | null;
-  agent_session: string | null;
-  terminal_session: string | null;
-  harness_session: string | null;
-  harness_effort_at_connect: string | null;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  identity_from_request: boolean | null;
-  confirmed_current: boolean;
-  record_seen: string;
-};
-
-/** The four fields the trait-spec confirmation writer owns, plus the audit-append warning:
- *  a confirmation that lands but whose audit line does not is still a 200, never a refusal. */
-export interface TraitSpecStatementConfirmation {
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  identity_from_request: boolean | null;
-  record_seen: string | null;
-  audit_warning: string | null;
-}
-
-export interface ConfirmTraitSpecStatementBody {
-  project_root: string;
-  trait: string;
-  record_seen: string;
-  user?: string;
-  confirmed?: boolean;
-}
-
-/** A trait-spec confirmation's refusal that the statement moved since it was displayed. */
-export interface TraitSpecAuthoringRefusal {
-  kind: "trait_spec_authoring";
-  message: string;
-  record: TraitSpecStatementRecord;
-}
-
-export function traitSpecAuthoringRefusalOf(e: unknown): TraitSpecAuthoringRefusal | null {
-  if (!(e instanceof StructuredRefusalError)) return null;
-  const detail = e.detail;
-  if (detail.kind !== "trait_spec_authoring") return null;
-  return {
-    kind: "trait_spec_authoring",
-    message: typeof detail.message === "string" ? detail.message : e.message,
-    record: detail.record as TraitSpecStatementRecord,
-  };
-}
-
 export type PlantMappingUnion =
   PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure;
 
@@ -463,15 +348,20 @@ export const resultsApi = {
       `${ROUTES.getResultsModelsRegistered}?project_path=${encodeURIComponent(project_path)}`,
     ),
 
-  // The project's own registered traits, so the Results tab resolves which trait it is
-  // computing for from the project's registry instead of assuming one. Each trait's declared
-  // milestone fractions come along, so the tab can tell what there is to compute for it.
+  // The project's own trait records, so a tab resolves which trait it works on from the project
+  // instead of assuming one, and the Setup tab shows each revision for confirmation.
   traits: (project_root: string) =>
-    getJson<{
-      traits: string[];
-      milestone_fractions_by_trait: Record<string, number[]>;
-      invalid_specs: { file: string; reason: string }[];
-    }>(`${ROUTES.getResultsTraits}?project_root=${encodeURIComponent(project_root)}`),
+    getJson<TraitsListing>(
+      `${ROUTES.getResultsTraits}?project_root=${encodeURIComponent(project_root)}`,
+    ),
+
+  // Refuses with 409 when the hash is not the revision's own: the revision shown was not the one
+  // on file.
+  confirmTraitRevision: (body: ConfirmRevisionPayload) =>
+    postJson<ServedTraitRevision & { audit_warning: string | null }>(
+      ROUTES.postResultsTraitsConfirm,
+      body,
+    ),
 
   buildPlantMapping: (body: {
     name: string;
@@ -502,42 +392,6 @@ export const resultsApi = {
 
   phenologyMeasurement: (body: PhenologyPayload) =>
     postJson<PhenologyMeasurementResponse>(ROUTES.postResultsPhenologyMeasurement, body),
-
-  /** Enumerates what exists, keyed by trait plus delivery kind; the served `statement_fields`
-   *  names what the `record_seen` hash covers, so the browser holds no list of its own to drift. */
-  operationalizations: (project_root: string) =>
-    getJson<{ records: OperationalizationRecord[]; statement_fields: string[] }>(
-      `${ROUTES.getResultsOperationalizations}?project_root=${encodeURIComponent(project_root)}`,
-    ),
-
-  operationalization: (project_root: string, trait: string, delivery_kind: string) =>
-    getJson<OperationalizationRecord>(
-      `${ROUTES.getResultsOperationalization}?project_root=${encodeURIComponent(project_root)}` +
-        `&trait=${encodeURIComponent(trait)}&delivery_kind=${encodeURIComponent(delivery_kind)}`,
-    ),
-
-  // Refuses with 409 when the record moved since it was displayed, carrying what is on file now.
-  confirmOperationalization: (body: ConfirmOperationalizationBody) =>
-    postJson<OperationalizationConfirmation>(ROUTES.postResultsOperationalizationConfirm, body),
-
-  /** Every trait-spec authoring statement this project holds, one row per trait; siblings of
-   *  `operationalizations`/`operationalization` above, the same generalized statement shape. */
-  traitSpecStatements: (project_root: string) =>
-    getJson<{
-      records: TraitSpecStatementRecord[];
-      unresolved: unknown[];
-      statement_fields: string[];
-    }>(`${ROUTES.getResultsTraitSpecStatements}?project_root=${encodeURIComponent(project_root)}`),
-
-  traitSpecStatement: (project_root: string, trait: string) =>
-    getJson<TraitSpecStatementRecord>(
-      `${ROUTES.getResultsTraitSpecStatement}?project_root=${encodeURIComponent(project_root)}` +
-        `&trait=${encodeURIComponent(trait)}`,
-    ),
-
-  // Refuses with 409 when the statement moved since it was displayed, carrying what is on file now.
-  confirmTraitSpecStatement: (body: ConfirmTraitSpecStatementBody) =>
-    postJson<TraitSpecStatementConfirmation>(ROUTES.postResultsTraitSpecStatementConfirm, body),
 
   /** Every delivery event this project holds: what shipped, under which trait and kind. */
   deliveryEvents: (project_root: string) =>

@@ -17,6 +17,9 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from tcip_mcp.project_paths import project_state_dir
+
+
 def _load(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -418,7 +421,7 @@ def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_store import SchemaVersionRefused
 
-    state = root / ".tcip" / "state"
+    state = project_state_dir(root)
     try:
         stems = _image_stems(root)
     except AmbiguousImageStem as exc:
@@ -474,62 +477,26 @@ def check_region_completeness(root: Path, findings: list, *, census: dict | None
                             "changed since attestation; re-attest"))
 
 
-def check_trait_specs(root: Path, findings: list) -> None:
-    """Flag every trait spec the store fails to read, through ``load_trait_specs_with_errors``."""
-    from tcip_mcp.traits import load_trait_specs_with_errors
+def check_traits(root: Path, findings: list) -> None:
+    """An error for every trait record the store or its schema refuses to read (a warning when
+    the refusal is the record's ``schema_version``), and a warning for every trait whose latest
+    revision the breeder has not confirmed."""
+    from pydantic import ValidationError
+    from tcip_store import SchemaVersionRefused, StoreError
 
-    _specs, errors = load_trait_specs_with_errors(project_root=root)
-    for e in errors:
-        level = "warn" if e.get("kind") == "version_refused" else "error"
-        findings.append((level, f"trait spec {e['file']} failed to load: {e['reason']}"))
+    from tcip_mcp.traits import read_trait, trait_names
 
-
-def check_trait_spec_statements(root: Path, findings: list) -> None:
-    """Every registered trait spec whose own trait-spec statement is not both confirmed and
-    current, one of three states: absent (the recoverable gap ``author_trait_spec``'s own second
-    write can leave when it fails partway), stale (the spec moved past what the statement
-    recorded), or current but never confirmed by the breeder. Reads only through the storage seam.
-    """
-    import tcip_store as ts
-    from tcip_store import DecodeError, SchemaVersionRefused
-
-    from tcip_mcp.traits import (
-        load_trait_specs_with_errors,
-        trait_spec_statement_key,
-        trait_spec_statement_stale,
-        trait_spec_statements_scope,
-    )
-
-    # A spec that did not load is check_trait_specs' own finding.
-    specs, _errors = load_trait_specs_with_errors(project_root=root)
-    if not specs:
-        return
-    scope = trait_spec_statements_scope(root)
-    for spec in specs:
-        key = trait_spec_statement_key(scope, spec.name)
+    for name in trait_names(root):
         try:
-            statement = ts.read_versioned(key, default=None).value
-        except DecodeError as exc:
-            findings.append(("error", f"trait spec {spec.name!r}'s authoring statement will "
-                            f"not read: {exc}"))
+            record = read_trait(name, root)
+        except (StoreError, ValidationError) as exc:
+            level = "warn" if isinstance(exc, SchemaVersionRefused) else "error"
+            findings.append((level, f"trait {name!r} will not read: {exc}"))
             continue
-        except SchemaVersionRefused as exc:
-            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement: {exc}"))
-            continue
-        if not statement:
-            findings.append(("warn", f"trait spec {spec.name!r} has no authoring statement on "
-                            "record; state it with revise_trait_spec(project_root=..., "
-                            f"trait_name={spec.name!r}, fields={{}}, rationale=...) so the "
-                            "breeder has something to confirm"))
-        elif trait_spec_statement_stale(spec, statement):
-            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement no longer "
-                            "matches its live spec; restate it with "
-                            f"revise_trait_spec(project_root=..., trait_name={spec.name!r}, "
-                            "fields=..., rationale=...) and have the breeder confirm it again"))
-        elif not statement.get("confirmed_by"):
-            findings.append(("warn", f"trait spec {spec.name!r}'s authoring statement is current "
-                            "but the breeder has not confirmed it; ask them to confirm it in the "
-                            "Results tab"))
+        if not record.latest.confirmed:
+            findings.append(("warn", f"the latest revision ({record.latest.number}) of trait "
+                            f"{name!r} is not confirmed; ask the breeder to confirm it in the "
+                            "Setup tab"))
 
 
 def check_project_record(root: Path, findings: list) -> None:
@@ -561,7 +528,7 @@ def check_stray_state_files(root: Path, findings: list) -> None:
     except (AnchorMisplaced, StoreError) as exc:
         findings.append(("warn", f"the state root's accounting refused: {exc}"))
         return
-    state_root = Path(root).resolve() / ".tcip" / "state"
+    state_root = project_state_dir(Path(root).resolve())
     for path in strays:
         findings.append((
             "info",
@@ -580,7 +547,7 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
             (root, "region_completeness"),
             (root, "region_completeness_digest"),
         ),
-        "check_state": ((root / ".tcip" / "state", "review_verdicts"),),
+        "check_state": ((project_state_dir(root), "review_verdicts"),),
         "check_provenance": ((root / ".tcip" / "experiments", "model_snapshot_manifest"),),
     }
 
@@ -642,7 +609,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                             check_reserved_names, check_provenance, check_region_completeness)
     for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
                  check_registry, check_provenance, check_state, check_region_completeness,
-                 check_trait_specs, check_trait_spec_statements,
+                 check_traits,
                  check_project_record, check_stray_state_files):
         reason = invalid.get(check.__name__)
         if reason:

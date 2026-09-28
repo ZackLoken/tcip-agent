@@ -41,5 +41,5 @@ ground truth or breeder judgment you are checking them.
 ## What the breeder expected
 
 What the breeder told you the delivered number should mean, and how what you got differs from
-that. If `state_trait_operationalization` was confirmed for this trait and delivery kind, say
-so and quote the confirmed statement if you have it.
+that. Name the trait revision the delivery event records, whether the breeder had confirmed it,
+and quote its operationalization statement for this delivery kind if you have it.

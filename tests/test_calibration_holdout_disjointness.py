@@ -13,10 +13,13 @@ covers resolve_model_identity reading the codebase's own stamped checkpoints off
 from __future__ import annotations
 
 import copy
+from functools import partial
 from pathlib import Path
 
 import pytest
 
+from tests._clear_prediction_bucket_fixtures import write_image
+from tests._dense_op_fixtures import shifted_cal_holdout, toy_records
 from tests._regime_fixtures import stub_pass, tiled_regime
 
 # no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
@@ -32,11 +35,7 @@ from tcip_mcp.pipelines.data.split_construction import recorded_side  # noqa: E4
 IMG = 32
 
 
-def _save_png(path: Path) -> None:
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (IMG, IMG), color=(128, 128, 128)).save(path)
+_save_png = partial(write_image, size=IMG)
 
 
 def _detection_dataset(root: Path, stems: list[str]) -> tuple[Path, Path]:
@@ -92,7 +91,7 @@ def test_a_record_with_no_group_policy_is_not_permanently_blocked_when_disjoint(
     tcip_store.replace(split_key("exp_ext"), {"members": {
         str(tmp_path / "labels"): {"train": ["train_a", "train_b"], "val": []}}})
 
-    cal, hold = _good_dense_op_records()
+    cal, hold = shifted_cal_holdout()
     b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
@@ -117,8 +116,8 @@ def test_a_record_with_no_group_policy_still_catches_a_real_leak(tmp_path, monke
         str(tmp_path / "labels"): {"train": ["c_a", "other_stem"], "val": []}}})
 
     b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
-                                calibration_records=_op_records("c"),
-                                holdout_records=_op_records("h", shift=3.0),
+                                calibration_records=toy_records("c"),
+                                holdout_records=toy_records("h", shift=3.0),
                                 experiment_id="exp_ext2")
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -809,7 +808,7 @@ def test_stale_locked_stem_refuses_cleanly(tmp_path):
             stems_now, identity_hash="stale-test", scope_root=tmp_path, seed=1)
 
 
-def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path):
+def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path, monkeypatch):
     """Bound to the file backend: undecodable bytes behind a record have no seam expression (a
     write always encodes a valid value), so this reaches the file the seam's own locator places
     them at. What is under test, catching DecodeError, is the store's own concern, not the file
@@ -820,18 +819,21 @@ def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path):
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path, resolve_locked_cal_holdout_split
 
     tcip_store.bind(FileBackend())
-    lock_path = cal_holdout_lock_path("corrupt-test", scope_root=tmp_path)
+    # The module's seeded trait put the pinned root in the database, so this case uses its own.
+    scope = tmp_path / "file_backend_scope"
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(scope))
+    lock_path = cal_holdout_lock_path("corrupt-test", scope_root=scope)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("{not valid json", encoding="utf-8")
 
     with pytest.raises(ValueError, match="corrupt"):
         resolve_locked_cal_holdout_split(
-            ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=tmp_path, seed=1)
+            ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=scope, seed=1)
 
     # force_redraw=True is the deliberate, audited path past the corrupt file, but its
     # redraw_history honestly starts fresh (nothing recoverable from an unreadable file).
     redrawn = resolve_locked_cal_holdout_split(
-        ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=tmp_path, seed=1,
+        ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=scope, seed=1,
         force_redraw=True, timestamp="2026-01-01T00:00:00Z")
     assert len(redrawn["redraw_history"]) == 1
     assert redrawn["redraw_history"][0]["old_content_hash"] is None
@@ -1093,40 +1095,3 @@ def test_minor_resolve_model_identity_reads_the_codebase_own_stamped_checkpoints
     identity = resolve_model_identity(checkpoint)
     assert identity["experiment_id"] == "exp_abc"
 
-
-# --- shared record fixture (mirrors test_operating_point.py's _records) -----------------------
-
-def _op_box(cx: float, cy: float, s: float = 20.0) -> list[float]:
-    return [cx - s / 2, cy - s / 2, s, s]
-
-
-def _op_ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _op_box(cx, cy), "iscrowd": 0}
-    if score is not None:
-        a["score"] = score
-    return a
-
-
-def _op_records(idp="c", *, shift: float = 0.0):
-    a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_op_ann(100 + shift, 100)],
-         "dt": [_op_ann(100, 100, score=0.9), _op_ann(300, 300, score=0.6)]}
-    b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_op_ann(100 + shift, 100), _op_ann(200 + shift, 200)],
-         "dt": [_op_ann(100, 100, score=0.9), _op_ann(200, 200, score=0.3)]}
-    return [a, b]
-
-
-def _good_dense_op_records():
-    """A realistic dense reference for tests that expect the holdout gate to validate: the
-    2-image ``_op_records`` toy's per-image variance trips the equivalence criterion at n=2 (an
-    intended tightening; see test_operating_point.py for the same fixture idiom)."""
-    from tests._dense_op_fixtures import dense_records
-
-    n_images, objects_per_image = 20, 80
-    miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    return cal, hold

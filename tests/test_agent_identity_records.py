@@ -1,7 +1,7 @@
 """What a record says about the harness that wrote it, proven through the real server.
 
 The MCP server learns which harness connected from the initialize handshake and mints a session id
-of its own; every audit line and statement record the process then writes carries both, and the
+of its own; every audit line and trait revision the process then writes carries both, and the
 tools' one HTTP push sends them as headers. These cases run the real ``tcip-pipeline`` server in
 memory over the SDK's own streams with a client that declares a name and version, call the tools
 through that handshake, and read what landed. A call made with no handshake at all is the control:
@@ -22,10 +22,9 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
-from tcip_mcp import operationalization as op
 from tcip_mcp import traits
 from tcip_mcp.server import mcp as tcip_server
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
@@ -147,79 +146,34 @@ def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_el
     assert "harness_session" not in other_row and "harness_effort_at_connect" not in other_row
 
 
-# ── the statement records ────────────────────────────────────────────────────
+# ── the trait revision ───────────────────────────────────────────────────────
 
 
-def _operationalization_call(project: Path) -> tuple[str, dict]:
-    return ("state_trait_operationalization", {
-        "project_root": str(project),
-        "trait": fx.CROSSING_TRAIT,
-        "delivery_kind": op.STATE_CROSSING_DATES,
-        "statement": "the date each plant reached the state the breeder scores in the field",
-        "mechanism": "the calibrated state classifier over the isolated flowers of one plant",
-        "measured_subject": "flower",
-        "delivered_phenotypes": ["bloom_05per_date", "bloom_50per_date"],
-    })
+def test_a_trait_proposed_through_a_handshake_names_the_harness(tmp_path: Path) -> None:
+    """The entry travels as the tool's declared input schema, JSON over the real server."""
+    entry = fx.with_operationalization(
+        fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT)
 
-
-def test_an_operationalization_stated_through_a_handshake_names_the_harness(
-    tmp_path: Path,
-) -> None:
-    project = fx.seed_project(tmp_path / "project")
-
-    (record,) = call_through_handshake([_operationalization_call(project)])
-
-    assert record["stated_by"] == op.STATEMENT_SURFACE
-    assert record["agent_client_name"] == "reviewing-harness"
-    assert record["agent_client_version"] == "1.2.3"
-    assert record["agent_session"].startswith("mcp_")
-    assert record["terminal_session"] is None
-    stored = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)[1].value
-    assert stored["agent_session"] == record["agent_session"]
-
-
-def test_the_operationalization_hash_covers_the_identity_fields(tmp_path: Path) -> None:
-    """A confirmation covers the statement and its stated provenance together."""
-    project = fx.seed_project(tmp_path / "project")
-    (record,) = call_through_handshake([_operationalization_call(project)])
-
-    for field in IDENTITY_FIELDS:
-        assert field in op.STATEMENT_FIELDS
-        moved = {**record, field: "something else"}
-        assert op.record_seen_hash(moved) != op.record_seen_hash(record), field
-
-
-def test_an_operationalization_stated_with_no_handshake_carries_the_fields_empty(
-    tmp_path: Path,
-) -> None:
-    project = fx.seed_project(tmp_path / "project")
-
-    record = fx.state_crossing(project)
-
-    assert {record[f] for f in IDENTITY_FIELDS} == {None}
-
-
-def test_a_trait_spec_authored_through_a_handshake_names_the_harness(tmp_path: Path) -> None:
-    (statement,) = call_through_handshake([("author_trait_spec", {
-        "project_root": str(tmp_path),
-        "trait": "bloom_authored",
-        "delivers": ["bloom_05per_date"],
-        "positive_value": "open",
-        "milestone_fractions": [0.05],
-        "milestone_on": "positive_fraction",
-        "rationale": "the breeder described the state directly, in their own field-scoring terms",
+    (revision,) = call_through_handshake([("propose_trait", {
+        "project_root": str(tmp_path), "entry": entry.model_dump(mode="json"),
+        "rationale": "the breeder described the count in their own field-scoring terms",
     })])
 
-    assert statement["stated_by"] == traits.TRAIT_SPEC_STATEMENT_SURFACE
-    assert statement["agent_client_name"] == "reviewing-harness"
-    assert statement["agent_client_version"] == "1.2.3"
-    assert statement["agent_session"].startswith("mcp_")
-    for field in IDENTITY_FIELDS:
-        assert field in traits.TRAIT_SPEC_STATEMENT_FIELDS
-        moved = {**statement, field: "something else"}
-        assert traits.trait_spec_statement_seen_hash(moved) != traits.trait_spec_statement_seen_hash(
-            statement
-        ), field
+    agent = revision["proposing_agent"]
+    assert agent["agent_client_name"] == "reviewing-harness"
+    assert agent["agent_client_version"] == "1.2.3"
+    assert agent["agent_session"].startswith("mcp_")
+    assert agent["terminal_session"] is None
+    stored = traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest
+    assert stored.proposing_agent == agent
+    assert stored.entry == entry and stored.entry_sha256 == traits.entry_sha256(entry)
+
+
+def test_a_trait_proposed_with_no_handshake_carries_the_fields_empty(tmp_path: Path) -> None:
+    revision = fx.propose(tmp_path, fx.COUNT_SPEC)
+
+    assert set(revision.proposing_agent) == set(IDENTITY_FIELDS)
+    assert set(revision.proposing_agent.values()) == {None}
 
 
 # ── the HTTP push ────────────────────────────────────────────────────────────

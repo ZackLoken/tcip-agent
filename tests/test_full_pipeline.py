@@ -170,7 +170,7 @@ class TestFullClassificationPipeline:
             })
         # A genuinely validated bucket stands behind the export: the delivery gate refuses a bare
         # unvalidated write, and this door takes no acknowledgment at all.
-        from tests import _operationalization_fixtures as fx
+        from tests import _trait_fixtures as fx
         from tests._binding_fixtures import write_bound_sidecar, write_prediction
         from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
@@ -183,7 +183,7 @@ class TestFullClassificationPipeline:
                                                  "validated_against": VALIDATED_HELD_OUT}},
                     "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
-        export_detection_csv(csv_results, csv_path, trait=fx.COUNT_TRAIT,
+        export_detection_csv(csv_results, csv_path, revision=fx.count_revision(tmp_path),
                              operating_point_validated=VALIDATED_HELD_OUT,
                              pred_dirs=[str(bucket)])
 
@@ -332,7 +332,7 @@ class TestDetectionPipelineRealData:
 
         # --- Step 5: Export detection CSV ---
         csv_path = str(out / "bud_detections.csv")
-        from tests import _operationalization_fixtures as fx
+        from tests import _trait_fixtures as fx
         from tests._binding_fixtures import write_bound_sidecar, write_prediction
         from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
@@ -345,7 +345,7 @@ class TestDetectionPipelineRealData:
                                                  "validated_against": VALIDATED_HELD_OUT}},
                     "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
-        export_detection_csv(results, csv_path, trait=fx.COUNT_TRAIT,
+        export_detection_csv(results, csv_path, revision=fx.count_revision(tmp_path),
                              operating_point_validated=VALIDATED_HELD_OUT,
                              pred_dirs=[str(bucket)])
 

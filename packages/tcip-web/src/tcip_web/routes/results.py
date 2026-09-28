@@ -1,8 +1,8 @@
-"""Results routes: plant-mapping, per-plant phenology curves, CSV export, and the
-operationalization and trait-spec confirmations.
+"""Results routes: plant-mapping, per-plant phenology curves, CSV export, and the traits with the
+breeder's confirmation of a trait revision.
 
 The delivered target is a per-plant CSV of a registered trait's own milestone-date columns
-(``<phenology_prefix>_<NN>per_date`` for each milestone its ``TraitSpec`` declares; every
+(``<phenology_prefix>_<NN>per_date`` for each milestone its ``TraitEntry`` declares; every
 registered trait has its own prefix and milestone set, resolved from the spec). That pipeline looks
 like:
 
@@ -14,9 +14,6 @@ like:
 The positive-state fraction is the share of a plant's detections of the trait's object that are in
 its positive/measured state, from a validated classifier. The milestone math lives in
 ``tcip_mcp.pipelines.postprocessing.phenology``.
-
-This module also serves the operationalization record (what a trait's delivered number means, who
-recorded it) and writes the breeder's confirmation of it.
 """
 
 from __future__ import annotations
@@ -39,6 +36,7 @@ from tcip_web.state import store
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
     from tcip_mcp.pipelines.resolution import DeliveryRefused
+    from tcip_mcp.traits import TraitRecord, TraitRevision
 
 logger = logging.getLogger(__name__)
 
@@ -126,16 +124,6 @@ def _reference_file(path: str, request: Request) -> Path:
     if exposed_arrival(request.scope):
         return _guarded_path(path)
     return _resolved(path)
-
-
-def _under_project(root: Path, path: str) -> Path:
-    """A path a Results door writes, confined to the open project's own tree (never a dataset)."""
-    resolved = _resolved(path)
-    if not within(resolved, root):
-        raise HTTPException(
-            403, f"{path} is outside the open project {root}; a mapping or a delivery is project "
-                 "state and is written under the project itself")
-    return resolved
 
 
 def _guarded_project_root(project_root: str) -> Path:
@@ -365,12 +353,13 @@ class _PhenologyMeasurement:
     """One trait's per-plant phenology measurement plus the on-disk evidence that qualifies it."""
 
     def __init__(
-        self, spec, plants: dict, recon: dict, classifier_recon: dict,
+        self, revision, plants: dict, recon: dict, classifier_recon: dict,
         classifier_state: str | None, binding_note: str, tile_recon: dict, gate,
-        positive_class_id, project_root: Path, basis, predictions_by_date: dict[str, str],
+        positive_class_id, project_root: Path, predictions_by_date: dict[str, str],
         flags: dict[str, str | None], plant_mapping_disclosure: dict,
     ) -> None:
-        self.spec, self.plants, self.gate = spec, plants, gate
+        # The confirmed trait revision this measurement was computed and is delivered under.
+        self.revision, self.plants, self.gate = revision, plants, gate
         # The reconciliations this measurement was computed from, kept as the door itself ran
         # them rather than pre-flattened: bindings and validity are both derived from these.
         self.recon, self.classifier_recon = recon, classifier_recon
@@ -381,8 +370,6 @@ class _PhenologyMeasurement:
         self.pred_dirs = list(predictions_by_date.values())
         # The guarded, resolved root every later write and audit entry resolves from.
         self.project_root = project_root
-        # What the precondition rested on, re-checked before this measurement reaches a caller.
-        self.basis = basis
         # The dimension flags the gate above was computed from; validity["tile_size"] is None for
         # an untiled delivery, not the same as the key being absent from the gate's own flags.
         self.flags = flags
@@ -473,16 +460,12 @@ def _measure_phenology(
 ) -> _PhenologyMeasurement:
     """Compute a trait's phenology measurement and reconcile the evidence behind it.
 
-    Rows come from ``per_plant_phenology``; the validity that qualifies them is read from the
-    buckets' own sidecars through one gate, which the curve, milestone and CSV doors all share. The
-    spec and the operationalization record come from one call against the guarded root, and the
-    precondition runs before anything else. ``acknowledgment`` is built only by the export route.
+    Rows come from ``per_plant_phenology`` under the trait's confirmed revision, read first,
+    against the guarded root and the delivered dataset's registry; the validity that qualifies
+    them is read from the buckets' own sidecars through one gate. ``acknowledgment`` is the
+    breeder's own act of shipping unvalidated, or ``None``.
     """
-    from tcip_mcp.operationalization import (
-        STATE_CROSSING_DATES,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
+    from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
         check_delivery_gate,
@@ -490,25 +473,22 @@ def _measure_phenology(
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
-    from tcip_mcp.traits import TraitUnknownError
+    from tcip_mcp.traits import STATE_CROSSING_DATES, TraitUnknownError
 
     root = _open_project_root(payload.project_root)
-    try:
-        spec, record, _specs_dir = resolve_trait_and_record(
-            payload.trait, STATE_CROSSING_DATES, project_root=root)
-    except TraitUnknownError as e:
-        raise HTTPException(400, str(e)) from e
-
     resolved_dirs = _belonging(root, *payload.predictions_by_date.values())
     predictions_by_date = {
         date: str(p) for date, p in zip(payload.predictions_by_date, resolved_dirs) if p is not None
     }
-
-    # The delivered dataset's own registry, resolved from the buckets this delivery actually reads.
-    registry = _delivered_registry(list(predictions_by_date.values()))
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
-    if not stated.ok:
-        raise HTTPException(400, stated.as_detail())
+    try:
+        revision = confirmed_revision(
+            STATE_CROSSING_DATES, project_root=root, trait=payload.trait,
+            registry=_delivered_registry(list(predictions_by_date.values())))
+    except TraitUnknownError as e:
+        raise HTTPException(400, str(e)) from e
+    except OperationalizationRefused as e:
+        raise HTTPException(400, e.as_detail()) from e
+    spec = revision.entry
 
     try:
         mapping_build, verified = plant_mapping.resolve_delivery_mapping(
@@ -533,37 +513,15 @@ def _measure_phenology(
     try:
         plants = phenology.per_plant_phenology(
             mapping_raw, predictions_by_date,
-            positive_value=spec.positive_value, spec=spec, plants=payload.plants,
+            spec=spec, plants=payload.plants,
         )
     except phenology.measurement_refusals() as exc:
         raise HTTPException(400, str(exc)) from exc
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
-        spec, plants, recon, classifier_recon, classifier_state, binding_note, tile_recon,
-        gate, positive_class_id, root, stated.basis, predictions_by_date, flags,
+        revision, plants, recon, classifier_recon, classifier_state, binding_note, tile_recon,
+        gate, positive_class_id, root, predictions_by_date, flags,
         mapping_build.delivery_disclosure(verified, list(predictions_by_date)))
-
-
-def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
-    """Refuse when the confirmation this measurement was produced under moved while it was
-    produced.
-
-    Called immediately before a response body is composed and before the export door writes its
-    file, so a withdrawal or a spec edit mid-delivery leaves nothing delivered and nothing written.
-    """
-    from tcip_mcp.operationalization import (
-        STATE_CROSSING_DATES,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
-
-    spec, record, _specs_dir = resolve_trait_and_record(
-        trait, STATE_CROSSING_DATES, project_root=measurement.project_root)
-    registry = _delivered_registry(measurement.pred_dirs)
-    check = check_operationalization(
-        spec, record, STATE_CROSSING_DATES, registry=registry, basis=measurement.basis)
-    if not check.ok:
-        raise HTTPException(400, check.as_detail())
 
 
 def _refusal(measurement: _PhenologyMeasurement) -> str:
@@ -632,7 +590,6 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok and not payload.show_unvalidated:
         raise HTTPException(400, _refusal(measurement))
-    _still_stated(measurement, payload.trait)
     return {
         "curves": {
             "rows": measurement.curve_rows(),
@@ -719,7 +676,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     if not measurement.positive_class_assessed:
         raise HTTPException(
             400,
-            f"predictions carry no {measurement.spec.positive_value!r} class anywhere in this "
+            f"predictions carry no {measurement.revision.entry.positive_value!r} class anywhere in this "
             "delivery. The classifier that produced them never assessed this trait's positive "
             "class, so the positive fraction is not a valid measurement. Run and validate the "
             "classifier first.",
@@ -737,7 +694,6 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
-    _still_stated(measurement, payload.trait)
     from tcip_mcp.pipelines.resolution import ProducerDiffers, stamped_producer
 
     try:
@@ -752,8 +708,8 @@ def export_csv(payload: ExportCsvPayload) -> Response:
 
     try:
         write_csv(
-            "results.export_csv", rows, saved_path, measurement.spec,
-            flags=measurement.flags, acknowledgment=acknowledgment, basis=measurement.basis,
+            "results.export_csv", rows, saved_path, measurement.revision,
+            flags=measurement.flags, acknowledgment=acknowledgment,
             document_reconciliations=measurement.document_reconciliations, producer=producer,
             dimension_reconciliations=measurement.dimension_reconciliations,
             predictions_by_date=measurement.predictions_by_date,
@@ -838,9 +794,9 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     """Write the CSV for a per-image or per-plant count delivery, over the buckets (and, for the
     per-plant kind, the registered plant registry) this route confines to the open project.
 
-    ``per_image_count`` delegates to ``inference_tools.per_image_counts_from_bucket`` and
-    ``per_plant_count_aggregate`` to ``orthomosaic_tools.orthomosaic_plant_counts``. The core runs
-    its own meaning check first, with this door's own arguments, and raises
+    ``per_image_count`` resolves the trait's confirmed revision and delegates to
+    ``inference_tools.per_image_counts_from_bucket``; ``per_plant_count_aggregate`` delegates to
+    ``orthomosaic_tools.orthomosaic_plant_counts``, whose writer resolves it. Either raises
     ``OperationalizationRefused``.
 
     ``predictions_dir``/``raster_path`` are confined to the open project's own tree or a dataset
@@ -848,7 +804,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     the same way before the core ever reads it, so a registered, byte-valid CSV outside the
     project's roots refuses 403 up front. ``DeliveryRefused`` returns 400 with ``{"kind":
     "delivery_gate", "message", "unvalidated_dimensions", **facts}``; ``OperationalizationRefused``
-    returns 400 with the check's own ``as_detail()``; ``CountDeliveryRefused`` returns 400 with its
+    returns 400 with its own ``as_detail()``; ``CountDeliveryRefused`` returns 400 with its
     own message and facts. Each post is a distinct delivery with its own event: a second post
     naming the same ``filename`` overwrites the file, and the earlier event's own digest no longer
     describes it; ``supersede_delivery`` is the remedy.
@@ -867,14 +823,19 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
         if predictions_dir is None:
             raise HTTPException(
                 400, {"kind": "count_delivery", "message": "predictions_dir is required"})
+        from tcip_mcp.operationalization import confirmed_revision
         from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
+        from tcip_mcp.traits import PER_IMAGE_COUNT, TraitUnknownError
 
         try:
             result = per_image_counts_from_bucket(
-                str(predictions_dir), str(saved_path), trait=payload.delivery.trait,
+                str(predictions_dir), str(saved_path), revision=confirmed_revision(
+                    PER_IMAGE_COUNT, project_root=root, trait=payload.delivery.trait),
                 project_root=root, acknowledgment=acknowledgment)
+        except TraitUnknownError as exc:
+            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc)}) from exc
         except OperationalizationRefused as exc:
-            raise HTTPException(400, exc.check.as_detail()) from exc
+            raise HTTPException(400, exc.as_detail()) from exc
         except DeliveryRefused as exc:
             raise HTTPException(400, _count_gate_detail(exc)) from exc
         except CountDeliveryRefused as exc:
@@ -906,7 +867,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
                 canopy_subject=payload.delivery.canopy_subject,
                 project_root=root, acknowledgment=acknowledgment)
         except OperationalizationRefused as exc:
-            raise HTTPException(400, exc.check.as_detail()) from exc
+            raise HTTPException(400, exc.as_detail()) from exc
         except DeliveryRefused as exc:
             raise HTTPException(400, _count_gate_detail(exc)) from exc
         except CountDeliveryRefused as exc:
@@ -934,309 +895,6 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
 
     headers["X-TCIP-Acknowledged-By"] = quote(result.get("acknowledged_by") or "")
     return Response(content=body, media_type="text/csv", headers=headers)
-
-
-# ── What a delivered number means: the record, and the breeder's confirmation ──
-
-
-class ConfirmOperationalizationPayload(BaseModel):
-    """One breeder confirmation, or one withdrawal, for one trait's one delivery kind.
-
-    ``record_seen`` is the content hash of the record the surface rendered; a record rewritten
-    since refuses. ``user`` is the name the surface carries; when it is absent the backend falls
-    back to its own process identity and records that it did.
-    """
-
-    project_root: str
-    trait: str
-    delivery_kind: str
-    record_seen: str
-    user: Optional[str] = None
-    confirmed: bool = True
-
-
-def _operationalization_body(project_root: Path, trait: str, delivery_kind: str) -> dict:
-    """One record as the confirming surface reads it: what is stated, what covers it, what moved.
-
-    ``confirmed_current`` and ``superseded`` come from ``check_operationalization``. ``delivers``
-    quotes the crop vocabulary's own wording. Nothing stated yet reads as null statement fields
-    with ``confirmed_current`` false.
-    """
-    from tcip_mcp import operationalization as op
-    from tcip_mcp.traits import crops_definitions
-
-    spec, record, _specs_dir = op.resolve_trait_and_record(
-        trait, delivery_kind, project_root=project_root
-    )
-    registry = None
-    if delivery_kind == op.STATE_CROSSING_DATES:
-        # No prediction buckets are in scope for a record display, so this resolves the same
-        # project-root-or-single-registered-dataset the statement writer resolves against.
-        registry = op.resolve_statement_registry(str(project_root), "")
-    check = op.check_operationalization(spec, record, delivery_kind, registry=registry)
-    stated = record.value or {}
-    definitions = crops_definitions()
-    return {
-        "trait": trait,
-        "delivery_kind": delivery_kind,
-        **{field: stated.get(field) for field in op.STATEMENT_FIELDS},
-        "confirmed_by": stated.get("confirmed_by"),
-        "confirmed_at": stated.get("confirmed_at"),
-        "identity_from_request": stated.get("identity_from_request"),
-        "confirmed_current": check.ok,
-        "superseded": [dict(entry) for entry in check.superseded],
-        "registry_problem": check.registry_problem,
-        "delivers": [{"name": name, "definition": definitions.get(name)} for name in spec.delivers],
-        "record_seen": op.record_seen_hash(stated),
-    }
-
-
-@router.get("/operationalization")
-def get_operationalization(project_root: str, trait: str, delivery_kind: str) -> dict:
-    """What this trait's delivered number is recorded to mean, and whether it is confirmed now."""
-    from tcip_mcp.traits import TraitUnknownError
-
-    root = _guarded_project_root(project_root)
-    try:
-        return _operationalization_body(root, trait, delivery_kind)
-    except (TraitUnknownError, ValueError) as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@router.get("/operationalizations")
-def list_operationalizations(project_root: str) -> dict:
-    """Every operationalization record this project holds, one row per trait and delivery kind,
-    including kinds the Results tab cannot compute.
-
-    ``unresolved`` names a record whose trait is no longer registered, or whose delivery kind is
-    not one this platform declares.
-
-    ``statement_fields`` names the fields ``record_seen`` hashes, in the order a surface shows
-    them.
-    """
-    import tcip_store as ts
-    from tcip_mcp import operationalization as op
-    from tcip_mcp.traits import TraitUnknownError
-
-    root = _guarded_project_root(project_root)
-    records: list[dict] = []
-    unresolved: list[dict] = []
-    for key in ts.keys(op.OPERATIONALIZATIONS_STORE, str(op.operationalizations_scope(root))):
-        trait, delivery_kind = key.parts
-        try:
-            records.append(_operationalization_body(root, trait, delivery_kind))
-        except (TraitUnknownError, ValueError) as e:
-            unresolved.append(
-                {"trait": trait, "delivery_kind": delivery_kind, "reason": str(e)}
-            )
-    return {
-        "records": records,
-        "unresolved": unresolved,
-        "statement_fields": list(op.STATEMENT_FIELDS),
-    }
-
-
-@router.post("/operationalization/confirm")
-def confirm_operationalization(payload: ConfirmOperationalizationPayload) -> dict:
-    """Record the breeder's confirmation of what is on file, or withdraw one they gave before.
-
-    Refused with 400 when nothing is stated for this trait and kind, or the trait is not registered
-    for this project, and with 409 when the record moved since the surface read it, the body then
-    carrying what is on file. ``confirmed`` false withdraws, clearing the four confirmation fields
-    and leaving the statement.
-
-    Records a name the request supplied, whether the request supplied one at all, and an audit
-    entry; it is not authentication.
-    """
-    from tcip_mcp import operationalization as op
-    from tcip_mcp.traits import TraitUnknownError
-
-    from tcip_web.identity import resolve_user, user_id
-
-    root = _guarded_project_root(payload.project_root)
-    # The writer applies the user: convention to whatever name it is given, so it is passed bare.
-    actor = resolve_user(payload.user)
-    identity_from_request = bool((payload.user or "").strip())
-    try:
-        record = op.confirm_trait_operationalization(
-            root,
-            payload.trait,
-            payload.delivery_kind,
-            user=actor,
-            record_seen=payload.record_seen,
-            identity_from_request=identity_from_request,
-            confirmed=payload.confirmed,
-        )
-    except op.RecordMoved as e:
-        raise HTTPException(
-            409,
-            {
-                "message": str(e),
-                "record": _operationalization_body(root, payload.trait, payload.delivery_kind),
-            },
-        ) from e
-    except (TraitUnknownError, ValueError) as e:
-        raise HTTPException(400, str(e)) from e
-
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
-
-    audit_warning: Optional[str] = None
-    try:
-        record_event_or_raise(
-            "results.confirm_trait_operationalization",
-            {
-                "trait": payload.trait,
-                "delivery_kind": payload.delivery_kind,
-                "confirmed": payload.confirmed,
-                "identity_from_request": identity_from_request,
-            },
-            source="gui",
-            scope=str(root),
-            user=user_id(actor),
-        )
-    except AuditEntryNotWritten as e:
-        audit_warning = str(e)
-
-    body = {field: record[field] for field in op.CONFIRMATION_FIELDS}
-    body["audit_warning"] = audit_warning
-    return body
-
-
-# ── What a trait's own semantics mean: the authoring statement, and its confirmation ──
-
-
-def _trait_spec_statement_body(project_root: Path, trait: str) -> dict:
-    """One trait's authoring statement as the confirming surface reads it.
-
-    ``confirmed_current`` is read-time drift detection against the live spec
-    (``traits.trait_spec_statement_current``). ``statement_fields`` carries the authored
-    ``TraitSpec`` fields exactly as the statement recorded them. Nothing stated yet reads as null
-    statement fields with ``confirmed_current`` false.
-    """
-    import tcip_store as ts
-    from tcip_mcp import traits
-
-    spec = traits.get_trait_for(trait, project_root)
-    scope = traits.trait_spec_statements_scope(project_root)
-    key = traits.trait_spec_statement_key(scope, trait)
-    stored = ts.read_versioned(key, default=None)
-    stated = stored.value or {}
-    return {
-        "trait": trait,
-        **{field: stated.get(field) for field in traits.TRAIT_SPEC_STATEMENT_FIELDS},
-        "confirmed_by": stated.get("confirmed_by"),
-        "confirmed_at": stated.get("confirmed_at"),
-        "identity_from_request": stated.get("identity_from_request"),
-        "confirmed_current": traits.trait_spec_statement_current(spec, stated),
-        "record_seen": traits.trait_spec_statement_seen_hash(stated),
-    }
-
-
-@router.get("/trait-spec-statement")
-def get_trait_spec_statement(project_root: str, trait: str) -> dict:
-    """What this trait's own semantics were authored to mean, and whether that is confirmed now."""
-    from tcip_mcp.traits import TraitUnknownError
-
-    root = _guarded_project_root(project_root)
-    try:
-        return _trait_spec_statement_body(root, trait)
-    except TraitUnknownError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@router.get("/trait-spec-statements")
-def list_trait_spec_statements(project_root: str) -> dict:
-    """Every trait-spec authoring statement this project holds, one row per trait. ``unresolved``
-    names a statement whose trait is no longer registered.
-    """
-    import tcip_store as ts
-    from tcip_mcp import traits
-    from tcip_mcp.traits import TraitUnknownError
-
-    root = _guarded_project_root(project_root)
-    records: list[dict] = []
-    unresolved: list[dict] = []
-    scope = traits.trait_spec_statements_scope(root)
-    for key in ts.keys(traits.TRAIT_SPEC_STATEMENTS_STORE, str(scope)):
-        (trait,) = key.parts
-        try:
-            records.append(_trait_spec_statement_body(root, trait))
-        except TraitUnknownError as e:
-            unresolved.append({"trait": trait, "reason": str(e)})
-    return {
-        "records": records,
-        "unresolved": unresolved,
-        "statement_fields": list(traits.TRAIT_SPEC_STATEMENT_FIELDS),
-    }
-
-
-class ConfirmTraitSpecPayload(BaseModel):
-    """One breeder confirmation, or one withdrawal, for one trait's authoring statement.
-    ``record_seen`` is the content hash of the statement the surface rendered.
-    """
-
-    project_root: str
-    trait: str
-    record_seen: str
-    user: Optional[str] = None
-    confirmed: bool = True
-
-
-@router.post("/trait-spec-statement/confirm")
-def confirm_trait_spec_statement(payload: ConfirmTraitSpecPayload) -> dict:
-    """Record the breeder's confirmation of a trait's own authored semantics, or withdraw one.
-
-    Refused with 400 when nothing is stated for this trait, and with 409 when the statement moved
-    since the surface read it, the body then carrying what is on file.
-
-    A failed audit append does not refuse an otherwise-successful confirmation; it rides back as
-    ``audit_warning`` on an ordinary 200 body.
-    """
-    from tcip_mcp import traits
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
-
-    from tcip_web.identity import resolve_user, user_id
-
-    root = _guarded_project_root(payload.project_root)
-    actor = resolve_user(payload.user)
-    identity_from_request = bool((payload.user or "").strip())
-    try:
-        record = traits.confirm_trait_spec(
-            root,
-            payload.trait,
-            user=actor,
-            record_seen=payload.record_seen,
-            identity_from_request=identity_from_request,
-            confirmed=payload.confirmed,
-        )
-    except traits.TraitSpecStatementMoved as e:
-        raise HTTPException(
-            409,
-            {
-                "kind": "trait_spec_authoring",
-                "message": str(e),
-                "record": _trait_spec_statement_body(root, payload.trait),
-            },
-        ) from e
-    except (traits.TraitSpecStatementNotFound, ValueError) as e:
-        raise HTTPException(400, str(e)) from e
-
-    audit_warning: Optional[str] = None
-    try:
-        record_event_or_raise(
-            "results.confirm_trait_spec",
-            {"trait": payload.trait, "confirmed": payload.confirmed,
-             "identity_from_request": identity_from_request},
-            source="gui",
-            scope=str(root),
-            user=user_id(actor),
-        )
-    except AuditEntryNotWritten as e:
-        audit_warning = str(e)
-
-    body = {field: record[field] for field in traits.TRAIT_SPEC_CONFIRMATION_FIELDS}
-    body["audit_warning"] = audit_warning
-    return body
 
 
 # ── What has shipped: the delivery-event record, read-only ─────────────
@@ -1282,28 +940,103 @@ def list_delivery_events(project_root: str) -> dict:
     return {"records": with_supersessions(records, load_delivery_supersessions(root))}
 
 
-# ── Registered traits (drives the Results tab's trait selection) ───────
+# ── Traits and the breeder's confirmation of a revision ────────────────
+
+
+def _served_revision(revision: TraitRevision) -> dict:
+    """One revision as the trait routes serve it, with its ``confirmed`` state."""
+    return {**revision.model_dump(mode="json"), "confirmed": revision.confirmed}
+
+
+def _served(name: str, record: TraitRecord) -> dict:
+    """One trait's record as the trait routes serve it: each revision as
+    :func:`_served_revision` states it, and ``latest_confirmed``, the number of the revision a
+    delivery reads, or ``None``."""
+    latest_confirmed = record.latest_confirmed
+    return {
+        "trait": name,
+        "revisions": [_served_revision(r) for r in record.revisions],
+        "latest_confirmed": latest_confirmed.number if latest_confirmed else None,
+    }
 
 
 @router.get("/traits")
 def list_traits(project_root: str) -> dict:
-    """Traits registered for this project.
+    """Every trait this project holds, each as :func:`_served` states it, revisions oldest first.
 
-    ``milestone_fractions_by_trait`` carries each trait's declared milestone fractions verbatim.
-    ``invalid_specs`` names every spec file under this project's registry that failed to load and
-    why.
+    ``definitions`` quotes crops.yml's own definition of every phenotype a revision delivers.
+    ``unreadable`` names each trait whose stored record its schema refuses, and why.
     """
-    root = _guarded_project_root(project_root)
-    from tcip_mcp.traits import load_trait_specs_with_errors
+    from pydantic import ValidationError
+    from tcip_mcp.traits import crops_definitions, read_trait, trait_names
 
-    specs, errors = load_trait_specs_with_errors(project_root=root)
+    root = _guarded_project_root(project_root)
+    records: list[dict] = []
+    unreadable: list[dict] = []
+    for name in trait_names(root):
+        try:
+            records.append(_served(name, read_trait(name, root)))
+        except ValidationError as exc:
+            unreadable.append({"trait": name, "reason": str(exc)})
+    definitions = crops_definitions()
+    delivered = {p for r in records for rev in r["revisions"] for p in rev["entry"]["delivers"]}
     return {
-        "traits": sorted(spec.name for spec in specs),
-        "milestone_fractions_by_trait": {
-            spec.name: list(spec.milestone_fractions) for spec in specs
-        },
-        "invalid_specs": errors,
+        "traits": records,
+        "unreadable": unreadable,
+        "definitions": {p: definitions[p] for p in sorted(delivered) if p in definitions},
     }
+
+
+class ConfirmRevisionPayload(BaseModel):
+    """The breeder's confirmation of one trait revision, or the withdrawal of one they gave.
+
+    ``entry_sha256`` is the hash of the entry the surface showed. ``user`` is the name the surface
+    carries; when it is absent the backend falls back to its own process identity and records that
+    it did.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_root: str
+    trait: str
+    revision: int
+    entry_sha256: str
+    user: Optional[str] = None
+    confirmed: bool
+
+
+@router.post("/traits/confirm")
+def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
+    """Record the breeder's confirmation of a trait revision, or withdraw one, through
+    ``traits.confirm_revision``.
+
+    Refused with 409 when the hash is not the revision's own, the body carrying the trait's record
+    as it stands, and with 400 for every other refusal. A committed confirmation whose audit line
+    could not be written returns the revision with that failure as ``audit_warning``. Records a
+    name the request supplied and whether it supplied one; it is not authentication.
+    """
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.traits import RevisionMoved, TraitUnknownError, confirm_revision, read_trait
+
+    from tcip_web.identity import resolve_user
+
+    root = _guarded_project_root(payload.project_root)
+    # The writer applies the user: convention to whatever name it is given, so it is passed bare.
+    actor = resolve_user(payload.user)
+    audit_warning: Optional[str] = None
+    try:
+        revision = confirm_revision(
+            root, payload.trait, payload.revision, payload.entry_sha256, user=actor,
+            identity_from_request=bool((payload.user or "").strip()), confirmed=payload.confirmed)
+    except AuditEntryNotWritten as e:
+        revision = read_trait(payload.trait, root).revisions[payload.revision - 1]
+        audit_warning = str(e)
+    except RevisionMoved as e:
+        record = _served(payload.trait, read_trait(payload.trait, root))
+        raise HTTPException(409, {"message": str(e), "record": record}) from e
+    except (TraitUnknownError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+    return {**_served_revision(revision), "audit_warning": audit_warning}
 
 
 # ── List registered models (used by Inference tab) ─────────────────────

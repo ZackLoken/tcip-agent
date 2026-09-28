@@ -217,6 +217,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "validate_data_quality",
         # Merged into run_inference, the one door that persists a prediction bucket.
         "export_predictions",
+        # Merged into propose_trait, the one door that proposes a trait's whole entry.
+        "author_trait_spec", "revise_trait_spec", "state_trait_operationalization",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

@@ -12,23 +12,11 @@ from PIL import Image  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module drives a stubbed predictor, not a real registered checkpoint;
-    load_registered_checkpoint is stubbed to admit whatever path it is given, carrying the real
-    file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
-    otherwise.
-    """
-    from pathlib import Path
+    """Every test in this module drives a stubbed predictor; some assertions check the
+    checkpoint file's own digest."""
+    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
 
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    def _stub(path, *a, **kw):
-        p = Path(path)
-        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
-        return stub_verified_checkpoint(str(path), sha256=sha)
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
 
 
 def _ckpt(tmp_path, name: str = "ckpt.pt") -> str:
@@ -171,6 +159,7 @@ def test_deliver_per_image_counts_forwards_selection_dir_to_run_inference(tmp_pa
     """A manifest-restricted calibration's evidence can only earn a validation record through
     this door if the door actually forwards selection_dir to run_inference."""
     import tcip_mcp.tools.inference_tools as itools
+    from tests import _trait_fixtures as fx
 
     captured = {}
 
@@ -179,16 +168,10 @@ def test_deliver_per_image_counts_forwards_selection_dir_to_run_inference(tmp_pa
         return {"error": "stop: plumbing check only"}
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    stated = type("Stated", (), {"ok": True, "message": ""})()
-    monkeypatch.setattr(
-        "tcip_mcp.operationalization.resolve_trait_and_record",
-        lambda trait, kind: (object(), object(), tmp_path))
-    monkeypatch.setattr(
-        "tcip_mcp.operationalization.check_operationalization",
-        lambda spec, record, kind, registry=None: stated)
+    fx.seed_confirmed_count(tmp_path)
 
     itools.deliver_per_image_counts(
-        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait="some_trait",
+        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait=fx.COUNT_TRAIT,
         selection_dir=str(tmp_path / "m"))
 
     assert captured.get("selection_dir") == str(tmp_path / "m")

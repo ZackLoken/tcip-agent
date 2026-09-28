@@ -108,7 +108,7 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
 
 
 def _calibrate(checkpoint: str, images: Path, reference: Path, out: Path) -> dict:
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -118,10 +118,10 @@ def _calibrate(checkpoint: str, images: Path, reference: Path, out: Path) -> dic
 
 
 def test_a_run_that_recorded_no_subject_is_refused_calibration_by_name(tmp_path: Path):
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     images, masks, reference = _capture(tmp_path / "ds")
-    fx.write_spec(tmp_path, fx.COUNT_SPEC)
+    fx.propose(tmp_path, fx.COUNT_SPEC)
     data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
                 "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
     checkpoint = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)

@@ -143,11 +143,12 @@ def test_no_document_refuses_as_already_republishable(tmp_path, monkeypatch):
     re-publishable in place through run_inference."""
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.dataset_layout import prediction_dir
-    from tests._clear_prediction_bucket_fixtures import stub_checkpoint_verification, stub_predictor
+    from tests._clear_prediction_bucket_fixtures import stub_predictor
+    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
 
     stub_predictor(monkeypatch)
-    stub_checkpoint_verification(monkeypatch)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
     dataset_root = tmp_path / "ds"
     empty_images = tmp_path / "empty_images"
     empty_images.mkdir()
@@ -169,11 +170,11 @@ def test_no_document_refuses_as_already_republishable(tmp_path, monkeypatch):
 
 
 def test_detection_verdict_refuses_carrying_review_state(tmp_path, monkeypatch):
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expVerdict")
-    review_state_dir = review_state_dir_of(built["dataset_root"])
+    review_state_dir = project_state_dir(built["dataset_root"])
     record_review_verdict(built["bucket"], review_state_dir, "img.png")
 
     result = clear_prediction_bucket(str(built["bucket"]), "should refuse: review state")
@@ -185,11 +186,11 @@ def test_zero_verdict_complete_refuses_carrying_review_state(tmp_path, monkeypat
     """A bulk-accepted image carries no detection verdict, but this door refuses a bucket carrying
     review state, not only its documents: review_state_count sees it where verdict_count would
     not."""
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expBulkAccept")
-    review_state_dir = review_state_dir_of(built["dataset_root"])
+    review_state_dir = project_state_dir(built["dataset_root"])
     mark_bulk_accepted(built["bucket"], review_state_dir, "img.json")
 
     result = clear_prediction_bucket(str(built["bucket"]), "should refuse: bulk accept")
@@ -202,11 +203,11 @@ def test_review_on_removed_document_still_refuses(tmp_path, monkeypatch):
     the stem no longer holds a document."""
     import tcip_store as ts
     from tcip_annotation.json_io import annotation_record_key
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expRemovedDoc")
-    review_state_dir = review_state_dir_of(built["dataset_root"])
+    review_state_dir = project_state_dir(built["dataset_root"])
     record_review_verdict(built["bucket"], review_state_dir, "img.png")
     ts.delete(annotation_record_key(built["bucket"], "img"))
 
@@ -324,12 +325,11 @@ def test_bracket_names_no_remedy_when_the_recorded_pointer_is_a_bucket_the_door_
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._clear_prediction_bucket_fixtures import (
-        stub_checkpoint_verification, stub_predictor, write_image,
-    )
+    from tests._clear_prediction_bucket_fixtures import stub_predictor, write_image
+    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
 
     stub_predictor(monkeypatch)
-    stub_checkpoint_verification(monkeypatch)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
     exp_id = "expBracketBespokePointer"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")

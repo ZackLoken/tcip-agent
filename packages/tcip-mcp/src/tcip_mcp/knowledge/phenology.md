@@ -21,7 +21,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 
 | Trait | Definition |
 |-------|------------|
-| `catkin_elongation_date` | date most catkins have elongated (`crops.yml`: "Date when most catkins have elongated"); see the crossing-unconfirmed operationalization below for what this maps to |
+| `catkin_elongation_date` | date most catkins have elongated (`crops.yml`: "Date when most catkins have elongated"); the trait's confirmed revision states which crossing this maps to (below) |
 | `catkin_05per_date` | date the elongated fraction crosses 5% |
 | `catkin_50per_date` | date the elongated fraction crosses 50% |
 | `catkin_95per_date` | date the elongated fraction crosses 95% |
@@ -30,19 +30,13 @@ Crossings interpolate linearly between the two neighboring capture dates. Pistil
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower elongation/receptivity call.
 
-> Crossing-unconfirmed operationalization (pending breeder confirmation). `crops.yml` is the
-> immutable authority ("Date when most catkins have elongated"). The implementation computes
-> `catkin_elongation_date` as the 95% majority crossing (= `catkin_95per_date`), the
-> current best-guess reading of that text, recorded on the trait spec as `majority_milestone`
-> and flagged crossing-unconfirmed via `crossing_unconfirmed`. That confirmation path is not
-> `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
-> (`positive_value`, `milestone_on`, `milestone_fractions`) and does not touch this
-> mapping; a disagreement over which crossing the majority date means is corrected on the
-> trait spec itself, through `revise_trait_spec` (or set at authoring time via
-> `author_trait_spec`), not this file. Since `majority_milestone` and `crossing_unconfirmed`
-> are authored fields, that correction restates the trait spec's own authoring statement for
-> the breeder's re-confirmation. `positive_onset_date`
-> (first date any elongation appears) remains a separate helper, not the delivered trait.
+> Which crossing the majority date means. `crops.yml` is the immutable authority ("Date when
+> most catkins have elongated"). The crossing `catkin_elongation_date` is computed at is the
+> trait entry's `majority_milestone`, and it answers for a delivery only once the breeder has
+> confirmed the revision stating it in the Setup tab. A disagreement over which crossing the
+> majority date means is corrected in the entry itself, as a new revision proposed with
+> `propose_trait`, not in this file. `positive_onset_date` (first date any elongation appears)
+> remains a separate helper, not the delivered trait.
 
 Not a count-of-peak. Do not normalize catkin *count* to the season peak and call the
 crossings bloom; that is an abundance signal and a different (wrong) trait. There is no
@@ -71,7 +65,7 @@ count-bias gate). See the `evaluation` skill.
 per date:  images ─► detect catkins ─► call each catkin elongated vs not (validated)
                   ─► write per-image JSON preds (carrying the elongation call)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
-                  ─► crossings at 5/50/95% (see the crossing-unconfirmed operationalization above) ─► per-plant CSV
+                  ─► crossings at 5/50/95% (and the confirmed majority crossing above) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable
 ```
 
@@ -91,9 +85,9 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | `register_plant_registry` (MCP tool) | `tools/phenology_tools.py` | names a plant-locations CSV set once (`{path, sha256, n_plants}` per file, `crop`, `site`, a content digest), so `build_plant_mapping` and `deliver_orthomosaic_plant_counts` read the same registered version instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + a `plant_registry` name → a named mapping persisted under the project. A same-name rebuild a delivery event still cites refuses by name unless `supersede=True`, which archives the cited record first (readable by digest, never enumerated) |
 | `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
-| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, and the gated delivery doors `write_phenology_csv` / `write_phenology_curve_csv` (both refuse without a passing operationalization basis) |
+| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, and the gated delivery doors `write_phenology_csv` / `write_phenology_curve_csv` (both write under the trait's confirmed revision and name it on the delivery event) |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`, `register_plant_registry_record`, `load_registry`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs (read through the named registry) at delivery time |
-| Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
+| Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (the traits and their revision confirmation, delivery events, registered models) not enumerated here |
 
 Milestone math lives once, in the `phenology` module; plant mapping lives once, in the
 `plant_mapping` module. The MCP tools and the web routes all call them. If you change a
@@ -102,20 +96,14 @@ definition, change it there; never fork a second copy. So the agent composes too
 `deliver_phenology_milestones`.
 
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
-count objective exists for this trait, persist it with `revise_trait_spec(project_root,
-trait_name, fields, rationale=...)`, the one audited write path for a `TraitSpec`'s fields
-(`count_objective`, `localization`, `positive_value`, ...; the positive value must be a value
-one of the measured subject's attributes declares in the delivered dataset's own subject registry,
-checked when the crossing statement is made and again at every delivery). It refuses if the trait
-has no existing spec file; register one first with `author_trait_spec(project_root, trait,
-delivers, rationale, ...)`, which records the breeder's own account of the trait's measurement for
-their later confirmation in the GUI. `revise_trait_spec` re-validates the merged spec against
-`crops.yml` before writing. `state_trait_operationalization` itself refuses unless this trait's
-own trait-spec statement is confirmed and current, so the breeder confirms what the trait
-measures before the agent states what its delivered number means. A revision that moves an
-authored field (`count_objective` among them) restates that statement for the breeder's
-re-confirmation; `fields={}` with a rationale states a spec that has no statement yet or
-restates one that has gone stale. Never hand-write the trait's spec YAML directly.
+count objective exists for this trait, record it with `propose_trait(project_root, entry,
+rationale)`, the one write path for a trait: it takes the complete entry (the spec fields, such as
+`count_objective`, `localization` and `positive_value`, and the operationalization per delivery
+kind) and appends it as a new, unconfirmed revision. The positive value must be a value one of
+the measured subject's attributes declares in the delivered dataset's own subject registry,
+checked when the revision is proposed and again at every delivery. The breeder confirms the whole
+revision, spec fields and operationalizations together, in the Setup tab; a delivery ships under
+the latest confirmed revision and names it on its event. Never hand-write the trait's record.
 
 Don't confuse `annotation_tools.score_predictions` (IoU GT-vs-prediction *eval* matching, a
 library call) with plant-GPS mapping; they are unrelated.

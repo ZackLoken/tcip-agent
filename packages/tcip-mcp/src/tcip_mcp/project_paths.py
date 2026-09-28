@@ -13,16 +13,7 @@ process that opts in (``from_marker=True``) binds from the workspace's active-pr
 one names an adoptable project, else keeps whatever it inherited, else the repo root. A process
 that does not opt in falls back to the inherited variable, else the repo root. Either way the
 decision is recorded in a :class:`RootBinding`, returned by :func:`root_binding`.
-
-Adopting a project (``workspace.activate_project``) repins the adopting process's own variable to
-``<workspace>/<project>`` through :func:`repin_platform_root`, so the platform's own audit log,
-experiments, and registry all land under that project from then on; a training run in flight keeps
-writing to the root it started under. No operation other than an adopt changes a running process's
-root.
-
-Data-side project state (images, ``gui.json``, reports, retrospectives) is addressed by an explicit
-``project_path`` (the workspace project); after adoption the platform root equals that project, so
-the two coincide.
+:func:`repin_platform_root` moves a running process's root to an adopted project.
 """
 
 from __future__ import annotations
@@ -89,6 +80,12 @@ def resolve_state(path: Path) -> Path:
         return path
     override = os.environ.get(ENV_VAR)
     return Path(override) / path if override else path
+
+
+def project_state_dir(project_root: str | Path | None) -> Path:
+    """A project's ``<root>/.tcip/state``; ``None`` resolves it against the pinned root."""
+    relpath = Path(".tcip") / "state"
+    return Path(project_root) / relpath if project_root is not None else resolve_state(relpath)
 
 
 def resolve_state_or(path: Path, fallback: Path) -> Path:

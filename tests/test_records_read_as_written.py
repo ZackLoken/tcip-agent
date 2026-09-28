@@ -52,43 +52,34 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
         load_registered_checkpoint(str(unstated), project_path=str(tmp_path)).task
 
 
-def test_an_authored_trait_spec_restates_through_its_carried_forward_fields(tmp_path: Path) -> None:
-    import tcip_store as ts
-
+def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(tmp_path: Path) -> None:
     from tcip_mcp import traits
 
-    def _author() -> dict:
-        return traits.author_trait_spec(
-            str(tmp_path), "leaf", delivers=("leaf_length",),
-            rationale="the breeder described the measurement in their own terms")
+    from tests import _trait_fixtures as fx
 
-    _author()
-    scope = traits.trait_spec_statements_scope(tmp_path)
-    key = traits.trait_spec_statement_key(scope, "leaf")
-    ts.delete(key, expect=ts.read_versioned(key).version)
+    proposed = fx.entry("leaf", ("leaf_length",))
+    fx.propose(tmp_path, proposed)
 
-    restated = _author()
-
-    assert restated["trait"] == "leaf"
-    assert traits.get_trait_for("leaf", str(tmp_path)).delivers == ("leaf_length",)
+    assert traits.read_trait("leaf", tmp_path).latest.entry == proposed
 
 
-def test_an_authored_trait_spec_record_lacking_a_field_fails_at_the_decoder(tmp_path: Path) -> None:
+def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(tmp_path: Path) -> None:
     import pytest
     import tcip_store as ts
+    from pydantic import ValidationError
 
     from tcip_mcp import traits
 
-    traits.author_trait_spec(
-        str(tmp_path), "fruit", delivers=("leaf_length",),
-        rationale="the breeder described the measurement in their own terms")
-    key = traits.trait_spec_key(traits.trait_specs_dir(tmp_path), "fruit")
-    stored = ts.read_versioned(key)
-    ts.replace(key, {k: v for k, v in stored.value.items() if k != "positive_value"},
-               expect=stored.version)
+    from tests import _trait_fixtures as fx
 
-    with pytest.raises(KeyError, match="positive_value"):
-        traits.get_trait_for("fruit", str(tmp_path))
+    fx.propose(tmp_path, fx.entry("fruit", ("leaf_length",)))
+    key = traits.trait_key(tmp_path, "fruit")
+    stored = ts.read_versioned(key)
+    del stored.value["revisions"][0]["entry"]["positive_value"]
+    ts.replace(key, stored.value, expect=stored.version)
+
+    with pytest.raises(ValidationError, match="positive_value"):
+        traits.read_trait("fruit", tmp_path)
 
 
 def test_a_sweep_manifest_lacking_its_status_fails_in_sweep_state(

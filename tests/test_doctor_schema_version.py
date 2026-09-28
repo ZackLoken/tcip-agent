@@ -14,7 +14,7 @@ import tcip_store as ts
 from tcip_mcp.dataset_layout import (
     image_status_key, region_completeness_digest_key, region_completeness_key,
 )
-from tcip_mcp.traits import trait_spec_key, trait_specs_dir
+from tcip_mcp.traits import trait_key
 from tcip_store.file_backend import FileBackend
 
 PY_EXE = sys.executable
@@ -79,18 +79,17 @@ def test_doctor_reports_the_digest_version_even_when_the_main_store_has_no_bucke
     assert res.returncode != 2
 
 
-def test_doctor_reports_a_version_refused_trait_spec_as_a_warning_not_a_crash(tmp_path):
+def test_doctor_reports_a_version_refused_trait_record_as_a_warning_not_a_crash(tmp_path):
     root = tmp_path / "proj"
     _project(root)
     (root / "images").mkdir(parents=True)
 
-    _plant(trait_spec_key(trait_specs_dir(root), "sometrait"),
-           {"schema_version": 3, "name": "sometrait"})
+    _plant(trait_key(root, "sometrait"), {"schema_version": 3, "revisions": []})
 
     res = _run(root)
 
     assert "sometrait" in res.stdout
-    assert "schema_version 3, above the 2 this reader knows" in res.stdout
+    assert "schema_version 3, above the 1 this reader knows" in res.stdout
     assert "Traceback" not in res.stderr
     assert res.returncode != 2
 

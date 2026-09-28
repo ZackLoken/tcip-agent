@@ -12,6 +12,7 @@ import { setSubjectColorOverride } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import type { Annotation, Detection, MatchesResponse } from "@/store/types";
 import { ReviewTab } from "@/tabs/ReviewTab";
+import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 // Konva needs a real 2D canvas; these tests exercise empty-state rendering, nav
 // bounds, and the matches-recompute effect, not drawing. Render Konva shapes as
@@ -166,11 +167,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
   // The validation-reference promotion resolves its trait from the project's own registered
   // traits (mirrors ResultsTab); one registered trait auto-selects with no picker shown.
-  vi.spyOn(resultsApi, "traits").mockResolvedValue({
-    traits: ["subject_a"],
-    milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
-    invalid_specs: [],
-  });
+  vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.results);
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue({

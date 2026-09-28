@@ -6,23 +6,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module drives a stubbed predictor, not a real registered checkpoint;
-    load_registered_checkpoint is stubbed to admit whatever path it is given, carrying the real
-    file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
-    otherwise.
-    """
-    from pathlib import Path
+    """Every test in this module drives a stubbed predictor; some assertions check the
+    checkpoint file's own digest."""
+    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
 
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    def _stub(path, *a, **kw):
-        p = Path(path)
-        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
-        return stub_verified_checkpoint(str(path), sha256=sha)
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
 
 
 def test_write_predictions_json_roundtrip_and_negative(tmp_path):

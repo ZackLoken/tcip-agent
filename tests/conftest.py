@@ -202,39 +202,22 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Seed a real bud_opening trait-spec record into this test's pinned platform state root.
-
-    There are no built-in traits anymore: ``get_trait("bud_opening")`` only resolves where a spec
-    record actually exists (``traits.py``). Writing the same values
-    ``tests/_trait_fixtures.BUD_OPENING`` holds keeps a test that calls
-    ``get_trait("bud_opening")``/``registered_traits()`` without authoring its own spec working,
-    the same as when a builtin was unconditionally present. Not autouse: an unrelated test's
-    platform state root should stay empty by default; request this explicitly in a test that
-    actually needs bud_opening registered.
+    """Propose and confirm ``tests/_trait_fixtures.BUD_OPENING`` in this test's pinned platform
+    state root, so measurement readers of ``bud_opening`` resolve. Not autouse: an unrelated
+    test's root stays empty.
     """
-    import dataclasses
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm
 
-    import tcip_store as ts
-
-    from tcip_mcp import traits
-    from tests._trait_fixtures import BUD_OPENING
-
-    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    data = {k: (list(v) if isinstance(v, tuple) else v)
-            for k, v in dataclasses.asdict(BUD_OPENING).items()}
-    spec, reason = traits._validate_and_write_spec(
-        traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT,
-    )
-    assert spec is not None, reason
+    propose_and_confirm(tmp_path, BUD_OPENING)
 
 
 @pytest.fixture
 def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
-    """Give the seeded bud_opening spec a confirmed ``state_crossing_dates`` record in the same
-    root, measuring the subject ``bud``. Requested alongside ``seed_bud_trait_spec``, never
-    autouse, so a test of the refusal gets a root without a record in it.
+    """Confirm a revision of bud_opening stating a ``state_crossing_dates`` operationalization of
+    the subject ``bud``, in the same root. Never autouse, so a test of the refusal gets a root
+    without one.
     """
-    from tests._operationalization_fixtures import seed_confirmed_crossing
+    from tests._trait_fixtures import seed_confirmed_crossing
 
     seed_confirmed_crossing(tmp_path, "bud_opening", measured_subject="bud")
 

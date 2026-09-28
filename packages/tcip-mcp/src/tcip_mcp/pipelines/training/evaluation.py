@@ -466,20 +466,19 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
                             class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
     """The localization criterion that governs a trait's phenotype count + model selection.
 
-    Reads the trait's recorded ``localization`` kind (center_match vs iou_match, traits.py) and
-    derives its per-dataset tolerance from the GT in hand. Returns ``{kind, tolerance |
+    Reads the ``localization`` kind of the trait's latest confirmed revision (refusing as
+    ``operationalization.latest_confirmed`` does) and derives its per-dataset tolerance from the GT
+    in hand. Returns ``{kind, tolerance |
     iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait), it is IoU
     matching at ``iou_threshold``, the labeled comparability convention (AP@0.5), which governs
     nothing on its own; a count trait's derived center-match tolerance is what the phenotype and
     checkpoint selection rest on.
 
-    ``localization`` is derived once, the first time real GT is available for a trait with no
-    recorded kind (via ``derivations.derive_localization_kind``), persisted through
-    ``traits.write_trait_spec_fields`` and recorded in the platform audit log naming the trait, the
-    field, the value and the derivation basis, and read from the recorded value on every later
-    call. A recorded kind is re-checked against what the current data would derive on every call;
-    divergence surfaces a warning (``kind_diverged`` in the returned dict); only an explicit
-    re-derive changes the recorded value.
+    A trait whose entry states no ``localization`` has it derived from this call's GT
+    (``derivations.derive_localization_kind``) and stamped as derived at runtime; the entry changes
+    only through a proposed revision. A stated kind is re-checked against what the current data
+    would derive on every call; divergence surfaces a warning (``kind_diverged`` in the returned
+    dict).
     """
     if not trait_name:
         return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
@@ -487,9 +486,10 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     from tcip_mcp.pipelines.derivations import (
         derive_iou_match_threshold, derive_localization_kind, derive_localization_tolerance_frac,
     )
-    from tcip_mcp.traits import CENTER_MATCH, get_trait
+    from tcip_mcp.operationalization import latest_confirmed
+    from tcip_mcp.traits import CENTER_MATCH
 
-    spec = get_trait(trait_name)
+    spec = latest_confirmed(trait_name).entry
     boxes_per_image = [[a["bbox"] for a in gt_objects(rec)
                         if class_id is None or a["category_id"] == class_id]
                        for rec in per_image]
@@ -503,8 +503,8 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
             kind_diverged = True
             logger.warning(
                 "trait %r: recorded localization kind %r diverges from what this call's own GT "
-                "would derive (%r), not switched (observation, not permission); re-derive "
-                "explicitly via revise_trait_spec if this data is now representative.",
+                "would derive (%r), not switched (observation, not permission); propose a "
+                "revision with propose_trait if this data is now representative.",
                 trait_name, kind, live_derived_kind)
     elif live_derived_kind is not None:
         kind = live_derived_kind
@@ -514,23 +514,11 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
         from tcip_mcp.pipelines.resolution import derived
         derived("localization_kind", kind,
                derived_from="achievable IoU under annotation jitter (GT characteristic size)")
-        basis = (f"derived from {sum(len(b) for b in boxes_per_image)} GT boxes "
-                 "(achievable IoU under jitter)")
-        try:
-            from tcip_mcp import traits as traits_module
-            traits_module.write_trait_spec_fields(trait_name, {"localization": kind})
-        except ValueError:
-            logger.warning("could not persist derived localization kind for %r", trait_name, exc_info=True)
-        else:
-            from tcip_mcp.audit import record_event_or_raise
-            record_event_or_raise("trait_spec_field_derived",
-                                  {"trait": trait_name, "field": "localization", "value": kind,
-                                   "basis": basis})
     else:
         raise ValueError(
-            f"trait {trait_name!r} has no recorded localization kind and no GT in this call to "
-            "derive one from, cannot resolve a match criterion. Calibrate or evaluate against a "
-            "labeled reference at least once before this trait's localization kind can be known.")
+            f"trait {trait_name!r} states no localization kind and no GT in this call derives "
+            "one, so no match criterion resolves. Evaluate against a labeled reference, or "
+            "propose the kind in a trait revision with propose_trait.")
 
     # Stamp via resolution.derived()/default(), not aliased on import, and with the derived_from
     # literal inlined directly into the call: passing it as a variable, even unaliased, is also

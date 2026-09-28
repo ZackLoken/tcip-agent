@@ -54,17 +54,15 @@ describe("downloadCsv refusal decoding", () => {
   it("carries a structured refusal through the blob path parsed, not stringified", async () => {
     const detail = {
       kind: "operationalization",
-      state: 1,
-      trait: "stage_50per_date",
-      delivery_kind: "state_crossing_dates",
-      message: "no operationalization is recorded for a state_crossing_dates delivery",
+      message:
+        "its confirmed revision states no operationalization for a state_crossing_dates delivery",
     };
     stubFetch(400, { detail });
 
     const thrown = await resultsApi.downloadCsv(REQUEST).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(StructuredRefusalError);
     expect((thrown as Error).message).not.toContain("[object Object]");
-    expect(operationalizationRefusalOf(thrown)?.delivery_kind).toBe("state_crossing_dates");
+    expect(operationalizationRefusalOf(thrown)?.message).toBe(detail.message);
   });
 
   it("keeps the status-only message when the refusal body carries no detail", async () => {

@@ -7,6 +7,8 @@ import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 const BASE: DeliveryEventRecord = {
   event_id: "evt-base",
   trait: "subject_a",
+  trait_revision: 1,
+  trait_revision_sha256: "b".repeat(64),
   delivery_kind: "state_crossing_dates",
   door: "results.export_csv",
   output_path: "C:/proj/results_export/subject_a_phenology.csv",

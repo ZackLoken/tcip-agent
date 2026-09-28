@@ -11,7 +11,8 @@ import numpy as np
 import pytest
 import tifffile
 
-from tests import _operationalization_fixtures as fx
+from tcip_mcp.project_paths import project_state_dir
+from tests import _trait_fixtures as fx
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -580,7 +581,7 @@ def test_deliver_orthomosaic_plant_counts_records_exactly_one_delivery_event(tmp
         delivered_phenotype="stem_count")
     assert "error" not in result, result
 
-    scope = resolution.delivery_events_scope(tmp_path / "proj")
+    scope = project_state_dir(tmp_path / "proj")
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))]
     assert len(events) == 1
     assert events[0]["door"] == "deliver_orthomosaic_plant_counts"
@@ -590,10 +591,9 @@ def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
     tmp_path, monkeypatch,
 ):
     """The MCP tool builds no project_root of its own (always None); the core must forward that
-    None to every meaning-record read (resolve_trait_for_phenotype, resolve_trait_and_record) and
-    to export_aggregated_csv unchanged, never substitute platform_state_root() (or any other
-    resolved path) in its place, even though the registry lookup genuinely needs a resolved root
-    to read the file from disk."""
+    None to the one trait read (``confirmed_revision``) through export_aggregated_csv unchanged,
+    never substitute platform_state_root() (or any other resolved path) in its place, even though
+    the registry lookup genuinely needs a resolved root to read the file from disk."""
     import tcip_mcp.operationalization as op
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
@@ -606,20 +606,14 @@ def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
     _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
-    real_resolve = op.resolve_trait_and_record
-    real_for_phenotype = op.resolve_trait_for_phenotype
+    real_read = op.confirmed_revision
     seen_roots = []
 
-    def _spy_record(*a, **kw):
+    def _spy_read(*a, **kw):
         seen_roots.append(kw.get("project_root"))
-        return real_resolve(*a, **kw)
+        return real_read(*a, **kw)
 
-    def _spy_phenotype(*a, **kw):
-        seen_roots.append(kw.get("project_root"))
-        return real_for_phenotype(*a, **kw)
-
-    monkeypatch.setattr(op, "resolve_trait_and_record", _spy_record)
-    monkeypatch.setattr(op, "resolve_trait_for_phenotype", _spy_phenotype)
+    monkeypatch.setattr(op, "confirmed_revision", _spy_read)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
@@ -628,8 +622,7 @@ def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
         str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result, result
-    assert seen_roots
-    assert all(root is None for root in seen_roots)
+    assert seen_roots == [None]
 
 
 def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_path, monkeypatch):

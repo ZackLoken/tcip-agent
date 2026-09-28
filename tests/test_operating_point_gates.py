@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tests._dense_op_fixtures import _box, dense_records  # noqa: E402
+from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
 from tests._regime_fixtures import tiled_regime  # noqa: E402
 from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     _cap_saturated_frac,
@@ -20,35 +21,13 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED  # noqa: E402
-from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitSpec  # noqa: E402
-from tests._trait_fixtures import BUD_OPENING  # noqa: E402
+from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE  # noqa: E402
+from tests._trait_fixtures import BUD_OPENING, confirm_entry, entry  # noqa: E402
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
-# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's pinned root.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
-def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
-    if score is not None:
-        a["score"] = score
-    return a
-
-
-def _records(idp="c", *, shift: float = 0.0):
-    """The small (2-image) sparse fixture: count-unbiased conf 0.6, real per-image variance
-    ([+1, -1] bias at that conf). Reused here, not as a fixture that must validate (the equivalence
-    criterion correctly refuses it, see test_n_equals_2 below), but to exercise the
-    reference-sufficiency checks precisely, where its small size and known bias distribution are
-    exactly the point.
-    """
-    a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_ann(100 + shift, 100)],
-         "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}
-    b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_ann(100 + shift, 100), _ann(200 + shift, 200)],
-         "dt": [_ann(100, 100, score=0.9), _ann(200, 200, score=0.3)]}
-    return [a, b]
 
 
 # ── Exact-conf holdout evaluation, not a nearest-neighbor snap ─────────────
@@ -183,9 +162,7 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     assert "localization_quality_floor_failed" in conf.gate_evidence["failures"]
 
 
-def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch):
-    import tcip_mcp.pipelines.operating_point as OP
-
+def test_dispersion_gate_skipped_when_unauthored_gates_when_authored():
     n_images, objects_per_image = 10, 50
     # One image drops 10 objects, none elsewhere -> mean bias -1.0, but the p90 tail is 1.0 (driven
     # by that single bad image among many good ones): exactly the "one bad plant among many"
@@ -197,9 +174,9 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9)
 
-    strict = TraitSpec(name="bud_opening", count_objective=COUNT_UNBIASED, count_error_tolerance=0.5,
-                       count_bias_tolerance_frac=1.0, delivers=BUD_OPENING.delivers)
-    monkeypatch.setattr(OP, "get_trait", lambda name: strict)
+    strict = entry("bud_opening", BUD_OPENING.delivers, count_objective=COUNT_UNBIASED,
+                   count_error_tolerance=0.5, count_bias_tolerance_frac=1.0)
+    confirm_entry(strict)
     b_strict = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
     strict_sweep = b_strict.get("conf").gate_evidence
@@ -208,7 +185,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
 
     # The same fixture, under a trait that has never authored count_error_tolerance (BUD_OPENING), the
     # dispersion term is skipped entirely, not gated on a platform-invented number.
-    monkeypatch.setattr(OP, "get_trait", lambda name: BUD_OPENING)
+    confirm_entry(BUD_OPENING)
     b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").gate_evidence
@@ -216,28 +193,26 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     assert "count_error_dispersion_too_high" not in default_sweep["failures"]
 
 
-def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch):
-    """TraitSpec.count_bias_tolerance_frac, when unauthored (None, BUD_OPENING's own state), resolves to
+def test_count_bias_tolerance_frac_source_platform_default_vs_trait():
+    """TraitEntry.count_bias_tolerance_frac, when unauthored (None, BUD_OPENING's own state), resolves to
     the platform's interim default fraction and stamps that provenance; a trait that authors its own
     value stamps ``"trait"`` instead, mirroring classifier_agreement_floor's own kappa_floor_source."""
-    import tcip_mcp.pipelines.operating_point as OP
-
     n_images, objects_per_image = 10, 50
     cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
                         miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
 
-    monkeypatch.setattr(OP, "get_trait", lambda name: BUD_OPENING)
+    confirm_entry(BUD_OPENING)
     b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").gate_evidence
     assert default_sweep["count_bias_tolerance_frac"] == pytest.approx(0.01)
     assert default_sweep["count_bias_tolerance_frac_source"] == "default"
 
-    authored = TraitSpec(name="bud_opening", count_objective=COUNT_UNBIASED,
-                         count_bias_tolerance_frac=0.2, delivers=BUD_OPENING.delivers)
-    monkeypatch.setattr(OP, "get_trait", lambda name: authored)
+    authored = entry("bud_opening", BUD_OPENING.delivers, count_objective=COUNT_UNBIASED,
+                     count_bias_tolerance_frac=0.2)
+    confirm_entry(authored)
     b_trait = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                       holdout_records=hold, staged_conf_floor=0.01)
     trait_sweep = b_trait.get("conf").gate_evidence
@@ -305,12 +280,10 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     ``test_dispersion_gate_skipped_when_unauthored_gates_when_authored``'s own pattern) so the
     padding's effect on the population is isolated from it.
     """
-    import dataclasses
+    from tests._trait_fixtures import with_fields
 
-    import tcip_mcp.pipelines.operating_point as OP
-
-    monkeypatch.setattr(OP, "get_trait", lambda name: dataclasses.replace(
-        BUD_OPENING, count_bias_tolerance_frac=1.0))
+    loosened = with_fields(BUD_OPENING, count_bias_tolerance_frac=1.0)
+    confirm_entry(loosened)
 
     hold_real = _records("h", shift=3.0)  # n=2, real per-image variance ([+1, -1])
     padding = [{"width": 400, "height": 400, "image_id": f"h_pad_{i}", "gt": [], "dt": [],
@@ -348,8 +321,8 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
 def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
-    f1_trait = TraitSpec(name="bud_opening", count_objective=DETECTION_F1, delivers=BUD_OPENING.delivers)
-    monkeypatch.setattr(OP, "get_trait", lambda name: f1_trait)
+    f1_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=DETECTION_F1)
+    confirm_entry(f1_trait)
 
     b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
@@ -360,8 +333,8 @@ def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypat
 def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
-    presence_trait = TraitSpec(name="bud_opening", count_objective=PRESENCE, delivers=BUD_OPENING.delivers)
-    monkeypatch.setattr(OP, "get_trait", lambda name: presence_trait)
+    presence_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=PRESENCE)
+    confirm_entry(presence_trait)
 
     b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
@@ -372,8 +345,8 @@ def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monk
 def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
-    f1_trait = TraitSpec(name="bud_opening", count_objective=DETECTION_F1, delivers=BUD_OPENING.delivers)
-    monkeypatch.setattr(OP, "get_trait", lambda name: f1_trait)
+    f1_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=DETECTION_F1)
+    confirm_entry(f1_trait)
 
     b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records(),
                                    validated_reference=VALIDATED_REVIEW_CONFIRMED)

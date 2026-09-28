@@ -56,6 +56,7 @@ const InferenceTab = lazy(() =>
   import("@/tabs/InferenceTab").then((m) => ({ default: m.InferenceTab })),
 );
 const ResultsTab = lazy(() => import("@/tabs/ResultsTab").then((m) => ({ default: m.ResultsTab })));
+const SetupTab = lazy(() => import("@/tabs/SetupTab").then((m) => ({ default: m.SetupTab })));
 const TrainingTab = lazy(() =>
   import("@/tabs/TrainingTab").then((m) => ({ default: m.TrainingTab })),
 );
@@ -295,8 +296,9 @@ function App() {
   });
 
   // Only Annotate / Review / Results need an imagery dataset+date and show the picker until
-  // one is set. Keyed by TabName, so an added tab with no entry here fails the typecheck.
+  // one is set; Setup needs an open project. Keyed by TabName, so an added tab with no entry here fails the typecheck.
   const tabPanels: Record<TabName, ReactNode> = {
+    setup: projectRoot ? <SetupTab /> : <ProjectPicker />,
     annotate: datasetReady ? <AnnotateTab /> : <ProjectPicker />,
     review: datasetReady ? <ReviewTab /> : <ProjectPicker />,
     results: datasetReady ? <ResultsTab /> : <ProjectPicker />,

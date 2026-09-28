@@ -5,6 +5,7 @@ stem with an image.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ pytest.importorskip("pycocotools")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import recorded_side  # noqa: E402
+from tests._clear_prediction_bucket_fixtures import write_image  # noqa: E402
 from tests._regime_fixtures import stub_pass  # noqa: E402
 
 IMG = 32
@@ -26,11 +28,7 @@ DATES = ("2-11-26", "2-12-01")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
-def _save_png(path: Path) -> None:
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (IMG, IMG), color=(128, 128, 128)).save(path)
+_save_png = partial(write_image, size=IMG)
 
 
 def _two_date_dataset(root: Path, stems=_STEMS) -> Path:

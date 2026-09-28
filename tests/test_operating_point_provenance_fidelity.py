@@ -16,7 +16,7 @@ from tests._regime_fixtures import tiled_regime
 
 pytest.importorskip("torch")
 
-import tcip_mcp.pipelines.operating_point as OP  # noqa: E402
+from tests._trait_fixtures import confirm_entry  # noqa: E402
 from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     attach_spatial_split_kind_provenance,
     attach_split_policy_provenance,
@@ -107,14 +107,13 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
     """
     from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
-    from tcip_mcp.traits import TraitSpec
+    from tests._trait_fixtures import entry
 
     recs = _records("c", 0.0)
     labels = set()
     for objective in sorted(COUNT_OBJECTIVE_PICKERS):
-        spec = TraitSpec(name="bud_opening", count_objective=objective,
-                         delivers=("leaf_out_50per_date",))
-        monkeypatch.setattr(OP, "get_trait", lambda name, s=spec: s)
+        spec = entry("bud_opening", ("leaf_out_50per_date",), count_objective=objective)
+        confirm_entry(spec)
         for reference in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
             b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
                                         calibration_records=recs, validated_reference=reference)
@@ -218,15 +217,14 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
     source of the floor.
     """
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
-    from tcip_mcp.traits import TraitSpec
+    from tests._trait_fixtures import entry
 
     pred = list(_RANKS)
     for i in range(6):
         pred[i] = min(4, pred[i] + 2)
 
-    authored = TraitSpec(name="bud_opening", ordinal_agreement_floor=0.9,
-                         delivers=("leaf_out_50per_date",))
-    monkeypatch.setattr(OP, "get_trait", lambda name: authored)
+    authored = entry("bud_opening", ("leaf_out_50per_date",), ordinal_agreement_floor=0.9)
+    confirm_entry(authored)
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",
@@ -251,14 +249,13 @@ def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_plac
     the calibration is judged against.
     """
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
-    from tcip_mcp.traits import TraitSpec
+    from tests._trait_fixtures import entry
 
     true_values = [float(r) for r in _RANKS]
     pred_values = [t * 0.5 + 1.0 for t in true_values]
 
-    authored = TraitSpec(name="bud_opening", regression_skill_floor=0.9,
-                         delivers=("leaf_out_50per_date",))
-    monkeypatch.setattr(OP, "get_trait", lambda name: authored)
+    authored = entry("bud_opening", ("leaf_out_50per_date",), regression_skill_floor=0.9)
+    confirm_entry(authored)
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared",
@@ -281,14 +278,14 @@ def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_place
     all.
     """
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
-    from tcip_mcp.traits import TraitSpec
+    from tests._trait_fixtures import entry
 
     pred = list(_RANKS)
     for i in range(6):
         pred[i] = min(4, pred[i] + 2)
 
-    unauthored = TraitSpec(name="bud_opening", delivers=("leaf_out_50per_date",))
-    monkeypatch.setattr(OP, "get_trait", lambda name: unauthored)
+    unauthored = entry("bud_opening", ("leaf_out_50per_date",))
+    confirm_entry(unauthored)
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",

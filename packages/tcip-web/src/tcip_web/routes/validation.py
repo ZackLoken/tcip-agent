@@ -271,7 +271,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         seal_validation,
         update_sidecar,
     )
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
 
     ref_hash = review_reference_hash(
         review_to_records(review_state, bucket_identities=bucket_identities, subject=req.subject))
@@ -287,7 +287,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                 producing_experiment_id=review_experiment_id,
                 reference_inputs={
                     "dataset_root": req.dataset_root,
-                    "scope_roots": {"verdicts": str(review_state_dir_of(req.dataset_root))},
+                    "scope_roots": {"verdicts": str(project_state_dir(req.dataset_root))},
                     "stated_values": {"review_reference_hash": ref_hash, "review_image_count": n},
                 },
             )

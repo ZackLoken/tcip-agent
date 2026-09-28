@@ -12,6 +12,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tests._verified_checkpoint_fixtures import admit_any_checkpoint  # noqa: E402
+
 
 def assert_source_stamps_absent(bucket: Path) -> None:
     """Assert a ``read_versioned`` of each of ``SIDECAR_FILENAMES``' five stamps answers absent at
@@ -53,26 +55,22 @@ def stub_predictor(monkeypatch, *, boxes: tuple[tuple[float, float, float, float
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
 
-def stub_checkpoint_verification(monkeypatch) -> None:
-    """``load_registered_checkpoint`` admits whatever path it is given, the same stand-in
-    ``test_run_inference_bucket_handling.py``'s autouse fixture installs."""
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    def _stub(path, *a, **kw):
-        p = Path(path)
-        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
-        return stub_verified_checkpoint(str(path), sha256=sha)
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
-
-
-def write_image(path: Path) -> None:
+def write_image(path: Path, size: int = 100) -> None:
+    """A flat gray ``size`` by ``size`` RGB image at ``path``, its parent created."""
     from PIL import Image
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(path)
+    Image.new("RGB", (size, size), (120, 120, 120)).save(path)
+
+
+def write_noise_image(path: Path, size: int, bright: bool = False, span: float = 0.3) -> None:
+    """A ``size`` by ``size`` RGB image of uniform noise at ``path``, its parent created: values
+    in [0, ``span``), or offset by 0.7 when ``bright``."""
+    import torch
+    from torchvision.utils import save_image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_image(torch.rand(3, size, size) * span + (0.7 if bright else 0.0), str(path))
 
 
 def build_published_bucket(
@@ -100,7 +98,7 @@ def build_published_bucket(
     from tcip_mcp.tools.inference_tools import run_inference
 
     stub_predictor(monkeypatch, boxes=boxes, scores=scores)
-    stub_checkpoint_verification(monkeypatch)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
 
     root = dataset_root if dataset_root is not None else (tmp_path / "ds")
     images_dir = tmp_path / f"{experiment_id}_images"

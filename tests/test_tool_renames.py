@@ -50,7 +50,6 @@ RENAMES = [
     ("force_redraw_cal_holdout_split", "redraw_calibration_holdout"),
     ("make_splits", "draw_splits"),
     ("push_panel_data", "push_panel_event"),
-    ("update_trait_spec_fields", "revise_trait_spec"),
     ("compute_phenology", "deliver_phenology_milestones"),
     ("tabulate_counts", "deliver_per_image_counts"),
     ("select_best_model", "rank_registered_models"),
@@ -67,6 +66,10 @@ MERGED = [
     ("list_registered_models", "rank_registered_models"),
     ("stage_accepted_proposals", "stage_proposals"),
     ("export_predictions", "run_inference"),
+    ("update_trait_spec_fields", "propose_trait"),
+    ("author_trait_spec", "propose_trait"),
+    ("revise_trait_spec", "propose_trait"),
+    ("state_trait_operationalization", "propose_trait"),
 ]
 
 # A demotion folded into a script with no single surviving door gets the same whole-tree sweep a

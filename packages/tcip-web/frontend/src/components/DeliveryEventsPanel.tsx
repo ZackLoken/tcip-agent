@@ -1,8 +1,7 @@
 /**
  * What has shipped from this project: one row per completed delivery, read-only. A delivery event
- * is a fact recorded after an artifact already shipped under a meaning the breeder already
- * confirmed through the operationalization mechanism, not a statement of its own, so this panel
- * carries no confirm/withdraw affordance and no correction disclosure.
+ * is a fact recorded after an artifact already shipped under the trait revision the breeder
+ * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
 import { Fragment } from "react";
@@ -45,9 +44,9 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
       data-testid={`delivery-${record.event_id}`}
     >
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12px]">{record.trait ?? "unresolved trait"}</span>
+        <span className="font-mono text-[12px]">{record.trait}</span>
         <span className="text-[11px] text-tcip-muted">
-          {record.delivery_kind ?? "unresolved delivery kind"}
+          {`revision ${record.trait_revision}, ${record.delivery_kind}`}
         </span>
         <span className="ml-auto text-[11px] text-tcip-muted">{record.produced_at}</span>
       </div>

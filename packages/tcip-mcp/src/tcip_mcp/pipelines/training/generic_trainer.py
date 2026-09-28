@@ -379,8 +379,8 @@ def resolve_selection_metric(
         names a metric that trait's own localization criterion demotes to comparability-only
         (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``).
 
-    Reads the trait's recorded localization kind (``TraitSpec.localization``); an unrecorded kind
-    (``spec.localization == ""``) rejects nothing here.
+    Reads the localization kind of the trait's latest confirmed revision, refusing as
+    ``operationalization.latest_confirmed`` does; an unstated kind rejects nothing here.
 
     A resolved metric (default or explicit) with no declared ranking direction
     (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected.
@@ -406,10 +406,11 @@ def resolve_selection_metric(
             "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
     if trait:
+        from tcip_mcp.operationalization import latest_confirmed
         from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
-        from tcip_mcp.traits import CENTER_MATCH, get_trait
+        from tcip_mcp.traits import CENTER_MATCH
 
-        spec = get_trait(trait)
+        spec = latest_confirmed(trait).entry
         if spec.localization == CENTER_MATCH and resolved in CENTER_MATCH_COMPARABILITY_KEYS:
             raise ValueError(
                 f"evaluation.selection_metric={resolved!r} is a comparability-only metric for "

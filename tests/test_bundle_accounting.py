@@ -50,13 +50,13 @@ def test_a_plain_dataset_tree_is_all_blob_and_nothing_unaccounted(tmp_path: Path
 def test_a_state_record_is_claimed_under_the_state_root(tmp_path: Path):
     root = tmp_path / "proj"
     _dataset_tree(root)
-    trait_specs = root / ".tcip" / "state" / "trait_specs"
-    trait_specs.mkdir(parents=True)
-    (trait_specs / "bud.json").write_text("{}", encoding="utf-8")
+    trait_records = root / ".tcip" / "state" / "traits"
+    trait_records.mkdir(parents=True)
+    (trait_records / "bud.json").write_text("{}", encoding="utf-8")
 
     accounting = account_for(root)
 
-    assert str(trait_specs / "bud.json") in _plan_paths(accounting)
+    assert str(trait_records / "bud.json") in _plan_paths(accounting)
     assert not accounting.unaccounted
 
 

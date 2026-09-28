@@ -131,7 +131,8 @@ def test_a_multi_bucket_datasets_verdicts_enumerate_under_the_bucket_they_were_r
     """The admit case: a dataset holding several reviewed and unreviewed buckets reads back one
     set of verdicts per bucket, and the unreviewed bucket keeps a count of zero."""
     from tcip_annotation.review_engine import ReviewEngine
-    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of, verdict_count
+    from tcip_mcp.prediction_buckets import bucket_key_of, verdict_count
+    from tcip_mcp.project_paths import project_state_dir
 
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
@@ -142,7 +143,7 @@ def test_a_multi_bucket_datasets_verdicts_enumerate_under_the_bucket_they_were_r
 
     key_a = bucket_key_of(prediction_dir(dataset_root, "detector", DATE_A))
     key_b = bucket_key_of(prediction_dir(dataset_root, "detector", DATE_B))
-    state_dir = review_state_dir_of(dataset_root)
+    state_dir = project_state_dir(dataset_root)
     engine = ReviewEngine(state_dir)
 
     assert engine.reviewed_buckets() == [key_a]

@@ -13,8 +13,8 @@ src/tcip_mcp/
                   # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
                   # generated block, and the serve_domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
-                  # gui, inference, ingest, knowledge, meta, model, operationalization,
-                  # orthomosaic, phenology, project, proposal, training, vision
+                  # gui, inference, ingest, knowledge, meta, model, orthomosaic, phenology,
+                  # project, proposal, trait, training, vision
   pipelines/      # composable ML: active_learning, components, data, feedback, inference,
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
@@ -33,16 +33,16 @@ src/tcip_mcp/
   dataset_layout.py      # the single path resolver on the backend: where an image's
                           # labels/predictions live on disk. The frontend cannot import it: the label suffix reaches it through the generated types, and subjects.ts's ImageStatus union restates the status vocabulary, held equal by tests/test_frontend_dataset_vocabulary.py
   subject_registry.py    # subjects.json: subjects, attributes, the name<->id assignment
-  traits.py               # the trait registry: human-defined measurement semantics per trait
-  operationalization.py    # per-project records of what a trait's delivered number means, who
-                            # confirmed it, and the precondition every delivery door checks
+  traits.py               # one record per trait: its entry (spec fields and what each delivered
+                            # number means) as appended revisions the breeder confirms
+  operationalization.py    # the check every delivery door runs on the latest confirmed revision
   prediction_buckets.py    # prediction-bucket immutability: never overwrite predictions a human reviewed
   project_paths.py, workspace.py     # platform-state-root and workspace-root resolvers
   experiments.py, model_registry.py   # experiment tracking (.tcip/experiments/) and the trained-model registry
   identity.py             # the user:<name> identity convention, spelled once
   agent_identity.py       # the harness the MCP handshake declared, this run's minted session, and what
-                            # the harness exported about itself, stamped on every audit line, statement
-                            # record and HTTP push; declarations, never verified
+                            # the harness exported about itself, stamped on every audit line, trait
+                            # revision and HTTP push; declarations, never verified
   audit.py, project_status.py, web_client.py
 ```
 

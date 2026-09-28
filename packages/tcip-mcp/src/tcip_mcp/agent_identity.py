@@ -4,7 +4,7 @@ A stdio MCP server runs one process per connected client, and the client declare
 initialize handshake (``client_info``: a name and a version, such as ``claude-code 2.1.238`` or
 ``codex-mcp-client 0.147.0``). This module keeps that declaration for the life of one server run,
 beside a session id the server mints itself, and projects the pair onto every record the process
-writes: the audit line, the statement records, and the headers of the one HTTP push the tools make.
+writes: the audit line, the trait revisions it proposes, and the headers of the one HTTP push the tools make.
 The in-app terminal's own session id, when the web backend passed it down through
 ``TCIP_TERMINAL_SESSION``, rides along as a correlation.
 
@@ -140,8 +140,8 @@ def audit_fields() -> dict[str, Any]:
     return {key: value for key, value in _current.fields().items() if value is not None}
 
 
-def statement_fields() -> dict[str, Any]:
-    """What a statement record carries: every field, ``None`` where nothing was declared."""
+def revision_fields() -> dict[str, Any]:
+    """What a proposed trait revision carries: every field, ``None`` where nothing was declared."""
     if _current is None:
         return {field: None for field in RECORD_FIELDS}
     return _current.fields()

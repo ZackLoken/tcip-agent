@@ -5,12 +5,13 @@ label_digests block a bound run's own split.json carries, never a refusal.
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import hashlib
+from functools import partial
 from pathlib import Path
 
 import pytest
+
+from tests._clear_prediction_bucket_fixtures import write_image
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -27,33 +28,20 @@ _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
 def _seed_trait_spec(project_root: Path) -> None:
-    """A trait spec whose only job is to give ``resolve_operating_point`` count-bias/localization
+    """A trait whose only job is to give ``resolve_operating_point`` count-bias/localization
     fields to read; ``holdout_match_quality_floor`` is set loose enough for the dense, synthetic
     references these rails build to clear it, the way a real trait's own confirmed value would."""
-    import tcip_store as ts
+    from tests._trait_fixtures import entry, propose_and_confirm
 
-    from tcip_mcp import traits
-
-    specs_dir = project_root / ".tcip" / "state" / "trait_specs"
-    spec = {
-        "name": TRAIT, "count_objective": "count_unbiased", "localization": "center_match",
-        "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
-        "holdout_match_quality_floor": 0.5, "positive_value": "", "milestone_fractions": [],
-        "milestone_on": "", "majority_milestone": "", "crossing_unconfirmed": False,
-        "phenology_prefix": "leaf_out", "majority_label": "", "sliver_policy": "class_avg_size",
-        "sliver_frac": 0.5, "count_bias_tolerance_frac": 0.01,
-        "delivers": ["leaf_out_05per_date", "leaf_out_50per_date"],
-        "notes": "Test-only, not a domain-expert-confirmed measurement.",
-        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
-    }
-    ts.replace(traits.trait_spec_key(specs_dir, TRAIT), complete_spec_record(spec), expect=ts.Version.ABSENT)
+    propose_and_confirm(project_root, entry(
+        TRAIT, ("leaf_out_05per_date", "leaf_out_50per_date"),
+        count_objective="count_unbiased", localization="center_match",
+        holdout_match_quality_floor=0.5, phenology_prefix="leaf_out",
+        count_bias_tolerance_frac=0.01,
+        notes="Test-only, not a domain-expert-confirmed measurement."))
 
 
-def _save_png(path: Path) -> None:
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (IMG, IMG), color=(128, 128, 128)).save(path)
+_save_png = partial(write_image, size=IMG)
 
 
 def _dataset(root: Path, stems=_STEMS) -> Path:

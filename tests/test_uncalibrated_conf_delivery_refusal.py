@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests import _operationalization_fixtures as fx  # noqa: E402
+from tests import _trait_fixtures as fx  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

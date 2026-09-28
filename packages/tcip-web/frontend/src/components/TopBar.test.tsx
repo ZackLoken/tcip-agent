@@ -97,10 +97,10 @@ describe("TopBar tab strip accessibility", () => {
     fireEvent.keyDown(tuning, { key: "ArrowLeft" });
     expect(screen.getByRole("tab", { name: /training/i })).toHaveAttribute("aria-selected", "true");
 
-    const annotate = screen.getByRole("tab", { name: /annotate/i });
-    fireEvent.click(annotate);
-    annotate.focus();
-    fireEvent.keyDown(annotate, { key: "ArrowLeft" });
+    const first = screen.getAllByRole("tab")[0];
+    fireEvent.click(first);
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowLeft" });
     const last = screen.getAllByRole("tab").at(-1) as HTMLElement;
     expect(last).toHaveAttribute("aria-selected", "true");
   });

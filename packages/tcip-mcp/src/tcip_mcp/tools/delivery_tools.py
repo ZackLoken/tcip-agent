@@ -183,17 +183,16 @@ def supersede_delivery(
     from tcip_mcp.pipelines.delivery_events_schema import DeliverySupersessionRecord
     from tcip_mcp.pipelines.resolution import (
         DeliveryEventShapeError,
-        delivery_events_scope,
         delivery_supersession_key,
         read_one_delivery_event,
     )
-    from tcip_mcp.project_paths import platform_state_root
+    from tcip_mcp.project_paths import platform_state_root, project_state_dir
 
     if not reason or not reason.strip():
         return {"error": "reason is required and must be non-empty"}
 
     platform_root = platform_state_root()
-    scope = delivery_events_scope(platform_root)
+    scope = project_state_dir(platform_root)
 
     try:
         event = read_one_delivery_event(platform_root, event_id)

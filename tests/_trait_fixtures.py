@@ -1,48 +1,221 @@
-"""Shared test-only trait fixture.
-
-``BUD_OPENING`` is a plain local ``TraitSpec`` literal with neutral names, a mechanism fixture
-rather than a crop's own trait, so trait-consuming code paths can be exercised without any
-project's config being present. The platform holds no built-in traits: every trait is authored
-as a per-project ``.tcip/state/trait_specs/*.yml`` file and is registered only where that file
-exists. It is not a registered trait: config-loaded specs are rebuilt fresh on every
-``get_trait()`` call, never module-load singletons (see ``traits.py``), so nothing here should
-ever be compared by identity against one.
-
-The trait's own name, ``bud_opening``, is not the ``bud`` subject it measures: a
-subject is an object class to isolate, a trait is the measurement over it, and this fixture keeps
-that distinction rather than reusing one string for both.
-"""
+"""Trait entries a test needs, proposed with ``traits.propose_trait`` and confirmed with
+``traits.confirm_revision``: a crossing trait delivering bloom dates, a count trait delivering a
+stem count, the vocabulary phenotypes the aggregate deliveries ship under, and ``bud_opening``,
+whose name is not the ``bud`` subject it measures."""
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
-from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, _encode_spec
+from tcip_mcp import subject_registry as cr
+from tcip_mcp import traits
+from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitEntry, TraitRevision
 
 
-def complete_spec_record(partial: Mapping[str, Any]) -> dict[str, Any]:
-    """``partial`` over the complete record the platform's own encoder writes for a spec of that
-    name: every field a stored spec states, each one ``partial`` does not name at the authoring
-    default ``author_trait_spec`` would have written."""
-    return {**_encode_spec(TraitSpec(name=partial.get("name", ""))), **partial}
+def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
+    """A complete fixture entry: ``fields`` over an entry that authors nothing beyond its name and
+    what it delivers."""
+    return TraitEntry.model_validate({
+        "name": name, "delivers": tuple(delivers), "positive_value": "",
+        "milestone_fractions": (), "milestone_on": "", "majority_milestone": "",
+        "phenology_prefix": "", "majority_label": "",
+        "count_objective": "", "localization": "", "localization_tolerance": "half_class_avg_size",
+        "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
+        "count_error_tolerance": None, "classifier_agreement_floor": None,
+        "ordinal_agreement_floor": None, "regression_skill_floor": None,
+        "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "",
+        "operationalizations": {}, **fields,
+    })
 
-BUD_OPENING = TraitSpec(
-    name="bud_opening",
+
+def with_fields(base: TraitEntry, **fields: Any) -> TraitEntry:
+    """``base`` with ``fields`` replaced, validated as a new entry."""
+    return TraitEntry.model_validate({**base.model_dump(), **fields})
+
+
+BUD_OPENING = entry(
+    "bud_opening", ("leaf_out_05per_date", "leaf_out_50per_date"),
     count_objective=COUNT_UNBIASED,
     localization=CENTER_MATCH,
-    localization_tolerance="half_class_avg_size",
-    localization_tolerance_frac=0.5,
     holdout_match_quality_floor=0.5,  # fixture value: loose enough for the synthetic dense references to clear
     positive_value="open",
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
-    crossing_unconfirmed=True,
     phenology_prefix="bud",
     majority_label="majority",
-    sliver_policy="class_avg_size",
-    sliver_frac=0.5,
-    delivers=("leaf_out_05per_date", "leaf_out_50per_date"),
     notes="The fraction of a plant's bud objects that are open: a texture call on the object "
           "itself, never a bbox-ratio proxy.",
 )
+
+CROSSING_TRAIT = "bloom"
+COUNT_TRAIT = "stem"
+COUNT_SUBJECT = "stem"
+"""What a count operationalization made from :data:`COUNT_SPEC` says the counts are counts of."""
+
+CROSSING_SPEC = entry(
+    CROSSING_TRAIT, ("bloom_05per_date", "bloom_50per_date"),
+    positive_value="open", milestone_fractions=(0.05, 0.50), milestone_on="positive_fraction",
+    phenology_prefix="bloom",
+)
+
+_FLOORS: dict[str, Any] = {
+    "count_objective": COUNT_UNBIASED, "localization": CENTER_MATCH,
+    "ordinal_agreement_floor": 0.6, "regression_skill_floor": 0.5,
+    "holdout_match_quality_floor": 0.5,
+}
+"""Every floor filled, so one entry serves whichever delivery kind a test exercises."""
+
+COUNT_SPEC = entry(COUNT_TRAIT, ("stem_count",), **_FLOORS)
+
+DELIVERY_SPECS = (
+    COUNT_SPEC,
+    *(entry(p, (p,), **_FLOORS)
+      for p in ("astringency", "fruit_diameter", "plant_surface_area", "bark_thickness")),
+)
+"""Every trait the count and aggregate delivery tests ship under; no phenotype is delivered by two
+of them, since a phenotype two traits deliver has no one operationalization behind it."""
+
+DELIVERY_TRAIT_BY_PHENOTYPE = {
+    phenotype: spec.name for spec in DELIVERY_SPECS for phenotype in spec.delivers
+}
+
+
+def propose(project_root: Path, proposed: TraitEntry, *, dataset_root: str = "") -> TraitRevision:
+    """Append ``proposed`` as a new, unconfirmed revision of its trait."""
+    return traits.propose_trait(
+        project_root, proposed, rationale="fixture proposal", relayed_note="",
+        dataset_root=dataset_root)
+
+
+def confirm(project_root: Path, revision: TraitRevision, *, user: str = "grüne") -> TraitRevision:
+    """Confirm ``revision`` the way the Setup tab posts it: by number and the hash it showed."""
+    return traits.confirm_revision(
+        project_root, revision.entry.name, revision.number, revision.entry_sha256,
+        user=user, identity_from_request=True, confirmed=True)
+
+
+def propose_and_confirm(project_root: Path, proposed: TraitEntry) -> TraitRevision:
+    """Propose ``proposed`` and confirm the revision it became."""
+    return confirm(project_root, propose(project_root, proposed))
+
+
+def confirm_entry(proposed: TraitEntry) -> TraitRevision:
+    """Propose and confirm ``proposed`` in this test's pinned platform state root."""
+    from tcip_mcp.project_paths import platform_state_root
+
+    return propose_and_confirm(platform_state_root(), proposed)
+
+
+def confirm_bare(name: str, **fields: Any) -> TraitRevision:
+    """Confirm a minimal trait delivering one dimension in this test's pinned platform state
+    root, stating nothing beyond ``fields``."""
+    return confirm_entry(entry(name, ("leaf_length",), **fields))
+
+
+def latest(trait: str, project_root: Path | None = None) -> TraitEntry:
+    """The entry of ``trait``'s latest revision, confirmed or not, to build the next one from."""
+    return traits.read_trait(trait, project_root).latest.entry
+
+
+def count_revision(project_root: Path | None = None) -> TraitRevision:
+    """The count trait's latest confirmed revision, the one a count delivery ships under."""
+    from tcip_mcp.operationalization import latest_confirmed
+
+    return latest_confirmed(COUNT_TRAIT, project_root)
+
+
+def operationalization(**fields: Any) -> dict[str, Any]:
+    """One operationalization, its three texts filled with fixture wording unless given."""
+    return {
+        "statement": "the number the breeder records for one plant",
+        "mechanism": "the calibrated model at the derived operating point",
+        "measured_subject": COUNT_SUBJECT, "delivered_phenotypes": (),
+        "delivered_value_keys": (), **fields,
+    }
+
+
+def with_operationalization(base: TraitEntry, kind: str, **fields: Any) -> TraitEntry:
+    """``base`` with an operationalization for ``kind`` added or replaced."""
+    stated = {k: v.model_dump() for k, v in base.operationalizations.items()}
+    stated[kind] = operationalization(**fields)
+    return with_fields(base, operationalizations=stated)
+
+
+def seed_positive_class(project_root: Path, subject_name: str, positive_value: str) -> cr.SubjectRegistry:
+    """Ensure the project's subject registry declares ``positive_value`` as a value of
+    ``subject_name``'s own attribute, adding both the subject and the value on first mention and
+    leaving an existing declaration alone; returns the registry as stored."""
+    from tcip_mcp.dataset_layout import subjects_path
+
+    registry = cr.registry_for_dataset_root(project_root) or cr.SubjectRegistry()
+    subjects = {s.name: s for s in registry.subjects}
+    existing = subjects.get(subject_name)
+    attrs = list(existing.attributes) if existing else []
+    if positive_value:
+        if attrs:
+            attr = attrs[0]
+            if positive_value not in attr.values:
+                attrs[0] = cr.Attribute(name=attr.name, type=attr.type,
+                                        values=(*attr.values, positive_value))
+        else:
+            attrs = [cr.Attribute(name="state", type="categorical", values=(positive_value,))]
+    subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
+    updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
+    cr.write_registry(subjects_path(project_root), updated)
+    return updated
+
+
+def seed_confirmed_crossing(project_root: Path, trait: str, **fields: Any) -> TraitRevision:
+    """Confirm a revision of ``trait`` (already proposed at this root) stating a crossing
+    operationalization, declaring its positive class for the measured subject in the project's
+    own subject registry first. ``fields`` override the operationalization's defaults: the
+    measured subject is the trait's own name and the phenotypes are everything it delivers."""
+    base = latest(trait, project_root)
+    stated = {"statement": f"the date each plant reached the state {trait} scores in the field",
+              "mechanism": f"the calibrated {base.positive_value} classifier over one plant's objects",
+              "measured_subject": trait, "delivered_phenotypes": base.delivers, **fields}
+    seed_positive_class(project_root, stated["measured_subject"], base.positive_value)
+    return propose_and_confirm(
+        project_root, with_operationalization(base, traits.STATE_CROSSING_DATES, **stated))
+
+
+def seed_confirmed_count(
+    project_root: Path, *, measured_subject: str = COUNT_SUBJECT, **fields: Any
+) -> TraitRevision:
+    """Confirm the count trait at this root with a per-image-count operationalization measuring
+    ``measured_subject``, the subject the delivery's buckets recorded detecting."""
+    return propose_and_confirm(project_root, with_operationalization(
+        COUNT_SPEC, traits.PER_IMAGE_COUNT, statement="how many stems the model finds in one frame",
+        measured_subject=measured_subject, **fields))
+
+
+def seed_delivery_traits(project_root: Path) -> Path:
+    """Propose and confirm every trait the count and aggregate delivery tests deliver under."""
+    for spec in DELIVERY_SPECS:
+        propose_and_confirm(project_root, spec)
+    return Path(project_root)
+
+
+def seed_confirmed_aggregate(
+    project_root: Path,
+    delivered_phenotype: str,
+    *,
+    value_keys: Sequence[str],
+    measurement_document: str = "operating_point",
+    **fields: Any,
+) -> TraitRevision:
+    """Confirm a revision of the trait delivering ``delivered_phenotype`` stating the aggregate
+    operationalization ``measurement_document`` selects, covering that phenotype and
+    ``value_keys``."""
+    from tcip_mcp.operationalization import aggregate_delivery_kind
+
+    (trait,) = [name for name in traits.trait_names(project_root)
+                if delivered_phenotype in latest(name, project_root).delivers]
+    return propose_and_confirm(project_root, with_operationalization(
+        latest(trait, project_root), aggregate_delivery_kind(measurement_document),
+        statement=f"the {delivered_phenotype} the breeder records for one plant",
+        delivered_phenotypes=(delivered_phenotype,), delivered_value_keys=tuple(value_keys),
+        **fields))

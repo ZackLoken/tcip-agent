@@ -1,16 +1,10 @@
-"""Runtime parameter resolution.
-
-Every result-affecting parameter that varies by dataset/model/trait is resolved at runtime into a
-``ResolvedParam`` carrying a value, how it was derived and whether it is trustworthy, so a
-phenotype can be traced to the operating point that produced it.
+"""Runtime parameter resolution: a ``ResolvedParam`` carries a value, how it was derived and
+whether it is trustworthy.
 
 A parameter that ``requires_validation`` (an operating point like a confidence threshold, or a
 physical scale) is un-consumable as a bare number unless it was checked against the right kind of
 real-world reference: ``.value`` raises; a caller that ships an unvalidated value goes through
 ``unvalidated_value(...)``.
-
-No torch; the storage seam (``tcip_store``) and ``tcip_annotation``'s ``json_io`` (the sidecar
-filename set) are the only dependencies beyond the standard library.
 """
 
 from __future__ import annotations
@@ -41,9 +35,11 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.dataset_layout import bucket_dataset_root
 from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.project_paths import project_state_dir
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.predictor import TileGeometry
+    from tcip_mcp.traits import TraitRevision
 
 logger = logging.getLogger(__name__)
 
@@ -2092,17 +2088,6 @@ never collide and neither ever needs to read the other before writing (``last_wr
 key is written exactly once, so there is nothing to compare-and-set against)."""
 
 
-def delivery_events_scope(project_root: str | Path | None = None) -> Path:
-    """Where a project's delivery-event records live: ``<root>/.tcip/state``, the project's
-    enumerable document of what shipped.
-    """
-    if project_root is not None:
-        return Path(project_root) / ".tcip" / "state"
-    from tcip_mcp.project_paths import resolve_state
-
-    return resolve_state(Path(".tcip") / "state")
-
-
 def delivery_event_key(scope: str | Path, event_id: str) -> Key:
     """One delivery event's record, addressed by its own content-derived id."""
     return Key(DELIVERY_EVENTS_STORE, str(scope), (event_id,))
@@ -2137,7 +2122,7 @@ def load_delivery_supersessions(project_root: str | Path | None = None) -> dict[
     """Every delivery-event id under this project that carries a supersession, mapped to its own
     stored record.
     """
-    scope = delivery_events_scope(project_root)
+    scope = project_state_dir(project_root)
     out: dict[str, dict] = {}
     for key in tcip_store.keys(DELIVERY_SUPERSESSIONS_STORE, str(scope)):
         record = tcip_store.read(key, default=None)
@@ -2186,7 +2171,7 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
     Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id``, on the first stored
     record that does not validate.
     """
-    scope = delivery_events_scope(project_root)
+    scope = project_state_dir(project_root)
     records: list[dict] = []
     for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope)):
         record = tcip_store.read(key, default=None)
@@ -2202,7 +2187,7 @@ def read_one_delivery_event(project_root: str | Path | None, event_id: str) -> d
     under ``event_id``; raises :class:`DeliveryEventShapeError` when a stored record does not
     validate.
     """
-    scope = delivery_events_scope(project_root)
+    scope = project_state_dir(project_root)
     record = tcip_store.read(delivery_event_key(scope, event_id), default=None)
     if record is None:
         return None
@@ -2285,14 +2270,15 @@ def record_delivery_binding_event(
     document_reconciliations: Mapping[str, Mapping],
     dimension_reconciliations: Mapping[str, Mapping],
     acknowledgment: Acknowledgment | None,
-    trait: str | None = None,
-    delivery_kind: str | None = None,
+    revision: TraitRevision,
+    delivery_kind: str,
     project_root: str | Path | None = None,
     plant_mapping: dict | None = None,
 ) -> None:
     """Record what verification found for each bucket a delivery read: one project-scoped
-    ``delivery_events`` record, carrying the delivering ``door`` and every reconciliation its gate
-    ran, findable by ``trait``/``delivery_kind``, and after it the delivery's one audit line, a
+    ``delivery_events`` record, carrying the delivering ``door``, every reconciliation its gate
+    ran, the ``delivery_kind`` and the trait revision it shipped under (``revision``: its trait
+    name, number and entry hash), and after it the delivery's one audit line, a
     ``delivery_event`` operation naming the record's ``event_id`` and stating nothing the record
     states.
 
@@ -2336,7 +2322,9 @@ def record_delivery_binding_event(
     event_id = _delivery_event_id(door, output_path, now)
     record = {
         "event_id": event_id,
-        "trait": trait,
+        "trait": revision.entry.name,
+        "trait_revision": revision.number,
+        "trait_revision_sha256": revision.entry_sha256,
         "delivery_kind": delivery_kind,
         "door": door,
         "output_path": output_path,
@@ -2355,7 +2343,7 @@ def record_delivery_binding_event(
         "produced_at": now,
     }
     DeliveryEventRecord.model_validate(record)
-    tcip_store.replace(delivery_event_key(delivery_events_scope(project_root), event_id), record)
+    tcip_store.replace(delivery_event_key(project_state_dir(project_root), event_id), record)
     record_event_or_raise("delivery_event", {"event_id": event_id},
                           scope=distinct_dataset_root(pred_dirs or []))
 
@@ -2384,10 +2372,8 @@ def _reconcile_validity(
     a caller string, an asserted value may only lower the result. ``document`` says which sidecar
     is read, which parameter and which kind of reference its claim rests on.
 
-    ``trait`` is the delivery's own registry trait, required; passed to
-    :func:`verify_stamp_binding`, which compares it against the record's own trait only when it is
-    not ``None`` (the classifier reconciler passes ``None``; :func:`bind_classifier_validity` runs
-    that comparison).
+    ``trait`` is the delivery's own trait, passed to :func:`verify_stamp_binding`, which compares it
+    against the record's own trait only when it is not ``None``.
 
     A stamp whose claim no validation record answers for floors here, with the reason recorded per
     bucket.
@@ -2525,7 +2511,7 @@ def tile_size_gate_flag(operating_point: dict | None) -> str | None:
     """The tile-geometry dimension's delivery-gate flag for one resolved operating point.
 
     ``operating_point`` is a bundle's ``to_provenance()["operating_point"]`` mapping, the shape
-    ``run_inference`` persists into ``operating_point.json``. Returns ``None`` when tiling was not
+    ``operating_point.json`` persists. Returns ``None`` when tiling was not
     operative for that run (``resolve_tile_size_param`` only sets ``requires_validation`` when
     ``tiled``). Otherwise it returns the reference the tile scale cleared, or ``VALIDATED_FALSE``.
 

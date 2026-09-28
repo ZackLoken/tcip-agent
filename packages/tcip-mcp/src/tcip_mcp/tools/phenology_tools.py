@@ -226,13 +226,6 @@ def build_plant_mapping(
     }
 
 
-def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
-    """Thin wrapper over ``phenology.resolve_positive_class_id``."""
-    from tcip_mcp.traits import get_trait
-
-    return phenology.resolve_positive_class_id(get_trait(trait_name), predictions_by_date)
-
-
 def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
                   score: Callable[[Any, Any], float], tolerance: float) -> list[tuple]:
     """Greedy 1:1 IoU assignment over every (gt, pred) pair, highest IoU claimed first; equal IoUs
@@ -475,12 +468,13 @@ def calibrate_classifier_operating_point(
             positive-class axis, for prediction dirs that carry no stamp; a stamped prediction dir
             records its own and refuses them (``_classification_items``).
     """
+    from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
-    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.traits import TraitUnknownError
 
     try:
-        spec = get_trait(trait_name)
-    except TraitUnknownError as e:
+        spec = latest_confirmed(trait_name).entry
+    except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
     if not spec.positive_value:
         return {"error": f"trait {trait_name!r} defines no positive_value to calibrate"}
@@ -571,22 +565,16 @@ def deliver_phenology_milestones(
 ) -> dict:
     """Per-plant phenology milestones from classified predictions + a plant mapping.
 
-    A phenology milestone is a crossing of the fraction of a plant's detected objects that are in
-    the trait's positive/measured state, an expert-defined morphological stage emitted by a
-    validated classifier (the trait's positive class). For a registered trait whose positive state
-    is, say, ``<majority_label>`` this reports:
-
-        <phenology_prefix>_<majority_label>_date   date most objects reached that state
-                                 (crops.yml) = the 95% crossing (crossing-unconfirmed reading,
-                                 pending breeder confirmation)
-        <phenology_prefix>_05/50/95per_date  dates the positive-state fraction crosses 5/50/95%
-
-    Column names and crossing fractions come from ``trait``'s ``TraitSpec``.
+    A phenology milestone is a crossing of the fraction of a plant's detected objects a validated
+    classifier calls the trait's positive class. The CSV carries
+    ``<phenology_prefix>_<NN>per_date`` for each of the trait's milestone fractions and, when the
+    trait names a ``majority_milestone``, ``<phenology_prefix>_<majority_label>_date`` for that
+    crossing. Column names and crossing fractions come from ``trait``'s latest confirmed revision,
+    which the delivery event names.
 
     Args:
-        trait: A registered trait name (``registered_traits()``), required, no default. The
-            positive class id is resolved from the prediction buckets' own recorded ``id_map`` by
-            this trait's ``positive_value``.
+        trait: A trait in this project, required, no default. The positive class id is resolved
+            from the prediction buckets' own recorded ``id_map`` by its ``positive_value``.
         mapping_name: Name of a plant mapping persisted under this project (``{date: [assignment,
             ...]}`` with ``stem`` / ``plot_name`` / ``accession_name`` per assignment).
         predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image JSON prediction
@@ -623,29 +611,19 @@ def deliver_phenology_milestones(
     plant.
     """
     from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
-    from tcip_mcp.operationalization import (
-        STATE_CROSSING_DATES,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
+    from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
     from tcip_mcp.project_paths import resolve_output_path
-    from tcip_mcp.traits import TraitUnknownError
+    from tcip_mcp.traits import STATE_CROSSING_DATES, TraitUnknownError
 
     output_csv_path = str(resolve_output_path(output_csv_path))
-    try:
-        spec, record, _specs_dir = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
-    except TraitUnknownError as e:
-        return {"error": str(e), "n_plants": 0}
-
-    # The one dataset every one of this delivery's buckets belongs to; refuses if they disagree.
-    try:
-        registry = registry_for_pred_dirs(list(predictions_by_date.values()))
-    except RegistryError as e:
-        return {"error": str(e), "n_plants": 0}
     # Ahead of the positive class id, so an unstated trait's class-id failure never names the wrong problem.
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
-    if not stated.ok:
-        return {"error": stated.message, "n_plants": 0}
+    try:
+        revision = confirmed_revision(
+            STATE_CROSSING_DATES, project_root=None, trait=trait,
+            registry=registry_for_pred_dirs(list(predictions_by_date.values())))
+    except (TraitUnknownError, RegistryError, OperationalizationRefused) as e:
+        return {"error": str(e), "n_plants": 0}
+    spec = revision.entry
     pos = spec.positive_value
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -662,7 +640,7 @@ def deliver_phenology_milestones(
     dates_delivered = list(predictions_by_date)
     disclosure = mapping_build.delivery_disclosure(verified, dates_delivered)
 
-    positive_class_id, msg = _resolve_positive_class_id(trait, predictions_by_date)
+    positive_class_id, msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     if positive_class_id is None:
         return {"error": (f"could not resolve the {pos} class id from any prediction bucket's "
                           f"own recorded id_map ({msg})."),
@@ -670,7 +648,7 @@ def deliver_phenology_milestones(
 
     try:
         result = phenology.per_plant_phenology(
-            mapping, predictions_by_date, positive_value=pos, spec=spec, plants=plants,
+            mapping, predictions_by_date, spec=spec, plants=plants,
         )
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc), "n_plants": 0}
@@ -778,25 +756,11 @@ def deliver_phenology_milestones(
     except ProducerDiffers as exc:
         return {"error": str(exc), "n_plants": len(rows)}
 
-    # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
-    # The registry is re-read too, not reused from the first check, to catch a racing registry edit.
-    spec_now, record_now, _ = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
-    try:
-        registry_now = registry_for_pred_dirs(list(predictions_by_date.values()))
-    except RegistryError as e:
-        return {"error": str(e), "n_plants": len(rows)}
-    still_stated = check_operationalization(
-        spec_now, record_now, STATE_CROSSING_DATES, registry=registry_now, basis=stated.basis)
-    if not still_stated.ok:
-        return {"error": still_stated.message, "n_plants": len(rows)}
-
     from tcip_mcp.project_paths import platform_state_root
 
-    # write_phenology_csv re-runs the same gate over these flags, composes every provenance cell
-    # (including the majority crossing-unconfirmed marker) and records the delivery.
     cells = phenology.write_phenology_csv(
-        "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
-        flags=flags, acknowledgment=None, basis=still_stated.basis,
+        "deliver_phenology_milestones", rows, Path(output_csv_path), revision,
+        flags=flags, acknowledgment=None,
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {

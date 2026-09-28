@@ -165,33 +165,23 @@ class Chain:
         self.published = published
 
 
-def _confirm_trait_revision(project_root: Path, trait: str, fields: dict) -> dict:
-    """Revise the trait's own spec statement and confirm the revision as the breeder would.
-
-    A changed record is a new unconfirmed revision, so the confirmation here is of the revision,
-    never of the statement it replaced.
-    """
-    from tcip_store import read_versioned
-
+def _confirm_trait_revision(project_root: Path, **fields):
+    """Propose a revision of the count trait stating its per-image count of ``SUBJECT`` with
+    ``fields`` changed, and confirm it as the breeder would: a changed entry is a new, unconfirmed
+    revision, so the confirmation is of the revision itself."""
     from tcip_mcp import traits
 
-    traits.write_trait_spec_fields(
-        trait, fields, project_root=project_root,
-        rationale="the breeder tightened what this trait's number has to clear",
-    )
-    scope = traits.trait_spec_statements_scope(project_root)
-    record = read_versioned(traits.trait_spec_statement_key(scope, trait), default=None).value or {}
-    assert not record.get("confirmed_by"), "a revised statement must land unconfirmed"
-    return traits.confirm_trait_spec(
-        project_root, trait, user="chain-breeder",
-        record_seen=traits.trait_spec_statement_seen_hash(record),
-        identity_from_request=False,
-    )
+    from tests import _trait_fixtures as fx
+
+    revision = fx.propose(project_root, fx.with_operationalization(
+        fx.with_fields(fx.COUNT_SPEC, **fields), traits.PER_IMAGE_COUNT, measured_subject=SUBJECT))
+    assert not revision.confirmed, "a proposed revision must land unconfirmed"
+    return fx.confirm(project_root, revision, user="chain-breeder")
 
 
 def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "chain") -> Chain:
     """Ingest, train, publish and assess: the flow every detector here varies one step of."""
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -201,7 +191,7 @@ def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "ch
     _draw_reference_selection(root, selection_dir)
     checkpoint_path = _train_on(selection_dir, tmp_path / "run", tmp_path, experiment_id)
 
-    fx.write_spec(tmp_path, fx.COUNT_SPEC)
+    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
     bucket = root / "predictions" / bucket_name / DATE
     published = run_inference(
@@ -280,7 +270,7 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
 def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_path: Path):
     """Publish and assess: the calibrated export door measures the operating point on the
     selection's calibration side and seals a record the bucket's stamp then names."""
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -290,7 +280,7 @@ def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_pa
     _draw_reference_selection(root, selection_dir)
     checkpoint_path = _train_on(selection_dir, tmp_path / "run", tmp_path, "exp-chain-publish")
 
-    fx.write_spec(tmp_path, fx.COUNT_SPEC)
+    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
     bucket = root / "predictions" / "chain" / DATE
     published = run_inference(
@@ -321,15 +311,14 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
     """
     import csv
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     chain = _run_the_chain(tmp_path, experiment_id="exp-chain-delivers")
 
-    _confirm_trait_revision(tmp_path, fx.COUNT_TRAIT, {"count_error_tolerance": 0.25})
-    fx.seed_confirmed_count(tmp_path, measured_subject=SUBJECT)
+    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(
@@ -357,15 +346,14 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
     afterwards and the number on file was earned against a reference that no longer exists, so
     the claim no longer answers for the delivery and the CSV must not be written.
     """
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     chain = _run_the_chain(tmp_path, experiment_id="exp-chain-edited")
 
-    _confirm_trait_revision(tmp_path, fx.COUNT_TRAIT, {"count_error_tolerance": 0.25})
-    fx.seed_confirmed_count(tmp_path, measured_subject=SUBJECT)
+    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
 
     # Move one object on the calibration side: the reference the gate was measured against.
     selection = read_selection(chain.selection_dir)
@@ -391,15 +379,14 @@ def test_a_reference_selection_that_can_no_longer_be_read_refuses_the_delivery(t
     """
     import tcip_store
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.pipelines.data.selection import read_selection, selection_key
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     chain = _run_the_chain(tmp_path, experiment_id="exp-chain-unreadable")
 
-    _confirm_trait_revision(tmp_path, fx.COUNT_TRAIT, {"count_error_tolerance": 0.25})
-    fx.seed_confirmed_count(tmp_path, measured_subject=SUBJECT)
+    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
 
     # Through the store's own door, so the selection is gone under either storage backend.
     tcip_store.delete(selection_key(chain.selection_dir))
@@ -421,7 +408,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     A bucket already holding prediction documents is not republished into, whatever overwrite
     says, so the predictions a delivered number rests on cannot be replaced underneath it.
     """
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.tools.inference_tools import run_inference
 

@@ -23,8 +23,7 @@ import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
 import tcip_mcp.tools.meta_tools  # noqa: F401, E402
 import tcip_mcp.tools.knowledge_tools  # noqa: F401, E402
 import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
-import tcip_mcp.tools.operationalization_tools  # noqa: F401, E402
-import tcip_mcp.tools.trait_spec_authoring_tools  # noqa: F401, E402
+import tcip_mcp.tools.trait_tools  # noqa: F401, E402
 import tcip_mcp.tools.scale_tools  # noqa: F401, E402
 import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
 import tcip_mcp.tools.vision_tools  # noqa: F401, E402
@@ -41,13 +40,7 @@ import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 def list_registered_tools() -> list[str]:
     """Return the sorted names of all tools currently registered on the server."""
-    manager = getattr(mcp, "_tool_manager", None)
-    if manager is not None and hasattr(manager, "list_tools"):
-        return sorted(t.name for t in manager.list_tools())
-    # Fallback for SDK versions without the sync tool-manager accessor.
-    import asyncio
-
-    return sorted(t.name for t in asyncio.run(mcp.list_tools()))
+    return sorted(t.name for t in mcp._tool_manager.list_tools())
 
 
 def binds_from_marker(environ: Mapping[str, str]) -> bool:

@@ -52,7 +52,8 @@ def project_records_present(project: Path) -> list[str]:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PLANT_MAPPING_STORE, PLANT_REGISTRY_STORE,
     )
-    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools import training_tools
     from tcip_mcp.web_client import JOB_REGISTRY_DOCUMENTS, job_registry_key
 
@@ -60,12 +61,12 @@ def project_records_present(project: Path) -> list[str]:
     if experiments.experiment_ids_with_status(root=project):
         present.append("experiments")
 
-    state_root = str(Path(project).absolute() / ".tcip" / "state")
+    state_root = str(project_state_dir(Path(project).absolute()))
     if tcip_store.keys(PLANT_MAPPING_STORE, state_root):
         present.append("plant_mapping")
     if tcip_store.keys(PLANT_REGISTRY_STORE, state_root):
         present.append("plant_registries")
-    if tcip_store.keys(DELIVERY_EVENTS_STORE, str(delivery_events_scope(project))):
+    if tcip_store.keys(DELIVERY_EVENTS_STORE, state_root):
         present.append("delivery_events")
 
     if any(

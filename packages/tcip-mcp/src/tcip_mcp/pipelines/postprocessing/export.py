@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import Acknowledgment
+    from tcip_mcp.traits import TraitRevision
 
 logger = logging.getLogger(__name__)
 
@@ -174,10 +175,7 @@ _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "oper
                        "validation_record", "acknowledged_by", "acknowledgment_reason"]
 
 _MEASUREMENT_DOCUMENT = "operating_point"
-"""What this CSV's counts always rest on: a per-image detection count is always the count
-operating point, never a scalar head or a physical scale, so ``measurement_document`` is a
-constant here rather than a per-row statement (contrast ``export_aggregated_csv``, whose rows can
-carry any of the three per-plant measurement documents)."""
+"""The sidecar document every per-image count rests on: the count operating point."""
 
 
 def export_detection_csv(
@@ -185,7 +183,7 @@ def export_detection_csv(
     output_path: str,
     provenance: dict | None = None,
     *,
-    trait: str,
+    revision: TraitRevision,
     operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledgment: Acknowledgment | None = None,
@@ -211,27 +209,26 @@ def export_detection_csv(
 
     Every row also carries ``measurement_document``, always ``"operating_point"``.
 
-    Refuses before composing the gate's flags unless ``trait``'s ``per_image_count``
-    operationalization is recorded and breeder-confirmed. The record's ``measured_subject`` is
-    checked against the object classes every bucket's own scope says its detections are of: a
-    classified bucket's own subject, an unscoped bucket's recorded ``id_map`` keys. A delivery
-    whose buckets contribute neither, and one called with no ``pred_dirs``, carries the subject
-    unchecked.
+    Before composing the gate's flags, every bucket in ``pred_dirs`` is bound to ``revision``
+    (``operationalization.bind``): its stamp must record ``revision``'s trait or none, and the
+    object classes it counted (its scope's subject, else its recorded ``id_map`` keys; nothing for
+    a bucket with no stamp) must include the ``per_image_count``
+    operationalization's measured subject. The delivery event names ``revision``.
 
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
         output_path: Path for the output CSV file.
         provenance: Optional producing-model / operating-point stamp added as trailing columns.
-        trait: The registered trait whose confirmed per-image-count operationalization this
-            delivery rests on. Required.
+        revision: The confirmed trait revision stating the ``per_image_count`` operationalization
+            this delivery ships under (``operationalization.confirmed_revision``).
         operating_point_validated: The count operating point's reconciled validity reference.
             Floored against each bucket's on-disk sidecar when ``pred_dirs`` is given; floored to
             unvalidated otherwise.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
         acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
-        project_root: The project this delivery's meaning-record reads and delivery event belong
-            to. ``None`` resolves against this process's pinned platform root.
+        project_root: The project this delivery event belongs to. ``None`` resolves against this
+            process's pinned platform root.
 
     Returns:
         ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
@@ -242,48 +239,37 @@ def export_detection_csv(
     Raises:
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
             clears it); carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
-        OperationalizationRefused (``tcip_mcp.operationalization``): the ``trait``'s
-            ``per_image_count`` operationalization is unrecorded, not breeder-confirmed, or was
-            withdrawn since the first check; carries the failed check and no counts.
+        OperationalizationRefused (``tcip_mcp.operationalization``): a bucket ``revision`` does
+            not bind.
         AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
             appended, raised by ``record_delivery_binding_event`` after the CSV and the
             ``delivery_events`` record were written.
     """
-    from tcip_mcp.operationalization import (
-        PER_IMAGE_COUNT,
-        OperationalizationRefused,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
+    from tcip_mcp.operationalization import bind
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.traits import PER_IMAGE_COUNT
     from tcip_annotation.json_io import safe_score
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
         DeliveryRefused,
         binding_notes_text,
-        bucket_scope,
         check_delivery_gate,
         delivered_tail,
+        read_operating_point_sidecar,
         record_delivery_binding_event,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
 
-    # A bucket's own counted object classes: a classified stamp's subject, else its map's keys.
-    counted_subjects: dict[str, set[str]] = {}
+    buckets: dict[str, tuple[str | None, set[str]]] = {}
     for d in (pred_dirs or []):
-        scope = bucket_scope(Path(d))
-        if scope is None:
-            continue
-        if scope.classified:
-            counted_subjects[d] = {cast(str, scope.subject)}
-        elif scope.id_map:
-            counted_subjects[d] = set(scope.id_map)
-    spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT, project_root=project_root)
-    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
-    stated = check_operationalization(
-        spec, record, PER_IMAGE_COUNT, counted_subjects=counted_subjects or None, registry=None)
-    if not stated.ok:
-        raise OperationalizationRefused(stated)
+        stamp = read_operating_point_sidecar(Path(d))
+        scope = ClassScope.of(stamp) if stamp is not None else ClassScope()
+        buckets[d] = (stamp["trait"] if stamp is not None else None,
+                      set(scope.id_map) if scope.id_map and not scope.classified
+                      else {scope.subject} if scope.subject else set())
+    bind(revision, PER_IMAGE_COUNT, buckets=buckets)
+    trait = revision.entry.name
 
     # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
     # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
@@ -307,15 +293,6 @@ def export_detection_csv(
     gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
     if not gate.ok:
         raise DeliveryRefused(gate, notes)
-
-    # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
-    spec_now, record_now, _ = resolve_trait_and_record(
-        trait, PER_IMAGE_COUNT, project_root=project_root)
-    still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, counted_subjects=counted_subjects or None,
-        registry=None, basis=stated.basis)
-    if not still_stated.ok:
-        raise OperationalizationRefused(still_stated)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -348,7 +325,7 @@ def export_detection_csv(
             else {}
         ),
         dimension_reconciliations={"tile_size": tile_recon} if tile_recon is not None else {},
-        acknowledgment=gate.effective_acknowledgment(), trait=trait,
+        acknowledgment=gate.effective_acknowledgment(), revision=revision,
         delivery_kind=PER_IMAGE_COUNT, project_root=project_root)
     summary = {
         "stamp": gate.stamp,

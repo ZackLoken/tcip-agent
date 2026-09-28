@@ -5,9 +5,6 @@ stamp at all. A stamped bucket carries its scope forward through the promotion u
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
-import dataclasses
 from pathlib import Path
 
 import pytest
@@ -17,11 +14,11 @@ from PIL import Image
 
 from tcip_annotation.review_engine import ReviewEngine
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import traits
 from tcip_mcp.dataset_layout import prediction_dir
 from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, sidecar_key
-from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of, stage_prediction_shapes
-from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
+from tcip_mcp.prediction_buckets import bucket_key_of, stage_prediction_shapes
+from tcip_mcp.project_paths import project_state_dir
+from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
 from tcip_web.app import app
 
 DATE = "2026-04-05"
@@ -29,25 +26,8 @@ STEM = "IMG_0300"
 IMG_W, IMG_H = 200, 150
 BOX = (20.0, 20.0, 60.0, 60.0)
 SUBJECT = "bud"
-TRAIT = TraitSpec(
-    name=SUBJECT,
-    count_objective=COUNT_UNBIASED,
-    localization=CENTER_MATCH,
-    localization_tolerance="half_class_avg_size",
-    localization_tolerance_frac=0.5,
-    holdout_match_quality_floor=0.5,
-    positive_value="open",
-    milestone_fractions=(0.05, 0.50, 0.95),
-    milestone_on="positive_fraction",
-    majority_milestone="95per",
-    crossing_unconfirmed=True,
-    phenology_prefix="bud",
-    majority_label="opening",
-    sliver_policy="class_avg_size",
-    sliver_frac=0.5,
-    delivers=("leaf_out_05per_date", "leaf_out_50per_date"),
-    notes="A neutral fixture trait, not any real crop's own.",
-)
+TRAIT = with_fields(BUD_OPENING, name=SUBJECT, majority_label="opening",
+                    notes="A neutral fixture trait, not any real crop's own.")
 
 
 @pytest.fixture
@@ -57,10 +37,7 @@ def client() -> TestClient:
 
 @pytest.fixture
 def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
-    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(TRAIT).items()}
-    data["schema_version"] = traits.TRAIT_SPEC_SCHEMA_VERSION
-    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    ts.replace(traits.trait_spec_key(specs_dir, SUBJECT), complete_spec_record(data), expect=ts.Version.ABSENT)
+    propose_and_confirm(tmp_path, TRAIT)
 
 
 def _image(dataset_root: Path) -> Path:
@@ -103,7 +80,7 @@ def _seed_accepted_verdict(dataset_root: Path, bucket: Path) -> None:
     against, since its own scope resolution reads the same stamp strictly.
     """
     key = (bucket_key_of(bucket), f"{STEM}.jpg")
-    state_dir = review_state_dir_of(dataset_root)
+    state_dir = project_state_dir(dataset_root)
     engine = ReviewEngine(str(state_dir))
     engine.raw_state.update({"verdicts": {key: {"img_status": "completed", "detections": [
         {"action": "accepted", "class_name": SUBJECT,

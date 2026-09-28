@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
 
 # The prediction bucket these verdicts were recorded against, as bucket_key_of spells one.
@@ -37,16 +38,10 @@ def _source_images(src: Path) -> Path:
     return src
 
 
-def _own_store(dataset_root: Path) -> Path:
-    from tcip_mcp.prediction_buckets import review_state_dir_of
-
-    return review_state_dir_of(dataset_root)
-
-
 def _setup(tmp_path: Path):
     """A dataset whose own verdict store holds the review, plus its reviewed source images."""
     dataset_root = tmp_path / "dataset"
-    _seed_verdicts(_own_store(dataset_root))
+    _seed_verdicts(project_state_dir(dataset_root))
     return dataset_root, _source_images(tmp_path / "src")
 
 
@@ -67,8 +62,8 @@ def test_materialize_reads_the_dataset_s_own_store_when_none_is_stated(tmp_path)
     assert "error" not in r
     assert r["dataset_root"] == str(dataset_root)
     assert r["review_state_stated"] is False
-    assert r["review_state"] == str(_own_store(dataset_root) / "review")
-    assert str(_own_store(dataset_root)) in r["review_state_origin"]
+    assert r["review_state"] == str(project_state_dir(dataset_root) / "review")
+    assert str(project_state_dir(dataset_root)) in r["review_state_origin"]
 
 
 def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
@@ -94,7 +89,7 @@ def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
     assert r["review_state_stated"] is True
     assert r["review_state"] == str(external / "review")
     assert str(external) in r["review_state_origin"]
-    assert str(_own_store(dataset_root)) in r["review_state_origin"]
+    assert str(project_state_dir(dataset_root)) in r["review_state_origin"]
 
 
 def test_materialize_refuses_an_empty_stated_store_rather_than_the_dataset_s_own(tmp_path):
@@ -127,7 +122,7 @@ def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
     lineage = ts.read(experiments.lineage_key("exp1"))
     assert lineage["data_source"] == str(dataset_root)
     assert lineage["review_session"]["dataset_root"] == str(dataset_root)
-    assert lineage["review_session"]["review_state_dir"] == str(_own_store(dataset_root))
+    assert lineage["review_session"]["review_state_dir"] == str(project_state_dir(dataset_root))
     artifacts = ts.read(experiments.artifacts_key("exp1"))
     assert artifacts["curated_dataset"]["path"] == str(out)
 
@@ -191,7 +186,7 @@ def test_materialize_invalid_inputs_error(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()  # a dataset root whose own store holds no shards
     r = materialize_review_dataset(str(empty), str(tmp_path), str(tmp_path / "o1"))
-    assert str(_own_store(empty)) in r["error"]
+    assert str(project_state_dir(empty)) in r["error"]
 
     dataset_root, _src = _setup(tmp_path)
     assert "error" in materialize_review_dataset(
@@ -822,7 +817,7 @@ def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_tru
     """The object class lands in subject, the confirmed value under the scope's own attribute,
     never the verdict-name-derived subject a detector review would write."""
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     source = _source_dataset_with_registry(tmp_path)
 
@@ -846,7 +841,7 @@ def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path
     the rejected-only image is named in unconfirmed_negatives and no confirmed-negative status
     is ever recorded for it, even though its label file is still an empty background."""
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
@@ -864,7 +859,7 @@ def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path
 
 def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_path):
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
@@ -880,7 +875,7 @@ def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_pat
 
 def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path):
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     src = _source_images(tmp_path / "src")  # a bare directory, no dataset root to derive from
 
@@ -893,7 +888,7 @@ def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path
 
 def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path):
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
@@ -911,7 +906,7 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
 @pytest.mark.parametrize("subject", [CLASSIFIED_SUBJECT, ""])
 def test_materialize_refuses_a_subject_stated_beside_a_stamped_bucket(tmp_path, subject):
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     _stamp_classified_bucket(dataset_root)
     source = _source_dataset_with_registry(tmp_path)
 
@@ -930,7 +925,7 @@ def test_materialize_refuses_an_undecodable_stamp(tmp_path):
     from tcip_store.store import _backend
 
     dataset_root = tmp_path / "dataset"
-    _seed_classified_verdicts(_own_store(dataset_root))
+    _seed_classified_verdicts(project_state_dir(dataset_root))
     bucket_dir = _stamp_classified_bucket(dataset_root)
     key = sidecar_key(bucket_dir, "operating_point")
     if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:

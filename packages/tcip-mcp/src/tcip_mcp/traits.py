@@ -1,220 +1,94 @@
-"""Trait knowledge, the human-defined semantics of each measurable trait.
-
-Most fields here are things the domain expert defines once per trait and the agent reads, never
-derives, never re-asks per dataset.
-
-Two fields are a different shape: ``localization`` (what "finding one" means) has no default at
-all; it is derived once from real GT the first time it's needed and recorded
-(``pipelines.derivations.derive_localization_kind``). ``count_objective`` (what the phenotype is,
-hence what the operating point optimizes) has a platform default (``COUNT_UNBIASED``, errors
-canceling is the right tolerance for a fraction/ratio phenotype, the common case), used when the
-breeder hasn't decided yet. ``count_objective`` is an authored field: once a real answer is
-recorded, it moves through ``revise_trait_spec`` with a rationale, restating the trait spec's own
-authoring statement for the breeder's re-confirmation. ``localization`` is carried forward, never
-authored, and stays on the plain ``write_trait_spec_fields``. Both are read from the recorded value
-on every later call. ``resolve_operating_point`` stamps whether a given run's ``count_objective``
-was trait-authored or the platform default.
-
-Everything else in ``TraitSpec`` says: which subject in ``subjects.json`` is the positive/target
-state, the milestone convention, and the tile-seam sliver policy. Operating-point values (conf,
-IoU, tolerances) and the CV task / pipeline decomposition are absent from this class.
+"""A trait: one entry holding its spec fields and the operationalization text for each delivery kind
+it delivers, kept per project as an appended list of revisions: ``propose_trait`` appends one,
+``confirm_revision`` confirms or withdraws one by its number and content hash.
 """
 
 from __future__ import annotations
 
-import dataclasses
-import logging
-from collections.abc import Sequence
-from dataclasses import dataclass, fields
+import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import tcip_store as ts
-from tcip_store import (
-    RECORD_JSON,
-    DecodeError,
-    Key,
-    NotFound,
-    SchemaVersionRefused,
-    StoreDescriptor,
-    VersionConflict,
-    register_store,
-)
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp import agent_identity
 from tcip_mcp.identity import user_identity
-from tcip_mcp.statements import canonical, content_hash, now_iso
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from tcip_mcp.subject_registry import SubjectRegistry
 
-# Count objectives, what the resolved operating point optimizes. Not a closed enum:
-# these three names are today's real, implemented picker capabilities
-# (``operating_point.COUNT_OBJECTIVE_PICKERS``), not the only objectives a trait may ever declare.
-# The agent can write and register a new named picker for a trait whose breeder-stated need these
-# three don't cover, a capability the platform can grow, not a category TraitSpec closes over.
+# Count objectives, what the resolved operating point optimizes. Not a closed enum: these are the
+# pickers ``operating_point.COUNT_OBJECTIVE_PICKERS`` implements today, kept torch-free here.
 COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-FN]; the phenotype is a count
 DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
 PRESENCE = "presence"             # only whether the object is present
-
-# The currently-implemented objective names, lives here (torch-free) rather than in
-# ``operating_point.py`` (which imports the torch-heavy ``pipelines.training.evaluation`` at module
-# level) purely so referencing these three names never drags torch into
-# ``get_trait``/``registered_traits``. ``operating_point.py``'s picker/label registry
-# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list. Not a
-# validation whitelist, ``_spec_from_config`` does not reject a ``count_objective`` outside this
-# set; a trait may name any objective an agent has implemented and registered a picker for.
 COUNT_OBJECTIVES = {COUNT_UNBIASED, DETECTION_F1, PRESENCE}
 
 # Localization, what counts as "finding" an object.
 CENTER_MATCH = "center_match"  # predicted center within a derived tolerance of a GT center
 IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
 
+# ── the delivery kinds ───────────────────────────────────────────────────────
 
-@dataclass(frozen=True)
-class TraitSpec:
-    """The semantics of one trait. Most fields are read, never derived; ``count_objective`` and
-    ``localization`` are the two exceptions, see the module docstring."""
+STATE_CROSSING_DATES = "state_crossing_dates"
+PER_IMAGE_COUNT = "per_image_count"
+PER_PLANT_COUNT_AGGREGATE = "per_plant_count_aggregate"
+PER_PLANT_ORDINAL_AGGREGATE = "per_plant_ordinal_aggregate"
+PER_PLANT_REGRESSION_AGGREGATE = "per_plant_regression_aggregate"
 
-    name: str
-    # What the delivered phenotype needs to be reliable for, hence what the operating point
-    # optimizes. Not authored blind: a consequence judgment only a human stakeholder can make (does
-    # this number need every object found correctly, or is it fine if errors cancel out as long as
-    # the total is right?), asked in plain domain terms, never CV vocabulary, and never silently
-    # copied from another trait's value. Empty = not yet decided; resolve_operating_point defaults
-    # to COUNT_UNBIASED (the common case for a fraction/ratio phenotype) rather than refusing to
-    # calibrate, since nobody can meaningfully answer this before a result exists to judge it
-    # against, stamping the run's provenance as trait-authored or platform-default so the
-    # distinction is never lost downstream. It is authored: record a real breeder answer via
-    # revise_trait_spec, with a rationale, which restates the trait spec's own authoring statement.
-    count_objective: str = ""
-    # What "a hit" means when validating counts (center_match vs iou_match), not authored: derived
-    # once from real GT the first time it's needed and recorded via
-    # ``write_trait_spec_fields``/``pipelines.derivations.derive_localization_kind``, then read from
-    # here on every later call. Empty = not yet derived, never silently assumed to be
-    # either kind; ``resolve_match_criterion`` is what fills this in.
-    localization: str = ""
-    # How the localization tolerance is derived (the recipe string names it; ``localization_tolerance_frac``
-    # is the fallback multiplier when a caller has no GT to derive one from, the real per-dataset
-    # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
-    localization_tolerance: str = "half_class_avg_size"
-    localization_tolerance_frac: float = 0.5  # fallback only, see derive_localization_tolerance_frac
-    # The value one of the measured subject's attributes declares in subjects.json, checked
-    # against that subject's own attribute values. Empty = the trait has no positive value.
-    positive_value: str = ""
-    # Milestone crossing fractions and the quantity they cross.
-    milestone_fractions: tuple[float, ...] = ()
-    milestone_on: str = ""  # e.g. "positive_fraction"
-    # The crossing key (e.g. "95per") the crops.yml majority-date milestone maps to.
-    majority_milestone: str = ""
-    # The majority crossing mapping is not yet breeder-confirmed.
-    crossing_unconfirmed: bool = False
-    # Phenology CSV column vocabulary: the milestone-column prefix and the label the majority
-    # alias/crossing-unconfirmed columns carry, so the delivered schema derives its own names.
-    phenology_prefix: str = ""
-    majority_label: str = ""
-    # How the tile-seam sliver cutoff is derived (the policy string names the basis). Partial objects
-    # count unless below ``sliver_frac * class_avg_size``. Not read by ``TiledDetectionDataset``
-    # directly, it derives its own default from the dataset's own size spread
-    # (``derivations.derive_sliver_frac``) unless the caller passes an explicit override; this field
-    # is that optional override, not a value the platform applies for you.
-    sliver_policy: str = "class_avg_size"
-    sliver_frac: float = 0.5
-    # Max acceptable mean per-image count bias on the held-out split, relative to the class's (or,
-    # for the pooled gate, the whole reference's) own typical per-image count, for the operating
-    # point to count as validated (a measurement decision, how much relative count error is
-    # trustworthy). A fraction (e.g. 0.1 == 10% relative error). How much relative count error is
-    # "enough" for a trait's own phenotype is measurement semantics, the same shape as
-    # `count_error_tolerance`/`classifier_agreement_floor` above: `None` means "not yet authored for
-    # this trait", it needs the domain expert, not a value picked by the agent. Unlike
-    # `count_error_tolerance`'s dispersion term, an unauthored fraction here does not skip the check:
-    # `operating_point.py`'s `_DEFAULT_COUNT_BIAS_TOLERANCE_FRAC` (0.01, platform-chosen, not
-    # domain-authored) applies as the real operative fraction until a trait sets its own. Applied
-    # identically wherever `operating_point._bias_equivalence_ok` is called, the pooled and
-    # per-class detector gates and the classifier path's positive-class gate, one field, one unit,
-    # everywhere it is read (deliberately not two different units at two call sites). The platform
-    # derives what the fraction is relative to (each scope's own typical per-image count, from the
-    # same holdout reference the equivalence test itself measures, never calibration, which would let
-    # a caller buy a looser holdout tolerance by padding calibration's own density) at runtime, never
-    # invented and never breeder-guessed. A near-zero-typical-count scope is protected by a floor that
-    # is itself derived (`1 / n`, the same evidence count the equivalence test's own standard error
-    # already uses, see `operating_point._effective_count_bias_tolerance`), not by a second authored
-    # or platform-invented number. That floor can raise the effective tolerance above what the
-    # fraction term alone would give (it is a `max()`), it is bounded, never a runaway number: at
-    # n >= 2 (the reference-sufficiency minimum every scope using this floor is independently gated
-    # on, see `insufficient_holdout_images`/`insufficient_holdout_images_per_class`) the floor
-    # itself never exceeds 0.5. What a given calibration was actually held to (both terms combined) is
-    # read from the per-scope `pooled_count_bias_tolerance`/`per_class_count_bias_tolerance` in a
-    # run's own gate-evidence record, rather than inferred from this fraction alone.
-    count_bias_tolerance_frac: float | None = None
-    # Max acceptable p90 |per-image count error| (a tail statistic, not a mean, a population mean
-    # can hide one badly-off image among many) on the held-out split. No default: an invented number
-    # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
-    # means "not yet authored for this trait" and the dispersion term is skipped, not gated on a
-    # guessed value, it needs the domain expert (or a derivation from real dense-imagery detector
-    # statistics), not a value picked by the agent. Not yet authored.
-    count_error_tolerance: float | None = None
-    # Min acceptable Cohen's kappa (chance-corrected classifier/GT agreement) on the held-out split
-    # for the classifier operating point to count as validated, catches a compensating-error
-    # classifier (flips k positives to negative and k negatives to positive, net count-bias ~0) a
-    # bare count-bias check can't see. How much agreement is "enough" for a trait's own phenotype is
-    # measurement semantics, the same shape as `count_error_tolerance` above: `None` means "not yet
-    # authored for this trait", it needs the domain expert, not a value picked by the agent. Unlike
-    # `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip the check:
-    # `operating_point.py`'s `_DEFAULT_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored)
-    # applies as the real operative floor until a trait sets its own, the gate is never satisfied by
-    # the bare mathematical minimum `kappa > 0` alone once the platform default is in effect.
-    classifier_agreement_floor: float | None = None
-    # Min acceptable value for whichever ordinal compensating-error criterion calibration actually
-    # used (today only `quadratic_weighted_kappa` is registered in
-    # `operating_point.ORDINAL_CRITERIA`, but the field name does not bake that in, since the
-    # toolkit may grow further criteria). Same shape as `classifier_agreement_floor` above: `None`
-    # means "not yet authored for this trait", it needs the domain expert, not a value picked by the
-    # agent. Unlike `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip
-    # the check: `operating_point.py`'s `_DEFAULT_ORDINAL_AGREEMENT_FLOOR` applies as the real
-    # operative floor until a trait sets its own.
-    ordinal_agreement_floor: float | None = None
-    # Min acceptable value for whichever regression skill/agreement criterion calibration actually
-    # used (`r_squared` or `concordance_correlation_coefficient`, `operating_point.
-    # REGRESSION_CRITERIA`), the regression counterpart to `ordinal_agreement_floor` above. `None`
-    # means "not yet authored for this trait"; `operating_point.py`'s
-    # `_DEFAULT_REGRESSION_SKILL_FLOOR` applies until a trait sets its own. Unlike
-    # `classifier_agreement_floor`'s single criterion (kappa), this platform offers more than one
-    # regression criterion with genuinely different scales/conventions (R² is unbounded below and
-    # measures skill relative to a trivial mean baseline; CCC is bounded in [-1, 1] and decomposes
-    # precision from bias), so a floor authored here is only meaningful paired with the criterion it
-    # was set against, whoever authors this value must decide the floor and the criterion together,
-    # an honest, documented limitation of a single scalar field, not a design this platform resolves
-    # further here.
-    regression_skill_floor: float | None = None
-    # Max relative disagreement a physical-scale reference half may show (scale_calibration.
-    # resolve_physical_scale); None has no platform default fallback, unlike count_bias_tolerance_frac.
-    scale_tolerance_frac: float | None = None
-    # Min held-out precision and recall the detection gate's governing localization criterion must
-    # both clear at the shipped conf. No fallback: None refuses to validate rather than substitute one.
-    holdout_match_quality_floor: float | None = None
-    # crops.yml controlled-vocab trait names this spec is authored to deliver, the anti-fabrication
-    # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
-    delivers: tuple[str, ...] = ()
-    notes: str = ""
+DELIVERY_KINDS = (
+    STATE_CROSSING_DATES,
+    PER_IMAGE_COUNT,
+    PER_PLANT_COUNT_AGGREGATE,
+    PER_PLANT_ORDINAL_AGGREGATE,
+    PER_PLANT_REGRESSION_AGGREGATE,
+)
+"""The delivered artifact shapes. Each kind decides which spec fields an operationalization of it
+rests on, whether it names delivered phenotypes, and whether it names value keys."""
+
+if TYPE_CHECKING:
+    DeliveryKind = str
+    Localization = str
+else:
+    DeliveryKind = Literal[DELIVERY_KINDS]
+    Localization = Literal["", CENTER_MATCH, IOU_MATCH]
+
+CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
+    STATE_CROSSING_DATES: ("positive_value", "milestone_on", "milestone_fractions"),
+    PER_IMAGE_COUNT: ("count_objective", "localization", "holdout_match_quality_floor"),
+    PER_PLANT_COUNT_AGGREGATE: ("count_objective", "holdout_match_quality_floor"),
+    PER_PLANT_ORDINAL_AGGREGATE: ("ordinal_agreement_floor",),
+    PER_PLANT_REGRESSION_AGGREGATE: ("regression_skill_floor",),
+}
+"""The spec fields an operationalization of each kind rests on, each required to hold a value."""
+
+PHENOTYPE_NAMING_KINDS = frozenset({
+    STATE_CROSSING_DATES,
+    PER_PLANT_COUNT_AGGREGATE,
+    PER_PLANT_ORDINAL_AGGREGATE,
+    PER_PLANT_REGRESSION_AGGREGATE,
+})
+"""Kinds whose delivered file carries a phenotype name, hence whose operationalization binds one."""
+
+VALUE_KEY_KINDS = frozenset({
+    PER_PLANT_COUNT_AGGREGATE,
+    PER_PLANT_ORDINAL_AGGREGATE,
+    PER_PLANT_REGRESSION_AGGREGATE,
+})
+"""Kinds whose rows carry a value key, hence whose operationalization bounds the set."""
+
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+"""Text that must say something: surrounding whitespace is stripped and an empty value refuses."""
 
 
 class TraitUnknownError(KeyError):
-    """Raised for an unregistered trait, lists the available traits (the honest no-fabrication signal)."""
-
-
-# --- Config-driven authoring ------------------------------------------------
-# There are no built-in traits; every trait is authored the same way, as a
-# per-project spec file. This is the only registration path. Cross-checked against the crops.yml
-# controlled vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call
-# (not a module-load snapshot) so a repin of the platform state root is picked up.
-
-_TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
-_SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
-_TUPLE_FIELDS = {"milestone_fractions", "delivers"}
-
-SPEC_SUFFIX = ".json"
-"""The canonical spec-file suffix, and the only one the store's locator addresses."""
+    """Raised for a trait with no record in the project, listing the traits it has."""
 
 
 def crops_yml_path() -> Path:
@@ -225,842 +99,406 @@ def crops_yml_path() -> Path:
 
 
 def _crops_traits() -> list[dict]:
-    """The raw crops.yml trait records, or [] if it can't be read."""
-    try:
-        import yaml
+    """crops.yml's trait records, read whole; a file that is missing or will not parse raises."""
+    import yaml
 
-        data = yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))
-        return [t for t in data.get("traits", []) if isinstance(t, dict) and "name" in t]
-    except (OSError, ValueError, KeyError, ImportError):
-        return []
-
-
-def _crops_vocab() -> set[str]:
-    """The crops.yml controlled-vocab trait names, or an empty set if it can't be read (fail-closed:
-    a config spec that can't be cross-checked is not registered)."""
-    return {t["name"] for t in _crops_traits()}
+    return yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))["traits"]
 
 
 def registered_crops() -> set[str]:
-    """Every crop name crops.yml declares (the union of each trait's own ``crops`` list), or an
-    empty set if it can't be read.
-    """
-    return {c for t in _crops_traits() for c in t.get("crops", []) if isinstance(c, str)}
+    """Every crop name crops.yml declares (the union of each trait's own ``crops`` list)."""
+    return {c for t in _crops_traits() for c in t.get("crops", [])}
 
 
 def crops_units() -> dict[str, str]:
-    """trait name -> crops.yml's declared physical unit (``mm``/``g``/``kg``/``m``/``cm``/…), for
-    every trait that declares one. crops.yml is the trait-unit authority; a count/
-    ordinal trait with no physical unit is simply absent from this mapping, never guessed."""
+    """trait name -> crops.yml's declared physical unit, for every trait that declares one; a
+    count or ordinal trait with no physical unit is absent from this mapping."""
     return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
 
 _METRIC_LENGTH_UNITS = {"mm", "cm", "m", "km", "um"}
-"""The metric length-unit symbols a physical scale may legitimately be expressed in, a dimensional
-fact about these symbols, not a trait-by-trait choice: it never grows or shrinks with which traits
-crops.yml happens to declare. ``crops_length_units`` intersects this against crops.yml's actual
-declared vocabulary, so the length subset always reflects what the vocabulary really contains."""
+"""The metric length-unit symbols a physical scale may be expressed in, a dimensional fact about
+the symbols that never grows or shrinks with what crops.yml declares."""
 
 
 def crops_length_units() -> set[str]:
-    """The subset of :func:`crops_units`'s own declared units that are linear length units.
-
-    Picked out of whatever crops.yml actually declares by a dimensional rule (a unit symbol that
-    names a metric length): a mass unit (``g``/``kg``) or a mass-ratio concentration (``ug/g``) is
-    never a length regardless of how a trait spells it.
-    """
+    """The subset of :func:`crops_units`'s declared units that are linear length units."""
     return {u for u in crops_units().values() if u in _METRIC_LENGTH_UNITS}
 
 
 def crops_definitions() -> dict[str, str]:
-    """trait name -> crops.yml's declared definition, for every trait that carries one: the
-    breeder's own wording for what a delivered phenotype is.
-    """
+    """trait name -> crops.yml's declared definition, for every trait that carries one."""
     return {t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)}
 
 
-def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, str | None]:
-    """Build a ``TraitSpec`` from one complete spec record, every ``TraitSpec`` field stated,
-    cross-checked against ``vocab``.
-
-    A record lacking a field raises ``KeyError`` naming it. Rejects (returns ``(None, reason)``)
-    an invalid ``name``, an unknown field, or a ``delivers`` that is empty or names a phenotype
-    absent from crops.yml. ``reason`` is the same text logged as a warning.
-
-    A ``schema_version`` key is not a ``TraitSpec`` field; the store seam enforces its ceiling on
-    every read, so it is stripped here.
-    """
-    name = data["name"]
-    if not isinstance(name, str) or not name:
-        reason = f"invalid 'name' ({name!r})"
-        logger.warning("trait spec skipped: %s", reason)
-        return None, reason
-    data = {k: v for k, v in data.items() if k != "schema_version"}
-    unknown = set(data) - _SPEC_FIELDS
-    if unknown:
-        reason = f"unknown field(s) {sorted(unknown)}"
-        logger.warning("trait spec %r skipped: %s", name, reason)
-        return None, reason
-    kwargs: dict[str, Any] = {
-        k: (tuple(data[k]) if k in _TUPLE_FIELDS else data[k]) for k in sorted(_SPEC_FIELDS)}
-    delivers = kwargs["delivers"]
-    off_vocab = [d for d in delivers if d not in vocab]
-    if not delivers or off_vocab:
-        reason = f"delivers must be non-empty and all in crops.yml (off-vocab: {off_vocab})"
-        logger.warning("trait spec %r skipped: %s", name, reason)
-        return None, reason
-    floor = kwargs["holdout_match_quality_floor"]
-    if floor is not None and not (isinstance(floor, (int, float)) and 0 < floor <= 1):
-        reason = f"holdout_match_quality_floor must be in (0, 1], got {floor!r}"
-        logger.warning("trait spec %r skipped: %s", name, reason)
-        return None, reason
-    # count_objective is not validated against a closed vocabulary, a trait may name any
-    # objective an agent has implemented and registered a picker for in
-    # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
-    # if the name has no registered picker, which is the honest place for that check to live (it
-    # needs the picker registry; this module stays torch-free and doesn't import it).
-    return TraitSpec(**kwargs), None
+# ── the entry: the one declared schema ───────────────────────────────────────
 
 
-# ── the trait-spec store ─────────────────────────────────────────────────────
+class Operationalization(BaseModel):
+    """What a trait's delivered number means for one delivery kind, in the breeder's terms."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+
+    statement: Text
+    """What the delivered number means, in the breeder's own words."""
+    mechanism: Text
+    """What produces the call or the number: which subject, attribute and model decide it."""
+    measured_subject: Text
+    """The ``subjects.json`` subject the number is about."""
+    delivered_phenotypes: tuple[str, ...]
+    """Which of the trait's ``delivers`` entries this kind ships under; empty for
+    ``per_image_count``, whose CSV names no phenotype, and at least one for every other kind."""
+    delivered_value_keys: tuple[str, ...]
+    """The value keys delivered rows may carry: at least one for the per-plant aggregate kinds,
+    empty for the others, whose row schema is fixed by their writer."""
 
 
-def trait_specs_dir(project_root: str | Path | None = None) -> Path:
-    """Where a project's trait specs live: ``<root>/.tcip/state/trait_specs``.
+class TraitEntry(BaseModel):
+    """One trait's complete entry: its spec fields and its operationalization per delivery kind.
+    Every field is required; a field not yet decided is stated as empty or null. A proposal is
+    checked by :func:`check_proposed_entry`."""
 
-    ``project_root`` names the project explicitly; omitting it resolves against this process's
-    pinned platform root.
-    """
-    if project_root is not None:
-        return Path(project_root) / _TRAIT_SPECS_RELPATH
-    from tcip_mcp.project_paths import resolve_state
+    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
 
-    return resolve_state(_TRAIT_SPECS_RELPATH)
+    name: Text
+    """The trait's name in this project; its record is keyed by it."""
+    delivers: tuple[str, ...]
+    """The crops.yml phenotype names this trait delivers."""
+    positive_value: str
+    """The value one of the measured subject's attributes declares for the positive state, or empty."""
+    milestone_fractions: tuple[float, ...]
+    """Crossing fractions for a milestone-delivering trait."""
+    milestone_on: str
+    """The quantity the milestones cross, e.g. ``positive_fraction``."""
+    majority_milestone: str
+    """The crossing key (e.g. ``95per``) the crops.yml majority-date milestone maps to, or empty."""
+    phenology_prefix: str
+    """The phenology CSV milestone-column prefix."""
+    majority_label: str
+    """The label the majority-alias column carries."""
+    count_objective: str
+    """What the delivered number must be reliable for (``count_unbiased``, ``detection_f1``,
+    ``presence`` or another registered picker), a consequence judgment only the breeder makes;
+    empty until decided."""
+    localization: Localization
+    """What finding one object means; empty until decided, when evaluation derives it from the
+    ground truth in hand."""
+    localization_tolerance: str
+    """How the localization tolerance is derived, by name."""
+    localization_tolerance_frac: float
+    """The tolerance multiplier used when no ground truth is at hand to derive one from."""
+    count_bias_tolerance_frac: float | None
+    """Max acceptable mean per-image count bias on the held-out split, relative to the scope's
+    typical per-image count; null until the breeder authors it."""
+    count_error_tolerance: float | None
+    """Max acceptable p90 per-image count error on the held-out split; null until authored."""
+    classifier_agreement_floor: float | None
+    """Min acceptable Cohen's kappa for the classifier operating point; null until authored."""
+    ordinal_agreement_floor: float | None
+    """Min acceptable ordinal agreement criterion value; null until authored."""
+    regression_skill_floor: float | None
+    """Min acceptable regression skill criterion value, paired with its criterion; null until authored."""
+    scale_tolerance_frac: float | None
+    """Max relative disagreement a physical-scale reference half may show; null until authored."""
+    holdout_match_quality_floor: float | None = Field(gt=0, le=1)
+    """Min held-out precision and recall the detection gate's localization criterion must clear, in
+    (0, 1]; null until authored."""
+    notes: str
+    """Free-text notes on the trait's measurement."""
+    operationalizations: dict[DeliveryKind, Operationalization]
+    """What the delivered number means, per delivery kind this trait delivers."""
 
 
-def _resolve_specs_dir(specs_dir: Path | None, project_root: str | Path | None) -> Path:
-    if specs_dir is not None and project_root is not None:
+def check_proposed_entry(entry: TraitEntry) -> None:
+    """Refuse (``ValueError``) an entry a proposal may not append: ``delivers`` empty or naming
+    anything outside crops.yml, or an operationalization that leaves a spec field its kind rests
+    on (:data:`CONSTITUTING_FIELDS`) empty, covers a phenotype the entry does not deliver, or names
+    phenotypes or value keys where its kind carries none (or none where it carries them)."""
+    vocab = {t["name"] for t in _crops_traits()}
+    off_vocab = [d for d in entry.delivers if d not in vocab]
+    if not entry.delivers or off_vocab:
         raise ValueError(
-            "name either the project root or the spec directory, not both: they can disagree "
-            "and nothing here can tell which one the caller meant"
+            f"delivers must name at least one crops.yml phenotype and nothing else "
+            f"(off-vocabulary: {off_vocab})"
         )
-    return Path(specs_dir) if specs_dir is not None else trait_specs_dir(project_root)
+    for kind, stated in entry.operationalizations.items():
+        empty = [f for f in CONSTITUTING_FIELDS[kind] if getattr(entry, f) in (None, "", ())]
+        if empty:
+            raise ValueError(
+                f"a {kind} operationalization rests on {empty}, which this entry leaves empty"
+            )
+        off_spec = [p for p in stated.delivered_phenotypes if p not in entry.delivers]
+        if off_spec:
+            raise ValueError(
+                f"the {kind} operationalization covers {off_spec}, which this trait does not "
+                f"deliver ({list(entry.delivers)})"
+            )
+        if (kind in PHENOTYPE_NAMING_KINDS) != bool(stated.delivered_phenotypes):
+            raise ValueError(
+                f"a {kind} operationalization's delivered_phenotypes must "
+                + ("name at least one delivered phenotype" if kind in PHENOTYPE_NAMING_KINDS
+                   else "be empty, since its file names no phenotype")
+            )
+        if (kind in VALUE_KEY_KINDS) != bool(stated.delivered_value_keys):
+            raise ValueError(
+                f"a {kind} operationalization's delivered_value_keys must "
+                + ("name the value keys its rows carry" if kind in VALUE_KEY_KINDS
+                   else "be empty, since its writer fixes the row schema")
+            )
 
 
-def _trait_specs_state_root(specs_dir: Path) -> Path:
-    """The ``.tcip/state`` root the store keys against; refuses a ``specs_dir`` not named
-    ``trait_specs``.
-    """
-    if specs_dir.name != "trait_specs":
-        raise ValueError(
-            f"{specs_dir} does not end in 'trait_specs', so it cannot name this store's "
-            "directory: trait specs live under a fixed 'trait_specs' segment, never a "
-            "caller-chosen name"
-        )
-    return specs_dir.parent
+def entry_sha256(entry: TraitEntry) -> str:
+    """The content hash of ``entry``: SHA-256 over its canonical JSON form."""
+    encoded = json.dumps(
+        entry.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-TRAIT_SPECS_STORE = "trait_specs"
-TRAIT_SPEC_SCHEMA_VERSION = 2
-_SPEC_FILE = RootedFileLocator(prefix=("trait_specs",), suffix=SPEC_SUFFIX)
+class TraitRevision(BaseModel):
+    """One proposed entry, as appended: its number, the entry, the entry's content hash, who
+    proposed it and why, and the breeder's confirmation or withdrawal once made."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+
+    number: int
+    """1 for the first revision, one more for each revision after it."""
+    entry: TraitEntry
+    entry_sha256: str
+    """:func:`entry_sha256` of ``entry``, the hash a confirmation must present."""
+    rationale: Text
+    """The agent's account of why it proposed this entry, from the breeder's own words."""
+    relayed_note: str
+    """What the breeder said away from the GUI, relayed by the agent; never a confirmation."""
+    proposed_at: str
+    proposing_agent: dict[str, str | None]
+    """The agent identity the proposing MCP session declared (``agent_identity.RECORD_FIELDS``)."""
+    confirmed_by: str | None
+    confirmed_at: str | None
+    identity_from_request: bool | None
+    """Whether the confirming request named its user, or the backend used its own identity."""
+    withdrawn_by: str | None
+    withdrawn_at: str | None
+
+    @property
+    def confirmed(self) -> bool:
+        """Whether the breeder confirmed this revision and has not withdrawn the confirmation."""
+        return self.confirmed_at is not None and self.withdrawn_at is None
+
+
+class TraitRecord(BaseModel):
+    """One trait's stored record: every revision proposed for it, oldest first."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revisions: tuple[TraitRevision, ...]
+
+    @property
+    def latest(self) -> TraitRevision:
+        """The most recently proposed revision, confirmed or not."""
+        return self.revisions[-1]
+
+    @property
+    def latest_confirmed(self) -> TraitRevision | None:
+        """The highest-numbered revision the breeder confirmed and has not withdrawn, or ``None``."""
+        return next((r for r in reversed(self.revisions) if r.confirmed), None)
+
+
+# ── the store ────────────────────────────────────────────────────────────────
+
+TRAITS_STORE = "traits"
 register_store(
     StoreDescriptor(
-        name=TRAIT_SPECS_STORE,
+        name=TRAITS_STORE,
         kind="record",
         key_fields=("trait",),
         frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         enumerable=True,
-        locator=_SPEC_FILE,
-        schema_version=TRAIT_SPEC_SCHEMA_VERSION,
+        locator=RootedFileLocator(prefix=("traits",), suffix=".json"),
     )
 )
 
 
-def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
-    """One trait's spec record under a spec directory.
+def trait_key(project_root: str | Path | None, trait: str) -> Key:
+    """One trait's record in a project's state; ``None`` names the process's pinned root."""
+    from tcip_mcp.project_paths import project_state_dir
 
-    The key's root is the shared ``.tcip/state`` directory ``specs_dir`` names (via
-    :func:`_trait_specs_state_root`); the locator's own ``trait_specs`` prefix supplies the rest of
-    the on-disk placement. Enumeration answers over the records themselves.
+    return Key(TRAITS_STORE, str(project_state_dir(project_root)), (trait,))
+
+
+def trait_names(project_root: str | Path | None = None) -> list[str]:
+    """Every trait with a record in the project, sorted."""
+    from tcip_mcp.project_paths import project_state_dir
+
+    return sorted(k.parts[0] for k in ts.keys(TRAITS_STORE, str(project_state_dir(project_root))))
+
+
+def _record(trait: str, project_root: str | Path | None, value: dict | None) -> TraitRecord:
+    """``trait``'s stored ``value`` read through its schema. An absent value raises
+    :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises."""
+    if value is None:
+        raise TraitUnknownError(
+            f"Unknown trait {trait!r}. Traits in this project: {trait_names(project_root)}")
+    return TraitRecord.model_validate(value)
+
+
+def read_trait(trait: str, project_root: str | Path | None = None) -> TraitRecord:
+    """One trait's record, read through its schema; refuses as :func:`_record` does."""
+    return _record(trait, project_root, ts.read(trait_key(project_root, trait), default=None))
+
+
+# ── the proposal and the confirmation ────────────────────────────────────────
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> SubjectRegistry:
+    """The registry a ``state_crossing_dates`` operationalization's positive class is checked
+    against.
+
+    ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
+    served when ``project_root`` is unambiguously the one dataset the project uses (its own
+    ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
+    Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
     """
-    return Key(TRAIT_SPECS_STORE, str(_trait_specs_state_root(Path(specs_dir))), (trait_name,))
+    from tcip_mcp.dataset_layout import subjects_path
+    from tcip_mcp.subject_registry import read_registry
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-
-def _spec_filename(specs_dir: Path, trait_name: str) -> str:
-    """The spec's file name, taken from the store's own locator rather than spelled again."""
-    return _SPEC_FILE.relative_path(str(specs_dir), (trait_name,)).name
-
-
-def load_trait_specs_with_errors(
-    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
-) -> tuple[list[TraitSpec], list[dict]]:
-    """Same scan as :func:`load_trait_specs`, plus the file/reason for every spec skipped.
-
-    Either name the project whose registry to read (``project_root``) or the directory itself; the
-    placement is resolved here.
-    """
-    directory = _resolve_specs_dir(specs_dir, project_root)
-    errors: list[dict] = []
-    vocab = _crops_vocab()
-    specs: list[TraitSpec] = []
-    for key in ts.keys(TRAIT_SPECS_STORE, str(_trait_specs_state_root(directory))):
-        filename = _spec_filename(directory, key.parts[0])
+    if dataset_root:
         try:
-            data = ts.read_versioned(key).value
-        except NotFound:
-            continue
-        except DecodeError as e:
-            logger.warning("trait spec %s skipped: %s", filename, e)
-            errors.append({"file": filename, "reason": str(e)})
-            continue
-        except SchemaVersionRefused as e:
-            logger.warning("trait spec %s skipped: %s", filename, e)
-            errors.append({"file": filename, "reason": str(e), "kind": "version_refused"})
-            continue
-        if not isinstance(data, dict):
-            reason: str | None = "not a mapping"
-            logger.warning("trait spec %s skipped: %s", filename, reason)
-            errors.append({"file": filename, "reason": reason})
-            continue
-        spec, reason = _spec_from_config(data, vocab)
-        if spec is not None:
-            specs.append(spec)
-        else:
-            errors.append({"file": filename, "reason": reason})
-    return specs, errors
+            return read_registry(subjects_path(dataset_root))
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"dataset_root {dataset_root!r} carries no subject registry of its own. Write one "
+                "(write_subject_registry) before a crossing's classes can be checked against it."
+            ) from exc
 
-
-def load_trait_specs(
-    specs_dir: Path | None = None, *, project_root: str | Path | None = None
-) -> list[TraitSpec]:
-    """Breeder-authored per-trait spec records (``<root>/.tcip/state/trait_specs/*.json``), each
-    cross-checked against the crops.yml controlled vocab. A project with no trait spec on record
-    yields none. Raises ``ValueError`` naming every spec record that did not load and why
-    (:func:`load_trait_specs_with_errors` answers them as a list instead).
-    """
-    specs, errors = load_trait_specs_with_errors(specs_dir, project_root=project_root)
-    if errors:
-        named = "; ".join(f"{e['file']}: {e['reason']}" for e in errors)
-        raise ValueError(f"trait spec record(s) did not load ({named}); repair or re-author them")
-    return specs
-
-
-class TraitSpecRevision(NamedTuple):
-    """One call's full answer to updating a trait spec: the spec as written, the trait-spec
-    authoring statement as written when this call stated or restated it (``None`` when it did
-    neither), and one sentence saying what happened to the statement."""
-
-    spec: TraitSpec
-    statement: dict[str, Any] | None
-    statement_note: str
-
-
-def write_trait_spec_fields(
-    trait_name: str, fields_: dict,
-    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
-    rationale: str | None = None, relayed_note: str = "",
-) -> TraitSpec:
-    """Update one or more fields on an already-registered trait spec, returning it as written.
-
-    ``rationale`` and ``relayed_note`` feed the trait-spec authoring statement this call states or
-    restates, through :func:`revise_trait_spec_fields`.
-    """
-    return revise_trait_spec_fields(
-        trait_name, fields_, specs_dir, project_root=project_root,
-        rationale=rationale, relayed_note=relayed_note,
-    ).spec
-
-
-def revise_trait_spec_fields(
-    trait_name: str, fields_: dict,
-    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
-    rationale: str | None = None, relayed_note: str = "",
-) -> TraitSpecRevision:
-    """Update one or more fields on an already-registered trait spec, and state or restate its
-    trait-spec authoring statement when the update calls for it.
-
-    Refuses (raises ``ValueError``) if the trait has no spec record on file: creating one is
-    ``author_trait_spec``'s job. Refuses a caller-supplied ``schema_version`` in ``fields_``. A
-    ``rationale`` that is given must say something, checked before any read.
-
-    The statements scope this reads and writes is :func:`trait_spec_statements_scope`
-    (project_root) whenever ``project_root`` is given or neither argument is, and
-    :func:`_trait_specs_state_root` (directory) for a ``specs_dir`` caller.
-
-    The read, the merge, the validation and the spec write are one compare-and-set against the
-    version read, retried on conflict against whatever landed meanwhile. ``moved`` is whether the
-    merge changes any of ``_AUTHORED_SPEC_FIELDS`` from what is on file now, both sides parsed
-    through :func:`_spec_from_config`; a stored record the parser refuses reads as moved, naming
-    the authored keys in ``fields_`` when there are any and otherwise saying the stored record's
-    authored values could not be read. ``stale`` is whether the trait-spec statement on file, if
-    any, is absent or no longer matches the candidate (:func:`trait_spec_statement_stale`). A call
-    that moves an authored field over a trait carrying a statement and gives no rationale refuses
-    by name, naming the fields that moved, before any write; every other combination writes the
-    spec.
-
-    A rationale-bearing call then states or restates the trait-spec statement whenever no statement
-    is on file, the one on file is stale, or this call moved an authored field; a current, unmoved
-    statement is left alone, and a rationale-less call never touches the statement at all.
-    ``relayed_note`` is taken fresh on every statement written here, never carried forward from the
-    one it replaces. The statement write is its own compare-and-set: on conflict, the spec on file
-    is re-read and compared to what this call wrote by authored snapshot; a different snapshot
-    abandons the restatement, and an unchanged snapshot retries the statement write against
-    whatever is on file now, creating fresh when the statement was deleted meanwhile.
-
-    The spec and its statement live in two stores and are never written atomically; a spec whose
-    statement is stale is a read-time fact the delivery refusal and the doctor catch.
-    """
-    if "schema_version" in fields_:
+    registered = read_datasets(project_root)
+    # The resolved root, never the registry's own stored spelling ("." for the project's own tree).
+    roots = [str(dataset_entry_path(project_root, d)) for d in registered]
+    if len(registered) > 1:
         raise ValueError(
-            f"update to trait spec {trait_name!r} cannot carry 'schema_version' in fields: it "
-            "is not a TraitSpec field, and no caller writes it directly"
+            f"project {project_root!r} registers {len(registered)} datasets {roots}, so which one "
+            "this crossing's classes belong to cannot be guessed. Pass dataset_root naming it."
         )
-    if rationale is not None:
-        rationale = _require_text(rationale, "rationale")
-
-    directory = _resolve_specs_dir(specs_dir, project_root)
-    if specs_dir is not None and project_root is None:
-        statements_scope: str | Path = _trait_specs_state_root(directory)
-    else:
-        statements_scope = trait_spec_statements_scope(project_root)
-    spec_key = trait_spec_key(directory, trait_name)
-    statement_key = trait_spec_statement_key(statements_scope, trait_name)
-    vocab = _crops_vocab()
-
-    # A conflict at the spec key means another writer committed, so the loop only repeats while
-    # the spec is actually changing under it and ends when this merge is the one that lands.
-    while True:
-        stored = ts.read_versioned(spec_key, default=None)
-        if stored.value is None:
-            raise _no_spec_error(trait_name, directory)
-        data = stored.value
-        if not isinstance(data, dict):
-            filename = _spec_filename(directory, trait_name)
-            raise ValueError(f"{directory / filename} is not a valid trait spec (not a mapping)")
-
-        merged = dict(data)
-        merged.update(fields_)
-        candidate, reason = _spec_from_config(merged, vocab)
-        if candidate is None:
-            raise ValueError(
-                f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. "
-                "Refusing to write."
-            )
-
-        stored_spec, _stored_reason = _spec_from_config(data, vocab)
-        if stored_spec is None:
-            moved = True
-            moved_fields = sorted(set(fields_) & set(_AUTHORED_SPEC_FIELDS))
-        else:
-            stored_snapshot = _statement_snapshot(stored_spec)
-            candidate_snapshot = _statement_snapshot(candidate)
-            moved_fields = sorted(
-                f for f in _AUTHORED_SPEC_FIELDS if stored_snapshot[f] != candidate_snapshot[f]
-            )
-            moved = bool(moved_fields)
-        moved_description = (
-            f"moves {moved_fields}" if moved_fields
-            else "repairs a stored record whose authored values could not be read"
-        )
-
-        existing_statement = ts.read_versioned(statement_key, default=None)
-        statement_on_file = existing_statement.value
-        stale = trait_spec_statement_stale(candidate, statement_on_file)
-
-        if moved and statement_on_file and rationale is None:
-            raise ValueError(
-                f"update to trait spec {trait_name!r} {moved_description}, and its authoring "
-                "statement already covers the old values; changing an authored field needs a "
-                "rationale so the statement restates for the breeder's re-confirmation. Pass "
-                "rationale=... naming why."
-            )
-
-        try:
-            written_spec, write_reason = _validate_and_write_spec(
-                spec_key, merged, expect=stored.version,
-            )
-        except VersionConflict:
-            continue
-        if written_spec is None:
-            raise ValueError(
-                f"update to trait spec {trait_name!r} would produce an invalid spec: "
-                f"{write_reason}. Refusing to write."
-            )
-        break
-
-    if rationale is None:
-        return TraitSpecRevision(written_spec, None, "left untouched, no rationale")
-    if not (moved or stale or statement_on_file is None):
-        return TraitSpecRevision(written_spec, None, "left as it is, current")
-    if statement_on_file is None:
-        note = "stated, since none was on record"
-    elif stale:
-        note = "restated, since the one on record was stale"
-    elif moved_fields:
-        note = f"restated for re-confirmation, since {moved_fields} moved"
-    else:
-        note = (
-            "restated for re-confirmation, since the stored record's authored values could "
-            "not be read and are read as moved by the repair"
-        )
-
-    statement_expect = existing_statement.version
-    while True:
-        new_statement = {
-            "trait": trait_name,
-            "statement_fields": _statement_snapshot(written_spec),
-            "rationale": rationale,
-            "stated_by": TRAIT_SPEC_REVISION_SURFACE,
-            "stated_at": now_iso(),
-            "relayed_note": str(relayed_note or ""),
-            **agent_identity.statement_fields(),
-            **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
-        }
-        try:
-            ts.replace(statement_key, new_statement, expect=statement_expect)
-        except VersionConflict:
-            spec_reread = ts.read_versioned(spec_key, default=None)
-            reread_data = spec_reread.value
-            reread_spec = (
-                _spec_from_config(reread_data, vocab)[0] if isinstance(reread_data, dict) else None
-            )
-            if (
-                reread_spec is None
-                or _statement_snapshot(reread_spec) != _statement_snapshot(written_spec)
-            ):
-                return TraitSpecRevision(
-                    written_spec, None,
-                    "abandoned: the spec's authored values moved again before this call's "
-                    "statement could land",
-                )
-            statement_expect = ts.read_versioned(statement_key, default=None).version
-            continue
-        return TraitSpecRevision(written_spec, new_statement, note)
-
-
-def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
-    """An already-valid ``TraitSpec`` as the JSON-safe mapping the store's codec accepts: every
-    tuple field becomes a list, plus the ``schema_version`` stamp the store seam's ceiling check
-    reads.
-    """
-    encoded = {
-        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
-    }
-    encoded["schema_version"] = TRAIT_SPEC_SCHEMA_VERSION
-    return encoded
-
-
-def _write_spec_record(key: Key, spec: TraitSpec, *, expect: ts.Version | None) -> None:
-    """Encode ``spec`` and write it to ``key`` under compare-and-set at ``expect``; ``spec`` is
-    written as given, never validated here."""
-    ts.replace(key, _encode_spec(spec), expect=expect)
-
-
-def _validate_and_write_spec(
-    key: Key, data: dict, *, expect: ts.Version | None,
-) -> tuple[TraitSpec | None, str | None]:
-    """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode and
-    write it to ``key`` under compare-and-set at ``expect``.
-
-    Returns ``(spec, None)`` on success or ``(None, reason)`` when ``data`` fails validation.
-    Raises ``VersionConflict`` if another writer landed at ``key`` since ``expect`` was read.
-    """
-    spec, reason = _spec_from_config(data, _crops_vocab())
-    if spec is None:
-        return None, reason
-    _write_spec_record(key, spec, expect=expect)
-    return spec, None
-
-
-def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
-    return ValueError(
-        f"no trait spec record for {trait_name!r} under {directory}, "
-        "revise_trait_spec only updates an already-registered trait; register it first "
-        "with author_trait_spec."
-    )
-
-
-# ── the trait-spec authoring statement store ─────────────────────────────────
-
-_AUTHORED_SPEC_FIELDS = (
-    "delivers", "positive_value", "milestone_fractions", "milestone_on", "majority_milestone",
-    "crossing_unconfirmed", "phenology_prefix", "majority_label", "count_objective",
-    "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
-    "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac",
-    "holdout_match_quality_floor", "notes",
-)
-"""Every ``TraitSpec`` field ``author_trait_spec`` accepts; see its own docstring for why the rest
-of ``TraitSpec`` is not here."""
-
-
-def _statement_snapshot(spec: TraitSpec) -> dict[str, Any]:
-    """The comparable snapshot a trait-spec statement's own ``statement_fields`` holds: every
-    authored field's canonical value."""
-    return {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
-
-
-_CARRIED_FORWARD_SPEC_FIELDS = (
-    "localization", "localization_tolerance", "localization_tolerance_frac",
-    "sliver_policy", "sliver_frac",
-)
-"""Fields ``author_trait_spec`` never authors: copied unchanged from an existing spec on a
-restatement, or left at ``TraitSpec``'s own dataclass defaults on first creation."""
-
-TRAIT_SPEC_STATEMENT_FIELDS = (
-    "statement_fields", "rationale", "stated_by", "stated_at", "relayed_note",
-    *agent_identity.RECORD_FIELDS,
-)
-"""Every field a trait-spec authoring statement owns, the agent identity fields included. The
-confirmation compare-and-set hashes all of them, the same discipline
-``operationalization.STATEMENT_FIELDS`` already uses."""
-
-TRAIT_SPEC_CONFIRMATION_FIELDS = ("confirmed_by", "confirmed_at", "identity_from_request", "record_seen")
-"""Every field only :func:`confirm_trait_spec` sets. A statement write refuses a payload with one."""
-
-TRAIT_SPEC_STATEMENT_SURFACE = "author_trait_spec"
-"""The producing surface stamped into ``stated_by``, never accepted from a caller: it says a
-statement came in through the authoring tool rather than through a file edit, nothing more. The
-harness and session that made the call are the agent identity fields beside it, declared by the
-connecting software and no evidence of who the person was."""
-
-TRAIT_SPEC_REVISION_SURFACE = "revise_trait_spec"
-"""The producing surface stamped into a restatement's ``stated_by``: the one platform caller
-that reaches ``revise_trait_spec_fields``'s statement branch, the field-editing door rather than
-the authoring one."""
-
-TRAIT_SPEC_STATEMENTS_STORE = "trait_spec_statements"
-_STATEMENT_FILE = RootedFileLocator(prefix=("trait_spec_statements",), suffix=".json")
-register_store(
-    StoreDescriptor(
-        name=TRAIT_SPEC_STATEMENTS_STORE,
-        kind="record",
-        key_fields=("trait",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=_STATEMENT_FILE,
-    )
-)
-
-_STATE_RELPATH = Path(".tcip") / "state"
-
-
-def trait_spec_statements_scope(project_root: str | Path | None = None) -> Path:
-    """Where a project's trait-spec authoring statements live: ``<root>/.tcip/state``.
-
-    Mirrors ``operationalization.operationalizations_scope``'s own placement and reasoning: a
-    statement is a claim about a trait spec it does not own, kept in the project's general state
-    directory beside the spec's own registry rather than folded into it. ``project_root`` names the
-    project explicitly, for a caller serving more than one project per process; omitting it
-    resolves against this process's pinned platform root.
-    """
-    if project_root is not None:
-        return Path(project_root) / _STATE_RELPATH
-    from tcip_mcp.project_paths import resolve_state
-
-    return resolve_state(_STATE_RELPATH)
-
-
-def trait_spec_statement_key(scope: str | Path, trait_name: str) -> Key:
-    """One trait's authoring-statement record.
-
-    ``cas``: ``author_trait_spec`` and ``confirm_trait_spec`` are two processes writing the same
-    record, so an unconditional write would drop whichever one landed first.
-    """
-    return Key(TRAIT_SPEC_STATEMENTS_STORE, str(scope), (trait_name,))
-
-
-def trait_spec_statement_seen_hash(record: dict[str, Any]) -> str:
-    """A content hash over every field a trait-spec statement owns, in canonical form.
-
-    The confirmation carries this back, so a breeder's click confirms the record they read rather
-    than whatever an agent rewrote while the card was open.
-    """
-    return content_hash(record, TRAIT_SPEC_STATEMENT_FIELDS)
-
-
-def _require_text(value: Any, field: str) -> str:
-    text = str(value or "").strip()
-    if not text:
+    try:
+        return read_registry(subjects_path(project_root))
+    except FileNotFoundError as exc:
         raise ValueError(
-            f"{field} is required and must say something: a trait-spec statement with an empty "
-            f"{field} states nothing"
-        )
-    return text
+            f"project root {project_root!r} carries no subject registry of its own (registered "
+            f"datasets: {roots}). Pass dataset_root naming the dataset this crossing's classes "
+            "belong to."
+        ) from exc
 
 
-def _spec_collision_text(trait_name: str) -> str:
-    return (
-        f"author_trait_spec cannot register trait {trait_name!r}: a trait spec and its authoring "
-        "statement are both already on record for it. author_trait_spec only creates a trait that "
-        "does not yet exist; change an already-registered spec's fields with "
-        "revise_trait_spec instead."
-    )
-
-
-def author_trait_spec(
+def propose_trait(
     project_root: str | Path,
-    trait: str,
+    entry: TraitEntry,
     *,
-    delivers: Sequence[str],
-    positive_value: str = "",
-    milestone_fractions: Sequence[float] = (),
-    milestone_on: str = "",
-    majority_milestone: str = "",
-    crossing_unconfirmed: bool = False,
-    phenology_prefix: str = "",
-    majority_label: str = "",
-    count_objective: str = "",
-    count_bias_tolerance_frac: float | None = None,
-    count_error_tolerance: float | None = None,
-    classifier_agreement_floor: float | None = None,
-    ordinal_agreement_floor: float | None = None,
-    regression_skill_floor: float | None = None,
-    scale_tolerance_frac: float | None = None,
-    holdout_match_quality_floor: float | None = None,
-    notes: str = "",
     rationale: str,
-    relayed_note: str = "",
-    **payload: Any,
-) -> dict[str, Any]:
-    """Author a trait spec that does not yet exist, and record the statement of why, unconfirmed.
+    relayed_note: str,
+    dataset_root: str = "",
+) -> TraitRevision:
+    """Append ``entry`` to its trait's record as a new, unconfirmed revision, creating the record
+    for a trait the project does not have yet, then write the proposal's audit line.
 
-    Writes the effective spec into ``trait_specs`` first, cross-checked against crops.yml's
-    controlled vocabulary through the same ``_spec_from_config`` every config-authored spec already
-    goes through, then writes the unconfirmed statement into ``trait_spec_statements`` second.
-    Refuses before writing anything when a spec is already registered for this trait *and* a
-    statement record already exists for it: a real collision. When a spec exists with no statement
-    behind it (the recovery state after a second write that failed partway), this call proceeds as
-    a restatement rather than refusing, since there is nothing to collide with.
-
-    ``localization``, ``localization_tolerance``, ``localization_tolerance_frac``,
-    ``sliver_policy`` and ``sliver_frac`` are not accepted here: they carry forward unchanged from
-    an existing spec on a restatement, or stay at ``TraitSpec``'s own dataclass defaults on first
-    creation, and remain ``write_trait_spec_fields``'s job to change. ``rationale`` is the agent's
-    account of why it chose these values from the breeder's own words, prose read by a breeder,
-    never parsed; it is required.
-
-    Refuses a payload naming one of the four confirmation fields
-    (``confirmed_by``/``confirmed_at``/``identity_from_request``/``record_seen``): only the
-    breeder's own confirmation, from the web backend, writes those.
+    Refuses an entry :func:`check_proposed_entry` refuses, and a ``state_crossing_dates`` operationalization whose
+    positive class the registry :func:`resolve_statement_registry` resolves (``dataset_root``
+    names the dataset, empty the project's own) does not declare for the measured subject. A
+    rationale that says nothing refuses. Returns the revision as written; an audit line that
+    cannot be written raises ``AuditEntryNotWritten`` with the revision already appended.
     """
-    if payload:
-        offered = sorted(payload)
-        confirmation = [key for key in offered if key in TRAIT_SPEC_CONFIRMATION_FIELDS]
-        if confirmation:
+    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.subject_registry import positive_value_problem
+
+    check_proposed_entry(entry)
+    crossing = entry.operationalizations.get(STATE_CROSSING_DATES)
+    if crossing is not None:
+        registry = resolve_statement_registry(project_root, dataset_root)
+        problem = positive_value_problem(registry, crossing.measured_subject, entry.positive_value)
+        if problem is not None:
             raise ValueError(
-                f"author_trait_spec cannot carry the confirmation field(s) {confirmation}: only "
-                "the breeder's own confirmation writes those, from the web backend, and a "
-                "statement that filled them would be the agent confirming its own trait"
+                f"the {STATE_CROSSING_DATES} operationalization of {entry.name!r} names positive "
+                f"class {entry.positive_value!r} for subject {crossing.measured_subject!r}, and "
+                f"{problem}. Name a class the registry declares, or update the registry first."
             )
-        raise ValueError(f"unknown field(s) {offered} for {TRAIT_SPEC_STATEMENTS_STORE}")
-
-    directory = trait_specs_dir(project_root)
-    statements_scope = trait_spec_statements_scope(project_root)
-    spec_key = trait_spec_key(directory, trait)
-    statement_key = trait_spec_statement_key(statements_scope, trait)
-
-    existing_spec = ts.read_versioned(spec_key, default=None)
-    existing_statement = ts.read_versioned(statement_key, default=None)
-    if existing_spec.value is not None and not isinstance(existing_spec.value, dict):
-        raise ValueError(
-            f"author_trait_spec cannot restate trait {trait!r}: the stored trait spec record is "
-            "not a mapping; delete or repair the record before authoring the trait again"
+    key = trait_key(project_root, entry.name)
+    with ts.transaction(key) as txn:
+        stored = txn.read(key, default=None)
+        revisions = () if stored is None else _record(entry.name, project_root, stored).revisions
+        revision = TraitRevision(
+            number=len(revisions) + 1, entry=entry, entry_sha256=entry_sha256(entry),
+            rationale=rationale, relayed_note=relayed_note, proposed_at=_now(),
+            proposing_agent=agent_identity.revision_fields(),
+            confirmed_by=None, confirmed_at=None, identity_from_request=None,
+            withdrawn_by=None, withdrawn_at=None,
         )
-    if existing_spec.value is not None and existing_statement.value is not None:
-        raise ValueError(_spec_collision_text(trait))
-
-    authored: dict[str, Any] = {
-        "name": trait,
-        "delivers": tuple(delivers),
-        "positive_value": positive_value,
-        "milestone_fractions": tuple(milestone_fractions),
-        "milestone_on": milestone_on,
-        "majority_milestone": majority_milestone,
-        "crossing_unconfirmed": crossing_unconfirmed,
-        "phenology_prefix": phenology_prefix,
-        "majority_label": majority_label,
-        "count_objective": count_objective,
-        "count_bias_tolerance_frac": count_bias_tolerance_frac,
-        "count_error_tolerance": count_error_tolerance,
-        "classifier_agreement_floor": classifier_agreement_floor,
-        "ordinal_agreement_floor": ordinal_agreement_floor,
-        "regression_skill_floor": regression_skill_floor,
-        "scale_tolerance_frac": scale_tolerance_frac,
-        "holdout_match_quality_floor": holdout_match_quality_floor,
-        "notes": notes,
-    }
-    carried = (existing_spec.value if existing_spec.value is not None
-               else _encode_spec(TraitSpec(name=trait)))
-    authored.update({field: carried[field] for field in _CARRIED_FORWARD_SPEC_FIELDS})
-
-    spec, reason = _validate_and_write_spec(spec_key, authored, expect=existing_spec.version)
-    if spec is None:
-        raise ValueError(f"author_trait_spec cannot register trait {trait!r}: {reason}")
-
-    snapshot = _statement_snapshot(spec)
-    statement = {
-        "trait": trait,
-        "statement_fields": snapshot,
-        "rationale": _require_text(rationale, "rationale"),
-        "stated_by": TRAIT_SPEC_STATEMENT_SURFACE,
-        "stated_at": now_iso(),
-        "relayed_note": str(relayed_note or ""),
-        **agent_identity.statement_fields(),
-        **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
-    }
-    ts.replace(statement_key, statement, expect=existing_statement.version)
-    return statement
+        txn.write(key, TraitRecord(revisions=(*revisions, revision)).model_dump(mode="json"))
+    record_event_or_raise(
+        "propose_trait",
+        {"trait": entry.name, "revision": revision.number, "entry_sha256": revision.entry_sha256},
+        scope=project_root,
+    )
+    return revision
 
 
-class TraitSpecStatementNotFound(ValueError):
-    """Raised when a confirmation arrives for a trait nothing has been stated for."""
+class RevisionMoved(ValueError):
+    """Raised when a confirmation's hash is not the revision's own: the surface showed something
+    other than what the revision holds."""
 
 
-class TraitSpecUnconfirmed(ValueError):
-    """Raised when a delivery-meaning statement is attempted for a trait whose own trait-spec
-    statement is not both confirmed and current: absent, stale, or current but never confirmed by
-    the breeder. Defined here, beside :class:`TraitSpecStatementNotFound`, rather than in
-    ``operationalization``, since a trait-spec statement is this module's own record."""
-
-
-class TraitSpecStatementMoved(ValueError):
-    """Raised when the statement record moved since the surface read it, carrying what is on
-    file now. Defined here rather than reused from ``operationalization.RecordMoved``, since
-    ``operationalization`` already imports from this module and the reverse import would be
-    circular.
-    """
-
-    def __init__(self, message: str, record: dict[str, Any], record_seen: str) -> None:
-        super().__init__(message)
-        self.record = dict(record)
-        self.record_seen = record_seen
-
-
-def confirm_trait_spec(
+def confirm_revision(
     project_root: str | Path,
     trait: str,
+    number: int,
+    entry_sha256: str,
     *,
     user: str,
-    record_seen: str,
     identity_from_request: bool,
-    confirmed: bool = True,
-) -> dict[str, Any]:
-    """Record that the breeder confirmed the trait-spec statement on file, or withdraw one.
+    confirmed: bool,
+) -> TraitRevision:
+    """Record the breeder's confirmation of revision ``number`` of ``trait`` (``confirmed``), or
+    the withdrawal of one they gave (not ``confirmed``). Neither edits the entry.
 
-    Exposed by no MCP tool and called only by the web backend, from a route the breeder's own GUI
-    action posts, mirroring ``operationalization.confirm_trait_operationalization``'s own "no MCP
-    tool" discipline exactly. Reads and writes only ``trait_spec_statements``, never ``trait_specs``
-    directly. ``record_seen`` is :func:`trait_spec_statement_seen_hash` over the record the surface
-    rendered, compared against what is on file now, so a click cannot land on text the breeder
-    never read; a mismatch raises :class:`TraitSpecStatementMoved` carrying the current record.
-
-    ``confirmed=False`` withdraws, clearing exactly the four confirmation fields and leaving the
-    statement intact.
+    ``entry_sha256`` is the hash of the entry the surface showed; one that is not the revision's
+    own raises :class:`RevisionMoved`. Refuses a revision that does not exist, a confirmation of a
+    revision already confirmed or withdrawn, and a withdrawal of a revision not confirmed. Writes
+    the audit line after the record; one that cannot be written raises ``AuditEntryNotWritten``
+    with the record already written. Returns the revision as written.
     """
-    scope = trait_spec_statements_scope(project_root)
-    key = trait_spec_statement_key(scope, trait)
-    existing = ts.read_versioned(key, default=None)
-    stated = existing.value
-    if not stated:
-        raise TraitSpecStatementNotFound(
-            f"nothing is stated for trait {trait!r}, so there is no trait-spec statement to "
-            "confirm. This reads only the statement store, so it cannot tell whether a spec is "
-            "on record: if one is, state it with revise_trait_spec(project_root=..., "
-            f"trait_name={trait!r}, fields={{}}, rationale=...); if none is, register it with "
-            "author_trait_spec first"
+    from tcip_mcp.audit import record_event_or_raise
+
+    key = trait_key(project_root, trait)
+    with ts.transaction(key) as txn:
+        revisions = list(_record(trait, project_root, txn.read(key, default=None)).revisions)
+        if not 1 <= number <= len(revisions):
+            raise ValueError(f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}")
+        revision = revisions[number - 1]
+        if entry_sha256 != revision.entry_sha256:
+            raise RevisionMoved(
+                f"revision {number} of {trait!r} holds entry {revision.entry_sha256}, not the "
+                f"{entry_sha256} that was shown; re-read it and confirm what it holds"
+            )
+        if confirmed and revision.confirmed_at is not None:
+            raise ValueError(f"revision {number} of {trait!r} was already confirmed")
+        if not confirmed and not revision.confirmed:
+            raise ValueError(f"revision {number} of {trait!r} holds no confirmation to withdraw")
+        who = user_identity(user)
+        stamp = (
+            {"confirmed_by": who, "confirmed_at": _now(),
+             "identity_from_request": identity_from_request}
+            if confirmed else {"withdrawn_by": who, "withdrawn_at": _now()}
         )
-    current_seen = trait_spec_statement_seen_hash(stated)
-    if record_seen != current_seen:
-        raise TraitSpecStatementMoved(
-            f"the trait-spec statement for {trait!r} moved since it was read, so confirming now "
-            "would confirm text nobody displayed; re-read it and confirm what is on file",
-            stated,
-            current_seen,
-        )
-
-    updated = dict(stated)
-    if confirmed:
-        updated.update({
-            "confirmed_by": user_identity(user),
-            "confirmed_at": now_iso(),
-            "identity_from_request": bool(identity_from_request),
-            "record_seen": current_seen,
-        })
-    else:
-        updated.update({field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS})
-
-    ts.replace(key, updated, expect=existing.version)
-    return updated
-
-
-def trait_spec_statement_stale(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
-    """Whether ``statement`` is absent, or its authored-field snapshot no longer matches
-    ``spec``'s live values.
-
-    The one staleness predicate ``revise_trait_spec_fields`` (against the candidate spec),
-    ``state_operationalization``'s trait-spec precondition and the doctor's own check all call,
-    so the three sites cannot disagree about what counts as stale.
-    """
-    if not statement:
-        return True
-    recorded = statement.get("statement_fields") or {}
-    return recorded != _statement_snapshot(spec)
-
-
-def trait_spec_statement_current(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
-    """Whether ``statement`` is both confirmed by the breeder and not stale against ``spec``'s
-    live values: "not stale and confirmed".
-
-    Invalidation here is read-time, not write-time: the write-time restatement inside
-    ``revise_trait_spec_fields`` is the platform's own mechanism for keeping a statement from
-    going stale in the first place, and this is the backstop for a spec written past it (a raw
-    store write, the evaluation's own carried-forward write, a crash between the spec write and
-    the statement write), the same way an operationalization's constituting-field drift is caught
-    by comparison rather than by a write-time rule. Unstated or unconfirmed is never current.
-    """
-    if not statement or not statement.get("confirmed_by"):
-        return False
-    return not trait_spec_statement_stale(spec, statement)
-
-
-def _all_traits() -> dict[str, TraitSpec]:
-    """The live registry: every config-authored spec found under this project's trait_specs dir."""
-    return {spec.name: spec for spec in load_trait_specs()}
-
-
-def get_trait(name: str) -> TraitSpec:
-    """Return the ``TraitSpec`` for ``name``, or raise ``TraitUnknownError`` listing the registered traits."""
-    return get_trait_for(name)
-
-
-def get_trait_for(name: str, project_root: str | Path | None = None) -> TraitSpec:
-    """One trait's spec from an explicit project's registry, or from the pinned one.
-
-    For a caller (the web backend, the operationalization resolver) that serves more than one
-    project per process and so cannot rely on ``resolve_state``'s single ``$TCIP_STATE_ROOT``
-    pin. ``get_trait`` is the same lookup against that pin, so both surfaces refuse an unregistered
-    trait in the same words.
-    """
-    traits = {spec.name: spec for spec in load_trait_specs(project_root=project_root)}
-    spec = traits.get(name)
-    if spec is None:
-        raise TraitUnknownError(f"Unknown trait {name!r}. Registered traits: {sorted(traits)}")
-    return spec
-
-
-def registered_traits() -> list[str]:
-    return sorted(_all_traits())
-
-
-def registered_traits_for(project_root: str | Path) -> list[str]:
-    """Registered trait names for an explicit project root.
-
-    For a caller (the web backend) that serves more than one project per process and so cannot
-    rely on ``resolve_state``'s single ``$TCIP_STATE_ROOT`` pin; ``registered_traits()`` stays
-    the MCP-server-side entry point for the one pinned project.
-    """
-    return sorted(spec.name for spec in load_trait_specs(project_root=project_root))
+        revisions[number - 1] = revision.model_copy(update=stamp)
+        txn.write(key, TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"))
+    record_event_or_raise(
+        "confirm_trait_revision",
+        {"trait": trait, "revision": number, "entry_sha256": entry_sha256,
+         "confirmed": confirmed, "identity_from_request": identity_from_request},
+        scope=project_root, user=who,
+    )
+    return revisions[number - 1]

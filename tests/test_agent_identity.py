@@ -24,7 +24,7 @@ def test_no_identity_until_a_handshake_and_every_projection_says_so() -> None:
     assert agent_identity.current() is None
     assert agent_identity.audit_fields() == {}
     assert agent_identity.http_headers() == {}
-    assert agent_identity.statement_fields() == {
+    assert agent_identity.revision_fields() == {
         "agent_client_name": None, "agent_client_version": None,
         "agent_session": None, "terminal_session": None,
         "harness_session": None, "harness_effort_at_connect": None,
@@ -65,7 +65,7 @@ def test_the_terminal_session_is_read_from_the_environment_as_declared(
     assert identity.terminal_session == "term_xyz"
     assert agent_identity.audit_fields()["terminal_session"] == "term_xyz"
     assert agent_identity.http_headers()["X-TCIP-Terminal-Session"] == "term_xyz"
-    assert agent_identity.statement_fields()["terminal_session"] == "term_xyz"
+    assert agent_identity.revision_fields()["terminal_session"] == "term_xyz"
 
 
 def test_an_empty_terminal_session_variable_counts_as_none(monkeypatch: pytest.MonkeyPatch) -> None:

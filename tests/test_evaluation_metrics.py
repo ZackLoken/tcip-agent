@@ -7,11 +7,10 @@ tests that exercise the detection/classification ``_validate`` path end-to-end.
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import csv
 import json
 import math
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -47,11 +46,13 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
     resolve_selection_metric,
 )
+from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._dense_op_fixtures import gt_only  # noqa: E402
+from tests._trait_fixtures import confirm_bare  # noqa: E402
 from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
-# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+# A test naming trait="bud_opening" proposes it in its pinned root (conftest.seed_bud_trait_spec).
+_with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # --------------------------------------------------------------------------
@@ -265,143 +266,56 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
 # resolve_match_criterion derives/records the localization kind once, reuses it, and warns
 # (never silently switches) on divergence.
 
-def _write_bare_trait(name: str, **extra) -> None:
-    """A minimal trait spec with no localization recorded (unlike seed_bud_trait_spec's
-    BUD_OPENING, which already carries localization="center_match").
+def test_resolve_match_criterion_derives_an_unstated_kind_and_leaves_the_entry_alone(
+    tmp_path: Path,
+):
+    """An entry stating no localization has it derived from this call's GT and stamped as
+    derived; the entry itself changes only through a proposed revision, so a second call derives
+    it again rather than reading back a value nobody proposed."""
+    from tcip_mcp.traits import read_trait
 
-    Seeded at the directory the platform's own resolver returns for this test's pinned project
-    root, so the fixture cannot state a specs location the registry does not read from.
-    """
-    import tcip_store as ts
-
-    from tcip_mcp.project_paths import resolve_state
-    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH, TRAIT_SPEC_SCHEMA_VERSION, trait_spec_key
-
-    specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
-    ts.replace(
-        trait_spec_key(specs_dir, name),
-        complete_spec_record({"name": name, "delivers": ["leaf_length"], "schema_version": TRAIT_SPEC_SCHEMA_VERSION,
-         **extra}),
-        expect=ts.Version.ABSENT,
-    )
-
-
-def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    return [{"gt": [{"bbox": list(b), "category_id": 0, "iscrowd": 0} for b in boxes]}]
-
-
-def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: Path):
-    from tcip_mcp.traits import get_trait
-
-    _write_bare_trait("leaf")
+    confirm_bare("leaf")
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]  # char size 20 -> center_match
-    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    result = resolve_match_criterion("leaf", gt_only(small_boxes))
     assert result["kind"] == "center_match"
     assert result["kind_source"] == "data_derived_at_runtime"
     assert result["kind_diverged"] is False
-    # persisted: a fresh read sees the derived value, not the original empty one.
-    assert get_trait("leaf").localization == "center_match"
 
-
-def test_resolve_match_criterion_audits_the_derived_localization_write(tmp_path: Path):
-    """The persisted write above is a platform mutation, so it carries an audit line naming the
-    trait, the field, the value and the derivation basis, in this project's own log."""
-    import tcip_store as ts
-
-    from tcip_mcp import audit as audit_module
-
-    _write_bare_trait("leaf")
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", _per_image(small_boxes))
-    assert result["kind_source"] == "data_derived_at_runtime"
-
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
-    rows = [r for r in ts.read_log(key).records if r["tool"] == "trait_spec_field_derived"]
-    assert len(rows) == 1
-    args = rows[0]["arguments"]
-    assert args["trait"] == "leaf"
-    assert args["field"] == "localization"
-    assert args["value"] == "center_match"
-    assert "GT boxes" in args["basis"]
-
-
-def test_resolve_match_criterion_raises_when_the_derived_audit_append_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
-    """The spec write already committed by the time the audit line is attempted, so a caller told
-    only by a swallowed warning would read the write as never having happened and blind-retry it.
-    The append failing must raise and name that committed write, not vanish into a log line."""
-    import tcip_store as ts
-
-    from tcip_mcp import audit as audit_module
-    from tcip_mcp.traits import get_trait
-
-    _write_bare_trait("leaf")
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-
-    real_append = audit_module.append
-
-    def _flaky_append(key, *args, **kwargs):
-        if key.store == audit_module.AUDIT_LOG_STORE:
-            raise RuntimeError("the audit log could not be appended to")
-        return real_append(key, *args, **kwargs)
-
-    monkeypatch.setattr(audit_module, "append", _flaky_append)
-
-    with pytest.raises(audit_module.AuditEntryNotWritten):
-        resolve_match_criterion("leaf", _per_image(small_boxes))
-
-    # the spec write is not routed through audit_module.append, so it already landed.
-    assert get_trait("leaf").localization == "center_match"
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
-    rows = [r for r in ts.read_log(key).records if r["tool"] == "trait_spec_field_derived"]
-    assert rows == []
-
-
-def test_derived_localization_kind_is_read_back_as_recorded_on_the_next_call(tmp_path: Path):
-    """A kind derived once has to land where the registry reads: the second call on the same
-    project reports it as recorded rather than deriving it again from that call's own GT, which is
-    what keeps one trait's governing criterion stable across sessions."""
-    _write_bare_trait("leaf")
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    first = resolve_match_criterion("leaf", _per_image(small_boxes))
-    assert first["kind_source"] == "data_derived_at_runtime"
-
-    second = resolve_match_criterion("leaf", _per_image(small_boxes))
-    assert second["kind_source"] == "recorded"
-    assert second["kind"] == first["kind"]
-    assert second["kind_diverged"] is False
+    record = read_trait("leaf")
+    assert len(record.revisions) == 1 and record.latest.entry.localization == ""
+    assert resolve_match_criterion(
+        "leaf", gt_only(small_boxes))["kind_source"] == "data_derived_at_runtime"
 
 
 def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_path: Path):
-    _write_bare_trait("leaf", localization="iou_match")
+    confirm_bare("leaf", localization="iou_match")
     # Small boxes would derive center_match fresh, but a recorded kind must be used as-is.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    result = resolve_match_criterion("leaf", gt_only(small_boxes))
     assert result["kind"] == "iou_match"
     assert result["kind_source"] == "recorded"
 
 
 def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
-    _write_bare_trait("leaf", localization="iou_match")
+    confirm_bare("leaf", localization="iou_match")
     # Small boxes: derive_localization_kind would say center_match, diverging from the recorded
     # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    result = resolve_match_criterion("leaf", gt_only(small_boxes))
     assert result["kind_diverged"] is True
     assert result["kind"] == "iou_match"  # unchanged despite the divergence
 
 
 def test_resolve_match_criterion_no_divergence_when_kinds_agree(tmp_path: Path):
-    _write_bare_trait("leaf", localization="center_match")
+    confirm_bare("leaf", localization="center_match")
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    result = resolve_match_criterion("leaf", gt_only(small_boxes))
     assert result["kind_diverged"] is False
 
 
 def test_resolve_match_criterion_refuses_when_unrecorded_and_underivable(tmp_path: Path):
-    _write_bare_trait("leaf")
-    with pytest.raises(ValueError, match="no recorded localization kind"):
+    confirm_bare("leaf")
+    with pytest.raises(ValueError, match="states no localization kind"):
         resolve_match_criterion("leaf", [])  # no GT at all -> nothing to derive from
 
 
@@ -414,17 +328,17 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
 def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
     """iou_match's threshold must be genuinely derived from the GT in hand
     (derive_iou_match_threshold), not pinned to 0.5."""
-    _write_bare_trait("leaf", localization="iou_match")
+    confirm_bare("leaf", localization="iou_match")
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
-    result = resolve_match_criterion("leaf", _per_image(large_boxes))
+    result = resolve_match_criterion("leaf", gt_only(large_boxes))
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] > 0.5
     assert "achievable IoU" in result["derived_from"]
 
 
 def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(tmp_path: Path):
-    _write_bare_trait("leaf", localization="iou_match")
+    confirm_bare("leaf", localization="iou_match")
     result = resolve_match_criterion("leaf", [], iou_threshold=0.42)
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] == pytest.approx(0.42)  # caller/default, not a fabricated derivation
@@ -607,11 +521,13 @@ def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
         resolve_selection_metric("classification", None, "accuracy", has_val_loader=False)
 
 
+@_with_bud_trait
 def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
     with pytest.raises(ValueError, match="comparability-only"):
         resolve_selection_metric("detection", "bud_opening", "map50")
 
 
+@_with_bud_trait
 def test_resolve_selection_metric_allows_coherent_explicit_choice():
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
@@ -640,6 +556,7 @@ def _detection_batch(num_images: int = 2, img_size: int = 64):
     return task_collate("detection")(items)
 
 
+@_with_bud_trait
 def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
     """The declaration is exactly the numeric keys these two producers return: nothing declared
     that neither ever produces, nothing either produces that the declaration leaves unaccounted
@@ -963,10 +880,7 @@ from tests._producer_fixtures import run_over  # noqa: E402
 IMG = 64
 
 
-def _save_png(path: Path) -> None:
-    from torchvision.utils import save_image
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(torch.rand(3, IMG, IMG) * 0.3, str(path))
+_save_png = partial(write_noise_image, size=IMG)
 
 
 def _cfg(model_source, data: dict) -> dict:
@@ -1011,6 +925,7 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     assert run.best_metric == math.inf
 
 
+@_with_bud_trait
 def test_train_center_match_trait_records_governing_criterion(tmp_path):
     """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these

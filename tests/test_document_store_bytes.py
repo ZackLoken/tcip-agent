@@ -8,13 +8,13 @@ here, so a codec swapped for a re-spelled serializer, a dropped trailing newline
 differently a season later.
 
 Two cases drive the owning module's own writer end to end: ``write_registry`` and
-``write_band_group_manifest``. ``write_trait_spec_fields`` has no case here: a trait spec writes
+``write_band_group_manifest``. ``propose_trait`` has no case here: a trait record writes
 through the same ``RECORD_JSON`` codec every other record store uses, so its byte spelling is the
 one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out`` pins centrally in
 ``test_store_contract.py``, its placement and codec application are covered there by the
-``trait_specs`` case of
+``traits`` case of
 ``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``,
-and ``test_trait_authoring.py`` asserts its own field-level content.
+and ``test_trait_revisions.py`` asserts its own field-level content.
 
 The other four (dataset identity, friction report, retrospective, snapshot manifest) pin
 the codec and the path only, through the seam expression their writer makes, because those writers

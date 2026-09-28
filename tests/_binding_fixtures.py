@@ -189,6 +189,29 @@ def write_bound_sidecar(
     return bound
 
 
+def validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_point",
+                     tag: str = "a") -> str:
+    """A prediction bucket under ``<tmp_path>/ds_<tag>`` whose sidecar carries a genuine
+    held-out-validated claim for ``trait``."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+
+    root = tmp_path / f"ds_{tag}"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    param_key = {"operating_point": "conf", "regression_operating_point": "regression"}[document]
+    stamp: dict = {
+        "validated": True, "trait": trait,
+        "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
+                                        "validation_kind": "annotations",
+                                        "validated_against": VALIDATED_HELD_OUT}},
+    }
+    if document == "operating_point":
+        stamp["scope"] = {"subject": trait, "attribute": None, "id_map": {trait: 0}}
+    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
+                        experiment_id=f"exp-validated-{tag}")
+    return str(bucket)
+
+
 PRODUCER_WEIGHTS = b"the weights a producing run filed under the experiment its predictions name"
 
 
@@ -253,6 +276,28 @@ def register_plant_registry_for(
         name=name, csv_paths=[str(p) for p in csv_paths], crop=crop, site=site)
     assert "error" not in res, res
     return name
+
+
+def _deg_to_dms(value: float) -> tuple[float, float, float]:
+    v = abs(value)
+    d = int(v)
+    m_full = (v - d) * 60
+    m = int(m_full)
+    return (float(d), float(m), round((m_full - m) * 60, 4))
+
+
+def write_geo_image(path: Path, lat: float, lon: float, when: Any) -> None:
+    """A tiny JPEG at ``path`` carrying EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``."""
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exif = Image.Exif()
+    exif[0x8769] = {0x9003: when.strftime("%Y:%m:%d %H:%M:%S")}
+    exif[0x8825] = {
+        0x0001: "N" if lat >= 0 else "S", 0x0002: _deg_to_dms(lat),
+        0x0003: "E" if lon >= 0 else "W", 0x0004: _deg_to_dms(lon),
+    }
+    Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
 def write_plant_mapping(

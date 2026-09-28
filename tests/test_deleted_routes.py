@@ -26,6 +26,14 @@ DELETED_ROUTES = [
     # returning both projections from one _measure_phenology run.
     ("POST", "/api/results/per_plant_curves"),
     ("POST", "/api/results/onset_dates"),
+    # A trait revision is read through GET /api/results/traits and confirmed through
+    # POST /api/results/traits/confirm, the one confirmation door.
+    ("GET", "/api/results/operationalization"),
+    ("GET", "/api/results/operationalizations"),
+    ("POST", "/api/results/operationalization/confirm"),
+    ("GET", "/api/results/trait-spec-statement"),
+    ("GET", "/api/results/trait-spec-statements"),
+    ("POST", "/api/results/trait-spec-statement/confirm"),
 ]
 
 

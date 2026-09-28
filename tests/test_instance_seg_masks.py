@@ -240,7 +240,7 @@ def test_deliver_per_image_counts_instance_seg_refuses_a_bare_tiled_pass(instanc
     images_dir = tmp_path / "images"
     _image(images_dir)
     out_path = tmp_path / "counts.csv"
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
@@ -261,7 +261,7 @@ def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_mask
     from datetime import datetime
 
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     images_dir = tmp_path / "images"
     _image(images_dir)

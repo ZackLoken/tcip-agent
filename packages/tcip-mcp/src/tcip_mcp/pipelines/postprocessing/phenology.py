@@ -1,29 +1,18 @@
 """Canonical phenology measurement: a trait's positive-fraction milestones, for whichever
 registered trait it's computed for.
 
-The positive-state fraction = the fraction of a plant's detected objects that are in the trait's
-positive/measured state, an expert-defined visible morphological stage emitted by a validated
-classifier (the trait's ``positive_value``), never a geometric proxy such as bbox height. Milestone
-columns come entirely from the trait's own ``TraitSpec`` (``phenology_prefix`` plus each
-``milestone_fractions`` entry):
+The positive-state fraction is the fraction of a plant's detected objects a classifier calls the
+trait's ``positive_value``. Milestone columns come entirely from the trait's own ``TraitEntry``
+(``phenology_prefix`` plus each ``milestone_fractions`` entry):
 
     ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
                                             for each fraction the spec declares
     ``<prefix>_<majority_label>_date``   = the majority-crossing alias
-                                            (``TraitSpec.majority_milestone``), present only
+                                            (``TraitEntry.majority_milestone``), present only
                                             when the spec names one
 
-A spec's majority-crossing alias is a breeder-confirmed reading of the trait's own definition text,
-flagged crossing-unconfirmed (``TraitSpec.crossing_unconfirmed``) until confirmed.
 ``positive_onset_date`` (the first date any positive-state observation appears) is a separate
 helper, not the delivered trait.
-
-Pure (stdlib only, plus the torch-free ``resolution.py`` and ``operationalization.py``): it
-    consumes prediction buckets and never touches pixels or model machinery. A classified bucket's
-    own recorded scope (``resolution.bucket_scope``) says which prediction records carry the
-    classifier's decoded call: ``.subject`` names the object class and the call sits under
-    ``.attributes[attribute]`` (see ``count_by_class``). A bucket that never assessed the trait's
-    positive-class axis is disclosed per plant and per date by ``per_plant_phenology``.
 """
 
 from __future__ import annotations
@@ -36,11 +25,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
 from tcip_mcp.dataset_layout import label_filename
-from tcip_mcp.operationalization import OperationalizationBasis
 from tcip_mcp.pipelines.resolution import Acknowledgment, bucket_scope
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.traits import TraitRevision
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -67,24 +56,14 @@ def milestone_date_columns(spec) -> list[str]:
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
 
-def majority_crossing_unconfirmed_column(spec) -> str | None:
-    """The column that marks a trait's majority alias as not yet breeder-confirmed, or ``None``
-    when the spec names no majority crossing for it to qualify.
-    """
-    if not spec.majority_milestone:
-        return None
-    return f"{spec.phenology_prefix}_{spec.majority_label}_crossing_unconfirmed"
-
-
 def phenology_csv_columns(spec) -> list[str]:
-    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
+    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitEntry``.
 
     The milestone/alias column names come from the spec (``phenology_prefix`` + each milestone key,
-    plus the majority alias/crossing-unconfirmed columns built from ``majority_label``). The
-    surrounding provenance columns (operating point, classifier validation, producer identity,
-    coverage disclosure) are trait-neutral.
+    plus the majority alias column built from ``majority_label``). The surrounding provenance
+    columns (operating point, classifier validation, producer identity, coverage disclosure) are
+    trait-neutral.
     """
-    crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
     return [
         "plant_id",
         "accession",
@@ -106,7 +85,6 @@ def phenology_csv_columns(spec) -> list[str]:
         # claim the data does not support, which is the failure mode this platform exists to
         # prevent.
         *[f"{c}_bound" for c in milestone_date_columns(spec)],
-        *([crossing_unconfirmed_column] if crossing_unconfirmed_column else []),
         *PROVENANCE_COLUMNS,
     ]
 
@@ -433,12 +411,12 @@ def per_plant_series(
 def per_plant_phenology(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
-    positive_value: str,
     spec,
     plants: Sequence[str],
 ) -> dict:
-    """Full canonical pipeline: classified predictions + plant mapping -> per-plant milestones, one
-    row per plant in ``plants`` and no other, in its order (see :func:`per_plant_series`).
+    """Full canonical pipeline: classified predictions + plant mapping -> per-plant milestones
+    against ``spec``'s ``positive_value`` and milestones, one row per plant in ``plants`` and no
+    other, in its order (see :func:`per_plant_series`).
 
     Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the
     positive-fraction series, the milestone dates, and coverage-disclosure fields
@@ -448,7 +426,7 @@ def per_plant_phenology(
     ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
     fully classified.
     """
-    per_plant = per_plant_series(mapping, predictions_by_date, positive_value, plants)
+    per_plant = per_plant_series(mapping, predictions_by_date, spec.positive_value, plants)
     rows = []
     any_classified_date = False
     for plant_id, info in per_plant.items():
@@ -522,13 +500,11 @@ def _write_phenology_delivery(
     door: str,
     rows: list[dict],
     out_path: Path,
-    spec,
+    revision: TraitRevision,
     columns: list[str],
     *,
-    include_majority_marker: bool,
     flags: dict[str, str | None],
     acknowledgment: Acknowledgment | None,
-    basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
@@ -541,14 +517,14 @@ def _write_phenology_delivery(
 
     Runs ``check_delivery_gate`` over ``flags``: a gate that does not pass raises ``ValueError``
     with the gate's own reason, and nothing is written. ``acknowledgment`` is the breeder's own
-    act (or ``None``) the caller already resolved. ``basis`` is what a passing
-    ``check_operationalization`` returned, and it is required.
+    act (or ``None``) the caller already resolved. ``revision`` is the trait's confirmed revision
+    ``operationalization.confirmed_revision`` returned: its entry names the columns and the event
+    names it.
 
     Composes every provenance cell the schema declares (the operating-point and classifier validity
     columns, the producer tail and ``produced_at``, the delivery's own
-    ``acknowledged_by``/``acknowledgment_reason``, all through ``resolution.delivered_tail``, and,
-    when ``include_majority_marker`` is set, the trait's majority-alias marker through
-    ``majority_crossing_unconfirmed_column``) and returns them. Records the delivery through
+    ``acknowledged_by``/``acknowledgment_reason``, all through ``resolution.delivered_tail``) and
+    returns them. Records the delivery through
     ``record_delivery_binding_event`` after the file is written, under the caller-stated ``door``
     and the explicit ``project_root``, with the gate's own ``effective_acknowledgment()``.
 
@@ -565,21 +541,13 @@ def _write_phenology_delivery(
     checked before the gate runs and before anything is written.
 
     Raises:
-        ValueError: ``basis`` is not an ``OperationalizationBasis``, ``predictions_by_date`` is
-            non-empty but ``document_reconciliations`` lacks an entry this writer declares, the
-            gate refused, or ``flags`` carries no ``classifier`` dimension; nothing is written in
-            any of these cases.
+        ValueError: ``predictions_by_date`` is non-empty but ``document_reconciliations`` lacks an
+            entry this writer declares, the gate refused, or ``flags`` carries no ``classifier``
+            dimension; nothing is written in any of these cases.
         AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
             appended, raised by ``record_delivery_binding_event`` after the CSV and the
             ``delivery_events`` record were written.
     """
-    if not isinstance(basis, OperationalizationBasis):
-        raise ValueError(
-            "a phenology delivery requires the basis a passing check_operationalization returned "
-            "for this trait's state_crossing_dates delivery. deliver_phenology_milestones and export_csv "
-            "produce one and are the primitives to call; this writer cannot read the record itself, "
-            "because it is given a trait spec rather than a project to read from."
-        )
     if predictions_by_date:
         missing = [doc for doc in ("operating_point", "classifier_operating_point")
                    if doc not in document_reconciliations]
@@ -594,7 +562,7 @@ def _write_phenology_delivery(
     bindings = op_recon.get("bindings", {})
     operating_point_confs = op_recon.get("confs", {})
 
-    from tcip_mcp.operationalization import STATE_CROSSING_DATES
+    from tcip_mcp.traits import STATE_CROSSING_DATES
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate, delivered_tail, record_delivery_binding_event,
     )
@@ -620,10 +588,6 @@ def _write_phenology_delivery(
          "plant_attribution": plant_mapping["plant_attribution"]},
         bindings, gate,
         columns=tuple(PROVENANCE_COLUMNS))
-    if include_majority_marker:
-        crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
-        if crossing_unconfirmed_column:
-            cells[crossing_unconfirmed_column] = "true" if spec.crossing_unconfirmed else "false"
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -638,7 +602,7 @@ def _write_phenology_delivery(
         document_reconciliations=document_reconciliations,
         dimension_reconciliations=dimension_reconciliations,
         acknowledgment=gate.effective_acknowledgment(),
-        trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
+        revision=revision, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,
     )
     return cells
@@ -648,11 +612,10 @@ def write_phenology_csv(
     door: str,
     rows: list[dict],
     out_path: Path,
-    spec,
+    revision: TraitRevision,
     *,
     flags: dict[str, str | None],
     acknowledgment: Acknowledgment | None,
-    basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
@@ -660,18 +623,17 @@ def write_phenology_csv(
     project_root: str | Path | None,
     plant_mapping: dict,
 ) -> dict:
-    """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
+    """Write per-plant milestone rows to the canonical delivery CSV, under the trait's confirmed
+    ``revision``.
 
-    Emits exactly ``phenology_csv_columns(spec)`` through ``_write_phenology_delivery`` (including
-    the trait's majority crossing-unconfirmed marker when the spec names one). ``door`` is the name
-    ``record_delivery_binding_event`` records the delivery under. ``predictions_by_date`` is the
-    date-to-bucket mapping the delivery reads. ``plant_mapping``, ``document_reconciliations``,
-    ``dimension_reconciliations`` and ``acknowledgment`` are ``_write_phenology_delivery``'s.
+    Emits exactly ``phenology_csv_columns(revision.entry)`` through ``_write_phenology_delivery``.
+    ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
+    ``predictions_by_date`` is the date-to-bucket mapping the delivery reads. The other arguments
+    are ``_write_phenology_delivery``'s.
     """
     return _write_phenology_delivery(
-        door, rows, out_path, spec, phenology_csv_columns(spec),
-        include_majority_marker=True, flags=flags,
-        acknowledgment=acknowledgment, basis=basis,
+        door, rows, out_path, revision, phenology_csv_columns(revision.entry),
+        flags=flags, acknowledgment=acknowledgment,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,
@@ -682,11 +644,10 @@ def write_phenology_curve_csv(
     door: str,
     rows: list[dict],
     out_path: Path,
-    spec,
+    revision: TraitRevision,
     *,
     flags: dict[str, str | None],
     acknowledgment: Acknowledgment | None,
-    basis: OperationalizationBasis | None,
     document_reconciliations: Mapping[str, Mapping],
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
@@ -694,14 +655,13 @@ def write_phenology_curve_csv(
     project_root: str | Path | None,
     plant_mapping: dict,
 ) -> dict:
-    """Write per-(plant, date) curve rows to the delivery CSV, for the given trait's spec: exactly
-    ``curve_csv_columns()`` through ``_write_phenology_delivery``, without the majority
-    crossing-unconfirmed marker. The arguments are :func:`write_phenology_csv`'s.
+    """Write per-(plant, date) curve rows to the delivery CSV, under the trait's confirmed
+    ``revision``: exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``. The
+    arguments are :func:`write_phenology_csv`'s.
     """
     return _write_phenology_delivery(
-        door, rows, out_path, spec, curve_csv_columns(),
-        include_majority_marker=False, flags=flags,
-        acknowledgment=acknowledgment, basis=basis,
+        door, rows, out_path, revision, curve_csv_columns(),
+        flags=flags, acknowledgment=acknowledgment,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=project_root,

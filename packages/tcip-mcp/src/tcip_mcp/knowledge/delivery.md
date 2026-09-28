@@ -43,7 +43,7 @@ Aggregating per-image measurements into a per-plant value is an agent choice key
 read-semantics, not a frozen one-function-per-type map. The table below is a starting reference of
 common choices; pick (or compose) the aggregation the trait's definition actually calls for (a
 skewed count may want a median, a robust mean, or a yield-model estimate; a date wants a crossing),
-and record which you used. When the trait carries read-semantics fields (`TraitSpec`), those govern.
+and record which you used. When the trait carries read-semantics fields (its entry), those govern.
 
 Examples use real `crops.yml` trait names; verify any trait against `crops.yml` before use.
 
@@ -107,15 +107,18 @@ Columns, in the order `export_detection_csv` writes them (its `fieldnames` is th
 ## The meaning door (what the number is)
 
 Before the evidence gate below, every count and per-plant delivery answers a different question:
-what the delivered number means, recorded per project and confirmed by the breeder. `crops.yml`
-gives a field criterion, which is not something a model can realize on its own, so the record says
-what the number means, what decides it in the imagery, and which subject it is about. No record, or
-one nobody confirmed, or one whose spec fields moved since, and the door refuses and names the
-primitive that fixes it. An acknowledgment does not reach this: it says a number's error is
-uncharacterized, which is a claim about a quantity that has been defined.
+what the delivered number means. A trait is one entry per project, its spec fields and an
+operationalization per delivery kind (what the number means, what decides it in the imagery, which
+subject it is about), proposed as a revision with `propose_trait` and confirmed by the breeder as
+a whole in the Setup tab. `crops.yml` gives a field criterion, which is not something a model can
+realize on its own. A delivery ships under the trait's latest confirmed revision and names it on
+its delivery event; a later, unconfirmed revision changes nothing until the breeder confirms it.
+No confirmed revision, or one stating no operationalization for this delivery's kind, and the door
+refuses and names the primitive that fixes it. An acknowledgment does not reach this: it says a
+number's error is uncharacterized, which is a claim about a quantity that has been defined.
 
 - `export_detection_csv` and `deliver_per_image_counts` take a required, keyword-only `trait` and rest on
-  its `per_image_count` record, in either of `deliver_per_image_counts`'s two source regimes. That record
+  its `per_image_count` operationalization, in either of `deliver_per_image_counts`'s two source regimes. It
   names no delivered phenotype, because the per-image CSV carries no phenotype column; what it
   names is the counted subject, checked against the counted subjects of every bucket that
   recorded one (a classified bucket's own scope subject, its recorded `id_map`'s keys otherwise,
@@ -123,22 +126,17 @@ uncharacterized, which is a claim about a quantity that has been defined.
   also refuses a bucket whose own stamp names a different, non-`None` trait, validated or not.
 - `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `delivered_phenotype`, a
   crop-vocabulary delivered-phenotype name (the `delivered_phenotype` CSV column and the unit
-  cross-check read it), and resolve it to the registered trait whose spec `delivers` it: none or
-  more than one refuses. Which record applies follows from the records' own `measurement_document`
-  (`operating_point`, `ordinal_operating_point` or `regression_operating_point`), since a count, an
-  ordinal and a regression aggregate rest on three different spec floors and are three separate
-  confirmations. Every row carries a value key and every one has to be inside the confirmed set.
-- A `state_crossing_dates` statement and every delivery under it are checked against the delivered
-  dataset's own subject registry, never a bare spec value: `state_trait_operationalization` resolves
-  it from `dataset_root` (given explicitly, or the project root's own registry when that project is
+  cross-check read it), and resolve it to the trait whose latest confirmed revision `delivers` it:
+  none or more than one refuses. Which operationalization applies follows from the records' own
+  `measurement_document` (`operating_point`, `ordinal_operating_point` or
+  `regression_operating_point`), since a count, an ordinal and a regression aggregate rest on three
+  different spec floors. Every row carries a value key and every one has to be inside the
+  confirmed set.
+- A `state_crossing_dates` operationalization and every delivery under it are checked against the
+  delivered dataset's own subject registry, never a bare spec value: `propose_trait` resolves it
+  from `dataset_root` (given explicitly, or the project root's own registry when that project is
   unambiguously one dataset), and a positive value the registry does not declare for the measured
-  subject refuses at the statement, or supersedes an existing confirmation at delivery.
-- Before any of that, `state_trait_operationalization` refuses unless the trait's own trait-spec
-  statement (what the trait itself measures, authored with `author_trait_spec` and revised with
-  `revise_trait_spec`) is confirmed and current: the breeder confirms what a trait is before the
-  agent states what its delivered number means, and the refusal names the door that clears
-  whichever of the three states applies (no statement, a stale one, or a current one nobody has
-  confirmed).
+  subject refuses the proposal, or refuses the delivery when the registry changed since.
 
 ## The delivery gate (measurement integrity)
 

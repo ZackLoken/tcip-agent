@@ -11,6 +11,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.postprocessing import plant_mapping
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
 from tests._binding_fixtures import register_plant_registry_for
@@ -50,7 +51,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     citing_ids = [
         r["event_id"] for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
         for r in [ts.read(k)]
