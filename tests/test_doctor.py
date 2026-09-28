@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import json
 import os
 import subprocess
@@ -26,9 +24,18 @@ from tcip_mcp.dataset_layout import (
     status_records,
 )
 from tcip_mcp.model_registry import ModelRegistry
-from tests._operationalization_fixtures import confirm_spec_statement
+from tests import _trait_fixtures as fx
 
 PY_EXE = sys.executable
+
+
+def _record_localizing(tmp_path: Path, name: str, localization: str) -> dict:
+    """A trait record as the proposing producer writes it, its entry's ``localization`` then
+    replaced, so a record the schema refuses carries every other field a real one does."""
+    revision = fx.propose(tmp_path / "scratch_project", fx.entry(name, ("leaf_length",)))
+    record = {"revisions": [revision.model_dump(mode="json")]}
+    record["revisions"][0]["entry"]["localization"] = localization
+    return record
 
 
 def _project(tmp_path: Path) -> Path:
@@ -162,26 +169,23 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     assert "Traceback" not in res.stderr
 
 
-def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
-    """A dropped trait spec reads identically to no trait at all from the registry alone;
-    ``tcip doctor`` is where the agent catches the difference at session start."""
+def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
+    """A trait record the schema refuses reads identically to no trait at all from a listing
+    alone; ``tcip doctor`` is where the agent catches the difference at session start."""
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
     root = _project(tmp_path)
-    specs_dir = root / ".tcip" / "state" / "trait_specs"
+    record = _record_localizing(tmp_path, "unicorn", "unicorn_match")
     # This test's doctor subprocess runs with file_layout=True, so the fixture's own record has
     # to land as the same loose file the file backend reads, not the process-default backend.
     ts.bind(FileBackend())
-    ts.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-              complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"],
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
-              expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_key(root, "unicorn"), record, expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
-    assert "unicorn.json" in res.stdout
-    assert "unicorn_horn_length" in res.stdout
+    assert "'unicorn' will not read" in res.stdout
+    assert "unicorn_match" in res.stdout
 
 
 def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
@@ -467,130 +471,89 @@ def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
     assert _image_stems(tmp_path) == {"plotA_0_0": "plotA_0_0.npz", "plotA_0_1": "plotA_0_1.jpg"}
 
 
-def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
-    """The specs the doctor loads are the ones the trait registry resolves, and only the
-    unloadable spec is reported: a valid spec sitting beside it stays silent."""
+def test_only_the_unreadable_trait_record_is_reported(tmp_path):
+    """A record the schema refuses is reported by name and reason; a confirmed trait beside it
+    stays silent."""
     import tcip_store as ts
 
     root = _layout_project(tmp_path, "2026-03-04")
-    specs_dir = root / traits._TRAIT_SPECS_RELPATH
-    ts.replace(traits.trait_spec_key(specs_dir, "leaf_length"),
-              complete_spec_record({"name": "leaf_length", "delivers": ["leaf_length"],
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}), expect=ts.Version.ABSENT)
-    ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
-              complete_spec_record({"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers",
-               "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
-              expect=ts.Version.ABSENT)
-    # A confirmed, current statement isolates the loadable spec's own finding, named off the
-    # spec that actually loads rather than spelled here.
-    (loadable,), _errors = traits.load_trait_specs_with_errors(project_root=root)
-    confirm_spec_statement(root, loadable.name)
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    ts.replace(traits.trait_key(root, "burr_size"),
+               _record_localizing(tmp_path, "burr_size", "not_a_localization"),
+               expect=ts.Version.ABSENT)
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
-    spec_lines = _lines(res.stdout, "trait spec")
-    assert len(spec_lines) == 1, res.stdout
-    assert "burr_size.json" in spec_lines[0]
-    assert "measured_with" in spec_lines[0]
-    assert "leaf_length.json" not in res.stdout
+    trait_lines = _lines(res.stdout, "trait '")
+    assert len(trait_lines) == 1, res.stdout
+    assert "'burr_size' will not read" in trait_lines[0]
+    assert "not_a_localization" in res.stdout
 
 
-def _leaf_spec_project(tmp_path: Path) -> Path:
-    import tcip_store as ts
-
+def _leaf_project(tmp_path: Path) -> Path:
     from tcip_mcp.project_record import record_site
 
     root = _layout_project(tmp_path, "2026-03-04")
     record_site(str(root), "north orchard")
-    directory = root / traits._TRAIT_SPECS_RELPATH
-    ts.replace(traits.trait_spec_key(directory, "leaf"),
-               complete_spec_record({"name": "leaf", "delivers": ["leaf_length"],
-                "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}), expect=ts.Version.ABSENT)
     return root
 
 
-def test_doctor_is_silent_on_a_confirmed_current_trait_spec_statement(tmp_path: Path):
-    """The doctor says nothing about a trait spec whose statement is confirmed and current."""
-    root = _leaf_spec_project(tmp_path)
-    confirm_spec_statement(root, "leaf")
+def test_doctor_is_silent_on_a_confirmed_latest_revision(tmp_path: Path):
+    root = _leaf_project(tmp_path)
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
 
     res = _run(root)
 
-    assert "trait spec" not in res.stdout, res.stdout
+    assert "trait '" not in res.stdout, res.stdout
 
 
-def test_doctor_reports_a_stale_trait_spec_statement(tmp_path: Path):
-    """The doctor reports one line, and exits 1, for a trait spec statement that no longer
-    matches its spec."""
-    import tcip_store as ts
-
-    root = _leaf_spec_project(tmp_path)
-    confirm_spec_statement(root, "leaf")
-    directory = root / traits._TRAIT_SPECS_RELPATH
-    key = traits.trait_spec_key(directory, "leaf")
-    stored = ts.read_versioned(key)
-    ts.replace(key, complete_spec_record({**stored.value, "notes": "a note added after confirmation"}),
-               expect=stored.version)
+def test_doctor_warns_on_an_unconfirmed_latest_revision(tmp_path: Path):
+    """One line, and exit 1, for a trait whose latest revision the breeder has not confirmed,
+    a confirmed earlier one notwithstanding."""
+    root = _leaf_project(tmp_path)
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    fx.propose(root, fx.entry("leaf", ("leaf_length",), notes="a second reading"))
 
     res = _run(root)
 
     assert res.returncode == 1, res.stdout
-    lines = _lines(res.stdout, "trait spec")
-    assert len(lines) == 1 and "no longer matches" in lines[0]
+    lines = _lines(res.stdout, "trait '")
+    assert len(lines) == 1
+    assert "the latest revision (2) of trait 'leaf' is not confirmed" in lines[0]
+    assert "Setup tab" in lines[0]
 
 
-def test_doctor_reports_a_current_unconfirmed_trait_spec_statement(tmp_path: Path):
-    """The doctor reports one line, and exits 1, for a current trait spec whose statement nobody
-    has confirmed."""
-    root = _leaf_spec_project(tmp_path)
-    traits.write_trait_spec_fields(
-        "leaf", {}, project_root=root, rationale="an initial account of the leaf trait",
-    )
-
-    res = _run(root)
-
-    assert res.returncode == 1, res.stdout
-    lines = _lines(res.stdout, "trait spec")
-    assert len(lines) == 1 and "has not confirmed" in lines[0]
-
-
-def test_doctor_reports_an_undecodable_trait_spec_statement_without_aborting(tmp_path: Path):
-    """The doctor reports one line for a trait spec statement it will not decode, and exits 2
-    rather than aborting."""
+def test_doctor_reports_an_undecodable_trait_record_without_aborting(tmp_path: Path):
     from tests._record_damage_fixtures import damage_record
 
-    root = _leaf_spec_project(tmp_path)
-    confirm_spec_statement(root, "leaf")
-    scope = traits.trait_spec_statements_scope(root)
-    key = traits.trait_spec_statement_key(scope, "leaf")
-    damage_record(key, b"{not valid json")
+    root = _leaf_project(tmp_path)
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
 
     res = _run(root)
 
     assert res.returncode == 2, res.stdout
-    lines = _lines(res.stdout, "trait spec")
+    lines = _lines(res.stdout, "trait '")
     assert len(lines) == 1 and "will not read" in lines[0]
 
 
-def test_doctor_reports_a_version_refused_trait_spec_statement_without_aborting(tmp_path: Path):
-    """The doctor reports one line naming the refused ``schema_version`` of a trait spec
-    statement, and exits 1 rather than aborting."""
+def test_doctor_reports_a_version_refused_trait_record_without_aborting(tmp_path: Path):
     import json
 
     from tests._record_damage_fixtures import damage_record
 
-    root = _leaf_spec_project(tmp_path)
-    confirmed = confirm_spec_statement(root, "leaf")
-    scope = traits.trait_spec_statements_scope(root)
-    key = traits.trait_spec_statement_key(scope, "leaf")
+    root = _leaf_project(tmp_path)
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    record = traits.read_trait("leaf", root).model_dump(mode="json")
     # A version this store's own writer refuses to produce, so the record's own bytes are
     # damaged in place rather than written through the seam.
-    damage_record(key, json.dumps({**confirmed, "schema_version": 99}).encode("utf-8"))
+    damage_record(traits.trait_key(root, "leaf"),
+                  json.dumps({**record, "schema_version": 99}).encode("utf-8"))
 
     res = _run(root)
 
     assert res.returncode == 1, res.stdout
-    lines = _lines(res.stdout, "trait spec")
+    lines = _lines(res.stdout, "trait '")
     assert len(lines) == 1 and "schema_version 99, above the" in lines[0]
 
 

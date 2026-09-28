@@ -29,31 +29,16 @@ from tcip_mcp.pipelines.resolution import (
     check_delivery_gate,
     write_sidecar,
 )
-from tcip_mcp import operationalization as op
-from tests import _operationalization_fixtures as fx
+from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE, read_trait
+from tests import _trait_fixtures as fx
 from tests._binding_fixtures import run_result, write_bound_sidecar, write_prediction
+from tests._verified_checkpoint_fixtures import admit_any_checkpoint, dummy_checkpoint
 
 
 @pytest.fixture(autouse=True)
 def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module exercises the gate logic downstream of a checkpoint load, not
-    the load itself, so load_registered_checkpoint is stubbed to admit whatever path it is given.
-    """
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
-
-
-def _dummy_checkpoint(tmp_path) -> str:
-    """A checkpoint path that exists on disk, for the not-found check every door now runs first;
-    its bytes are never read (load_registered_checkpoint is stubbed for this whole module)."""
-    p = tmp_path / "m.pt"
-    if not p.exists():
-        p.write_bytes(b"x")
-    return str(p)
+    """Every test in this module exercises the gate logic downstream of a checkpoint load."""
+    admit_any_checkpoint(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
@@ -65,15 +50,13 @@ def _recorded_meaning(tmp_path):
     """
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    for trait, keys in (("stem_count", ["count"]), ("plant_surface_area", ["area_mm2"]),
-                        ("fruit_diameter", ["fruit_diameter"])):
-        fx.confirm_aggregate(tmp_path, fx.DELIVERY_TRAIT_BY_PHENOTYPE[trait],
-                             op.PER_PLANT_COUNT_AGGREGATE,
-                             delivered_phenotype=trait, value_keys=keys)
-    fx.confirm_aggregate(tmp_path, "fruit_diameter", op.PER_PLANT_REGRESSION_AGGREGATE,
-                         delivered_phenotype="fruit_diameter", value_keys=["fruit_diameter"])
-    fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_ORDINAL_AGGREGATE,
-                         delivered_phenotype="astringency", value_keys=["astringency"])
+    for phenotype, keys in (("stem_count", ["count"]), ("plant_surface_area", ["area_mm2"]),
+                            ("fruit_diameter", ["fruit_diameter"])):
+        fx.seed_confirmed_aggregate(tmp_path, phenotype, value_keys=keys)
+    fx.seed_confirmed_aggregate(tmp_path, "fruit_diameter", value_keys=["fruit_diameter"],
+                                measurement_document="regression_operating_point")
+    fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"],
+                                measurement_document="ordinal_operating_point")
 
 
 # ── the shared helper ─────────────────────────────────────────────────────
@@ -221,7 +204,7 @@ def test_export_detection_csv_refuses_bare_write(tmp_path):
 
     with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT)
+                             revision=fx.count_revision())
 
 
 def test_export_detection_csv_gate_refusal_carries_the_gate_result(tmp_path):
@@ -232,7 +215,7 @@ def test_export_detection_csv_gate_refusal_carries_the_gate_result(tmp_path):
 
     with pytest.raises(ValueError, match="unvalidated dimension") as exc_info:
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT)
+                             revision=fx.count_revision())
     exc = exc_info.value
     assert hasattr(exc, "gate"), "the raise carries no .gate: it is a bare ValueError"
     assert exc.gate.ok is False
@@ -248,7 +231,7 @@ def test_export_detection_csv_refuses_the_retired_acknowledge_unvalidated_keywor
 
     with pytest.raises(TypeError):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),  # type: ignore[call-arg]
-                             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                             revision=fx.count_revision(), acknowledge_unvalidated=True)
 
 
 def test_export_detection_csv_records_the_gates_effective_acknowledgment(tmp_path):
@@ -260,7 +243,7 @@ def test_export_detection_csv_records_the_gates_effective_acknowledgment(tmp_pat
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     _path, tail, summary = export_detection_csv(
-        [{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+        [{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"), revision=fx.count_revision(),
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="a look now"))
     assert tail["acknowledged_by"] == "user:tester"
     assert tail["acknowledgment_reason"] == "a look now"
@@ -281,7 +264,7 @@ def test_delivery_skill_documents_the_real_per_image_csv_schema(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out_path = tmp_path / "schema.csv"
-    export_detection_csv([{"image": "a.jpg", "count": 1}], str(out_path), trait=fx.COUNT_TRAIT,
+    export_detection_csv([{"image": "a.jpg", "count": 1}], str(out_path), revision=fx.count_revision(),
                          acknowledgment=Acknowledgment(acknowledged_by="user:t", reason="r"))
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
@@ -333,7 +316,7 @@ def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_b
 
     bucket = _detection_bucket(tmp_path, "preds", validated=True)
     out = tmp_path / "o.csv"
-    export_detection_csv([_raw()], str(out), trait=fx.COUNT_TRAIT,
+    export_detection_csv([_raw()], str(out), revision=fx.count_revision(),
                          operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
 
@@ -352,7 +335,8 @@ def test_export_detection_csv_quantizes_a_non_finite_score_before_averaging(tmp_
     out = tmp_path / "o.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 2, "scores": [float("nan"), 0.5]}], str(out),
-        trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+        revision=fx.count_revision(), operating_point_validated=VALIDATED_HELD_OUT,
+        pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["avg_confidence"] == "0.25"  # (0.0 + 0.5) / 2, never a NaN-propagated mean
 
@@ -384,7 +368,7 @@ def test_export_detection_csv_reconciles_sidecar_floor(tmp_path):
     bucket = _detection_bucket(tmp_path, "preds", validated=False)
     with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT,
+                             revision=fx.count_revision(),
                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
 
 
@@ -394,30 +378,27 @@ def test_export_detection_csv_pred_dirs_ships_when_bucket_validated(tmp_path):
     bucket = _detection_bucket(tmp_path, "preds", validated=True)
     out = tmp_path / "o.csv"
     export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         trait=fx.COUNT_TRAIT,
+                         revision=fx.count_revision(),
                          operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_detection_csv_floors_a_stamp_earned_for_a_different_trait(tmp_path):
-    """A count stamp validated for one trait must not answer for a delivery under a different
-    trait: the refusal names the sidecar and both traits."""
+    """A count bucket recorded for one trait must not answer for a delivery under a different
+    trait: the refusal names the bucket and both traits."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     other_trait = "astringency"
-    record = op.state_operationalization(
-        tmp_path, other_trait, op.PER_IMAGE_COUNT,
+    other = fx.propose_and_confirm(tmp_path, fx.with_operationalization(
+        read_trait(other_trait, tmp_path).latest.entry, PER_IMAGE_COUNT,
         statement="how many astringent structures the model finds in one frame",
-        mechanism="the calibrated detector over whole frames at the derived operating point",
-        measured_subject=fx.COUNT_SUBJECT, delivered_phenotypes=[],
-    )
-    fx.confirm(tmp_path, other_trait, op.PER_IMAGE_COUNT, record)
+        measured_subject=fx.COUNT_SUBJECT))
 
     bucket = _detection_bucket(tmp_path, "preds", validated=True)  # stamped trait=fx.COUNT_TRAIT
     with pytest.raises(ValueError) as exc:
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=other_trait,
+                             revision=other,
                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     message = str(exc.value)
     assert bucket in message
@@ -436,7 +417,7 @@ def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
     )
     with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT,
+                             revision=fx.count_revision(),
                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
 
 
@@ -453,7 +434,7 @@ def test_export_detection_csv_records_operating_point_and_tile_size(tmp_path):
                         "validated_against": VALIDATED_PERSISTED_GEOMETRY},
     )
     export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                         trait=fx.COUNT_TRAIT, pred_dirs=[bucket])
+                         revision=fx.count_revision(), pred_dirs=[bucket])
 
     records = [r for r in res.read_delivery_events(tmp_path) if r["door"] == "export_detection_csv"]
     assert len(records) == 1, records
@@ -481,7 +462,7 @@ def test_export_detection_csv_refusal_merges_the_tile_reconciler_binding_notes(t
 
     with pytest.raises(ValueError) as exc_info:
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT, pred_dirs=[bucket])
+                             revision=fx.count_revision(), pred_dirs=[bucket])
     assert "a tile-specific binding note" in str(exc_info.value)
 
 
@@ -498,7 +479,7 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
 
     with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT,
+                             revision=fx.count_revision(),
                              operating_point_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY,
                              pred_dirs=[bucket])
 
@@ -513,7 +494,8 @@ def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
     out = tmp_path / "o.csv"
     with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                             trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT)
+                             revision=fx.count_revision(),
+                             operating_point_validated=VALIDATED_HELD_OUT)
     assert not out.exists()
 
 
@@ -745,7 +727,7 @@ def test_deliver_per_image_counts_refuses_unvalidated_run(tmp_path, monkeypatch)
                           validated=False, conf_source="default")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -766,9 +748,9 @@ def test_deliver_per_image_counts_takes_no_acknowledgment_for_the_delivery(tmp_p
     out_csv = tmp_path / "o.csv"
     with pytest.raises(TypeError):
         itools.deliver_per_image_counts(  # type: ignore[call-arg]
-            _dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+            dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert not out_csv.exists()
@@ -801,7 +783,7 @@ def test_deliver_per_image_counts_refuses_fabricated_tile_size_even_with_validat
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -830,7 +812,7 @@ def test_deliver_per_image_counts_publishes_via_staging_but_the_csv_itself_still
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket), allow_unvalidated_staging=True)
     assert "error" in r
@@ -855,7 +837,7 @@ def test_deliver_per_image_counts_ships_when_tile_size_has_a_real_basis(tmp_path
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, trait=fx.COUNT_TRAIT, postprocess="nms", tile_size=224, tile_size_source="derived"))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" not in r, r
@@ -874,7 +856,7 @@ def test_deliver_per_image_counts_never_gates_tile_size_when_untiled(tmp_path, m
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT))
     r = itools.deliver_per_image_counts(
-        _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+        dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(tmp_path),
         predictions_dir=str(tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"))
     assert "error" not in r, r
@@ -893,7 +875,7 @@ def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_cs
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT))
-    refused = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    refused = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
     assert "predictions_dir" in refused["error"]
@@ -980,7 +962,7 @@ def test_run_inference_refuses_fabricated_tile_size_even_with_validated_conf(tmp
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out))
+    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out))
     assert "error" in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert not out.exists()
@@ -997,7 +979,7 @@ def test_run_inference_ships_when_tile_size_has_a_real_basis(
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, postprocess="nms", tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
+    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
@@ -1018,7 +1000,7 @@ def test_run_inference_never_gates_tile_size_when_untiled(
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(tmp_path))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
+    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True
@@ -1035,7 +1017,7 @@ def test_run_inference_staging_escape_writes_and_floors_the_sidecar_stamp(tmp_pa
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out),
+    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out),
                              allow_unvalidated_staging=True)
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
@@ -1616,8 +1598,8 @@ def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with
     cleanly, unlike the same shape under operating_point above."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    fx.confirm_aggregate(tmp_path, "fruit_diameter", op.PER_PLANT_REGRESSION_AGGREGATE,
-                         delivered_phenotype="fruit_diameter", value_keys=["fruit_diameter_mm"])
+    fx.seed_confirmed_aggregate(tmp_path, "fruit_diameter", value_keys=["fruit_diameter_mm"],
+                                measurement_document="regression_operating_point")
     bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True, trait="fruit_diameter")
     out = tmp_path / "o.csv"
     export_aggregated_csv(
@@ -1811,7 +1793,7 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
     export_detection_csv([{"image": "img_a.jpg", "count": 5}], str(out), pred_dirs=[d],
-                         trait=fx.COUNT_TRAIT,
+                         revision=fx.count_revision(),
                          provenance={"producer_model_sha256": "b" * 64,
                                      "producing_experiment_id": "exp_that_never_ran",
                                      "operating_point_conf": 0.4})
@@ -1903,7 +1885,8 @@ def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     record_delivery_binding_event(
         "export_aggregated_csv", str(tmp_path / "o.csv"), [d],
         document_reconciliations={"operating_point": recon}, dimension_reconciliations={},
-        acknowledgment=None, trait=fx.COUNT_TRAIT, delivery_kind=op.PER_PLANT_COUNT_AGGREGATE)
+        acknowledgment=None, revision=read_trait(fx.COUNT_TRAIT, tmp_path).latest,
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE)
 
     (record,) = [r for r in res.read_delivery_events(tmp_path)
                  if r["door"] == "export_aggregated_csv"]
@@ -1927,7 +1910,7 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
         tmp_path, trait=fx.COUNT_TRAIT))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
 
@@ -1994,12 +1977,8 @@ def _write_reference_csv(path, rows, header=("image_stem", "physical_extent", "u
 
 
 def _author_scale_tolerance(tmp_path, trait, tolerance_frac=0.1):
-    from tcip_mcp.traits import write_trait_spec_fields
-
-    write_trait_spec_fields(
-        trait, {"scale_tolerance_frac": tolerance_frac}, project_root=tmp_path,
-        rationale="the breeder set how much reference disagreement a physical-scale calibration may show",
-    )
+    fx.propose_and_confirm(tmp_path, fx.with_fields(
+        read_trait(trait, tmp_path).latest.entry, scale_tolerance_frac=tolerance_frac))
 
 
 def _write_bucket_image(images_dir, stem, *, color=(120, 120, 120)):
@@ -2256,9 +2235,10 @@ def test_calibrate_physical_scale_refuses_an_image_with_two_reference_annotation
     assert "error" in result
 
 
-def test_calibrate_physical_scale_refuses_with_no_authored_tolerance(tmp_path):
-    """TraitSpec.scale_tolerance_frac unset has no platform default fallback: the tool refuses
-    and names the field, never validating against a platform-invented number."""
+def test_calibrate_physical_scale_refuses_an_unauthored_tolerance_before_any_stamp(tmp_path):
+    """A trait authoring no scale_tolerance_frac refuses by that name, asking the breeder's
+    question, and writes no scale stamp."""
+    from tcip_mcp.pipelines.resolution import read_scale_sidecar
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
@@ -2268,8 +2248,9 @@ def test_calibrate_physical_scale_refuses_with_no_authored_tolerance(tmp_path):
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
         images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
         reference_csv=ref_csv, group_key_map=group_key_map)
-    assert "error" in result
     assert "scale_tolerance_frac" in result["error"]
+    assert "relative disagreement" in result["error"]
+    assert read_scale_sidecar(pred_dir) is None
 
 
 def test_calibrate_physical_scale_refuses_a_non_length_unit(tmp_path):

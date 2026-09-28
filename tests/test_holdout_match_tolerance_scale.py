@@ -102,12 +102,9 @@ def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_s
 def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
     """None means not yet authored: the gate refuses rather than substituting a floor of its own,
     even over a reference whose matches are otherwise perfect."""
-    import dataclasses
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
 
-    from tests._operationalization_fixtures import write_spec
-    from tests._trait_fixtures import BUD_OPENING
-
-    write_spec(tmp_path, dataclasses.replace(
+    propose_and_confirm(tmp_path, with_fields(
         BUD_OPENING, name="no_floor_trait", holdout_match_quality_floor=None))
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)

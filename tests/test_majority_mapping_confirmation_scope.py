@@ -1,24 +1,14 @@
-"""What the delivered majority-crossing marker is about, and what it is never about.
-
-A trait's ``crossing_unconfirmed`` says one thing: whether the breeders have confirmed that this
-trait's "most objects in state" phrase maps to the crossing key the spec names. It travels into the
-phenology CSV as its own column, per trait, and it is not the delivery gate's verdict on whether the
-numbers beside it were validated. Two different questions, two columns, two independent answers: a
-gate-cleared delivery of a trait whose majority reading is still unconfirmed, and a gate refusal
-naming each dimension's own reconciled state for a trait whose reading is settled, are both real
-cases.
-"""
+"""Each trait's phenology delivery carries its own majority-crossing column, named from its own
+prefix and label and computed at the crossing its confirmed revision states, and a delivery whose
+classifier is unvalidated refuses naming each dimension's own reconciled state."""
 
 from __future__ import annotations
-
-from tests._trait_fixtures import complete_spec_record
 
 import csv
 from pathlib import Path
 
 import pytest
 
-import tcip_store as ts
 from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
 BUD_SPEC = {
@@ -28,7 +18,6 @@ BUD_SPEC = {
     "milestone_fractions": [0.05, 0.5, 0.95],
     "milestone_on": "positive_fraction",
     "majority_milestone": "95per",
-    "crossing_unconfirmed": True,
     "phenology_prefix": "bud",
     "majority_label": "opening",
 }
@@ -40,7 +29,6 @@ PISTILLATE_SPEC = {
     "milestone_fractions": [0.5],
     "milestone_on": "positive_fraction",
     "majority_milestone": "50per",
-    "crossing_unconfirmed": False,
     "phenology_prefix": "pistillate",
     "majority_label": "flowering",
 }
@@ -49,21 +37,12 @@ from tests._population import mapped_plants
 
 
 def _write_specs(project_root: Path) -> None:
-    """Register both traits and give each a confirmed crossing record, so both can deliver.
+    """Propose both traits and confirm a revision of each stating its crossing."""
+    from tests._trait_fixtures import entry, propose, seed_confirmed_crossing
 
-    The marker under test travels with a delivered CSV, so each trait needs the confirmed meaning
-    the delivery door requires before it will produce one. The two are independent: what a record
-    covers is the crossing measurement, never the majority alias the marker qualifies.
-    """
-    from tcip_mcp import traits
-
-    from tests._operationalization_fixtures import seed_confirmed_crossing
-
-    specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
     for spec in (BUD_SPEC, PISTILLATE_SPEC):
-        stamped = {**spec, "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}
-        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), complete_spec_record(stamped), expect=ts.Version.ABSENT)
-    for spec in (BUD_SPEC, PISTILLATE_SPEC):
+        fields = {k: v for k, v in spec.items() if k not in ("name", "delivers")}
+        propose(project_root, entry(spec["name"], spec["delivers"], **fields))
         seed_confirmed_crossing(project_root, spec["name"])
 
 
@@ -161,36 +140,23 @@ def _registry(tmp_path: Path) -> None:
     _write_specs(tmp_path)
 
 
-def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
-    """Two traits, two different readings: bud's majority phrase maps to its 95% crossing on an
-    unconfirmed reading, pistillate's to its 50% crossing on a confirmed one. Each delivery carries
-    its own prefix, its own label, and its own answer, with no column of the other trait's."""
+def test_each_trait_carries_its_own_majority_crossing_column(tmp_path: Path):
+    """bud's majority date is its 95% crossing, pistillate's its 50%: each delivery carries its own
+    prefix and label, equal to the crossing its revision names, and no column of the other's."""
     bud = _deliver(tmp_path, BUD_SPEC, validated=True)
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=True)
 
-    assert bud["bud_opening_crossing_unconfirmed"] == "true"
-    assert pistillate["pistillate_flowering_crossing_unconfirmed"] == "false"
-    assert "pistillate_flowering_crossing_unconfirmed" not in bud
-    assert "bud_opening_crossing_unconfirmed" not in pistillate
+    assert bud["bud_opening_date"] == bud["bud_95per_date"]
+    assert pistillate["pistillate_flowering_date"] == pistillate["pistillate_50per_date"]
+    assert "pistillate_flowering_date" not in bud
+    assert "bud_opening_date" not in pistillate
 
 
-def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
-    """The marker answers whether the breeders confirmed the majority reading, a different
-    question from the delivery gate's own verdict. With one measurement dimension cleared and the
-    classifier left unvalidated, this door takes no acknowledgment at all, so the delivery
-    refuses, and the refusal still names each dimension's own reconciled state."""
+def test_an_unvalidated_classifier_refuses_naming_each_dimension(tmp_path: Path):
+    """With the count dimension cleared and the classifier left unvalidated, this door takes no
+    acknowledgment, so the delivery refuses, naming each dimension's own reconciled state."""
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=False)
 
     assert "error" in pistillate
     assert pistillate["positive_state_classifier_validated"] == "false"
     assert pistillate["operating_point_validated"] == "held_out_annotations"
-
-
-def test_an_unconfirmed_majority_reading_survives_a_cleared_delivery_gate(tmp_path: Path):
-    """The other direction: clearing the gate validates the numbers, never the reading. bud's
-    majority mapping is still unconfirmed in a delivery whose measurement dimensions all cleared."""
-    bud = _deliver(tmp_path, BUD_SPEC, validated=True)
-
-    assert bud["bud_opening_crossing_unconfirmed"] == "true"
-    assert bud["operating_point_validated"] != "false"
-    assert bud["positive_state_classifier_validated"] != "false"

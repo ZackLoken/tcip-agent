@@ -56,9 +56,7 @@ _EXPECTED_DENY = {
     "Edit(tsconfig.json)",
     "Edit(.gitignore)",
     "Edit(README.md)",
-    "Edit(.tcip/state/trait_operationalizations/**)",
-    "Edit(.tcip/state/trait_spec_statements/**)",
-    "Edit(.tcip/state/trait_specs/**)",
+    "Edit(.tcip/state/traits/**)",
     "Bash(rm:*)",
     "Bash(rmdir:*)",
     "Bash(git push:*)",
@@ -823,7 +821,7 @@ def test_classify_drops_repo_rules_in_production_mode_keeping_breeder_data():
     assert fr.classify("packages/tcip-mcp/x.py", root=root, mode="prod") is None
     assert fr.classify("README.md", root=root, mode="prod") is None
     assert fr.classify("/c/proj/labels/a.json", root=root, mode="prod") == "breeder"
-    assert fr.classify("/c/proj/.tcip/state/trait_specs/x.json", root=root, mode="prod") == "breeder"
+    assert fr.classify("/c/proj/.tcip/state/traits/x.json", root=root, mode="prod") == "breeder"
     # Development mode keeps the repo rules on.
     assert fr.classify("packages/tcip-mcp/x.py", root=root, mode="dev") == "protected"
 

@@ -17,7 +17,8 @@ import pytest
 from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units, export_aggregated_csv
 from tcip_mcp.traits import crops_units
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
+from tests._binding_fixtures import validated_bucket
 
 
 @pytest.fixture(autouse=True)
@@ -28,29 +29,6 @@ def _recorded_meaning(tmp_path: Path):
                                 value_keys=["detections_count"])
     fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
 
-
-def _validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_point",
-                      tag: str = "a") -> str:
-    """A prediction bucket whose sidecar carries a genuine held-out-validated claim for ``trait``,
-    for a test whose subject is unit resolution rather than the delivery gate itself."""
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-    from tests._binding_fixtures import write_bound_sidecar, write_prediction
-
-    root = tmp_path / f"ds_{tag}"
-    bucket = root / "predictions" / "preds"
-    write_prediction(bucket, "img_a")
-    param_key = {"operating_point": "conf", "regression_operating_point": "regression"}[document]
-    stamp = {
-        "validated": True, "trait": trait,
-        "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
-                                        "validation_kind": "annotations",
-                                        "validated_against": VALIDATED_HELD_OUT}},
-    }
-    if document == "operating_point":
-        stamp["scope"] = {"subject": trait, "attribute": None, "id_map": {trait: 0}}
-    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
-                        experiment_id=f"exp-validated-{tag}")
-    return str(bucket)
 
 # crops.yml traits that declare a physical unit, one per declared unit shape it uses.
 DECLARED_UNITS = {
@@ -89,7 +67,7 @@ def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(trait_name: s
     units column, as though a breeder had declared it."""
     from tcip_mcp import traits
 
-    assert trait_name in traits._crops_vocab(), trait_name
+    assert trait_name in {t["name"] for t in traits._crops_traits()}, trait_name
     assert trait_name not in crops_units()
 
 
@@ -115,7 +93,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
          "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "counts.csv"
-    bucket = _validated_bucket(tmp_path, fx.COUNT_TRAIT, tag="counts")
+    bucket = validated_bucket(tmp_path, fx.COUNT_TRAIT, tag="counts")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           pred_dirs=[bucket])
     with open(out_path, newline="") as f:
@@ -137,11 +115,12 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
                 "value_key": "area_mm2", "plant_attribution": "image",
                 "measurement_document": "regression_operating_point"}]
-    assert _resolve_units("plant_surface_area", results, "regression_operating_point") == ("mm2", "mm")
+    assert _resolve_units("plant_surface_area", results, "regression_operating_point")[:2] == (
+        "mm2", "mm")
 
     fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
                                 measurement_document="regression_operating_point")
-    bucket = _validated_bucket(tmp_path, "plant_surface_area", document="regression_operating_point",
+    bucket = validated_bucket(tmp_path, "plant_surface_area", document="regression_operating_point",
                                tag="area")
     out_path = tmp_path / "area.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",

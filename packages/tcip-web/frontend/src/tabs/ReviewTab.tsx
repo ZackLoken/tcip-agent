@@ -196,11 +196,12 @@ export function ReviewTab() {
     void resultsApi
       .traits(dataset.project_root)
       .then((res) => {
-        setAvailableTraits(res.traits);
-        if (res.traits.length === 0) {
+        const names = res.traits.map((t) => t.trait);
+        setAvailableTraits(names);
+        if (names.length === 0) {
           setTraitError("No trait is registered for this project yet.");
-        } else if (res.traits.length === 1) {
-          setTrait(res.traits[0]);
+        } else if (names.length === 1) {
+          setTrait(names[0]);
         }
       })
       .catch((e) => {

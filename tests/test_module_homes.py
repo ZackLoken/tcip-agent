@@ -409,17 +409,6 @@ def test_ordinal_regression_tasks_constant_has_one_home():
             assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(py_file), py_file
 
 
-def test_revise_trait_spec_has_one_home():
-    """``revise_trait_spec`` moved out of ``tools/phenology_tools.py`` into
-    ``tools/trait_spec_authoring_tools.py``, beside ``author_trait_spec``. Decorators are not
-    this test's concern (see ``_assert_one_home``)."""
-    _assert_one_home(
-        {"revise_trait_spec"},
-        _module_path("tools/phenology_tools.py"),
-        _module_path("tools/trait_spec_authoring_tools.py"),
-    )
-
-
 def test_accept_proposals_is_absent_from_package_source():
     """``accept_proposals`` is absent from every package's shipped source, not just from the
     live MCP registry the manifest test checks (a registry lookup only fires for an

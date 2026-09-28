@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import json
 from pathlib import Path
 
@@ -18,6 +16,7 @@ from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_si
 from tcip_web.app import app
 from tcip_web.state import store
 
+from tests._audit_fixtures import refuse_audit_appends
 from tests._binding_fixtures import producer_checkpoint_sha256
 
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
@@ -41,25 +40,23 @@ def _write_preds(path: Path, subjects: list[str]) -> None:
 _ID_MAP = {"closed": 0, "open": 1}
 
 
-def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
+def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """bud_opening is seeded valid by the fixture; a second, broken spec must still be visible by
-    name and reason, not silently absent the way a dropped spec looks identical to none at all."""
+    """bud_opening is seeded valid by the fixture; a record its schema refuses must still be
+    visible by name and reason, never silently absent the way a dropped trait looks like none."""
     from tcip_mcp import traits
 
-    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    tcip_store.replace(traits.trait_spec_key(specs_dir, "unicorn"),
-                       complete_spec_record({"name": "unicorn", "delivers": ["unicorn_horn_length"],
-                        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION}),
+    valid = traits.read_trait("bud_opening", tmp_path).model_dump(mode="json")
+    valid["revisions"][0]["entry"]["localization"] = "unicorn_match"
+    tcip_store.replace(traits.trait_key(tmp_path, "unicorn"), valid,
                        expect=tcip_store.Version.ABSENT)
 
-    resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})
-    body = resp.json()
-    assert body["traits"] == ["bud_opening"]
-    assert len(body["invalid_specs"]) == 1
-    assert body["invalid_specs"][0]["file"] == "unicorn.json"
-    assert "unicorn_horn_length" in body["invalid_specs"][0]["reason"]
+    body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
+
+    assert [record["trait"] for record in body["traits"]] == ["bud_opening"]
+    assert [entry["trait"] for entry in body["unreadable"]] == ["unicorn"]
+    assert "localization" in body["unreadable"][0]["reason"]
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(
@@ -124,10 +121,9 @@ def _phenology_fixture(
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import complete_stamp, record_producing_run, write_bound_sidecar
-    from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
-    from tests._trait_fixtures import BUD_OPENING
+    from tests._trait_fixtures import BUD_OPENING, propose, seed_confirmed_crossing
 
-    write_spec(tmp_path, BUD_OPENING)
+    propose(tmp_path, BUD_OPENING)
     seed_confirmed_crossing(tmp_path, BUD_OPENING.name, measured_subject="bud")
 
     # A stamp naming a producing run is only repeated in a delivery when that run really exists.
@@ -429,15 +425,18 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     which names no walked mapping) carries no plant_mapping_resolved_key at all, beside a walked-
     mapping disclosure that does, in the same listing."""
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+    from tcip_mcp.traits import read_trait
 
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
     store.open_project(tmp_path.resolve())
+    revision = read_trait("bud_opening", tmp_path).latest_confirmed
+    assert revision is not None
 
     record_delivery_binding_event(
         "deliver_orthomosaic_plant_counts", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None,
-        trait="stem_count", delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
+        acknowledgment=None, revision=revision,
+        delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
         plant_mapping={
             "plant_registry": {"name": "orchard-block", "digest": "0" * 64},
             "project_root": str(tmp_path),
@@ -452,8 +451,8 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "results.export_csv", None, [],
         document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None,
-        trait="bud_opening", delivery_kind="state_crossing_dates", project_root=tmp_path,
+        acknowledgment=None, revision=revision,
+        delivery_kind="state_crossing_dates", project_root=tmp_path,
         plant_mapping={
             "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
             "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-01T00:00:00+00:00",
@@ -635,13 +634,13 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     # The web CSV writes phenology_csv_columns, never the caller's own keys, and stamps its
     # provenance from the same reconciliation the gate read. Every declared column is filled.
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
-    from tcip_mcp.traits import get_trait
+    from tcip_mcp.operationalization import latest_confirmed
 
     body = _phenology_fixture(tmp_path, validated=True)
     resp = _export(client, body, "milestones")
     assert resp.status_code == 200
     header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
-    assert header == phenology_csv_columns(get_trait("bud_opening"))
+    assert header == phenology_csv_columns(latest_confirmed("bud_opening").entry)
     cells = dict(zip(header, first))
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
@@ -1044,14 +1043,8 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
     """The CSV is already on disk by the time the delivery-event audit line is appended; a
     failed append must not vanish as a bare 500. The 409 names the unwritten entry and the file
     that was written, and the file itself is left in place rather than rolled back."""
-    from tcip_mcp import audit as audit_module
-
     body = _phenology_fixture(tmp_path, validated=True)
-
-    def _broken(tool, arguments=None, **kwargs):
-        raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
-
-    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
+    refuse_audit_appends(monkeypatch)
 
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "unaudited.csv"})
@@ -1071,19 +1064,9 @@ def test_export_csv_route_line_answers_409_after_the_library_line_lands(
     """The library's own delivery-binding line lands; the route's own `results.export_csv` line
     is the one refused, and the delivery's record stands beside the saved file."""
     from tcip_mcp.pipelines.resolution import read_delivery_events
-    from tcip_mcp import audit as audit_module
-
-    real_append = audit_module.append
-    calls = {"n": 0}
-
-    def _fail_second_append(*args: object, **kwargs: object) -> object:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return real_append(*args, **kwargs)
-        raise RuntimeError("audit log unwritable")
 
     body = _phenology_fixture(tmp_path, validated=True)
-    monkeypatch.setattr(audit_module, "append", _fail_second_append)
+    refuse_audit_appends(monkeypatch, landing=1)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "route_line.csv"})
     assert resp.status_code == 409
@@ -1136,7 +1119,7 @@ def _count_bucket(
 
 
 def _seed_count_meaning(project_root: Path) -> None:
-    from tests._operationalization_fixtures import seed_confirmed_count
+    from tests._trait_fixtures import seed_confirmed_count
 
     seed_confirmed_count(project_root, measured_subject="stem")
 
@@ -1199,17 +1182,12 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     """The CSV is already on disk by the time the delivery-event audit line is appended; a
     failed append must not vanish as a bare 500. The 409 names the unwritten entry and the file
     that was written, and the file itself is left in place rather than rolled back."""
-    from tcip_mcp import audit as audit_module
-
-    def _broken(tool, arguments=None, **kwargs):
-        raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
-
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
     store.open_project(tmp_path.resolve())
     # Patched only for the export call itself: the fixture setup above records its own
     # validation event through the same emitter and must not be caught by this refusal.
-    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
+    refuse_audit_appends(monkeypatch)
     resp = _export_count(client, {
         "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
@@ -1230,21 +1208,10 @@ def test_export_count_csv_route_line_answers_409_after_the_library_line_lands(
 ) -> None:
     """The library's own delivery-binding line lands; the route's own `results.export_count_csv`
     line is the one refused, so ``committed`` carries the count-export fields alongside it."""
-    from tcip_mcp import audit as audit_module
-
-    real_append = audit_module.append
-    calls = {"n": 0}
-
-    def _fail_second_append(*args: object, **kwargs: object) -> object:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return real_append(*args, **kwargs)
-        raise RuntimeError("audit log unwritable")
-
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
     store.open_project(tmp_path.resolve())
-    monkeypatch.setattr(audit_module, "append", _fail_second_append)
+    refuse_audit_appends(monkeypatch, landing=1)
     resp = _export_count(client, {
         "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
@@ -1340,11 +1307,9 @@ def test_export_count_csv_refuses_a_whitespace_only_reason(
 def test_export_count_csv_refuses_an_unconfirmed_meaning(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # No confirmation seeded: the core's own pre-check refuses before the bucket is touched.
-    from tests._operationalization_fixtures import write_spec
+    # bud_opening's confirmed revision states no per-image count, so the writer's check refuses.
     from tests._trait_fixtures import BUD_OPENING
 
-    write_spec(tmp_path, BUD_OPENING)
     bucket = _count_bucket(tmp_path, validated=True, trait=BUD_OPENING.name)
     store.open_project(tmp_path.resolve())
     resp = _export_count(client, {
@@ -1357,48 +1322,12 @@ def test_export_count_csv_refuses_an_unconfirmed_meaning(
     assert detail["kind"] == "operationalization"
 
 
-def test_export_count_csv_per_image_refuses_a_confirmation_withdrawn_between_check_and_write(
-    client: TestClient, tmp_path: Path, monkeypatch,
-) -> None:
-    """The core's own pre-check and the writer's own pre-check both pass; a confirmation
-    withdrawn after that, before the writer's post-gate re-check, is caught there, not silently
-    written past."""
-    from tcip_mcp import operationalization as op
-    import tcip_mcp.pipelines.resolution as resolution_mod
-
-    _seed_count_meaning(tmp_path)
-    bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
-
-    real_gate = resolution_mod.check_delivery_gate
-
-    def _withdraw_then_gate(*args, **kwargs):
-        result = real_gate(*args, **kwargs)
-        op.confirm_trait_operationalization(
-            tmp_path, "stem", op.PER_IMAGE_COUNT, user="grüne",
-            record_seen=op.record_seen_hash(
-                op.resolve_trait_and_record(
-                    "stem", op.PER_IMAGE_COUNT, project_root=tmp_path).record.value),
-            identity_from_request=True, confirmed=False)
-        return result
-
-    monkeypatch.setattr(resolution_mod, "check_delivery_gate", _withdraw_then_gate)
-    resp = _export_count(client, {
-        "project_root": str(tmp_path),
-        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
-        "filename": "counts.csv",
-    })
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "operationalization"
-
-
 def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_confirmed_subject(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The core's own pre-check never reads a bucket's id_map (it runs before the bucket is
-    touched); a subject a bucket's recorded id_map does not name is caught only by the writer's
-    own check, and answers 400 with the structured detail rather than a 500. The bucket's stamp is
-    rewritten to a map keyed "other" beside its "stem" subject."""
+    """A subject the bucket's recorded id_map does not name is caught by the writer's check and
+    answers 400 with the structured detail rather than a 500. The bucket's stamp is rewritten to
+    a map keyed "other" beside its "stem" subject."""
     from tcip_mcp.pipelines.resolution import sidecar_key
 
     _seed_count_meaning(tmp_path)  # confirms measured_subject="stem"
@@ -1549,7 +1478,7 @@ def test_export_count_csv_split_root_event_lands_under_the_open_project(
 
 
 def _seed_orthomosaic_meaning(project_root: Path) -> None:
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     fx.seed_delivery_traits(project_root)
     fx.seed_confirmed_aggregate(project_root, "stem_count", value_keys=["count"])
@@ -1569,7 +1498,7 @@ def _orthomosaic_fixture(
     ``validated_by`` claim names an experiment the process-pinned experiment store must still
     hold when the claim is later reconciled. Returns ``(bucket_dir, raster_path, registry_name)``.
     """
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests.test_orthomosaic_tools import (
         _PLANT_PIXELS, _plant_grid_csv, _promote_bucket_conf, _replace_boxes, _run_bucket,
         _write_geo_raster,

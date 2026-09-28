@@ -9,7 +9,9 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._dense_op_fixtures import _box, dense_records, good_cal_holdout  # noqa: E402
+from tests._dense_op_fixtures import ann as _ann  # noqa: E402
+from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
 from tests._regime_fixtures import tiled_regime  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
@@ -27,38 +29,6 @@ N_IMAGES = _DENSE_RECORDS_DEFAULTS["n_images"].default
 OBJECTS_PER_IMAGE = _DENSE_RECORDS_DEFAULTS["objects_per_image"].default
 
 
-def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
-    return [cx - s / 2, cy - s / 2, s, s]  # xywh centered at (cx, cy)
-
-
-def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
-    if score is not None:
-        a["score"] = score
-    return a
-
-
-def _records(idp="c", *, shift: float = 0.0):
-    """Constructed so the count-unbiased conf (0.6) differs from the F1-max conf (0.9).
-
-    Image A: 1 GT; a correct det @0.9 + a spurious far det @0.6.
-    Image B: 2 GT; a correct det @0.9 + a hesitant-but-correct det @0.3.
-    conf 0.6 -> A over-counts (+1, spurious kept), B under-counts (-1, hesitant dropped) => net bias 0.
-    conf 0.9 -> A unbiased, B under-counts (-1) => net bias -0.5 but higher F1 (no spurious FP).
-
-    ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
-    tolerance derived from these boxes) while leaving the detections in place, so a holdout
-    fixture carries genuinely different GT content from calibration's (the content-overlap gate
-    would otherwise flag a byte-identical-content holdout, differing only by ``image_id``, as a
-    clone unable to function as an independent check).
-    """
-    a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_ann(100 + shift, 100)],
-         "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}
-    b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_ann(100 + shift, 100), _ann(200 + shift, 200)],
-         "dt": [_ann(100, 100, score=0.9), _ann(200, 200, score=0.3)]}
-    return [a, b]
 
 
 def test_good_cal_holdout_hashes_are_disjoint_and_detection_counts_differ():

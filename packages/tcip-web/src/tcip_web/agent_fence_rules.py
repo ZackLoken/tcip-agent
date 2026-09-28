@@ -130,7 +130,7 @@ def _declared_targets() -> "tuple[list[str], list[str], list[str]]":
 
     A single-segment ``Edit(<dir>/**)`` rule (``packages``) is repo code, anchored to the repo
     root and active in dev mode only. A multi-segment ``Edit(<a>/<b>/**)`` rule
-    (``.tcip/state/trait_specs``) is the breeder's project data, matched as a path-segment
+    (``.tcip/state/traits``) is the breeder's project data, matched as a path-segment
     subsequence wherever the project lives and active in both modes. A rule with no ``/**``
     (``README.md``) is a repo-root single file, anchored, dev mode only. Denies the command
     outright when the declaration cannot be read: a guard that cannot see the boundary refuses.

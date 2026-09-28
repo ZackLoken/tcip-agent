@@ -16,8 +16,6 @@ backend it is about and why; everything else must pass unchanged on both.
 
 from __future__ import annotations
 
-from tests._trait_fixtures import complete_spec_record
-
 import json
 import os
 import re
@@ -39,7 +37,6 @@ from tcip_mcp import (
     dataset_layout,
     experiments,
     model_registry,
-    operationalization,
     project_record,
     project_status,
     traits,
@@ -47,6 +44,7 @@ from tcip_mcp import (
     workspace,
 )
 from tcip_mcp.pipelines import image_utils, model_build, resolution
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 from tcip_mcp.pipelines.data import band_groups, selection, splits
 from tcip_mcp.pipelines.feedback import materialize
@@ -1699,24 +1697,20 @@ def test_two_spellings_of_one_root_address_one_database(store):
     ]
 
 
-def test_trait_specs_shares_the_state_database_rather_than_gaining_its_own(store):
-    """The positive proof the trait-spec re-root exists to establish: writing a ``trait_specs``
-    record alongside a sibling ``STATE``-rooted store (``trait_operationalizations``) creates
-    exactly one database under the project's shared state root, never a second, nested one under
-    ``trait_specs`` itself.
+def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
+    """Writing a ``traits`` record alongside a sibling ``STATE``-rooted store
+    (``delivery_events``) creates exactly one database under the project's shared state root,
+    never a second, nested one under ``traits`` itself.
     """
     only_on(store, SQLITE, _DATABASE_MECHANICS)
-    spec_key = traits.trait_spec_key(traits.trait_specs_dir(store.root), "bud_opening")
-    op_key = operationalization.operationalization_key(
-        operationalization.operationalizations_scope(store.root), "bud_opening", "phenology")
-
-    ts.replace(spec_key, complete_spec_record({"name": "bud_opening", "delivers": ["leaf_out_05per_date"]}),
+    ts.replace(traits.trait_key(store.root, "bud_opening"), {"revisions": []},
                expect=ts.Version.ABSENT)
-    ts.replace(op_key, {"trait": "bud_opening", "delivery_kind": "phenology"}, expect=ts.Version.ABSENT)
+    ts.replace(resolution.delivery_event_key(project_state_dir(store.root), "e1"),
+               {"event_id": "e1"})
 
     databases = sorted(store.root.rglob(DATABASE_FILENAME))
     assert databases == [store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME]
-    assert not (store.root / ".tcip" / "state" / "trait_specs" / ".tcip").exists()
+    assert not (store.root / ".tcip" / "state" / "traits" / ".tcip").exists()
 
 
 def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(store):
@@ -1890,37 +1884,6 @@ def _plant_mapping_dir(root: Path) -> Path:
 def _stamp_bucket(root: Path) -> Path:
     """The prediction bucket a run's provenance stamps sit in, from the layout's own resolver."""
     return dataset_layout.prediction_dir(root, "live", "2026-03-04")
-
-
-def _trait_spec_key(root: Path) -> ts.Key:
-    return traits.trait_spec_key(traits.trait_specs_dir(root), TRAIT_UNDER_TEST)
-
-
-def _trait_specs_root(root: Path) -> Path:
-    """The shared ``.tcip/state`` root the store's key actually hangs off, mirroring
-    ``_trait_spec_statements_root``'s own shape: the state directory, not the specs directory
-    (``trait_specs_dir``) the locator's fixed prefix places records under."""
-    return traits.trait_specs_dir(root).parent
-
-
-def _trait_spec_statement_key(root: Path) -> ts.Key:
-    return traits.trait_spec_statement_key(traits.trait_spec_statements_scope(root), TRAIT_UNDER_TEST)
-
-
-def _trait_spec_statements_root(root: Path) -> Path:
-    return traits.trait_spec_statements_scope(root)
-
-
-def _operationalization_key(root: Path) -> ts.Key:
-    return operationalization.operationalization_key(
-        operationalization.operationalizations_scope(root),
-        TRAIT_UNDER_TEST,
-        DELIVERY_KIND_UNDER_TEST,
-    )
-
-
-def _operationalizations_root(root: Path) -> Path:
-    return operationalization.operationalizations_scope(root)
 
 
 def _pin_platform_root(root: Path, monkeypatch) -> None:
@@ -2205,21 +2168,36 @@ REGISTERED = {
         lambda root: inference_tools._raster_pass_key(_stamp_bucket(root), "identity"),
         "predictions/live/2026-03-04/.tcip/raster_pass_progress/identity.json",
         root_of=_stamp_bucket),
-    "trait_specs": Registered(
-        # Every TraitSpec field at its default plus the encoder's schema stamp; the
-        # producer-agreement module holds this golden's keys to what _encode_spec writes.
-        {"name": TRAIT_UNDER_TEST, "count_objective": "", "localization": "",
-         "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
-         "positive_value": "", "milestone_fractions": [], "milestone_on": "",
-         "majority_milestone": "", "crossing_unconfirmed": False, "phenology_prefix": "",
-         "majority_label": "", "sliver_policy": "class_avg_size", "sliver_frac": 0.5,
-         "count_bias_tolerance_frac": None, "count_error_tolerance": None,
-         "classifier_agreement_floor": None, "ordinal_agreement_floor": None,
-         "regression_skill_floor": None, "scale_tolerance_frac": None,
-         "holdout_match_quality_floor": None, "delivers": ["measure_one"], "notes": "ü",
-         "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION},
-        _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.json",
-        root_of=_trait_specs_root),
+    "traits": Registered(
+        # One trait's record as the proposing and confirming producers leave it; the
+        # producer-agreement module holds this golden's keys to what those producers write.
+        {"revisions": [{
+            "number": 1,
+            "entry": {
+                "name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "positive_value": "büsch",
+                "milestone_fractions": [0.5], "milestone_on": "positive_fraction",
+                "majority_milestone": "",
+                "phenology_prefix": "", "majority_label": "", "count_objective": "",
+                "localization": "", "localization_tolerance": "half_class_avg_size",
+                "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
+                "count_error_tolerance": None, "classifier_agreement_floor": None,
+                "ordinal_agreement_floor": None, "regression_skill_floor": None,
+                "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "ü",
+                "operationalizations": {DELIVERY_KIND_UNDER_TEST: {
+                    "statement": "the date each büsch reached the measured state",
+                    "mechanism": "the calibrated state classifier over isolated buds",
+                    "measured_subject": "bud", "delivered_phenotypes": ["measure_one"],
+                    "delivered_value_keys": []}}},
+            "entry_sha256": "7f3a1b9c2d4e5f60",
+            "rationale": "the breeder described the state directly", "relayed_note": "",
+            "proposed_at": "2026-03-04T12:00:00+00:00",
+            "proposing_agent": {"agent_client_name": "ü", "agent_client_version": "1",
+                                "agent_session": "mcp_1", "terminal_session": None,
+                                "harness_session": None, "harness_effort_at_connect": None},
+            "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
+            "identity_from_request": True, "withdrawn_by": None, "withdrawn_at": None}]},
+        lambda root: traits.trait_key(root, TRAIT_UNDER_TEST),
+        f".tcip/state/traits/{TRAIT_UNDER_TEST}.json", root_of=project_state_dir),
     "annotation_records": Registered(
         LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),
         "labels/a_1.json", root_of=_generic_label_dir),
@@ -2362,9 +2340,9 @@ REGISTERED = {
          "superseded_by": "agent:supersede_delivery",
          "superseded_at": "2026-03-04T12:00:00+00:00"},
         lambda root: resolution.delivery_supersession_key(
-            resolution.delivery_events_scope(root), EVENT_ID_UNDER_TEST),
+            project_state_dir(root), EVENT_ID_UNDER_TEST),
         f".tcip/state/delivery_supersessions/{EVENT_ID_UNDER_TEST}.json",
-        root_of=lambda root: resolution.delivery_events_scope(root)),
+        root_of=project_state_dir),
     # the experiment record's validation member
     "experiment_validations": Registered(
         # every field _VALIDATION_FIELDS requires, train_disjointness/selection_disjointness
@@ -2381,34 +2359,10 @@ REGISTERED = {
         lambda root: experiments.validations_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
-    # what one trait's delivered number means, for one delivery kind
-    "trait_operationalizations": Registered(
-        {"trait": TRAIT_UNDER_TEST, "delivery_kind": DELIVERY_KIND_UNDER_TEST,
-         "statement": "the date each büsch reached the measured state",
-         "mechanism": "the calibrated state classifier over isolated buds",
-         "measured_subject": "bud", "delivered_phenotypes": ["measure_one"],
-         "delivered_value_keys": [], "stated_by": "state_trait_operationalization",
-         "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
-         "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
-         "identity_from_request": True, "confirmed_fields": {"milestone_on": "positive_fraction"}},
-        _operationalization_key,
-        f".tcip/state/trait_operationalizations/{TRAIT_UNDER_TEST}/{DELIVERY_KIND_UNDER_TEST}.json",
-        root_of=_operationalizations_root),
-    # what a trait spec means and why the agent chose it, proposed and confirmed separately from
-    # the spec record itself
-    "trait_spec_statements": Registered(
-        {"trait": TRAIT_UNDER_TEST,
-         "statement_fields": {"delivers": ["measure_one"], "positive_value": "büsch"},
-         "rationale": "the breeder described the state directly", "stated_by": "author_trait_spec",
-         "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
-         "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
-         "identity_from_request": True,
-         "record_seen": "7f3a1b9c2d4e5f60"},
-        _trait_spec_statement_key, f".tcip/state/trait_spec_statements/{TRAIT_UNDER_TEST}.json",
-        root_of=_trait_spec_statements_root),
     # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
     "delivery_events": Registered(
-        {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
+        {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST, "trait_revision": 1,
+         "trait_revision_sha256": "7f3a1b9c2d4e5f60",
          "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
          "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
          "acknowledged_by": None, "acknowledgment_reason": None,
@@ -2445,10 +2399,8 @@ REGISTERED = {
                  "operative": False, "validated": None, "per_bucket": {},
                  "unvalidated_buckets": [], "binding_notes": {}}},
          "produced_at": "2026-03-04T12:00:00+00:00"},
-        lambda root: resolution.delivery_event_key(
-            resolution.delivery_events_scope(root), EVENT_ID_UNDER_TEST),
-        f".tcip/state/delivery_events/{EVENT_ID_UNDER_TEST}.json",
-        root_of=lambda root: resolution.delivery_events_scope(root)),
+        lambda root: resolution.delivery_event_key(project_state_dir(root), EVENT_ID_UNDER_TEST),
+        f".tcip/state/delivery_events/{EVENT_ID_UNDER_TEST}.json", root_of=project_state_dir),
 }
 
 CODEC_EXEMPT = {

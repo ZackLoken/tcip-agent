@@ -366,12 +366,13 @@ def test_records_refusal_names_plant_registries(client, tmp_path):
 
 
 def test_records_refusal_names_delivery_events(client, tmp_path):
-    from tcip_mcp.pipelines.resolution import delivery_event_key, delivery_events_scope
+    from tcip_mcp.pipelines.resolution import delivery_event_key
+    from tcip_mcp.project_paths import project_state_dir
 
     ws = tmp_path.parent
     _, target = _seed(ws)
     ts.replace(
-        delivery_event_key(delivery_events_scope(target), "event1"),
+        delivery_event_key(project_state_dir(target), "event1"),
         {"event_id": "event1", "output_path": str(target / "out.csv")},
         expect=ts.Version.ABSENT,
     )

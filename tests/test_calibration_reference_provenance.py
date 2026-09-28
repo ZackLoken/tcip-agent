@@ -19,9 +19,12 @@ gate, so it travels with a run's ``shippable_issues`` without changing whether t
 
 from __future__ import annotations
 
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
+
+from tests._clear_prediction_bucket_fixtures import write_image
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -35,11 +38,7 @@ IMG = 32
 PRODUCER = "model:m_best@c9f632ba98b2"  # the shape run_inference stamps on every prediction
 
 
-def _save_png(path):
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (IMG, IMG), color=(128, 128, 128)).save(path)
+_save_png = partial(write_image, size=IMG)
 
 
 def _reference(root, stems, annotations):

@@ -14,21 +14,18 @@ import sys
 import pytest
 
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT, write_sidecar
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
 from tests._binding_fixtures import (
     calibrated_run_fields, run_result, write_bound_sidecar, write_prediction,
 )
 from tests._record_damage_fixtures import damage_record
+from tests._verified_checkpoint_fixtures import admit_any_checkpoint, dummy_checkpoint
 
 
 @pytest.fixture(autouse=True)
 def _stub_checkpoint_verification(monkeypatch):
     """Every test here exercises the door's own logic, not a checkpoint load."""
-    import tcip_mcp.model_registry as model_registry_mod
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    admit_any_checkpoint(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
@@ -37,11 +34,14 @@ def _recorded_meaning(tmp_path):
     fx.seed_confirmed_count(tmp_path)
 
 
-def _dummy_checkpoint(tmp_path) -> str:
-    p = tmp_path / "m.pt"
-    if not p.exists():
-        p.write_bytes(b"x")
-    return str(p)
+def _confirm_count_of(project_root, trait: str, measured_subject: str) -> None:
+    """Confirm a revision of ``trait`` stating a per-image count of ``measured_subject``."""
+    from tcip_mcp.traits import PER_IMAGE_COUNT
+
+    fx.propose_and_confirm(project_root, fx.with_operationalization(
+        fx.latest(trait, project_root), PER_IMAGE_COUNT,
+        statement="how many astringent structures the model finds in one frame",
+        measured_subject=measured_subject))
 
 
 def _write_real_prediction(bucket, stem: str, *, score: float = 0.9) -> None:
@@ -232,23 +232,16 @@ def test_bucket_regime_refuses_a_stamp_naming_an_empty_string_images_dir(tmp_pat
 def test_bucket_regime_refuses_a_trait_contradiction_even_unvalidated(tmp_path):
     """An unvalidated stamp recording a different, non-None trait refuses as a positive
     contradiction: verify_stamp_binding only compares traits when a stamp claims validation, so
-    the door itself has to catch the unvalidated case."""
+    the writer's binding of the bucket to the revision catches the unvalidated case."""
     import tcip_mcp.tools.inference_tools as itools
 
     other_trait = "astringency"
-    from tcip_mcp import operationalization as op
-
-    record = op.state_operationalization(
-        tmp_path, other_trait, op.PER_IMAGE_COUNT,
-        statement="how many astringent structures the model finds in one frame",
-        mechanism="the calibrated detector over whole frames at the derived operating point",
-        measured_subject=fx.COUNT_SUBJECT, delivered_phenotypes=[],
-    )
-    fx.confirm(tmp_path, other_trait, op.PER_IMAGE_COUNT, record)
+    _confirm_count_of(tmp_path, other_trait, fx.COUNT_SUBJECT)
 
     bucket = tmp_path / "other_trait_preds"
-    write_prediction(bucket, "a")
-    stamp = {"scope": {"subject": fx.COUNT_SUBJECT}, "trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
+    _write_real_prediction(bucket, "a")
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT},
+             "trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -304,20 +297,13 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     and one present in it clears the same check, reaching the counting/gate stage rather than
     refusing on the subject. The stamp names no trait, which a validated claim can never do, so
     the matching case is read off the gate refusal it reaches, not a delivered CSV."""
-    from tcip_mcp import operationalization as op
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     other_trait = "astringency"
     other_subject = "a subject no recorded id_map names"
-    record = op.state_operationalization(
-        tmp_path, other_trait, op.PER_IMAGE_COUNT,
-        statement="how many astringent structures the model finds in one frame",
-        mechanism="the calibrated detector over whole frames at the derived operating point",
-        measured_subject=other_subject, delivered_phenotypes=[],
-    )
-    fx.confirm(tmp_path, other_trait, op.PER_IMAGE_COUNT, record)
+    _confirm_count_of(tmp_path, other_trait, other_subject)
 
     bucket = tmp_path / "id_mapped_preds"
     _write_real_prediction(bucket, "a")
@@ -328,8 +314,8 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     with pytest.raises(OperationalizationRefused, match="a subject no recorded id_map names"):
-        itools.per_image_counts_from_bucket(str(bucket), str(tmp_path / "mismatch.csv"),
-                               trait=other_trait)
+        itools.per_image_counts_from_bucket(
+            str(bucket), str(tmp_path / "mismatch.csv"), revision=latest_confirmed(other_trait))
 
     match = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "match.csv"),
                                    trait=fx.COUNT_TRAIT)
@@ -339,8 +325,8 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
 
 
 def test_bucket_regime_returns_an_error_dict_for_an_unknown_trait(tmp_path):
-    """No spec is registered for this trait name at all: resolve_trait_and_record's own
-    TraitUnknownError is caught and converted to the tool's ordinary {"error": ...} shape, the
+    """No trait by this name exists at all: the one trait read's TraitUnknownError is caught and
+    converted to the tool's ordinary {"error": ...} shape, the
     same contract every other bucket-regime refusal has, never an unhandled 500 or a raise out of
     the tool."""
     import tcip_mcp.tools.inference_tools as itools
@@ -357,27 +343,30 @@ def test_bucket_regime_returns_an_error_dict_for_an_unknown_trait(tmp_path):
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_bucket_regime_forwards_project_root_none_unchanged_to_its_own_precheck(
+def test_bucket_regime_forwards_project_root_none_unchanged_to_the_one_trait_read(
     tmp_path, monkeypatch,
 ):
-    """The tool builds no project_root of its own (always None); the core's own meaning
-    pre-check (run before the bucket is even touched) must receive that None unchanged, never a
-    substituted resolved root."""
+    """The tool builds no project_root of its own (always None); the writer's one trait read must
+    receive that None unchanged, never a substituted resolved root."""
     from tcip_mcp import operationalization as op
-    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
     import tcip_mcp.tools.inference_tools as itools
 
-    real_resolve = op.resolve_trait_and_record
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT},
+             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+    real_read = op.confirmed_revision
     seen_roots = []
 
     def _spy(*a, **kw):
         seen_roots.append(kw.get("project_root"))
-        return real_resolve(*a, **kw)
+        return real_read(*a, **kw)
 
-    monkeypatch.setattr(op, "resolve_trait_and_record", _spy)
-    with pytest.raises(CountDeliveryRefused):
-        itools.per_image_counts_from_bucket(
-            str(tmp_path / "no-such-bucket"), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+    monkeypatch.setattr(op, "confirmed_revision", _spy)
+    itools.deliver_per_image_counts(
+        predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
     assert seen_roots == [None]
 
 
@@ -398,7 +387,7 @@ def test_publish_bracket_refuses_a_fabricated_tile_with_the_bucket_left_absent(t
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -420,7 +409,7 @@ def test_publish_bracket_refuses_a_frozen_lineage_pointer(tmp_path, monkeypatch)
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert eid in r["error"]
@@ -443,7 +432,7 @@ def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -455,72 +444,54 @@ def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(
 
 # ── refusal-channel separation ──────────────────────────────────────────────
 
-def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_regime(
-    tmp_path, monkeypatch,
-):
-    """The writer's own meaning-door raise (a confirmation withdrawn since the door's own first
-    check) is the same typed OperationalizationRefused the core's own first check raises, so
-    deliver_per_image_counts converts it to the same count-free {"error": ...} dict either way,
-    never the counts-bearing shape a caught DeliveryRefused gets."""
-    from dataclasses import replace
-
-    import tcip_mcp.tools.inference_tools as itools
+def _refuse_meaning(monkeypatch) -> None:
+    """The door's one trait read refuses, as it does for a trait with no confirmed revision."""
     from tcip_mcp import operationalization as op
+
+    def refuse(delivery_kind, **kwargs):
+        raise op.OperationalizationRefused("meaning refused here")
+
+    monkeypatch.setattr(op, "confirmed_revision", refuse)
+
+
+def test_a_meaning_refusal_is_count_free_in_the_bucket_regime(tmp_path, monkeypatch):
+    """The meaning refusal reaches deliver_per_image_counts as the count-free {"error": ...} dict,
+    never the counts-bearing shape a caught DeliveryRefused gets."""
+    import tcip_mcp.tools.inference_tools as itools
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
     stamp = {"image_filenames": {"a": "a.png"}, "scope": {"subject": fx.COUNT_SUBJECT}, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
-
-    real_check = op.check_operationalization
-    calls = {"n": 0}
-
-    def _flaky_check(*a, **kw):
-        calls["n"] += 1
-        result = real_check(*a, **kw)
-        # The door's own first check (call 1) passes; every later call (the writer's own) reads
-        # as withdrawn since.
-        return result if calls["n"] == 1 else replace(
-            result, state=1, message="operationalization withdrawn mid-flow")
-
-    monkeypatch.setattr(op, "check_operationalization", _flaky_check)
+    _refuse_meaning(monkeypatch)
 
     result = itools.deliver_per_image_counts(
         predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
-    assert result == {"error": "operationalization withdrawn mid-flow"}
+    assert result == {"error": "meaning refused here"}
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regime(
-    tmp_path, monkeypatch,
-):
-    """The writer's own meaning-door refusal answers the live regime by its message alone, after
-    the bucket the shared bracket already published and linked, never a counts-bearing dict."""
-    from dataclasses import replace
-
+def test_a_meaning_refusal_is_count_free_in_the_live_regime(tmp_path, monkeypatch):
+    """The meaning refusal answers the live regime by its message alone, before any inference
+    runs or any bucket is published, never a counts-bearing dict."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp import operationalization as op
 
-    monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _unvalidated_run_result())
-    real_check = op.check_operationalization
-    calls = {"n": 0}
+    ran: list[bool] = []
 
-    def _flaky_check(*a, **kw):
-        calls["n"] += 1
-        result = real_check(*a, **kw)
-        return result if calls["n"] == 1 else replace(
-            result, state=1, message="operationalization withdrawn mid-flow")
+    def inference(*a, **kw) -> dict:
+        ran.append(True)
+        return _unvalidated_run_result()
 
-    monkeypatch.setattr(op, "check_operationalization", _flaky_check)
+    monkeypatch.setattr(itools, "_run_inference_verified", inference)
+    _refuse_meaning(monkeypatch)
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     result = itools.deliver_per_image_counts(
-        _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+        dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
         trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
-    assert result == {"error": "operationalization withdrawn mid-flow"}
-    assert bucket.exists()  # the bracket already published before the writer refused
+    assert result == {"error": "meaning refused here"}
+    assert ran == [] and not bucket.exists()
 
 
 def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
@@ -551,7 +522,7 @@ def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path
                         lambda *a, **kw: _unvalidated_run_result())
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     out_csv = tmp_path / "o.csv"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert r["image_count"] == 1
@@ -577,7 +548,7 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
                         lambda *a, **kw: _earned_run_result(tmp_path))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
-    live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
+    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
                                   trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                   predictions_dir=str(bucket))
     assert "error" not in live, live
@@ -603,13 +574,15 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
 
 
 def _audit_tools(*roots) -> list[str]:
-    """Every audit row's tool name across the platform log and each named root's own log."""
+    """Every audit row's tool name across the platform log and each named root's own log, less
+    the trait proposals and confirmations the fixture seeds before the delivery."""
     import tcip_store as ts
 
     from tcip_mcp.audit import audit_log_key
 
     keys = [audit_log_key()] + [audit_log_key(r) for r in roots]
-    return sorted(row["tool"] for key in keys for row in ts.read_log(key).records)
+    return sorted(row["tool"] for key in keys for row in ts.read_log(key).records
+                  if row["tool"] not in ("propose_trait", "confirm_trait_revision"))
 
 
 def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch):
@@ -622,7 +595,7 @@ def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch)
                         lambda *a, **kw: _earned_run_result(tmp_path))
     root = tmp_path / "ds"
     bucket = root / "predictions" / "baseline" / "2026-01-01"
-    live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                            str(tmp_path / "a.csv"), trait=fx.COUNT_TRAIT,
                                            calibration_labels_dir=str(tmp_path),
                                            predictions_dir=str(bucket))
@@ -715,7 +688,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
@@ -727,7 +700,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
         raise AssertionError("_run_inference_verified must not run on a refused publish")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fail_if_reached)
-    second = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    second = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                     str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                     calibration_labels_dir=str(tmp_path),
                                     predictions_dir=str(bucket))
@@ -742,7 +715,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
     # The admitting case: the suggested bucket is free of both a verdict and a document.
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="b"))
-    third = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    third = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "third.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path),
                                    predictions_dir=second["suggested_bucket"])
@@ -765,7 +738,7 @@ def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalida
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
@@ -775,7 +748,7 @@ def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalida
         raise AssertionError("_run_inference_verified must not run on a refused publish")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fail_if_reached)
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -804,13 +777,13 @@ def test_live_regime_second_publish_refuses_before_the_checkpoint_is_read(tmp_pa
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
     assert calls["n"] == 1
 
-    second = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    second = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                     str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                     predictions_dir=str(bucket))
     assert "error" in second
@@ -944,7 +917,7 @@ def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, m
                         lambda *a, **kw: _unvalidated_run_result())
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
-    live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
+    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
                                   trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in live
     assert live["operating_point_validated"] == VALIDATED_FALSE
@@ -1074,7 +1047,7 @@ def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
 
@@ -1106,6 +1079,6 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error
 
     with pytest.raises(CountDeliveryRefused) as excinfo:
         itools.per_image_counts_from_bucket(
-            str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+            str(bucket), str(tmp_path / "o.csv"), revision=fx.count_revision())
 
     assert str(excinfo.value) == str(real_exc)

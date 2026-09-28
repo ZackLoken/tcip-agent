@@ -224,14 +224,16 @@ class ReconciledDimension(BaseModel):
 
 
 class DeliveryEventRecord(BaseModel):
-    """The stored per-delivery record: what shipped, under which trait and kind, and the real
-    per-bucket verification evidence the delivering door reconciled at the time."""
+    """The stored per-delivery record: what shipped, under which trait revision and kind, and the
+    real per-bucket verification evidence the delivering door reconciled at the time."""
 
     model_config = ConfigDict(extra="forbid")
 
     event_id: str
-    trait: Optional[str]
-    delivery_kind: Optional[str]
+    trait: str
+    trait_revision: int
+    trait_revision_sha256: str
+    delivery_kind: str
     door: str
     output_path: Optional[str]
     output_sha256: Optional[str]

@@ -12,7 +12,7 @@ import pytest
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
 
 SUBJECT = fx.COUNT_SUBJECT  # "stem": what the confirmed per_image_count says the counts are of
 ATTRIBUTE = "condition"
@@ -51,7 +51,7 @@ def test_a_classified_bucket_delivers_its_object_count_not_its_value_count(tmp_p
     from tcip_mcp.pipelines.resolution import Acknowledgment
 
     result = per_image_counts_from_bucket(
-        str(bucket), str(out), trait=fx.COUNT_TRAIT, project_root=tmp_path,
+        str(bucket), str(out), revision=fx.count_revision(tmp_path), project_root=tmp_path,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="unvalidated fixture"))
 
     assert "error" not in result

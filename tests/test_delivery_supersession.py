@@ -13,6 +13,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord, with_supersessions
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.delivery_tools import supersede_delivery
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
@@ -41,7 +42,7 @@ def _delivered_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
 
 
 def _one_event(tmp_path: Path, door: str = "deliver_phenology_milestones") -> dict:
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == door]
     assert len(events) == 1, events
@@ -66,10 +67,12 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 
 
 def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
+    from tests._trait_fixtures import seed_confirmed_count
+
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None, trait="astringency",
-        delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=None,
+        acknowledgment=None, revision=seed_confirmed_count(tmp_path),
+        delivery_kind="per_image_count", project_root=tmp_path, plant_mapping=None,
     )
     event = _one_event(tmp_path, door="test_door")
     assert event["output_sha256"] is None
@@ -96,7 +99,7 @@ def test_supersede_delivery_over_a_real_event_records_the_withdrawal(
     assert outcome["replacement_event_id"] is None
 
     stored = ts.read(resolution.delivery_supersession_key(
-        resolution.delivery_events_scope(tmp_path), event["event_id"]))
+        project_state_dir(tmp_path), event["event_id"]))
     assert stored["reason"] == "a mis-stated crop was corrected upstream"
     assert stored["output_sha256"] == event["output_sha256"]
     assert out_csv.exists(), "a supersession never deletes or rewrites the delivered file"
@@ -116,7 +119,7 @@ def test_supersede_delivery_names_a_replacement_event(
     assert "error" not in deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(second_csv), classifier_pred_dirs=list(preds_by_date.values()))
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
              if ts.read(k)["door"] == "deliver_phenology_milestones"]
     second_event = next(e for e in events if e["event_id"] != first_event["event_id"])
@@ -202,7 +205,7 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_a_recorded_field
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     replacement_id = "malformed-replacement"
     ts.replace(resolution.delivery_event_key(scope, replacement_id), {
         "event_id": replacement_id, "trait": "currant_bloom",

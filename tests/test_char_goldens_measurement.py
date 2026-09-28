@@ -52,39 +52,7 @@ pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 from tests._population import mapped_plants
 
 
-# ── shared fixture helpers ────────────────────────────────────────────────
-
-def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
-    return [cx - s / 2, cy - s / 2, s, s]  # xywh centered at (cx, cy)
-
-
-def _ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
-    if score is not None:
-        a["score"] = score
-    return a
-
-
-def _sweep_records(idp="c", *, shift: float = 0.0):
-    """Two images engineered so count-unbiased conf (0.6) != F1-max conf (0.0).
-
-    Image A: 1 GT; correct det @0.9 + a spurious far det @0.6.
-    Image B: 2 GT; correct det @0.9 + a hesitant-but-correct det @0.3.
-
-    ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
-    tolerance derived from these boxes), leaving the detections in place, so the holdout fixture
-    carries genuinely different GT content from calibration's. A holdout differing from
-    calibration only by ``image_id`` is byte-identical content, which the content-overlap gate
-    refuses; ``test_golden_duplicate_content_holdout_is_false`` below pins that refusal on the
-    shift=0 fixture pair.
-    """
-    a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_ann(100 + shift, 100)],
-         "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}
-    b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_ann(100 + shift, 100), _ann(200 + shift, 200)],
-         "dt": [_ann(100, 100, score=0.9), _ann(200, 200, score=0.3)]}
-    return [a, b]
+from tests._dense_op_fixtures import toy_records as _sweep_records  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -229,7 +197,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     }
     res = PH.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_value="open", spec=BUD_OPENING, plants=["P1"])
+        spec=BUD_OPENING, plants=["P1"])
 
     # Both buckets are fully classified, so the fraction is produced and delivered.
     assert res["positive_class_assessed"] is True

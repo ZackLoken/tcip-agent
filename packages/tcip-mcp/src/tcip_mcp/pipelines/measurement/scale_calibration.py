@@ -3,9 +3,6 @@
 A physical scale is derived from a breeder's own reference measurements (a scale bar, a reference
 disc, an organ measured with calipers) and tested against a held-out half of the same references it
 was not derived from (``tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split``).
-
-:func:`resolve_physical_scale` is the registered ``_DOCUMENT_RESOLVERS["resolve_scale"]`` entry
-(see ``pipelines.resolution``).
 """
 
 from __future__ import annotations
@@ -41,7 +38,7 @@ def resolve_physical_scale(
     extent in that image (``mask_geometry.principal_axis_extent_of_points``, never a bounding box's
     long side). Each reference implies a scale ``physical_extent / pixel_extent``.
 
-    ``tolerance_frac`` is the trait-authored ``TraitSpec.scale_tolerance_frac``; ``None`` (not yet
+    ``tolerance_frac`` is the trait-authored ``TraitEntry.scale_tolerance_frac``; ``None`` (not yet
     authored) refuses.
 
     The candidate is the mean of the calibration half's implied scales. It clears when its relative
@@ -53,9 +50,10 @@ def resolve_physical_scale(
     Returns ``{validated_against, passed, value, unit, failures, gate_evidence}``: ``value`` is the
     derived scale on a pass, ``None`` otherwise; ``gate_evidence`` carries every implied scale by
     half, both means, the holdout dispersion, the relative standard error and the split identity.
-    Never raises for an evidence-quality failure (too few references, a disagreeing reference set,
-    an unauthored tolerance); raises only for a caller-composition error (a non-string ``unit``, a
-    unit that is not a linear length unit crops.yml declares, a non-mapping ``references``).
+    Never raises for an evidence-quality failure (too few references, a disagreeing reference set);
+    raises ``ValueError`` for an unauthored tolerance, naming ``scale_tolerance_frac``, and for a
+    caller-composition error (a non-string ``unit``, a unit that is not a linear length unit
+    crops.yml declares, a non-mapping ``references``).
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
     from tcip_mcp.traits import crops_length_units
@@ -75,13 +73,12 @@ def resolve_physical_scale(
         )
 
     if tolerance_frac is None:
-        return {
-            "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
-            "failures": ["scale_tolerance_not_authored"],
-            "gate_evidence": {"note": "TraitSpec.scale_tolerance_frac is not authored for this "
-                                   "trait; a physical-scale gate has no platform default "
-                                   "fallback, the domain expert must author it."},
-        }
+        raise ValueError(
+            "this trait's confirmed revision authors no scale_tolerance_frac, so no physical scale "
+            "can be validated. Ask the breeder what relative disagreement between two physical "
+            "reference measurements of the same object is acceptable, propose it as "
+            "scale_tolerance_frac, and have the breeder confirm the revision in the Setup tab."
+        )
     if not references:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,

@@ -98,10 +98,9 @@ def calibrate_physical_scale(
     itself.
 
     The scale is derived on a locked calibration half of the references and validated against the
-    holdout half it was not derived from (``scale_calibration.resolve_physical_scale``), against
-    ``trait``'s own authored ``scale_tolerance_frac``; a trait with none authored refuses. ``unit``
-    must be a linear length unit crops.yml declares (``traits.crops_length_units``); a mass or
-    other non-length unit refuses.
+    holdout half it was not derived from (``scale_calibration.resolve_physical_scale``, which admits
+    ``unit`` and the tolerance), against the ``scale_tolerance_frac`` of ``trait``'s latest
+    confirmed revision; a trait with no confirmed revision, or one authoring no tolerance, refuses.
 
     On a pass, ``open_validation``/``seal_validation`` earn and record the claim, with
     ``covered_buckets`` keyed by a digest over the bytes of ``pred_dir``'s own images in
@@ -134,25 +133,13 @@ def calibrate_physical_scale(
         (``splits.default_group_key``, which strips a trailing ``_<row>_<col>`` tile offset) would
         group same-prefix camera filenames together.
     """
-    from tcip_mcp.traits import TraitUnknownError, crops_length_units, get_trait
+    from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
+    from tcip_mcp.traits import TraitUnknownError
 
     try:
-        spec = get_trait(trait)
-    except TraitUnknownError as e:
+        spec = latest_confirmed(trait).entry
+    except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
-    if spec.scale_tolerance_frac is None:
-        return {"error": (
-            f"trait {trait!r} has no authored scale_tolerance_frac; a physical-scale gate has no "
-            "platform default fallback for how much reference disagreement is acceptable. "
-            "Author it via revise_trait_spec before calibrating this trait's scale."
-        )}
-    length_units = crops_length_units()
-    if unit not in length_units:
-        return {"error": (
-            f"unit {unit!r} is not a linear length unit crops.yml declares ({sorted(length_units)}); "
-            "a per-pixel scale is a length-per-pixel quantity, and a mass or other non-length unit "
-            "is a contradiction."
-        )}
 
     from tcip_mcp.tools.phenology_tools import _stated_root_disagreement
 
@@ -226,12 +213,15 @@ def calibrate_physical_scale(
         f"{dataset_hash(labels_dir, stems=sorted(references_raw))}".encode()
     ).hexdigest()[:16]
 
-    result = resolve_physical_scale(
-        unit=unit, references=references, tolerance_frac=spec.scale_tolerance_frac,
-        dataset_root=dataset_root, identity_hash=identity_hash, group_by=group_by,
-        group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
-        capture_id=capture_id,
-    )
+    try:
+        result = resolve_physical_scale(
+            unit=unit, references=references, tolerance_frac=spec.scale_tolerance_frac,
+            dataset_root=dataset_root, identity_hash=identity_hash, group_by=group_by,
+            group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
+            capture_id=capture_id,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
 
     from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 

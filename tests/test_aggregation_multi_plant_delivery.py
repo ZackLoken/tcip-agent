@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     export_aggregated_csv,
 )
 from tcip_mcp.pipelines.resolution import DeliveryRefused, VALIDATED_FALSE, VALIDATED_HELD_OUT
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
 from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
 

@@ -28,6 +28,7 @@ from tcip_mcp import (  # noqa: F401
     web_client,
     workspace,
 )
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines import model_build, resolution  # noqa: F401
 from tcip_mcp.pipelines.data import band_groups, selection, splits  # noqa: F401
 from tcip_mcp.pipelines.data.split_construction import bound_selection_dir
@@ -99,7 +100,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     seen: set[tuple[str, str]] = set()
 
     _add(roots, seen, root, ROOT)
-    _add(roots, seen, root / ".tcip" / "state", STATE)
+    _add(roots, seen, project_state_dir(root), STATE)
     _add(roots, seen, root / ".tcip" / "experiments", EXPERIMENTS)
 
     hpo_dir = training_tools.hpo_root(root=root)
@@ -133,7 +134,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     for dataset_entry in project_tools.read_datasets(root):
         dataset_root = project_tools.dataset_entry_path(root, dataset_entry).absolute()
         _add(roots, seen, dataset_root, ROOT)
-        _add(roots, seen, dataset_root / ".tcip" / "state", STATE)
+        _add(roots, seen, project_state_dir(dataset_root), STATE)
         for bucket in dataset_layout.prediction_bucket_dirs(dataset_root, include_cleared=True):
             _add(roots, seen, bucket.absolute(), PREDICTION_BUCKET)
 

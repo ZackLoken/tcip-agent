@@ -29,6 +29,14 @@ def _load_guardrail():
 
 guardrail = _load_guardrail()
 
+
+def _document_text(name: str) -> str:
+    from tcip_mcp.knowledge import document_path
+
+    skill = document_path(name)
+    assert skill.exists(), f"missing document: {skill}"
+    return skill.read_text(encoding="utf-8")
+
 # knowledge document name -> crops.yml crop key (None = domain document, global check)
 CROP_SKILLS = {
     "hazelnut": "hazelnut",
@@ -41,13 +49,10 @@ CROP_SKILLS = {
 }
 
 
-@pytest.mark.parametrize("name,crop_key", list(CROP_SKILLS.items()))
-def test_skill_asserts_no_fabricated_traits(name: str, crop_key: str | None) -> None:
-    from tcip_mcp.knowledge import document_path
-
-    skill = document_path(name)
-    assert skill.exists(), f"missing document: {skill}"
-    unknown = guardrail.unknown_trait_tokens(skill, crop_key)
+@pytest.mark.parametrize("name", list(CROP_SKILLS))
+def test_skill_asserts_no_fabricated_traits(name: str) -> None:
+    allnames, _ = guardrail.load_vocab()
+    unknown = guardrail.unknown_trait_tokens(_document_text(name), allnames)
     assert not unknown, (
         f"{name}: backticks trait-like tokens not in crops.yml and not allow-listed: "
         f"{unknown}. Either it's a fabricated trait (fix the document) or a real platform token "
@@ -62,10 +67,8 @@ def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
     """Every real trait a per-crop document backticks must actually be assigned to that crop in
     crops.yml: the mis-assignment check `test_skill_asserts_no_fabricated_traits` doesn't cover
     it (that one only checks fabrication, never crop assignment)."""
-    from tcip_mcp.knowledge import document_path
-
-    skill = document_path(name)
-    off_crop = guardrail.off_crop_tokens(skill, crop_key)
+    allnames, by_crop = guardrail.load_vocab()
+    off_crop = guardrail.off_crop_tokens(_document_text(name), allnames, by_crop[crop_key])
     assert not off_crop, (
         f"{name}: backticks trait(s) crops.yml does not assign to {crop_key!r}: "
         f"{off_crop}. Either the document or crops.yml's crop assignment is wrong."
@@ -95,7 +98,7 @@ def test_mentioned_trait_names_finds_single_word_traits() -> None:
     assert "dbh" in found
 
 
-def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(monkeypatch, tmp_path) -> None:
+def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(monkeypatch) -> None:
     """One read of the controlled vocabulary serves both the runtime registry and this check.
     Two reads can disagree, and the disagreement shows up as a skill passing a check the platform
     would fail on the same name, so the vocabulary the guardrail sees is the registry's."""
@@ -108,46 +111,25 @@ def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(monkeypat
     allnames, by_crop = guardrail.load_vocab()
     assert allnames == {"measure_one"}
     assert by_crop["crop_one"] == {"measure_one"}
-
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("Records `plant_height` for the block.", encoding="utf-8")
-    assert guardrail.unknown_trait_tokens(skill) == ["plant_height"]
+    assert guardrail.unknown_trait_tokens(
+        "Records `plant_height` for the block.", allnames) == ["plant_height"]
 
 
-def test_the_guardrail_refuses_a_vocabulary_that_reads_empty(monkeypatch, tmp_path) -> None:
-    """The registry's load answers with nothing when crops.yml will not read, and a check run
-    against nothing reports every skill clean. So an empty vocabulary is a refusal, naming the
-    file, rather than a pass."""
-    from tcip_mcp import traits
-
-    monkeypatch.setattr(traits, "_crops_traits", list)
-
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("Nothing trait-shaped here.", encoding="utf-8")
-    with pytest.raises(ValueError) as excinfo:
-        guardrail.unknown_trait_tokens(skill)
-    assert str(traits.crops_yml_path()) in str(excinfo.value)
-
-
-def test_a_readable_vocabulary_is_still_checked_rather_than_refused(tmp_path) -> None:
-    """The refusal above must not turn every run into a refusal: the real controlled vocabulary
-    loads, carries its crop assignments, and a clean skill still comes back clean."""
+def test_a_readable_vocabulary_is_checked() -> None:
+    """The real controlled vocabulary loads, carries its crop assignments, and a clean skill comes
+    back clean."""
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert by_crop["hazelnut"]
-
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("Measure `dbh` on the standing tree.", encoding="utf-8")
-    assert guardrail.unknown_trait_tokens(skill) == []
+    assert guardrail.unknown_trait_tokens("Measure `dbh` on the standing tree.", allnames) == []
 
 
-def test_off_crop_tokens_catches_single_word_mis_assignment(tmp_path) -> None:
+def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
     """A single-word real trait referenced on the wrong crop's skill is caught by
     `off_crop_tokens`. `dbh` is a real crops.yml trait not assigned to currant."""
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert "dbh" not in by_crop.get("currant", set())
-    fake_skill = tmp_path / "SKILL.md"
-    fake_skill.write_text("This currant skill mentions `dbh` by mistake.", encoding="utf-8")
-    off_crop = guardrail.off_crop_tokens(fake_skill, "currant")
+    off_crop = guardrail.off_crop_tokens(
+        "This currant skill mentions `dbh` by mistake.", allnames, by_crop.get("currant", set()))
     assert "dbh" in off_crop

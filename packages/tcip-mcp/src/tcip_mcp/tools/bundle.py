@@ -104,10 +104,11 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import image_root as _image_root
+    from tcip_mcp.project_paths import project_state_dir
 
     root = Path(tree).resolve()
     derived: list[DerivedRoot] = [DerivedRoot(root, ROOT)]
-    state, experiments, hpo = root / ".tcip" / "state", root / ".tcip" / "experiments", root / ".tcip" / "hpo"
+    state, experiments, hpo = project_state_dir(root), root / ".tcip" / "experiments", root / ".tcip" / "hpo"
     derived += [DerivedRoot(state, STATE), DerivedRoot(experiments, EXPERIMENTS), DerivedRoot(hpo, HPO_ROOT)]
 
     if experiments.is_dir():

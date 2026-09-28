@@ -11,22 +11,19 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.operationalization import STATE_CROSSING_DATES
 from tcip_mcp.pipelines import resolution
+from tcip_mcp.pipelines.resolution import read_delivery_events
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+from tcip_mcp.traits import STATE_CROSSING_DATES, read_trait
 
 from tests._binding_fixtures import record_producing_run
+from tests._trait_fixtures import seed_confirmed_count
 from tests.test_phenology_tools import _delivery_setup, _ds_root
 
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 from tests._population import mapped_plants
-
-
-def _delivery_event_records(project_root: Path | None = None) -> list[dict]:
-    scope = resolution.delivery_events_scope(project_root)
-    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    return [ts.read(key) for key in keys]
 
 
 def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_real_bindings(
@@ -46,10 +43,14 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
 
     from tcip_mcp.audit import audit_log_key
 
-    records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
+    records = [r for r in read_delivery_events() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 1, records
     record = records[0]
     assert record["trait"] == "bud_opening"
+    shipped_under = read_trait("bud_opening").latest_confirmed
+    assert shipped_under is not None
+    assert (record["trait_revision"], record["trait_revision_sha256"]) == (
+        shipped_under.number, shipped_under.entry_sha256)
     assert record["delivery_kind"] == STATE_CROSSING_DATES
     assert record["output_path"] == str(out_csv)
 
@@ -72,10 +73,8 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
 def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_with_its_reconciliations(
     tmp_path: Path,
 ) -> None:
-    """The healthy round trip goes through the reader every other consumer uses
-    (list_delivery_events, _citing_delivery_event_ids), not the raw store this module's own
-    _delivery_event_records helper reads through: a real delivery's document_reconciliations and
-    dimension_reconciliations come back exactly as the door computed them."""
+    """A real delivery's document_reconciliations and dimension_reconciliations come back
+    through read_delivery_events exactly as the door computed them."""
     sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
@@ -122,7 +121,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
         )
         assert "error" not in res, res
 
-    records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
+    records = [r for r in read_delivery_events() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 2, records
     assert records[0]["event_id"] != records[1]["event_id"]
     assert {r["output_path"] for r in records} == {str(first_csv), str(second_csv)}
@@ -155,13 +154,13 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
     assert resp.status_code == 200, resp.text
 
     payload_records = [
-        r for r in _delivery_event_records(payload_root.resolve())
+        r for r in read_delivery_events(payload_root.resolve())
         if r["door"] == "results.export_csv"
     ]
     assert len(payload_records) == 1, payload_records
 
     pinned_records = [
-        r for r in _delivery_event_records(pinned_root) if r["door"] == "results.export_csv"
+        r for r in read_delivery_events(pinned_root) if r["door"] == "results.export_csv"
     ]
     assert pinned_records == []
 
@@ -188,7 +187,7 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is False
 
-    assert _delivery_event_records(tmp_path.resolve()) == []
+    assert read_delivery_events(tmp_path.resolve()) == []
     assert list(ts.read_log(audit_log_key(tmp_path)).records) == before
 
 
@@ -202,17 +201,18 @@ def test_record_delivery_binding_event_raises_on_a_failed_store_write_before_any
     def _boom(*a, **kw):
         raise OSError("disk full")
 
+    revision = seed_confirmed_count(tmp_path)
     monkeypatch.setattr(ts, "replace", _boom)
 
     with pytest.raises(OSError, match="disk full"):
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-            acknowledgment=None, trait="astringency",
+            acknowledgment=None, revision=revision,
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
     monkeypatch.undo()
-    assert _delivery_event_records(tmp_path.resolve()) == []
+    assert read_delivery_events(tmp_path.resolve()) == []
     events = ts.read_log(audit_log_key(tmp_path)).records
     assert not any(e["tool"] == "delivery_event" for e in events)
 
@@ -237,11 +237,11 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     with pytest.raises(ValidationError):
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
-            acknowledgment=None, trait="astringency",
+            acknowledgment=None, revision=seed_confirmed_count(tmp_path),
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
         )
 
-    assert _delivery_event_records(tmp_path) == []
+    assert read_delivery_events(tmp_path) == []
 
 
 def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_the_reconciler_returns(
@@ -267,11 +267,12 @@ def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_th
     with pytest.raises(KeyError, match="per_bucket"):
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
-            dimension_reconciliations={}, acknowledgment=None, trait="astringency",
+            dimension_reconciliations={}, acknowledgment=None,
+            revision=seed_confirmed_count(tmp_path),
             delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
-    assert _delivery_event_records(tmp_path.resolve()) == []
+    assert read_delivery_events(tmp_path.resolve()) == []
 
 
 def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_the_reconciler_returns(
@@ -296,11 +297,11 @@ def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_t
         resolution.record_delivery_binding_event(
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={"tile_size": tile},
-            acknowledgment=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
-            project_root=tmp_path, plant_mapping=None,
+            acknowledgment=None, revision=seed_confirmed_count(tmp_path),
+            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
         )
 
-    assert _delivery_event_records(tmp_path.resolve()) == []
+    assert read_delivery_events(tmp_path.resolve()) == []
 
 
 def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
@@ -345,7 +346,8 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
 
     def _resolved(pm: dict) -> object:
         record = {
-            "event_id": "e", "trait": None, "delivery_kind": None, "door": "d",
+            "event_id": "e", "trait": "t", "trait_revision": 1, "trait_revision_sha256": "0" * 64,
+            "delivery_kind": STATE_CROSSING_DATES, "door": "d",
             "output_path": None, "output_sha256": None,
             "acknowledged_by": None, "acknowledgment_reason": None,
             "plant_mapping": pm, "document_reconciliations": {},
@@ -383,5 +385,134 @@ def test_phenology_measurement_records_no_delivery_event_for_an_assessed_look(
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is True
 
-    assert _delivery_event_records(tmp_path.resolve()) == []
+    assert read_delivery_events(tmp_path.resolve()) == []
     assert list(ts.read_log(audit_log_key(tmp_path)).records) == before
+
+
+# ── the delivery-events route: read-only ─────────────────────────────────────
+
+DELIVERY_EVENTS_ROUTE = "/api/results/delivery-events"
+
+
+def _client():
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
+def test_delivery_events_route_lists_a_recorded_event_with_its_revision(tmp_path: Path) -> None:
+    revision = seed_confirmed_count(tmp_path)
+    resolution.record_delivery_binding_event(
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        acknowledgment=None, revision=revision, delivery_kind="per_image_count",
+        project_root=tmp_path,
+    )
+
+    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 200
+    (record,) = resp.json()["records"]
+    assert record["door"] == "test_door"
+    assert (record["trait"], record["trait_revision"], record["trait_revision_sha256"]) == (
+        revision.entry.name, revision.number, revision.entry_sha256)
+    assert record["delivery_kind"] == "per_image_count"
+
+
+def test_delivery_events_route_confines_project_root_to_allowed_roots(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+
+    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(outside)})
+
+    assert resp.status_code == 403
+
+
+def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_the_disclosure(
+    tmp_path: Path,
+) -> None:
+    """A record whose ``plant_mapping`` lacks ``dates_delivered``, ``images_unattributed`` and
+    ``plant_attribution`` refuses the whole listing by event_id rather than being served with
+    the gap silently absent."""
+    event_id = "lacking-disclosure"
+    key = resolution.delivery_event_key(project_state_dir(tmp_path), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id,
+            "trait": "astringency",
+            "delivery_kind": "state_crossing_dates",
+            "door": "deliver_phenology_milestones",
+            "output_path": None,
+            "plant_mapping": {
+                "name": "valley",
+                "project_root": str(tmp_path),
+                "dataset_id": "ds-1",
+                "dataset_root": "C:/data",
+                "built_at": "2026-02-01T00:00:00+00:00",
+                "record_sha256": "0" * 64,
+                "nn_tolerance_m": {"value": 3, "source": "stated"},
+                "capture_identity": {},
+                "captures_unverified": [],
+                "plant_csvs_unverified": [],
+                "images_unattributed_scope": "delivered_dates",
+            },
+            "produced_at": "2026-02-03T12:00:00+00:00",
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert event_id in detail
+    assert "does not validate as a DeliveryEventRecord" in detail
+    assert "dates_delivered" in detail
+
+
+def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_three_keys(
+    tmp_path: Path,
+) -> None:
+    """A ``plant_mapping`` built the way a real delivery builds it (``MappingBuild.
+    delivery_disclosure``) carries all three keys, and the route serves them through unchanged."""
+    from datetime import datetime, timezone
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
+
+    dates = ["2026-01-01", "2026-01-08"]
+    build = MappingBuild(
+        name="valley", project_root=str(tmp_path), dataset_root=str(tmp_path / "data"),
+        dataset_id="ds-1", built_by="build_plant_mapping",
+        built_at=datetime.now(timezone.utc).isoformat(),
+        dates_requested=None, dates=dates,
+        nn_tolerance_m={"value": 3.0, "source": "stated"},
+        plant_registry={"name": "unregistered", "digest": "0" * 64},
+        capture_identity={d: "0" * 16 for d in dates},
+        capture_digests={d: {} for d in dates}, unreadable={d: [] for d in dates},
+        assignments={}, record_sha256="0" * 64,
+    )
+    disclosure = build.delivery_disclosure(
+        {"captures_unverified": [], "plant_csvs_unverified": []}, dates)
+    revision = read_trait("bud_opening").latest_confirmed
+    assert revision is not None
+
+    resolution.record_delivery_binding_event(
+        "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
+        acknowledgment=None, revision=revision,
+        delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=disclosure,
+    )
+
+    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 200
+    (record,) = resp.json()["records"]
+    mapping = record["plant_mapping"]
+    assert mapping["dates_delivered"] == dates
+    assert mapping["images_unattributed"] == 0
+    assert mapping["plant_attribution"] == "image"

@@ -1,31 +1,11 @@
 #!/usr/bin/env python
 """Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml.
 
-The deterministic backstop against a crop skill asserting a trait name outside the
-breeder-defined controlled vocabulary, catching a fabrication that a review alone might pass.
-
-Two independent checks, deliberately not sharing one extraction mechanism, so a gap in one
-check's coverage does not also blind the other:
-
-- `unknown_trait_tokens` (fabrication detection) extracts backtick-quoted, snake_case-shaped
-  tokens via regex and flags any not in crops.yml or the allowlist. Regex-based because finding
-  an unknown/fabricated name has nothing to search for: it can only look for "something shaped
-  like a trait reference." Requires an underscore (multi-segment) deliberately: widening it to
-  match bare single-word tokens floods on ordinary code identifiers (`ctx`, `boxes`, ...) that
-  aren't traits. Residual gap, stated honestly, not fixed by this file: a single-word
-  fabricated trait name is lexically undetectable by this check, since it looks identical to a
-  legitimate non-trait single-word identifier. Only a real trait-name membership check (below)
-  or human review catches that.
-- `off_crop_tokens` (mis-assignment detection) does exact literal membership search, for every
-  real crops.yml trait name, any shape, does it appear backtick-quoted in this skill's text,
-  rather than regex extraction. Because it searches for known names instead of extracting
-  candidates, it cannot miss a single-word trait the way the regex-based check structurally can.
-
-The vocabulary itself is read through the runtime registry's own crops.yml load
-(`tcip_mcp.traits`), so the guardrail and the platform police the same names from the same read.
-That load is tolerant by design (it drops a malformed record and answers with nothing at all when
-the file will not read), which for a guardrail would mean passing on a registry that is broken, so
-`load_vocab` refuses an empty or shapeless vocabulary rather than checking against it.
+`unknown_trait_tokens` flags backtick-quoted, multi-segment snake_case tokens that are neither a
+crops.yml trait nor an allow-listed platform token; a single-word fabrication is not detectable
+this way. `off_crop_tokens` flags every crops.yml trait name, any shape, a per-crop skill
+backticks that crops.yml does not assign to that crop. Both read the vocabulary through
+`tcip_mcp.traits`, which raises when crops.yml will not read.
 
 CLI: `python tools/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown,
 2 unusable arguments or an unreadable vocabulary.
@@ -38,22 +18,18 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 from tcip_mcp import traits as registry
 
 
 def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
     """Every crops.yml trait name, and the names each crop declares.
 
-    Raises ``ValueError`` when the registry reads empty or a record carries no crop list: a check
-    run against a vocabulary that failed to load reports a clean skill either way, which is the
-    one answer this guardrail must never give by accident.
+    Raises ``ValueError`` when a record carries no crop list; a crops.yml that will not read
+    raises from the registry's own read.
     """
     records = registry._crops_traits()
-    if not records:
-        raise ValueError(
-            f"{registry.crops_yml_path()} declared no usable trait records, so there is no "
-            "vocabulary to check against; fix the file before trusting this check"
-        )
     allnames: set[str] = set()
     by_crop: dict[str, set[str]] = collections.defaultdict(set)
     for trait in records:
@@ -94,33 +70,20 @@ def extract_backtick_snake(md_text: str) -> set[str]:
 
 
 def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
-    """Every crops.yml trait name, any shape, single-word or multi-word, whatever casing
-    crops.yml itself uses, that appears backtick-quoted, literally, in this text. Exact
-    membership search, not regex extraction: a name search can never miss a real trait for
-    lacking an underscore the way `extract_backtick_snake`'s token-shaped regex can."""
+    """Every name in ``names`` that appears backtick-quoted, literally, in ``md_text``."""
     return {n for n in names if f"`{n}`" in md_text}
 
 
-def unknown_trait_tokens(skill_path: str | Path, crop_key: str | None = None) -> list[str]:
-    """Backticked snake_case tokens that are neither a crops.yml trait nor an allow-listed
-    platform token: the fabrication signal. Cannot catch a single-word fabrication (see module
-    docstring); that residual gap is inherent to token-shaped extraction, not fixed here."""
-    allnames, _ = load_vocab()
-    md = Path(skill_path).read_text(encoding="utf-8")
-    toks = extract_backtick_snake(md)
+def unknown_trait_tokens(md_text: str, allnames: set[str]) -> list[str]:
+    """Backticked snake_case tokens in ``md_text`` that are neither in ``allnames`` nor an
+    allow-listed platform token."""
+    toks = extract_backtick_snake(md_text)
     return sorted(t for t in toks if t not in allnames and t not in NON_TRAIT_ALLOW)
 
 
-def off_crop_tokens(skill_path: str | Path, crop_key: str) -> list[str]:
-    """Real traits referenced in a per-crop skill that crops.yml does not assign to that crop
-    (a possible mis-assignment). Exact-membership search over the full vocabulary
-    (`mentioned_trait_names`), not regex extraction: catches single-word trait names a
-    token-shaped regex would miss entirely."""
-    allnames, by_crop = load_vocab()
-    md = Path(skill_path).read_text(encoding="utf-8")
-    mentioned = mentioned_trait_names(md, allnames)
-    cset = by_crop.get(crop_key, set())
-    return sorted(t for t in mentioned if t not in cset)
+def off_crop_tokens(md_text: str, allnames: set[str], crop_names: set[str]) -> list[str]:
+    """Names in ``allnames`` that ``md_text`` backticks and ``crop_names`` does not hold."""
+    return sorted(t for t in mentioned_trait_names(md_text, allnames) if t not in crop_names)
 
 
 def main() -> int:
@@ -130,9 +93,11 @@ def main() -> int:
     skill_path = sys.argv[1]
     crop_key = sys.argv[2] if len(sys.argv) > 2 else None
     try:
-        unknown = unknown_trait_tokens(skill_path, crop_key)
-        off_crop = off_crop_tokens(skill_path, crop_key) if crop_key else []
-    except ValueError as e:
+        allnames, by_crop = load_vocab()
+        md = Path(skill_path).read_text(encoding="utf-8")
+        unknown = unknown_trait_tokens(md, allnames)
+        off_crop = off_crop_tokens(md, allnames, by_crop.get(crop_key, set())) if crop_key else []
+    except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
         print(f"cannot check {skill_path}: {e}")
         return 2
     print(f"== {skill_path} ==")

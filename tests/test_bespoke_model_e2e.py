@@ -14,6 +14,7 @@ Proves the whole CV-scientist vision at once:
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -36,17 +37,13 @@ from torch.utils.data import DataLoader  # noqa: E402
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 IMG = 64
 
-
-def _save_png(path: Path) -> None:
-    from torchvision.utils import save_image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(torch.rand(3, IMG, IMG), str(path))
+_save_png = partial(write_noise_image, size=IMG, span=1.0)
 
 
 def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:

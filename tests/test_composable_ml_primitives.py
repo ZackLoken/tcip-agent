@@ -180,7 +180,7 @@ class TestActiveLearningScoringLogic:
 # evaluated, or measured. Its milestone convention was also a trait semantic
 # frozen as a constructor default. Sequence modeling remains available; the
 # agent writes it in its own model_source builder, where the milestone
-# definition comes from the trait's TraitSpec.
+# definition comes from the trait's TraitEntry.
 
 
 def test_temporal_component_module_is_gone():

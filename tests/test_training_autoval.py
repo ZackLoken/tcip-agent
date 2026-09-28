@@ -8,6 +8,7 @@ crashing the run.
 from __future__ import annotations
 
 import csv
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -24,17 +25,12 @@ from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
 
 IMG = 64
 
 
-def _save_png(path: Path, bright: bool = False) -> None:
-    from torchvision.utils import save_image
-
-    base = 0.7 if bright else 0.0
-    img = torch.rand(3, IMG, IMG) * 0.3 + base
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(img, str(path))
+_save_png = partial(write_noise_image, size=IMG)
 
 
 def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=2):

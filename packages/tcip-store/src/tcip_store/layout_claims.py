@@ -53,17 +53,13 @@ PREDICTION_BUCKET = "prediction_bucket"
 """One prediction bucket directory, where a run's operating-point stamps sit beside its output."""
 
 NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-"""A caller-chosen name's one legal shape (lowercase letters, digits, single hyphens between
-groups): ``workspace``'s own project-name segment rule. The store package depends on
-``filelock`` alone and cannot import ``tcip_mcp``, so this constant lives here and
-``workspace._SEGMENT_RE`` imports it, not the other way round."""
+"""A caller-chosen name's one legal shape: lowercase letters, digits, single hyphens between
+groups."""
 
 ARCHIVED_NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@[0-9a-f]{12}$")
 """An archived plant-mapping key's own shape: a legal :data:`NAME_SEGMENT` plus ``@`` and the
-twelve-hex-digit prefix of the record digest it archived (``plant_mapping.persist_mapping``'s
-``supersede`` path). Never a name a caller may register a fresh mapping or registry under, and
-never one :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.plant_mapping_names` enumerates
-(it fails plain :data:`NAME_SEGMENT`, which that listing filters on)."""
+twelve-hex-digit prefix of the record digest it archived; it never matches plain
+:data:`NAME_SEGMENT`."""
 
 LAYOUTS = (
     ROOT,
@@ -345,16 +341,7 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
             (Constant("review"), Patterned(ANY, tail=".json")),
         ),
     ),
-    "trait_specs": Claim(
-        STATE, ((Constant("trait_specs"), Patterned(ANY, tail=".json")),)
-    ),
-    "trait_operationalizations": Claim(
-        STATE,
-        ((Constant("trait_operationalizations"), Patterned(ANY), Patterned(ANY, tail=".json")),),
-    ),
-    "trait_spec_statements": Claim(
-        STATE, ((Constant("trait_spec_statements"), Patterned(ANY, tail=".json")),)
-    ),
+    "traits": Claim(STATE, ((Constant("traits"), Patterned(ANY, tail=".json")),)),
     "delivery_events": Claim(
         STATE, ((Constant("delivery_events"), Patterned(ANY, tail=".json")),)
     ),
@@ -420,12 +407,8 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         PREDICTION_BUCKET, (_rooted(".tcip", "raster_pass_progress", suffix=".json"),)
     ),
 }
-"""One row per record and log store the platform declares, keyed by store name.
-
-Each row is derived from that store's own locator plus the constants its key constructor
-spells, and the bootstrap inventory test holds the two sides together: a golden key of every
-platform store lands on a path its row matches, and near misses do not.
-"""
+"""One row per record and log store the platform declares, keyed by store name, derived from that
+store's own locator plus the constants its key constructor spells."""
 
 
 def platform_claim_stores() -> frozenset[str]:

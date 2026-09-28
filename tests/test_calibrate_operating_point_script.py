@@ -21,17 +21,7 @@ pytest.importorskip("torch")
 
 
 from tests._producer_fixtures import admission_of
-
-
-def _stub_checkpoint_load(monkeypatch) -> None:
-    """These tests drive a stubbed predictor over a checkpoint path ("x.pt") that never exists
-    on disk; load_registered_checkpoint is stubbed so the verified-load rail never reads it."""
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+from tests._verified_checkpoint_fixtures import admit_any_checkpoint as _stub_checkpoint_load
 
 
 def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):

@@ -86,7 +86,7 @@ def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp
 
 
 def test_deliver_per_image_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     fx.seed_confirmed_count(tmp_path)

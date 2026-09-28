@@ -115,9 +115,9 @@ def _action(client: TestClient, s: dict, **payload):
 def _shard(dataset_root: Path, image_name: str) -> dict:
     import tcip_store
     from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
 
-    state_dir = str(review_state_dir_of(dataset_root))
+    state_dir = str(project_state_dir(dataset_root))
     found = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, state_dir) if k.parts[1] == image_name]
     assert len(found) == 1, found
     return tcip_store.read(found[0])["state"]

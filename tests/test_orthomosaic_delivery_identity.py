@@ -21,30 +21,15 @@ pytest.importorskip("torchvision")
 from tcip_mcp.pipelines.resolution import (  # noqa: E402
     VALIDATED_FALSE, VALIDATED_HELD_OUT, VALIDATED_SAME_MOSAIC_IDENTITY,
 )
-from tests.test_orthomosaic_tools import (  # noqa: E402
+from tests.test_orthomosaic_tools import (  # noqa: E402, F401
     _PLANT_PIXELS, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint, _plant_grid_csv,
-    _plant_registry, _replace_boxes, _write_geo_raster,
+    _plant_registry, _recorded_meaning, _replace_boxes, _write_geo_raster,
 )
 
-from tcip_mcp import operationalization as op  # noqa: E402
-from tests import _operationalization_fixtures as fx  # noqa: E402
+from tests import _trait_fixtures as fx  # noqa: E402
 
 # One detection sitting on the first plant of the grid (pixel 10, 10).
 _ON_FIRST_PLANT = [(8.0, 8.0, 12.0, 12.0)]
-
-
-
-@pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
-    """Every per-plant delivery below ships under a trait whose meaning is confirmed.
-
-    Seeded into the project these tests pin as well as the one the autouse pin names, so a
-    delivery reads the same registry whichever of the two it resolves against.
-    """
-    for project_root in (tmp_path, tmp_path / "proj"):
-        fx.seed_delivery_traits(project_root)
-        fx.confirm_aggregate(project_root, fx.COUNT_TRAIT, op.PER_PLANT_COUNT_AGGREGATE,
-                             delivered_phenotype="stem_count", value_keys=["count"])
 
 
 def _project(tmp_path, monkeypatch) -> None:
@@ -248,29 +233,3 @@ def test_delivery_gate_never_gates_a_bucket_that_records_no_claim_scope(tmp_path
     out = _aggregated(tmp_path, bucket)
     rows = list(csv.DictReader(Path(out).open(newline="")))
     assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
-
-
-def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path, monkeypatch):
-    """Two refusals apply to one delivery and the earlier one reports by itself.
-
-    A bucket that cannot vouch for the raster it was produced on says how a number would be
-    attributed, which is nothing to answer for while nobody has said what the number means. The
-    door runs its own check first for exactly this, rather than inheriting one from its writer.
-    """
-    _project(tmp_path, monkeypatch)
-    raster_path = tmp_path / "mosaic.tif"
-    _write_geo_raster(raster_path)
-    bucket = _hand_written_bucket(tmp_path, "preds_no_identity", _validated_count_stamp())
-    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
-
-    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
-
-    out_csv = tmp_path / "counts.csv"
-    refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv),
-        delivered_phenotype="bark_thickness")
-
-    assert "no operationalization is recorded" in refused["error"]
-    assert "run_inference" not in refused["error"]
-    assert "raster content identity" not in refused["error"]
-    assert not out_csv.exists()

@@ -261,9 +261,10 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
     assert resp.status_code == 400
     assert gt.read_bytes() == before
     from tcip_annotation.review_engine import ReviewEngine
-    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of
+    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.project_paths import project_state_dir
 
-    engine = ReviewEngine(str(review_state_dir_of(dataset_root)))
+    engine = ReviewEngine(str(project_state_dir(dataset_root)))
     assert engine.image_states(bucket_key_of(bucket)) == {}
 
 
@@ -365,9 +366,10 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     assert "not a value this bucket's own id_map declares" in resp.json()["detail"]
     assert gt.read_bytes() == before
     from tcip_annotation.review_engine import ReviewEngine
-    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of
+    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.project_paths import project_state_dir
 
-    engine = ReviewEngine(str(review_state_dir_of(dataset_root)))
+    engine = ReviewEngine(str(project_state_dir(dataset_root)))
     assert engine.image_states(bucket_key_of(bucket)) == {}
 
 

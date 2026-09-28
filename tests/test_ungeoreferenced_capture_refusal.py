@@ -22,7 +22,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingB
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
 from tests._binding_fixtures import register_plant_registry_for
-from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_geo_image, _write_scene
+from tests._binding_fixtures import write_geo_image as _write_geo_image
+from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_scene
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 DATE = "2026-02-11"
@@ -416,8 +417,9 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert rows[0]["dates_delivered"] == DATE
 
     from tcip_mcp.pipelines import resolution
+    from tcip_mcp.project_paths import project_state_dir
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]

@@ -1,12 +1,5 @@
-"""Fixtures for the checkpoint-digest rail: a real checkpoint registered through the platform's
-own producer, and a stub ``VerifiedCheckpoint`` for a test that stubs a build.
-
-``build_predictor`` and every measurement-path checkpoint load take a
-``tcip_mcp.model_registry.VerifiedCheckpoint`` from ``load_registered_checkpoint``, never a
-bare path: a real-checkpoint test builds and registers one through :func:`registered_checkpoint`,
-and a test that stubs ``build_predictor``/``load_registered_checkpoint`` builds the stub object
-through :func:`stub_verified_checkpoint`.
-"""
+"""Checkpoint fixtures: a real checkpoint registered through the platform's own producer, a stub
+``VerifiedCheckpoint``, and a stubbed ``load_registered_checkpoint``."""
 
 from __future__ import annotations
 
@@ -61,15 +54,10 @@ def registered_checkpoint(
 
 
 def run_inference_verified(checkpoint_path: str, **overrides: Any):
-    """The ephemeral in-memory pass, for a test that wants inference results with no bucket
-    persisted: loads the registered checkpoint and calls ``_run_inference_verified``
-    directly, the same private pass ``run_inference`` itself calls once it has resolved a bucket.
-
-    ``overrides`` supplies whichever of the pass' own keyword arguments a test cares about; every
-    other one takes the unstated-sentinel default the tool forwards when a caller states nothing.
-    The pass' ``results`` stream is drawn into a list, the way a door with no bucket consumes it.
-    A checkpoint the registry refuses (``UnregisteredCheckpoint``) returns ``{"error": ...}``.
-    """
+    """``_run_inference_verified`` over the registered checkpoint at ``checkpoint_path``, with no
+    bucket persisted: ``overrides`` sets any of its keyword arguments, the rest take
+    ``run_inference``'s unstated defaults, and ``results`` comes back as a list. A checkpoint the
+    registry refuses returns ``{"error": ...}``."""
     import inspect
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
@@ -131,3 +119,26 @@ def stub_verified_checkpoint(
     return VerifiedCheckpoint(
         path=path, sha256=sha256, payload=payload, entries=entries, producer=producer,
     )
+
+
+def admit_any_checkpoint(monkeypatch, *, file_digest: bool = False) -> None:
+    """Stub ``load_registered_checkpoint`` to admit whatever path it is given as a
+    :func:`stub_verified_checkpoint`. With ``file_digest``, a path naming a file carries the
+    digest of its bytes; otherwise every path carries ``"stub-sha256"``."""
+    import tcip_mcp.model_registry as model_registry_mod
+
+    def _stub(path, *a, **kw):
+        p = Path(path)
+        sha = (model_registry_mod._sha256_of_bytes(p.read_bytes())
+               if file_digest and p.is_file() else "stub-sha256")
+        return stub_verified_checkpoint(str(path), sha256=sha)
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+
+
+def dummy_checkpoint(tmp_path: Path) -> str:
+    """A checkpoint path that exists on disk and whose bytes are never read."""
+    p = tmp_path / "m.pt"
+    if not p.exists():
+        p.write_bytes(b"x")
+    return str(p)

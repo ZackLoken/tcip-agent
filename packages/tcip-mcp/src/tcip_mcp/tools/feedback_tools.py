@@ -40,15 +40,15 @@ def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
     """The verdict store to read: the one the caller stated, else the dataset's own.
 
     A stated ``review_state_dir`` is used verbatim; with none stated the store is derived from the
-    dataset root through :func:`~tcip_mcp.prediction_buckets.review_state_dir_of`, the platform's
-    one derivation of where verdicts live. The two are never merged and neither backs the other:
-    a stated store holding nothing is a stated store holding nothing.
+    dataset root through :func:`~tcip_mcp.project_paths.project_state_dir`. The two are never
+    merged and neither backs the other: a stated store holding nothing is a stated store holding
+    nothing.
     """
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
 
     if review_state_dir:
         return Path(review_state_dir)
-    return review_state_dir_of(dataset_root)
+    return project_state_dir(dataset_root)
 
 
 def _load_or_refuse(checkpoint_path: str, project_path: str):

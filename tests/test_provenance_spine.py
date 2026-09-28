@@ -224,10 +224,10 @@ def test_export_detection_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
-    fx.seed_confirmed_count(tmp_path)
+    revision = fx.seed_confirmed_count(tmp_path)
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expE")
     # This door takes no acknowledgment, so the delivery is made genuinely validated: a real
     # bucket bound to the checkpoint that produced it, rather than a provisional escape.
@@ -245,7 +245,7 @@ def test_export_detection_csv_carries_provenance(tmp_path):
     out = tmp_path / "counts.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        trait=fx.COUNT_TRAIT, provenance={"operating_point_conf": 0.42}, pred_dirs=[str(bucket)])
+        revision=revision, provenance={"operating_point_conf": 0.42}, pred_dirs=[str(bucket)])
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expE"
@@ -256,7 +256,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_delivery_traits(tmp_path)
@@ -292,7 +292,7 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
     every delivery and never read off a bucket. Coverage, not a regression guard."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_delivery_traits(tmp_path)
@@ -327,10 +327,10 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
 
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
-    fx.seed_confirmed_count(tmp_path)
+    revision = fx.seed_confirmed_count(tmp_path)
     # This door takes no acknowledgment, so the delivery is made genuinely validated.
     root = tmp_path / "ds"
     bucket = root / "predictions" / "preds"
@@ -347,7 +347,7 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
 
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        trait=fx.COUNT_TRAIT, pred_dirs=[str(bucket)])
+        revision=revision, pred_dirs=[str(bucket)])
 
     rows = list(__import__("csv").DictReader(out.open()))
     datetime.fromisoformat(rows[0]["produced_at"])

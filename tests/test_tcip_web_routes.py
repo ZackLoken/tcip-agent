@@ -1002,15 +1002,15 @@ def _cwd_write_fingerprint(cwd: Path) -> tuple:
     """Everything an unguarded review route resolving an empty ``dataset_root`` to ``cwd``
     could leave on disk, read without opening any store: the review-verdict store directory's
     own entries (the review engine writes verdicts and completion marks under
-    ``review_state_dir_of(cwd)``), and the audit store's file for the bound backend with its
+    ``project_state_dir(cwd)``), and the audit store's file for the bound backend with its
     write-ahead sibling, since a database write lands in ``store.db-wal`` until a checkpoint.
     Coverage on the tree the gate runs on, where ``cwd`` is the repository root and its
     ``.tcip`` already exists; the probe bites on a clean checkout."""
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_store.binding import is_database_backend
     from tcip_store.file_backend import FileBackend, database_file
 
-    state_dir = review_state_dir_of(cwd)
+    state_dir = project_state_dir(cwd)
     try:
         state_entries: tuple[str, ...] | None = tuple(sorted(os.listdir(state_dir)))
     except FileNotFoundError:

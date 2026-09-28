@@ -217,11 +217,11 @@ def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
 
 
 def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size, resolve_match_criterion
 
-    fx.write_spec(tmp_path, fx.COUNT_SPEC)
+    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
     with_crowd, without = _records(tmp_path, crowd=True, n_crowd=3), _records(tmp_path, crowd=False)
 
     assert gt_class_avg_size(with_crowd) == gt_class_avg_size(without) == 10.0
@@ -355,7 +355,7 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path:
 def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: Path):
     """The operating point derives its localization spacing and its cross-tile NMS from the
     objects of the calibration reference: stacked crowd regions beside them move neither."""
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     from types import SimpleNamespace
 
@@ -364,7 +364,7 @@ def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: 
     from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
-    fx.write_spec(tmp_path, fx.COUNT_SPEC)
+    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
     def records(crowd: bool) -> list[dict]:
         out = []

@@ -379,22 +379,10 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "trait_operationalizations": {
+    "traits": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "trait_spec_statements": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "trait_specs": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 2,
       "cannot_carry_field": null
     },
     "view_coverage": {

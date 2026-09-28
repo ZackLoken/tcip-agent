@@ -7,21 +7,17 @@ tentative: no domain expert has confirmed it, and it exists to prove the deliver
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
 leaves ``majority_milestone``/``majority_label`` empty rather than copied from bud_opening, since
 crops.yml names no "majority" bloom date for currant, proving ``_milestone_columns`` produces the
-smaller, no-majority column set for a real second trait, not only for local ``TraitSpec`` shapes
+smaller, no-majority column set for a real second trait, not only for local ``TraitEntry`` shapes
 constructed to prove the structural invariant.
 """
 
 from __future__ import annotations
-
-from tests._trait_fixtures import complete_spec_record
 
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import tcip_store as ts
-from tcip_mcp import traits
 from tcip_web.app import app
 from tcip_web.state import store
 
@@ -34,35 +30,19 @@ def client() -> TestClient:
 
 
 def _seed_currant_bloom_trait(tmp_path: Path) -> None:
-    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    spec = {
-        "name": "currant_bloom",
-        "count_objective": "count_unbiased",
-        "localization": "center_match",
-        "localization_tolerance": "half_class_avg_size",
-        "localization_tolerance_frac": 0.5,
-        "positive_value": "open",
-        "milestone_fractions": [0.05, 0.50, 0.95],
-        "milestone_on": "positive_fraction",
-        # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
-        # bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
-        "majority_milestone": "",
-        "crossing_unconfirmed": False,
-        "phenology_prefix": "bloom",
-        "majority_label": "",
-        "sliver_policy": "class_avg_size",
-        "sliver_frac": 0.5,
-        "count_bias_tolerance_frac": 0.01,
-        "delivers": ["bloom_05per_date", "bloom_50per_date", "bloom_95per_date"],
-        "notes": "Test-only, provisional: proves the delivery mechanism "
-                 "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
-        "schema_version": traits.TRAIT_SPEC_SCHEMA_VERSION,
-    }
-    spec = complete_spec_record(spec)
-    ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
-    # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.
-    from tests._operationalization_fixtures import seed_confirmed_crossing
+    from tests._trait_fixtures import entry, propose, seed_confirmed_crossing
 
+    propose(tmp_path, entry(
+        "currant_bloom", ("bloom_05per_date", "bloom_50per_date", "bloom_95per_date"),
+        count_objective="count_unbiased", localization="center_match", positive_value="open",
+        milestone_fractions=(0.05, 0.50, 0.95), milestone_on="positive_fraction",
+        # No majority alias: crops.yml names no single "most blooms open" date for currant,
+        # unlike bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
+        phenology_prefix="bloom", count_bias_tolerance_frac=0.01,
+        notes="Test-only, provisional: proves the delivery mechanism generalizes to a second "
+              "trait. Not a domain-expert-confirmed measurement.",
+    ))
+    # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.
     seed_confirmed_crossing(tmp_path, "currant_bloom")
 
 
@@ -156,11 +136,11 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
 
 def test_currant_bloom_is_registered_and_distinct_from_bud_opening(tmp_path: Path):
     # $TCIP_STATE_ROOT is already pinned to tmp_path by conftest.py's autouse _pin_platform_root.
-    from tcip_mcp.traits import get_trait, registered_traits
+    from tcip_mcp.traits import read_trait, trait_names
 
     _seed_currant_bloom_trait(tmp_path)
-    assert "currant_bloom" in registered_traits()
-    t = get_trait("currant_bloom")
+    assert "currant_bloom" in trait_names()
+    t = read_trait("currant_bloom").latest.entry
     assert t.delivers == ("bloom_05per_date", "bloom_50per_date", "bloom_95per_date")
     assert t.majority_milestone == ""  # no majority alias, unlike bud_opening
 

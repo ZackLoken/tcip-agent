@@ -443,17 +443,14 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     """
     import torch
 
-    import tcip_mcp.traits as traits
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tcip_mcp.tools.model_tools import register_model
-    from tcip_mcp.traits import TraitSpec
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    # One registered trait, so what this exercises is the door's provenance, not trait authoring.
-    monkeypatch.setattr(
-        traits, "get_trait_for",
-        lambda name, project_root=None: TraitSpec(name=name, regression_skill_floor=0.0))
+    # One trait in the project, so what this exercises is the door's provenance, not the trait.
+    propose_and_confirm(tmp_path, with_fields(BUD_OPENING, regression_skill_floor=0.0))
 
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)

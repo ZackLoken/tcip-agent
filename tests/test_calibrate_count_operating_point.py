@@ -13,6 +13,7 @@ pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tests._producer_fixtures import admission_of  # noqa: E402
+from tests._verified_checkpoint_fixtures import admit_any_checkpoint  # noqa: E402
 
 
 class _Dataset:
@@ -36,13 +37,8 @@ def _stub_dense_pass(monkeypatch, cal_stems=("a",), hold_stems=("b",), cal_recor
     prepared pass's record collection), leaving the resolver itself to run for real over the
     records supplied.
     """
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
     cal_stems, hold_stems = list(cal_stems), list(hold_stems)
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    admit_any_checkpoint(monkeypatch)
 
     class _Predictor:
         def __init__(self):
@@ -593,13 +589,9 @@ def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha2
 ):
     """A stamp sealed under a digest it does not carry could never bind at delivery, so a bucket
     with no ``checkpoint_sha256`` at all refuses the same as a disagreeing one."""
-    import tcip_mcp.model_registry as model_registry_mod
-
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    admit_any_checkpoint(monkeypatch)
 
     dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=None)
 
@@ -690,15 +682,11 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
 
     dataset_root, pred_dir = _existing_bucket(tmp_path)
 
-    import tcip_mcp.model_registry as model_registry_mod
-
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     # Matches _existing_bucket's checkpoint_sha256, so this door's own pre-pass identity check
     # clears and the stub below is reached, same as the script's own call above.
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    admit_any_checkpoint(monkeypatch)
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         calibrate_count_operating_point(

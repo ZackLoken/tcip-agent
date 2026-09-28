@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from tcip_mcp.project_paths import project_state_dir
+
 
 def _under_normcased(path: Path, root: Path) -> bool:
     """Whether ``path`` is ``root`` itself or sits under it, compared by :func:`os.path.normcase`."""
@@ -32,7 +34,7 @@ def stray_state_files(project_root: "Path | str") -> tuple[Path, ...]:
 
     resolved_root = Path(project_root).resolve()
     accounting = bundle.account_for(resolved_root)
-    state_root = resolved_root / ".tcip" / "state"
+    state_root = project_state_dir(resolved_root)
     database_home = state_root / ".tcip"
     return tuple(
         path for path in accounting.unaccounted
@@ -90,7 +92,7 @@ def stray_state_file_refusal(
     from tcip_mcp.tools import bundle
 
     resolved_root = Path(project_root).resolve()
-    state_root = resolved_root / ".tcip" / "state"
+    state_root = project_state_dir(resolved_root)
     database_home = state_root / ".tcip"
 
     if not relative_path or is_external_form(relative_path) or ".." in Path(relative_path).parts:

@@ -14,6 +14,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
+from tests._dense_op_fixtures import shifted_cal_holdout, toy_records  # noqa: E402
 from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     build_coco_image_record,
@@ -835,52 +836,6 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
 # Calibrated operating point wired into the delivery doors
 # ======================================================================
 
-def _op_box(cx, cy, s=20.0):
-    return [cx - s / 2, cy - s / 2, s, s]
-
-
-def _op_ann(cx, cy, cid=0, score=None):
-    a = {"category_id": cid, "bbox": _op_box(cx, cy), "iscrowd": 0}
-    if score is not None:
-        a["score"] = score
-    return a
-
-
-def _op_records(idp, *, shift=0.0):
-    """Records where count-unbiased conf (0.6) is well-defined and the holdout passes (validated).
-
-    ``shift`` offsets every GT box's center by that many px (well inside the ~10px
-    center-match tolerance) so a holdout fixture's GT content genuinely differs from
-    calibration's: a holdout identical in content to calibration (differing only by
-    ``image_id``) trips the content-overlap gate.
-    """
-    a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_op_ann(100 + shift, 100)],
-         "dt": [_op_ann(100, 100, score=0.9), _op_ann(300, 300, score=0.6)]}
-    b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_op_ann(100 + shift, 100), _op_ann(200 + shift, 200)],
-         "dt": [_op_ann(100, 100, score=0.9), _op_ann(200, 200, score=0.3)]}
-    return [a, b]
-
-
-def _good_dense_cal_holdout():
-    """resolve_operating_point's holdout gate needs a realistic dense
-    reference, not the 2-image ``_op_records`` toy (its per-image variance trips the
-    equivalence criterion at n=2). A good detector with one low-conf spurious detection per image:
-    the count-unbiased pick lands at the high, correct-match score (0.9) once that FP is filtered
-    out, with zero bias/dispersion and full recall/precision on the holdout.
-    """
-    from tests._dense_op_fixtures import dense_records
-
-    n_images, objects_per_image = 20, 80
-    miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    return cal, hold
-
-
 class _CalStub:
     """Predictor stub with the mutable operating-point surface run_inference sets."""
 
@@ -923,7 +878,7 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
     excluded stems, and the evidence a delivery door reopens the gate over."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_dense_cal_holdout()
+    cal, hold = shifted_cal_holdout()
 
     def _calibrate(p, *a, **k):
         inputs = {**calibration_pipeline.pass_resolver_inputs(p), "dataset_hash": "H",
@@ -1015,8 +970,8 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     img = _one_image(tmp_path)
     json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
                               [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
-    inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": _op_records("c"),
-              "holdout_records": _op_records("h", shift=3.0)}
+    inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": toy_records("c"),
+              "holdout_records": toy_records("h", shift=3.0)}
     bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
@@ -1046,7 +1001,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
 
     from PIL import Image
 
-    cal, hold = _good_dense_cal_holdout()
+    cal, hold = shifted_cal_holdout()
     inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
              "holdout_records": hold, "staged_conf_floor": 0.01}
     bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
@@ -1098,7 +1053,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
 
     from PIL import Image
 
-    cal, hold = _good_dense_cal_holdout()
+    cal, hold = shifted_cal_holdout()
     universe = ["a", "b"]
     dh = dataset_hash(tmp_path, stems=universe)
     inputs = {"slicing": None, "dataset_hash": dh, "calibration_records": cal,
@@ -1150,7 +1105,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
 
     from PIL import Image
 
-    cal, hold = _good_dense_cal_holdout()
+    cal, hold = shifted_cal_holdout()
     inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
               "holdout_records": hold, "staged_conf_floor": 0.01}
     bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
@@ -1358,7 +1313,7 @@ def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, capt
         return run_result(op, [{"image": "a.png", "count": 3}], validated=validated,
                           conf_source="calibration")
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     fx.seed_confirmed_count(tmp_path)
     ckpt = tmp_path / "m.pt"
@@ -1378,7 +1333,7 @@ def test_deliver_per_image_counts_carries_operating_point(tmp_path, monkeypatch)
     captured: dict = {}
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
     r = _deliver_per_image_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
 
     assert captured["trait"] == fx.COUNT_TRAIT              # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)

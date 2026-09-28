@@ -41,6 +41,8 @@ from PIL import ExifTags, Image
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.project_paths import project_state_dir
+
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
@@ -680,8 +682,7 @@ def plant_registry_key(project_root: Path | str, name: str) -> Key:
     """One project's named plant registry: identity state for a plant-locations CSV set, under
     ``.tcip/state`` like :func:`plant_mapping_key`.
     """
-    root = Path(project_root).absolute() / ".tcip" / "state"
-    return Key(PLANT_REGISTRY_STORE, str(root), (name,))
+    return Key(PLANT_REGISTRY_STORE, str(project_state_dir(Path(project_root).absolute())), (name,))
 
 
 def load_registry(project_root: Path | str, name: str) -> Optional[dict]:
@@ -1251,8 +1252,7 @@ def plant_mapping_key(project_root: Path | str, name: str) -> Key:
     ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
         later build under the same name replaces it. No writer reads the record first.
     """
-    root = Path(project_root).absolute() / ".tcip" / "state"
-    return Key(PLANT_MAPPING_STORE, str(root), (name,))
+    return Key(PLANT_MAPPING_STORE, str(project_state_dir(Path(project_root).absolute())), (name,))
 
 
 def plant_mapping_names(project_root: Path | str) -> list[str]:
@@ -1264,7 +1264,7 @@ def plant_mapping_names(project_root: Path | str) -> list[str]:
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
-    root = str(Path(project_root).absolute() / ".tcip" / "state")
+    root = str(project_state_dir(Path(project_root).absolute()))
     names = (key.parts[-1] for key in tcip_store.keys(PLANT_MAPPING_STORE, root))
     return sorted(name for name in names if NAME_SEGMENT.fullmatch(name))
 

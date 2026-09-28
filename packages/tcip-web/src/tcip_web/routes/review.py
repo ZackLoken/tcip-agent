@@ -81,12 +81,11 @@ def _guarded(path: str) -> Path:
 
 def _get_engine(dataset_root: str) -> ReviewEngine:
     """The review engine anchored on a client-supplied dataset root, confined first (403)."""
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
 
     key = str(_guarded(dataset_root))
     if key not in _engines:
-        state_dir = review_state_dir_of(key)
-        _engines[key] = ReviewEngine(state_dir=state_dir, current_user=_current_user())
+        _engines[key] = ReviewEngine(state_dir=project_state_dir(key), current_user=_current_user())
     return _engines[key]
 
 

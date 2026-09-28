@@ -23,7 +23,7 @@ from tcip_web.app import app
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
 
-from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
+from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
 from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
 from tests.test_tcip_web_results_routes import _phenology_fixture
@@ -430,7 +430,7 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
     b = _project(tmp_path / "b")
-    write_spec(b, BUD_OPENING)
+    propose(b, BUD_OPENING)
     seed_confirmed_crossing(b, BUD_OPENING.name, measured_subject="bud")
     _open(client, b)
 

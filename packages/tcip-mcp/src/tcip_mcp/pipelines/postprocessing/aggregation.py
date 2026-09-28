@@ -24,7 +24,7 @@ import logging
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.resolution import Acknowledgment
@@ -55,7 +55,7 @@ def aggregate_per_plant(
     record's ``plant_attribution`` (the granularity objects were attributed to plants at, e.g.
     ``plant_mapping.MappingBuild``'s ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s
     ``"detection"``); a plant whose own images disagree on any of the three refuses (see
-    :func:`_agreed_statement_field`).
+    :func:`_agreed`).
 
     Args:
         image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
@@ -96,11 +96,9 @@ def aggregate_per_plant(
         summary["plant_id"] = plant_id
         summary["observations"] = len(items)
         summary["value_key"] = value_key
-        summary["measurement_document"] = _agreed_statement_field(
-            items, "measurement_document", plant_id)
-        summary["scale_document"] = _agreed_statement_field(items, "scale_document", plant_id)
-        summary["plant_attribution"] = _agreed_statement_field(
-            items, "plant_attribution", plant_id)
+        where = f"aggregate_per_plant, plant {plant_id!r}"
+        for key in ("measurement_document", "scale_document", "plant_attribution"):
+            summary[key] = _agreed(items, key, where)
         sources = {r["plant_id_source"] for r in items if r.get("plant_id_source") is not None}
         if sources:
             summary["plant_id_source"] = sources.pop() if len(sources) == 1 else "mixed"
@@ -113,17 +111,15 @@ def aggregate_per_plant(
     return results
 
 
-def _agreed_statement_field(items: list[dict], key: str, plant_id: str) -> Any:
-    """One plant's own value for a statement field (``measurement_document``, ``scale_document``,
-    or ``plant_attribution``), refusing when its images disagree. ``None`` when every item omits
-    the field.
-    """
+def _agreed(items: list[dict], key: str, where: str, *, required: bool = False) -> Any:
+    """The one value every item states for ``key``; ``None`` when every item omits an optional
+    ``key``. Refuses (``ValueError`` naming ``where``) when the items disagree or, with
+    ``required``, when any omits it."""
     values = {r.get(key) for r in items}
-    if len(values) > 1:
+    if len(values) > 1 or (required and None in values):
         raise ValueError(
-            f"aggregate_per_plant: plant {plant_id!r} carries disagreeing {key} values "
-            f"{sorted(str(v) for v in values)} across its images; a statement that disagrees "
-            "with itself is not a statement."
+            f"{where}: records disagree on{' or omit' if required else ''} {key} "
+            f"({sorted(str(v) for v in values)}); every record must state the same one."
         )
     return next(iter(values))
 
@@ -144,8 +140,7 @@ def _agg_count(items: list[dict], value_key: str) -> dict:
 
 
 def _agg_mean(items: list[dict], value_key: str) -> dict:
-    """Arithmetic mean of continuous values. All-absent yields None, never a fabricated 0.0, a
-    missing measurement must never read as a measured zero."""
+    """Arithmetic mean of continuous values; ``None`` when every item omits ``value_key``."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
     n_observations_with_value = len(values)
     if not values:
@@ -172,7 +167,7 @@ def _agg_mode(items: list[dict], value_key: str) -> dict:
 
 
 def _agg_sum(items: list[dict], value_key: str) -> dict:
-    """Sum of values (for area traits). All-absent yields None, never a fabricated 0."""
+    """Sum of values (for area traits); ``None`` when every item omits ``value_key``."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
     if not values:
         return {"value": None, "n_observations_with_value": 0}
@@ -198,11 +193,12 @@ _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "prod
 
 def _resolve_units(
     delivered_phenotype: str, results: list[dict], measurement_document: str
-) -> tuple[str, str | None]:
-    """``(display_unit, linear_basis)`` implied by the aggregated values' own value_key;
+) -> tuple[str, str | None, str | None]:
+    """``(display_unit, linear_basis, declared_unit)``: the units implied by the aggregated
+    values' own value_key, and crops.yml's declared unit for ``delivered_phenotype`` or ``None``;
     crops.yml's declared unit is a cross-check only under ``operating_point``. A value_key with no
     recognized physical-unit suffix (px, count, or a trailing token outside crops.yml's declared
-    unit vocabulary) yields ``("", None)`` under ``operating_point``.
+    unit vocabulary) yields an empty display unit and no linear basis under ``operating_point``.
 
     Under a scalar head (``ordinal_operating_point``/``regression_operating_point``), a value_key
     with no unit suffix at all (a bare ``value`` or the trait's own bare name, e.g.
@@ -235,8 +231,8 @@ def _resolve_units(
         explicitly_px = any(is_pixel_space_key(r.get("value_key", "")) for r in results)
         if measurement_document in ("ordinal_operating_point", "regression_operating_point") \
                 and declared is not None and not explicitly_px:
-            return declared, declared
-        return "", None
+            return declared, declared, declared
+        return "", None, declared
     display, linear_basis = pair
     if declared is not None and linear_basis != declared:
         raise ValueError(
@@ -245,7 +241,7 @@ def _resolve_units(
             f"{linear_basis!r}, refusing to ship a mismatched unit label rather than guessing which "
             "one is right."
         )
-    return display, linear_basis
+    return display, linear_basis, declared
 
 
 def export_aggregated_csv(
@@ -341,8 +337,8 @@ def export_aggregated_csv(
             a whole-raster frame (validated whole by ``PlantMappingDisclosure`` /
             ``PlantRegistryDisclosure``). ``None`` when the caller names no verified mapping.
         acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
-        project_root: The project this delivery's meaning-record reads and delivery event belong
-            to. ``None`` resolves against this process's pinned platform root.
+        project_root: The project whose traits this delivery reads and whose delivery event it
+            writes. ``None`` resolves against this process's pinned platform root.
 
     Returns:
         ``(path, tail)``: the path to the written CSV and the ``_PROVENANCE_COLUMNS`` tail
@@ -352,9 +348,9 @@ def export_aggregated_csv(
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
             clears it); carries the ``DeliveryGateResult`` and every operative reconciler's binding
             notes.
-        OperationalizationRefused (``tcip_mcp.operationalization``): ``delivered_phenotype``'s
-            operationalization is unrecorded, not breeder-confirmed, or was withdrawn since the
-            first check; carries the failed check and no counts.
+        OperationalizationRefused (``tcip_mcp.operationalization``): the trait delivering
+            ``delivered_phenotype`` has no confirmed revision whose operationalization for this
+            kind binds these rows.
         ValueError: any other refusal (a statement or unit problem the results carry); carries no
             gate result.
         AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
@@ -378,12 +374,10 @@ def export_aggregated_csv(
     )
 
     measurement_document, scale_document = _resolve_statement(results, MEASUREMENT_DOCUMENTS)
-    plant_attribution = _resolve_plant_attribution(results)
-    units, linear_basis = _resolve_units(delivered_phenotype, results, measurement_document)
-
-    from tcip_mcp.traits import crops_units
-
-    declared_unit = crops_units().get(delivered_phenotype)
+    plant_attribution = _agreed(
+        results, "plant_attribution", "export_aggregated_csv", required=True)
+    units, linear_basis, declared_unit = _resolve_units(
+        delivered_phenotype, results, measurement_document)
     if measurement_document == "operating_point" and declared_unit and not units:
         raise ValueError(
             f"export_aggregated_csv: delivered phenotype {delivered_phenotype!r} is declared "
@@ -421,25 +415,13 @@ def export_aggregated_csv(
             "deliver only the plants that do carry a value."
         )
 
-    from tcip_mcp.operationalization import (
-        OperationalizationRefused,
-        aggregate_delivery_kind,
-        check_operationalization,
-        resolve_trait_and_record,
-        resolve_trait_for_phenotype,
-    )
+    from tcip_mcp.operationalization import aggregate_delivery_kind, confirmed_revision
 
     delivery_kind = aggregate_delivery_kind(measurement_document)
-    trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=project_root)
-    value_keys = [r.get("value_key", "") for r in results]
-    spec, record, _specs_dir = resolve_trait_and_record(
-        trait, delivery_kind, project_root=project_root)
-    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
-    stated = check_operationalization(
-        spec, record, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
-        registry=None)
-    if not stated.ok:
-        raise OperationalizationRefused(stated)
+    revision = confirmed_revision(
+        delivery_kind, project_root=project_root, delivered_phenotype=delivered_phenotype,
+        value_keys=[r.get("value_key", "") for r in results])
+    trait = revision.entry.name
 
     _reconcilers = {
         "operating_point": reconcile_operating_point_validity,
@@ -490,15 +472,6 @@ def export_aggregated_csv(
         )))
         raise DeliveryRefused(gate, notes)
 
-    # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
-    spec_now, record_now, _ = resolve_trait_and_record(
-        trait, delivery_kind, project_root=project_root)
-    still_stated = check_operationalization(
-        spec_now, record_now, delivery_kind, delivered_phenotype=delivered_phenotype,
-        value_keys=value_keys, registry=None, basis=stated.basis)
-    if not still_stated.ok:
-        raise OperationalizationRefused(still_stated)
-
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
@@ -545,8 +518,8 @@ def export_aggregated_csv(
             else {}
         ),
         dimension_reconciliations=dimension_reconciliations,
-        acknowledgment=gate.effective_acknowledgment(), trait=trait, delivery_kind=delivery_kind,
-        project_root=project_root, plant_mapping=plant_mapping)
+        acknowledgment=gate.effective_acknowledgment(), revision=revision,
+        delivery_kind=delivery_kind, project_root=project_root, plant_mapping=plant_mapping)
     return output_path, stamp
 
 
@@ -561,47 +534,18 @@ def _resolve_statement(
     through to any particular reconciler."""
     if not results:
         raise ValueError("export_aggregated_csv: results is empty, nothing to deliver")
-    documents = {r.get("measurement_document") for r in results}
-    if len(documents) > 1 or None in documents:
-        raise ValueError(
-            f"export_aggregated_csv: results disagree on or omit measurement_document "
-            f"({sorted(str(d) for d in documents)}); every record aggregate_per_plant produces "
-            "must state which sidecar document its value rests on."
-        )
-    measurement_document = documents.pop()
+    measurement_document = _agreed(
+        results, "measurement_document", "export_aggregated_csv", required=True)
     if measurement_document not in measurement_documents:
         raise ValueError(
             f"export_aggregated_csv: measurement_document {measurement_document!r} is not one of "
             f"{measurement_documents}; a per-plant aggregate never rests on "
             "classifier_operating_point or resolve_scale alone."
         )
-    scale_documents = {r.get("scale_document") for r in results}
-    if len(scale_documents) > 1:
-        raise ValueError(
-            f"export_aggregated_csv: results disagree on scale_document "
-            f"({sorted(str(d) for d in scale_documents)}); it must be stated on every row or none."
-        )
-    scale_document = scale_documents.pop()
+    scale_document = _agreed(results, "scale_document", "export_aggregated_csv")
     if scale_document not in (None, "resolve_scale"):
         raise ValueError(
             f"export_aggregated_csv: scale_document must be 'resolve_scale' or absent, got "
             f"{scale_document!r}."
         )
     return measurement_document, scale_document
-
-
-def _resolve_plant_attribution(results: list[dict]) -> str:
-    """The delivery's own ``plant_attribution``, read off ``results`` the way
-    :func:`_resolve_statement` reads ``measurement_document``: every row states one, and they
-    agree.
-    """
-    values = {r.get("plant_attribution") for r in results}
-    if len(values) > 1 or None in values:
-        raise ValueError(
-            f"export_aggregated_csv: results disagree on or omit plant_attribution "
-            f"({sorted(str(v) for v in values)}); every record must state the granularity "
-            "objects were attributed to plants at."
-        )
-    value = values.pop()
-    # The refusal above already ruled out None and a multi-value set; what remains is one string.
-    return cast(str, value)

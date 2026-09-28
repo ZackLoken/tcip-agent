@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import math
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale, snapshot_optimizer_state, restore_optimizer_state,
 )
+from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
@@ -119,12 +121,7 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 # Integration helpers
 # --------------------------------------------------------------------------
 
-def _save_png(path: Path, bright: bool = False) -> None:
-    from torchvision.utils import save_image
-
-    base = 0.7 if bright else 0.0
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(torch.rand(3, IMG, IMG) * 0.3 + base, str(path))
+_save_png = partial(write_noise_image, size=IMG)
 
 
 def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> DataLoader:

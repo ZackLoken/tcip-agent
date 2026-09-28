@@ -5,3 +5,4 @@ package-lock.json
 # Same build-output path is restated in the repo root .gitignore and this dir's vite.config.ts.
 ../static
 src/api/types.generated.ts
+src/test/traitListings.json

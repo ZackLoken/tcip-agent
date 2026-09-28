@@ -39,7 +39,6 @@ for _path in (*_PKG_SRC, _REPO_ROOT):
         sys.path.insert(0, str(_path))
 
 from fastapi.testclient import TestClient  # noqa: E402
-from PIL import Image  # noqa: E402
 
 from tcip_mcp.dataset_layout import label_filename  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
@@ -54,6 +53,7 @@ from tcip_mcp.tools.phenology_tools import (  # noqa: E402
 # explicit bind_default() below must run after it to be the one every call below uses.
 from tcip_web.app import app  # noqa: E402
 from tcip_web.state import store  # noqa: E402
+from tests._binding_fixtures import write_geo_image  # noqa: E402
 
 class _Plant(TypedDict):
     plot: str
@@ -92,29 +92,6 @@ def check(label: str, ok: bool, detail: str = "") -> None:
         _failures += 1
 
 
-def _deg_to_dms(value: float) -> tuple[float, float, float]:
-    v = abs(value)
-    d = int(v)
-    m_full = (v - d) * 60
-    m = int(m_full)
-    s = round((m_full - m) * 60, 4)
-    return (float(d), float(m), s)
-
-
-def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None:
-    """A tiny JPEG carrying EXIF DateTimeOriginal + GPS lat/lon (as plant_mapping reads)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    exif = Image.Exif()
-    exif[0x8769] = {0x9003: when.strftime("%Y:%m:%d %H:%M:%S")}  # Exif IFD → DateTimeOriginal
-    exif[0x8825] = {  # GPSInfo IFD
-        0x0001: "N" if lat >= 0 else "S",
-        0x0002: _deg_to_dms(lat),
-        0x0003: "E" if lon >= 0 else "W",
-        0x0004: _deg_to_dms(lon),
-    }
-    Image.new("RGB", (8, 8)).save(path, exif=exif)
-
-
 def _pred_result(n_open: int, n_total: int, *, width: int, height: int) -> dict:
     """One image's raw predictor-shaped result: n_total detections of one subject, the first
     n_open one-indexed to id_map['open'], the rest to id_map['closed'].
@@ -138,27 +115,11 @@ def _stem(plot: str, date: str) -> str:
 
 
 def _author_bud_opening_trait_spec(root: Path) -> None:
-    """Register the bud_opening trait under ``root`` and record a confirmed meaning for its delivery.
+    """Propose the bud_opening trait under ``root`` and confirm a revision stating its crossing."""
+    from tests._trait_fixtures import BUD_OPENING, propose, seed_confirmed_crossing
 
-    The spec is ``tests/_trait_fixtures.BUD_OPENING`` itself rather than a copy of its field values, so
-    a change to that definition cannot leave this smoke run exercising a stale one. The crossing
-    door refuses a trait whose delivered number has no breeder-confirmed meaning, so this states
-    one and confirms it through the same two writers a real project goes through; it also declares
-    the confirmed positive class in ``root``'s own class registry, which the web export route (but
-    not the MCP tool) requires reachable from the delivered dataset's own root.
-    """
-    import tcip_store as ts
-
-    from tcip_mcp import traits
-    from tests._operationalization_fixtures import seed_confirmed_crossing
-    from tests._trait_fixtures import BUD_OPENING
-
-    data = traits._encode_spec(BUD_OPENING)
-    key = traits.trait_spec_key(traits.trait_specs_dir(root), data["name"])
-    spec, reason = traits._validate_and_write_spec(key, data, expect=ts.Version.ABSENT)
-    if spec is None:
-        raise ValueError(f"the fixture trait spec does not clear crops.yml: {reason}")
-    seed_confirmed_crossing(root, data["name"], measured_subject=SUBJECT)
+    propose(root, BUD_OPENING)
+    seed_confirmed_crossing(root, BUD_OPENING.name, measured_subject=SUBJECT)
 
 
 def main() -> int:
@@ -200,7 +161,7 @@ def main() -> int:
                 n_open = round(FRACTIONS[date] * N_DETECTIONS)
                 for j, plant in enumerate(PLANTS):
                     stem = _stem(plant["plot"], date)
-                    _write_geo_image(
+                    write_geo_image(
                         images_root / date / f"{stem}.jpg",
                         plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
                     )
@@ -289,7 +250,7 @@ def main() -> int:
             client = TestClient(app, base_url="http://127.0.0.1")
             body = {
                 "project_root": str(root), "mapping_name": mapping_name,
-                "predictions_by_date": preds_by_date, "trait": "bud_opening",
+                "predictions_by_date": preds_by_date, "trait": "bud_opening", "plants": plants,
             }
 
             screen = client.post(

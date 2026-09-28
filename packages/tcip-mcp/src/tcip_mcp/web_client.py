@@ -1,12 +1,5 @@
-"""HTTP client for MCP tools to push state to the tcip-web backend.
-
-MCP tools call ``post_panel_event`` to ship a panel event to the running FastAPI GUI over HTTP,
-never through a file on disk.
-
-Every store the web package owns is declared here rather than in the web package: the backend's
-port handoff, the GUI snapshot, the live-canvas pair, the canvas-open binding, the SessionEnd
-learning-capture log, the async job registry, and the per-project annotation-timing stats. The tab
-vocabulary (``ActiveTab``/``TAB_NAMES``) is declared here too.
+"""HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the
+declarations of the stores and the tab vocabulary (``ActiveTab``) the web package owns.
 
 Port discovery order:
   1. The port record under the workspace root: the port actually bound, so a substituted port
@@ -351,7 +344,8 @@ def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[st
     }
 
 
-ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
+ActiveTab = Literal[
+    "setup", "annotate", "review", "training", "tuning", "inference", "results", "meta"]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
 validates against."""
 

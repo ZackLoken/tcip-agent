@@ -511,12 +511,12 @@ def test_review_state_landed_during_clear_is_reported(tmp_path, monkeypatch):
     """Review state recorded on the source between the preflight and the last document's delete
     is not caught by the review-state refusal (which read the state before this call began); it is counted
     once more after the last delete and reported, never silently dropped."""
-    from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
     import tcip_mcp.tools.inference_tools as inference_tools_mod
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expReviewLandedDuring")
-    review_state_dir = review_state_dir_of(built["dataset_root"])
+    review_state_dir = project_state_dir(built["dataset_root"])
 
     real_reconcile_document = inference_tools_mod._reconcile_document
     landed_once = {"done": False}
@@ -539,13 +539,14 @@ def test_a_verdict_recorded_between_a_crash_and_the_resume_still_finishes_report
     """An interrupted clear that acquires review state between the crash and the resume must
     still be finishable: the review-state refusal runs only on a fresh call, so the resume does
     not re-check state it cannot undo, and reports what landed instead."""
-    from tcip_mcp.prediction_buckets import bucket_stems, review_state_dir_of
+    from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_mcp.project_paths import project_state_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expVerdictBetweenCalls")
     _fix_stamp(monkeypatch)
     destination = _expected_destination(built)
-    review_state_dir = review_state_dir_of(built["dataset_root"])
+    review_state_dir = project_state_dir(built["dataset_root"])
 
     fault = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):

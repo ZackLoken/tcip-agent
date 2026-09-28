@@ -13,12 +13,11 @@ from tcip_mcp.pipelines.resolution import (
     dataset_hash,
     derived,
 )
-from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
+from tcip_mcp.traits import TraitUnknownError, read_trait, trait_names
 from tests._regime_fixtures import tiled_regime
 from tests._trait_fixtures import BUD_OPENING
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
-# test's pinned platform state root so get_trait("bud_opening") keeps resolving by default.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's pinned root.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -369,24 +368,21 @@ def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
 # --- trait knowledge ---
 
 def test_bud_opening_trait_semantics():
-    # config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons, so
-    # value equality against the same-valued local fixture, not identity.
-    t = get_trait("bud_opening")
+    t = read_trait("bud_opening").latest.entry
     assert t == BUD_OPENING
     assert t.count_objective == "count_unbiased"
     assert t.localization == "center_match"
     assert t.localization_tolerance == "half_class_avg_size"
     assert t.milestone_fractions == (0.05, 0.50, 0.95)
     assert t.milestone_on == "positive_fraction"
-    assert t.sliver_policy == "class_avg_size"
     assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
 
 
 def test_unknown_trait_lists_available():
     with pytest.raises(TraitUnknownError) as exc:
-        get_trait("banana")
+        read_trait("banana")
     assert "bud_opening" in str(exc.value)
-    assert "bud_opening" in registered_traits()
+    assert "bud_opening" in trait_names()
 
 
 # --- raw_operating_point: a stated conf/max_dets is never laundered into a default ---

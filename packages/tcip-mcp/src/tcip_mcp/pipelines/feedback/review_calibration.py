@@ -120,7 +120,7 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
     (("holdout_match_quality_floor_unauthored",),
      "Not yet. No held-out match-quality floor has been authored for this trait yet, so this check "
      "has nothing to hold the model's predictions to. This is for the agent: author one with "
-     "author_trait_spec's holdout_match_quality_floor, with the breeder's confirmation."),
+     "propose_trait's holdout_match_quality_floor, with the breeder's confirmation."),
     (("count_error_dispersion_too_high",),
      "Not yet. Individual held-back images can be far off in opposite directions that cancel out "
      "in the total, the count isn't reliable image-to-image, whatever the total shows. Review "

@@ -193,16 +193,16 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
     assert "MOVED" in result.stdout
 
 
-# ── operationalization.py: refusal messages name the resolved root ─────────────────────────
+# ── traits.py: refusal messages name the resolved root ──────────────────────────────────────
 
 
 def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(tmp_path: Path):
-    """A project registering more than one dataset refuses to guess which one a statement's
+    """A project registering more than one dataset refuses to guess which one a crossing's
     classes belong to. Both datasets are registered under subdirectories of the project (never
     the project's own tree), so the resolved paths the refusal names can only have come from the
     registry-driven ``roots`` list, never from the message's own echo of its ``project_root``
     argument (which the un-nested form let this assertion pass without discriminating)."""
-    from tcip_mcp.operationalization import resolve_statement_registry
+    from tcip_mcp.traits import resolve_statement_registry
 
     project = tmp_path / "proj"
     first = project / "datasets" / "first"

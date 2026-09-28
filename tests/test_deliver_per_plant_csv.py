@@ -11,25 +11,17 @@ from pathlib import Path
 
 import pytest
 
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
 
 torch = pytest.importorskip("torch")
 
 
 @pytest.fixture(autouse=True)
 def _stub_checkpoint_verification(monkeypatch):
-    """This module drives a stubbed predictor, not a real registered checkpoint;
-    ``load_registered_checkpoint`` is stubbed to admit whatever path it is given."""
-    import tcip_mcp.model_registry as model_registry_mod
+    """This module drives a stubbed predictor, not a real registered checkpoint."""
+    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    def _stub(path, *a, **kw):
-        p = Path(path)
-        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
-        return stub_verified_checkpoint(str(path), sha256=sha)
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+    admit_any_checkpoint(monkeypatch, file_digest=True)
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +73,7 @@ def _write_one_plant_scene(tmp_path: Path) -> tuple[Path, Path, str]:
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
 
-    from tests.test_plant_mapping_binding import _write_geo_image
+    from tests._binding_fixtures import write_geo_image as _write_geo_image
 
     assert "error" not in initialize_project(str(tmp_path), site="orchard block")
 
@@ -115,7 +107,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
 
-    from tests.test_plant_mapping_binding import _write_geo_image
+    from tests._binding_fixtures import write_geo_image as _write_geo_image
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     assert "error" not in initialize_project(str(tmp_path), site="orchard block")
@@ -216,9 +208,10 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     from tcip_mcp.audit import audit_log_key
 
-    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE
+    from tcip_mcp.project_paths import project_state_dir
 
-    scope = delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     events = [
         tcip_store.read(key, default=None)
         for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
@@ -488,7 +481,7 @@ def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_wa
     assert "error" not in mapped, mapped
     assert mapped["n_mapped"] == 1
 
-    from tests.test_plant_mapping_binding import _write_geo_image
+    from tests._binding_fixtures import write_geo_image as _write_geo_image
 
     # Added after the mapping was built: the mapping's own assignments do not name it.
     _write_geo_image(dataset_root / "images" / date / "P2.jpg", 43.19680, -90.057000,

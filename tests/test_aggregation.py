@@ -19,7 +19,8 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     aggregate_per_plant,
     export_aggregated_csv,
 )
-from tests import _operationalization_fixtures as fx
+from tests import _trait_fixtures as fx
+from tests._binding_fixtures import validated_bucket
 
 
 @pytest.fixture(autouse=True)
@@ -37,29 +38,6 @@ def _identity_fn(image_name: str) -> str:
     """A trivial plant_id_fn for tests that don't care about grouping specifics: every image maps
     to a plant_id equal to its own stem-derived group key."""
     return image_name.rsplit("_", 1)[0]
-
-
-def _validated_bucket(tmp_path, trait: str, *, document: str = "operating_point", tag: str = "a") -> str:
-    """A prediction bucket whose sidecar carries a genuine held-out-validated claim for ``trait``,
-    for a test whose subject is the CSV's shape or arithmetic rather than the delivery gate itself."""
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-    from tests._binding_fixtures import write_bound_sidecar, write_prediction
-
-    root = tmp_path / f"ds_{tag}"
-    bucket = root / "predictions" / "preds"
-    write_prediction(bucket, "img_a")
-    param_key = {"operating_point": "conf", "regression_operating_point": "regression"}[document]
-    stamp = {
-        "validated": True, "trait": trait,
-        "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
-                                        "validation_kind": "annotations",
-                                        "validated_against": VALIDATED_HELD_OUT}},
-    }
-    if document == "operating_point":
-        stamp["scope"] = {"subject": trait, "attribute": None, "id_map": {trait: 0}}
-    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
-                        experiment_id=f"exp-validated-{tag}")
-    return str(bucket)
 
 
 def _add_validated_scale(bucket: str, trait: str, *, unit: str = "mm", tag: str = "a") -> str:
@@ -271,7 +249,7 @@ def test_export_aggregated_csv(tmp_path):
          "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
-    bucket = _validated_bucket(tmp_path, "stem", tag="export")
+    bucket = validated_bucket(tmp_path, "stem", tag="export")
     export_aggregated_csv(
         results, str(out_path), delivered_phenotype="stem_count", crop="currant",
         pred_dirs=[bucket],
@@ -316,7 +294,7 @@ def test_export_aggregated_csv_header_carries_operating_point_validated_not_meas
     results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
                "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "aggregated.csv"
-    bucket = _validated_bucket(tmp_path, "stem", tag="header")
+    bucket = validated_bucket(tmp_path, "stem", tag="header")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           pred_dirs=[bucket])
 
@@ -336,7 +314,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
          "scale_document": "resolve_scale"},
     ]
     out_path = tmp_path / "out.csv"
-    bucket = _validated_bucket(tmp_path, "plant_surface_area", tag="units")
+    bucket = validated_bucket(tmp_path, "plant_surface_area", tag="units")
     images_dir = _add_validated_scale(bucket, "plant_surface_area", tag="units")
     export_aggregated_csv(
         results, str(out_path), delivered_phenotype="plant_surface_area",
@@ -351,7 +329,7 @@ def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
     results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count",
                 "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
-    bucket = _validated_bucket(tmp_path, "stem", tag="blank-units")
+    bucket = validated_bucket(tmp_path, "stem", tag="blank-units")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           pred_dirs=[bucket])
     with open(out_path, newline="") as f:
@@ -393,7 +371,7 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
                 "value_key": "principal_axis_extent_px",
                 "plant_attribution": "image", "measurement_document": "regression_operating_point"}]
     out_path = tmp_path / "out.csv"
-    bucket = _validated_bucket(tmp_path, "bark_thickness", document="regression_operating_point",
+    bucket = validated_bucket(tmp_path, "bark_thickness", document="regression_operating_point",
                               tag="pixel")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="bark_thickness",
                           pred_dirs=[bucket])
@@ -416,7 +394,7 @@ def test_units_never_fall_back_with_no_value_key_at_all():
 
     assert crops_units()["bark_thickness"] == "mm"
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
-    assert _resolve_units("bark_thickness", results, "operating_point") == ("", None)
+    assert _resolve_units("bark_thickness", results, "operating_point") == ("", None, "mm")
 
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "open_fraction", "pct_open"])
@@ -471,12 +449,13 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm2"}]
     # no crops.yml entry -> no cross-check
-    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm2", "mm")
+    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm2", "mm", None)
 
     results_linear = [{"plant_id": "P1", "value": 12.0, "observations": 1,
                        "value_key": "principal_axis_extent_mm"}]
     # non-area stays unsquared
-    assert _resolve_units("__no_such_trait__", results_linear, "operating_point") == ("mm", "mm")
+    assert _resolve_units("__no_such_trait__", results_linear, "operating_point") == (
+        "mm", "mm", None)
 
     # A real mm-declared trait: the cross-check compares crops.yml's linear "mm" against area_mm2's
     # own linear basis ("mm", not "mm2") and passes; the returned label is still squared.
@@ -485,7 +464,7 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     units = crops_units()
     mm_trait = next((name for name, u in units.items() if u == "mm"), None)
     if mm_trait is not None:
-        assert _resolve_units(mm_trait, results, "operating_point") == ("mm2", "mm")
+        assert _resolve_units(mm_trait, results, "operating_point") == ("mm2", "mm", "mm")
 
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
@@ -495,7 +474,7 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 14.2, "observations": 1, "value_key": "nut_diameter_mm"}]
-    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm", "mm")
+    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm", "mm", None)
 
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
@@ -515,7 +494,7 @@ def test_export_aggregated_csv_writes_value_key_column(tmp_path):
                 "plant_attribution": "image", "measurement_document": "operating_point",
                 "scale_document": "resolve_scale"}]
     out_path = tmp_path / "out.csv"
-    bucket = _validated_bucket(tmp_path, "plant_surface_area", tag="value-key")
+    bucket = validated_bucket(tmp_path, "plant_surface_area", tag="value-key")
     images_dir = _add_validated_scale(bucket, "plant_surface_area", tag="value-key")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
                           pred_dirs=[bucket], images_dir=images_dir)
@@ -534,7 +513,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     from tcip_mcp.knowledge import document_path
 
     out_path = tmp_path / "schema.csv"
-    bucket = _validated_bucket(tmp_path, "stem", tag="schema")
+    bucket = validated_bucket(tmp_path, "stem", tag="schema")
     export_aggregated_csv(
         [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
           "plant_attribution": "image", "measurement_document": "operating_point"}],

@@ -1,0 +1,250 @@
+{
+  "setup": {
+    "traits": [
+      {
+        "trait": "stem",
+        "revisions": [
+          {
+            "number": 1,
+            "entry": {
+              "name": "stem",
+              "delivers": [
+                "stem_count"
+              ],
+              "positive_value": "",
+              "milestone_fractions": [],
+              "milestone_on": "",
+              "majority_milestone": "",
+              "phenology_prefix": "",
+              "majority_label": "",
+              "count_objective": "count_unbiased",
+              "localization": "center_match",
+              "localization_tolerance": "half_class_avg_size",
+              "localization_tolerance_frac": 0.5,
+              "count_bias_tolerance_frac": null,
+              "count_error_tolerance": null,
+              "classifier_agreement_floor": null,
+              "ordinal_agreement_floor": null,
+              "regression_skill_floor": null,
+              "scale_tolerance_frac": null,
+              "holdout_match_quality_floor": 0.5,
+              "notes": "",
+              "operationalizations": {
+                "per_image_count": {
+                  "statement": "One stem per detected box.",
+                  "mechanism": "the detector's boxes at the calibrated operating point",
+                  "measured_subject": "stem",
+                  "delivered_phenotypes": [],
+                  "delivered_value_keys": []
+                }
+              }
+            },
+            "entry_sha256": "f4a73866adda3a582197b254c4f76f42a1e8c7681baf366d97e2795d8ed4b07b",
+            "rationale": "The breeder counts every stem.",
+            "relayed_note": "",
+            "proposed_at": "1970-01-01T00:00:00+00:00",
+            "proposing_agent": {
+              "agent_client_name": null,
+              "agent_client_version": null,
+              "agent_session": null,
+              "terminal_session": null,
+              "harness_session": null,
+              "harness_effort_at_connect": null
+            },
+            "confirmed_by": "user:grower",
+            "confirmed_at": "1970-01-01T00:00:00+00:00",
+            "identity_from_request": true,
+            "withdrawn_by": null,
+            "withdrawn_at": null,
+            "confirmed": true
+          },
+          {
+            "number": 2,
+            "entry": {
+              "name": "stem",
+              "delivers": [
+                "stem_count"
+              ],
+              "positive_value": "",
+              "milestone_fractions": [],
+              "milestone_on": "",
+              "majority_milestone": "",
+              "phenology_prefix": "",
+              "majority_label": "",
+              "count_objective": "count_unbiased",
+              "localization": "center_match",
+              "localization_tolerance": "half_class_avg_size",
+              "localization_tolerance_frac": 0.5,
+              "count_bias_tolerance_frac": null,
+              "count_error_tolerance": null,
+              "classifier_agreement_floor": null,
+              "ordinal_agreement_floor": null,
+              "regression_skill_floor": null,
+              "scale_tolerance_frac": null,
+              "holdout_match_quality_floor": 0.5,
+              "notes": "",
+              "operationalizations": {
+                "per_image_count": {
+                  "statement": "Only stems above the graft union.",
+                  "mechanism": "the detector's boxes at the calibrated operating point",
+                  "measured_subject": "stem",
+                  "delivered_phenotypes": [],
+                  "delivered_value_keys": []
+                }
+              }
+            },
+            "entry_sha256": "67865829cc8ea2cf549235bb521306ab868f7e8cbb23c9461e9c73c680df5672",
+            "rationale": "The breeder counts every stem.",
+            "relayed_note": "",
+            "proposed_at": "1970-01-01T00:00:00+00:00",
+            "proposing_agent": {
+              "agent_client_name": null,
+              "agent_client_version": null,
+              "agent_session": null,
+              "terminal_session": null,
+              "harness_session": null,
+              "harness_effort_at_connect": null
+            },
+            "confirmed_by": null,
+            "confirmed_at": null,
+            "identity_from_request": null,
+            "withdrawn_by": null,
+            "withdrawn_at": null,
+            "confirmed": false
+          }
+        ],
+        "latest_confirmed": 1
+      }
+    ],
+    "unreadable": [],
+    "definitions": {
+      "stem_count": "Total number of stems"
+    }
+  },
+  "unconfirmed": {
+    "traits": [
+      {
+        "trait": "subject_a",
+        "revisions": [
+          {
+            "number": 1,
+            "entry": {
+              "name": "subject_a",
+              "delivers": [
+                "stem_count"
+              ],
+              "positive_value": "",
+              "milestone_fractions": [
+                0.5,
+                0.95
+              ],
+              "milestone_on": "positive_fraction",
+              "majority_milestone": "",
+              "phenology_prefix": "",
+              "majority_label": "",
+              "count_objective": "count_unbiased",
+              "localization": "center_match",
+              "localization_tolerance": "half_class_avg_size",
+              "localization_tolerance_frac": 0.5,
+              "count_bias_tolerance_frac": null,
+              "count_error_tolerance": null,
+              "classifier_agreement_floor": null,
+              "ordinal_agreement_floor": null,
+              "regression_skill_floor": null,
+              "scale_tolerance_frac": null,
+              "holdout_match_quality_floor": 0.5,
+              "notes": "",
+              "operationalizations": {}
+            },
+            "entry_sha256": "97616a938d616dabc2ef1d9e8d75aaed3fe380e9cfc618855b6729c3c3e81f11",
+            "rationale": "The breeder counts every stem.",
+            "relayed_note": "",
+            "proposed_at": "1970-01-01T00:00:00+00:00",
+            "proposing_agent": {
+              "agent_client_name": null,
+              "agent_client_version": null,
+              "agent_session": null,
+              "terminal_session": null,
+              "harness_session": null,
+              "harness_effort_at_connect": null
+            },
+            "confirmed_by": null,
+            "confirmed_at": null,
+            "identity_from_request": null,
+            "withdrawn_by": null,
+            "withdrawn_at": null,
+            "confirmed": false
+          }
+        ],
+        "latest_confirmed": null
+      }
+    ],
+    "unreadable": [],
+    "definitions": {
+      "stem_count": "Total number of stems"
+    }
+  },
+  "results": {
+    "traits": [
+      {
+        "trait": "subject_a",
+        "revisions": [
+          {
+            "number": 1,
+            "entry": {
+              "name": "subject_a",
+              "delivers": [
+                "stem_count"
+              ],
+              "positive_value": "",
+              "milestone_fractions": [
+                0.5,
+                0.95
+              ],
+              "milestone_on": "positive_fraction",
+              "majority_milestone": "",
+              "phenology_prefix": "",
+              "majority_label": "",
+              "count_objective": "count_unbiased",
+              "localization": "center_match",
+              "localization_tolerance": "half_class_avg_size",
+              "localization_tolerance_frac": 0.5,
+              "count_bias_tolerance_frac": null,
+              "count_error_tolerance": null,
+              "classifier_agreement_floor": null,
+              "ordinal_agreement_floor": null,
+              "regression_skill_floor": null,
+              "scale_tolerance_frac": null,
+              "holdout_match_quality_floor": 0.5,
+              "notes": "",
+              "operationalizations": {}
+            },
+            "entry_sha256": "97616a938d616dabc2ef1d9e8d75aaed3fe380e9cfc618855b6729c3c3e81f11",
+            "rationale": "The breeder counts every stem.",
+            "relayed_note": "",
+            "proposed_at": "1970-01-01T00:00:00+00:00",
+            "proposing_agent": {
+              "agent_client_name": null,
+              "agent_client_version": null,
+              "agent_session": null,
+              "terminal_session": null,
+              "harness_session": null,
+              "harness_effort_at_connect": null
+            },
+            "confirmed_by": "user:grower",
+            "confirmed_at": "1970-01-01T00:00:00+00:00",
+            "identity_from_request": true,
+            "withdrawn_by": null,
+            "withdrawn_at": null,
+            "confirmed": true
+          }
+        ],
+        "latest_confirmed": 1
+      }
+    ],
+    "unreadable": [],
+    "definitions": {
+      "stem_count": "Total number of stems"
+    }
+  }
+}

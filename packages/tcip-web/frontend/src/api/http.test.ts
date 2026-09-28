@@ -45,17 +45,14 @@ describe("http helpers", () => {
   it("asJson keeps an object detail parsed instead of stringifying it", async () => {
     const detail = {
       kind: "operationalization",
-      state: 2,
-      trait: "catkin_50per_date",
-      delivery_kind: "state_crossing_dates",
-      message: "stated but not confirmed by the breeder",
+      message: "none of its 1 revision(s) is confirmed by the breeder",
     };
     const thrown = await asJson(res(400, { detail })).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(StructuredRefusalError);
     const refusal = thrown as StructuredRefusalError;
     expect(refusal.detail).toEqual(detail);
     expect(refusal.status).toBe(400);
-    expect(refusal.message).toBe("stated but not confirmed by the breeder");
+    expect(refusal.message).toBe("none of its 1 revision(s) is confirmed by the breeder");
     expect(refusal.message).not.toContain("[object Object]");
   });
 

@@ -147,10 +147,11 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     stored fingerprint (``dataset.json``) is a cache.
     """
     from tcip_mcp.dataset_layout import annotation_root, image_root
+    from tcip_mcp.project_paths import project_state_dir
 
     root = Path(dataset_root)
     labels = _labels_term(annotation_root(root))
-    images = _images_term(image_root(root), root / ".tcip" / "state" / "image_hash_cache.json")
+    images = _images_term(image_root(root), project_state_dir(root) / "image_hash_cache.json")
     if labels is None or images is None:
         return None
     h = hashlib.sha256()

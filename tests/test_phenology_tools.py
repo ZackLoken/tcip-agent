@@ -25,7 +25,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     NEAREST_MATCH_FACTOR,
     plant_mapping_key,
 )
-from tcip_mcp.traits import CENTER_MATCH, get_trait
+from tcip_mcp.operationalization import latest_confirmed
+from tcip_mcp.traits import CENTER_MATCH
 from tcip_mcp.tools.phenology_tools import (
     _classification_items,
     build_plant_mapping,
@@ -60,14 +61,14 @@ def test_build_plant_mapping_wraps_build_and_persists(
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
 
-    from tests.test_plant_mapping_binding import _write_geo_image
+    from tests._binding_fixtures import write_geo_image
 
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
     # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
-    _write_geo_image(
+    write_geo_image(
         images_root / "2026-02-11" / "img1.jpg", 43.19670, -90.058000,
         datetime(2026, 2, 11, 9, 30))
     register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
@@ -161,6 +162,18 @@ def _write_preds(dir_path: Path, stem: str, subjects: list[str], *,
 
 def _ds_root(tmp_path: Path) -> Path:
     return tmp_path / "ds"
+
+
+def _flipped_items(n: int, flips: set[int]) -> list[dict]:
+    """``n`` classifier items, the first half true positives, each index in ``flips`` predicted
+    the other way."""
+    items = []
+    for i in range(n):
+        is_tp = i < n // 2
+        pred = (not is_tp) if i in flips else is_tp
+        items.append({"image_id": f"i{i}", "is_true_positive": is_tp, "is_pred_positive": pred,
+                      "bbox": [float(i), 0.0, float(i + 10), 10.0]})
+    return items
 
 
 def _bucket(tmp_path: Path, date: str) -> Path:
@@ -453,59 +466,6 @@ def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(t
     assert str(bad) in res["error"]
 
 
-def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The registry is re-resolved immediately before the write, not reused from the first check:
-    a registry edit racing the delivery is exactly the mid-run move that check exists to catch."""
-    from tcip_mcp import subject_registry as cr
-
-    root = _ds_root(tmp_path)
-    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["closed"])
-    _write_preds(d2, "P1_b", ["open"])
-    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
-    mapping_name = "valley"
-    _write_mapping(tmp_path, mapping_name, {
-        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
-        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
-    })
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-
-    declares_it = cr.SubjectRegistry(subjects=(
-        cr.Subject(name="bud", attributes=(
-            cr.Attribute(name="state", type="categorical", values=("closed", "open")),
-        )),
-    ))
-    drops_it = cr.SubjectRegistry(subjects=(
-        cr.Subject(name="bud", attributes=(
-            cr.Attribute(name="state", type="categorical", values=("closed",)),
-        )),
-    ))
-    calls = {"n": 0}
-
-    def racing_registry(pred_dirs: object) -> cr.SubjectRegistry:
-        calls["n"] += 1
-        return declares_it if calls["n"] == 1 else drops_it
-
-    monkeypatch.setattr("tcip_mcp.subject_registry.registry_for_pred_dirs", racing_registry)
-
-    res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-        classifier_pred_dirs=[str(d1)],
-    )
-
-    assert calls["n"] >= 2
-    assert "error" in res
-    assert "no longer holds" in res["error"]
-    assert not out_csv.exists()
-
-
 def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_different_trait(tmp_path: Path) -> None:
     """A count stamp validated for one trait must not answer for a phenology delivery under a
     different trait: the refusal names the sidecar and both traits."""
@@ -671,17 +631,16 @@ def _deliver_via_writer(
     output_csv_path: Path, classifier_pred_dirs: list[str] | None = None,
     acknowledgment,
 ) -> dict:
-    """Deliver through the canonical writer directly, built from the same reconciliation, basis
-    and mapping ``deliver_phenology_milestones`` itself resolves before calling it.
+    """Deliver through the canonical writer directly, built from the same reconciliation,
+    confirmed revision and mapping ``deliver_phenology_milestones`` itself resolves before
+    calling it.
 
     Writer-level, not tool-level: the MCP tool takes no acknowledgment, so a test
     proving what an acknowledged, unvalidated delivery stamps on the CSV runs through this
     instead. The producer path (a real request through the web export route) is exercised by
     ``tests/test_tcip_web_results_routes.py``, not here.
     """
-    from tcip_mcp.operationalization import (
-        STATE_CROSSING_DATES, check_operationalization, resolve_trait_and_record,
-    )
+    from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
@@ -702,15 +661,15 @@ def _deliver_via_writer(
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
-    spec, record, _specs_dir = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    revision = confirmed_revision("state_crossing_dates", project_root=None, trait=trait)
+    spec = revision.entry
     result = phenology.per_plant_phenology(
         mapping_build.rows(), predictions_by_date,
-        positive_value=spec.positive_value, spec=spec, plants=["P1"])
+        spec=spec, plants=["P1"])
 
     return phenology.write_phenology_csv(
-        "test", result["rows"], Path(output_csv_path), spec, flags=flags,
-        acknowledgment=acknowledgment, basis=stated.basis,
+        "test", result["rows"], Path(output_csv_path), revision, flags=flags,
+        acknowledgment=acknowledgment,
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {
@@ -1354,29 +1313,17 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
 def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floor(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """TraitSpec.classifier_agreement_floor, when a trait authors one,
+    """TraitEntry.classifier_agreement_floor, when a trait authors one,
     must be the floor actually applied, not the platform's interim default."""
-    from dataclasses import replace
-
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import BUD_OPENING
+    from tests._trait_fixtures import BUD_OPENING, confirm_entry, with_fields
 
-    strict_bud_opening = replace(BUD_OPENING, classifier_agreement_floor=0.9)
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_bud_opening)
+    confirm_entry(with_fields(BUD_OPENING, classifier_agreement_floor=0.9))
 
     # A holdout with kappa=0.8: clears the platform's interim default (0.41) but not the
     # trait's own stricter authored floor (0.9).
-    def make_items(n, flips):
-        items = []
-        for i in range(n):
-            is_tp = i < n // 2
-            pred = (not is_tp) if i in flips else is_tp
-            items.append({"image_id": f"i{i}", "is_true_positive": is_tp, "is_pred_positive": pred,
-                         "bbox": [float(i), 0.0, float(i + 10), 10.0]})
-        return items
-
-    cal = make_items(20, flips=set())
-    hold = make_items(100, flips=set(range(10)))  # 10% symmetric flip -> kappa=0.8
+    cal = _flipped_items(20, flips=set())
+    hold = _flipped_items(100, flips=set(range(10)))  # 10% symmetric flip -> kappa=0.8
     res = op_mod.resolve_classifier_operating_point(
         "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
@@ -1388,34 +1335,22 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
 
 
 def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(monkeypatch) -> None:
-    """TraitSpec.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
+    """TraitEntry.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
     stamp: unauthored (BUD_OPENING's own state) resolves to the platform's interim default fraction and
     stamps that; a trait that authors its own value stamps ``"trait"`` instead."""
-    from dataclasses import replace
-
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import BUD_OPENING
+    from tests._trait_fixtures import BUD_OPENING, confirm_entry, with_fields
 
-    def make_items(n, flips):
-        items = []
-        for i in range(n):
-            is_tp = i < n // 2
-            pred = (not is_tp) if i in flips else is_tp
-            items.append({"image_id": f"i{i}", "is_true_positive": is_tp, "is_pred_positive": pred,
-                         "bbox": [float(i), 0.0, float(i + 10), 10.0]})
-        return items
+    cal = _flipped_items(20, flips=set())
+    hold = _flipped_items(100, flips=set())  # clean, zero bias, so this stamp is reachable regardless
 
-    cal = make_items(20, flips=set())
-    hold = make_items(100, flips=set())  # clean, zero bias, so this stamp is reachable regardless
-
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: BUD_OPENING)
+    confirm_entry(BUD_OPENING)
     res_default = op_mod.resolve_classifier_operating_point(
         "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac_source"] == "default"
 
-    authored_bud_opening = replace(BUD_OPENING, count_bias_tolerance_frac=0.2)
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: authored_bud_opening)
+    confirm_entry(with_fields(BUD_OPENING, count_bias_tolerance_frac=0.2))
     res_trait = op_mod.resolve_classifier_operating_point(
         "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
     assert res_trait["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
@@ -1696,7 +1631,7 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     # so this assertion is what actually fails fast, with a clear message, if the BUD_OPENING fixture's
     # localization value ever changes and silently stops exercising the center-match code path
     # this test exists to cover.
-    spec = get_trait("bud_opening")
+    spec = latest_confirmed("bud_opening").entry
     assert spec.localization == CENTER_MATCH and spec.localization_tolerance_frac == 0.5
 
     # "big": a 200x200 GT box -> char_size=200 -> per-image tolerance would be 100px; offset 40px

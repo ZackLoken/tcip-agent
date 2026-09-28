@@ -12,6 +12,8 @@ from pathlib import Path
 import tcip_store as ts
 
 from tcip_mcp.pipelines import resolution
+from tcip_mcp.project_paths import project_state_dir
+from tests._trait_fixtures import seed_confirmed_count
 
 
 def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> None:
@@ -21,12 +23,12 @@ def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> 
 
     resolution.record_delivery_binding_event(
         "test_door", str(out_csv), [], document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None, trait="astringency",
-        delivery_kind="state_crossing_dates",
+        acknowledgment=None, revision=seed_confirmed_count(tmp_path),
+        delivery_kind="per_image_count",
         project_root=tmp_path, plant_mapping=None,
     )
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "test_door"]
     assert len(events) == 1, events

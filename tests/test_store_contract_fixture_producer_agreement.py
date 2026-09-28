@@ -90,7 +90,7 @@ def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tm
     from tcip_mcp.pipelines.resolution import read_scale_sidecar
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
-    from tests import _operationalization_fixtures as fx
+    from tests import _trait_fixtures as fx
     from tests.test_delivery_gate import _author_scale_tolerance, _calibration_setup
 
     fx.seed_delivery_traits(tmp_path)
@@ -145,16 +145,27 @@ def test_the_experiment_split_golden_carries_every_key_persist_run_partition_wri
     assert set(golden_block["label_digests"]) == set(fresh_block["label_digests"])
 
 
-def test_the_trait_specs_golden_carries_every_field_the_encoder_writes():
-    """``_encode_spec`` writes every ``TraitSpec`` field plus the ``schema_version`` stamp; the
-    golden carries exactly those keys, so a field added to the dataclass is caught here."""
+def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(
+    tmp_path,
+):
+    """The record ``propose_trait`` and ``confirm_revision`` leave on the store carries exactly
+    the golden's keys, at the record, the revision, the entry and the operationalization, so a
+    field added to the schema is caught here."""
+    import tcip_store as ts
     from tcip_mcp import traits
 
-    from tests.test_store_contract import TRAIT_UNDER_TEST
+    from tests import _trait_fixtures as fx
 
-    fresh = traits._encode_spec(traits.TraitSpec(name=TRAIT_UNDER_TEST))
-    golden = REGISTERED["trait_specs"].golden
+    fx.seed_confirmed_count(tmp_path)
+    fresh = ts.read(traits.trait_key(tmp_path, fx.COUNT_TRAIT))
+    golden = REGISTERED["traits"].golden
     assert isinstance(golden, dict)
 
+    (golden_revision,), fresh_revision = golden["revisions"], fresh["revisions"][-1]
     assert set(golden) == set(fresh)
-    assert golden["schema_version"] == fresh["schema_version"] == traits.TRAIT_SPEC_SCHEMA_VERSION
+    assert set(golden_revision) == set(fresh_revision)
+    assert set(golden_revision["entry"]) == set(fresh_revision["entry"])
+    assert set(golden_revision["proposing_agent"]) == set(fresh_revision["proposing_agent"])
+    (golden_op,), (fresh_op,) = (golden_revision["entry"]["operationalizations"].values(),
+                                 fresh_revision["entry"]["operationalizations"].values())
+    assert set(golden_op) == set(fresh_op)

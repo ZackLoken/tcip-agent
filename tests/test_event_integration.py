@@ -665,7 +665,7 @@ class TestInferenceToolOutputSchema:
         monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
-        from tests import _operationalization_fixtures as fx
+        from tests import _trait_fixtures as fx
 
         fx.seed_confirmed_count(tmp_path)
         out_csv = tmp_path / "block_counts.csv"

@@ -3,14 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
-import {
-  resultsApi,
-  type DeliveryEventRecord,
-  type OperationalizationRecord,
-  type TraitSpecStatementRecord,
-} from "@/api/inference";
+import { resultsApi, type DeliveryEventRecord } from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
+import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
 
@@ -44,25 +40,11 @@ function setupDataset() {
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   setupDataset();
-  // ResultsTab resolves its trait from the project's own registered traits before it will
-  // compute anything; every test fixture here is written against a single-trait project whose
-  // spec declares milestone fractions, which is what the curve/milestone panels render for.
-  vi.spyOn(resultsApi, "traits").mockResolvedValue({
-    traits: ["subject_a"],
-    milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
-    invalid_specs: [],
-  });
-  // The operationalization, trait-spec, and delivery-events panels all load with the tab; a test
-  // about anything else has no records.
-  vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-    records: [],
-    statement_fields: [],
-  });
-  vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
-    records: [],
-    unresolved: [],
-    statement_fields: [],
-  });
+  // One trait whose confirmed revision declares milestone fractions, which is what the
+  // curve/milestone panels render for.
+  vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.results);
+  vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley"] });
+  // The delivery-events panel loads with the tab; a test about anything else has no records.
   vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
 });
 
@@ -184,31 +166,37 @@ describe("ResultsTab structured predictions-by-date picker", () => {
   });
 });
 
-describe("ResultsTab broken trait spec visibility", () => {
-  it("names a broken spec file and its reason, not just a blank/empty tab", async () => {
+describe("ResultsTab unreadable trait visibility", () => {
+  it("names an unreadable trait and sends the breeder to the Setup tab", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue({
-      traits: ["subject_a"],
-      milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
-      invalid_specs: [
-        {
-          file: "leaf_area.yml",
-          reason: "delivers must be non-empty and all in crops.yml (off-vocab: ['leaf_size'])",
-        },
-      ],
+      ...TRAIT_LISTINGS.results,
+      unreadable: [{ trait: "leaf_area", reason: "delivers: off-vocab ['leaf_size']" }],
     });
 
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
-    expect(await screen.findByText(/leaf_area\.yml/)).toBeInTheDocument();
-    expect(screen.getByText(/off-vocab: \['leaf_size'\]/)).toBeInTheDocument();
+    expect(await screen.findByText(/will not read: leaf_area/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open the setup tab/i }));
+    expect(useStore.getState().gui.active_tab).toBe("setup");
   });
 
-  it("renders nothing extra when every spec loaded cleanly", async () => {
+  it("renders nothing extra when every trait record reads", async () => {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
-    expect(screen.queryByText(/failed to load/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will not read/)).not.toBeInTheDocument();
+  });
+
+  it("sends the breeder to the Setup tab when no revision of the trait is confirmed", async () => {
+    vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.unconfirmed);
+
+    render(<ResultsTab />);
+
+    expect(await screen.findByText(/No revision of subject_a is confirmed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Per-plant phenology curves/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open the setup tab/i }));
+    expect(useStore.getState().gui.active_tab).toBe("setup");
   });
 });
 
@@ -544,246 +532,7 @@ describe("ResultsTab onset table validity marker", () => {
   });
 });
 
-describe("ResultsTab operationalization records", () => {
-  // Every hashed field is non-empty here, so rendering is asserted against the hashed set itself.
-  const COUNT_RECORD: OperationalizationRecord = {
-    trait: "subject_b_total",
-    delivery_kind: "per_plant_count_aggregate",
-    statement: "Every isolated object of the subject on a plant, summed over that plant's images.",
-    mechanism: "The detector's objects at the operating point the calibration holdout fixed.",
-    measured_subject: "subject_b",
-    delivered_phenotypes: ["subject_b_count"],
-    delivered_value_keys: ["n_objects"],
-    stated_by: "state_trait_operationalization",
-    stated_at: "2026-02-01T10:00:00+00:00",
-    relayed_note: "Answered in the packing shed rather than in the browser.",
-    agent_client_name: null,
-    agent_client_version: null,
-    agent_session: null,
-    terminal_session: null,
-    harness_session: null,
-    harness_effort_at_connect: null,
-    confirmed_by: null,
-    confirmed_at: null,
-    identity_from_request: null,
-    confirmed_current: false,
-    superseded: [],
-    registry_problem: null,
-    delivers: [{ name: "subject_b_count", definition: "objects counted per plant" }],
-    record_seen: "hash-of-the-displayed-record",
-  };
-
-  // What the list route answers, the server's own naming of the fields the record_seen hash covers.
-  const LISTED = {
-    records: [COUNT_RECORD],
-    statement_fields: [
-      "statement",
-      "mechanism",
-      "measured_subject",
-      "delivered_phenotypes",
-      "delivered_value_keys",
-      "stated_by",
-      "stated_at",
-      "relayed_note",
-    ],
-  };
-
-  const CONFIRMED_RECORD: OperationalizationRecord = {
-    ...COUNT_RECORD,
-    confirmed_by: "user:breeder",
-    confirmed_at: "2026-02-02T09:00:00+00:00",
-    identity_from_request: true,
-    confirmed_current: true,
-  };
-
-  function rowFor(record: OperationalizationRecord) {
-    return screen.findByTestId(`operationalization-${record.trait}::${record.delivery_kind}`);
-  }
-
-  it("shows every field the served list names as covered by a confirmation", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
-
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-
-    const values: Record<string, unknown> = COUNT_RECORD;
-    for (const field of LISTED.statement_fields) {
-      const value = values[field];
-      expect(
-        within(row).getByText(Array.isArray(value) ? value.join(", ") : String(value)),
-      ).toBeInTheDocument();
-    }
-    // The crop vocabulary's own wording for what the trait delivers, beside the statement.
-    expect(within(row).getByText(/objects counted per plant/)).toBeInTheDocument();
-  });
-
-  it("shows only what the served list names, so a field the server drops leaves the row", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [COUNT_RECORD],
-      statement_fields: ["statement"],
-    });
-
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-
-    expect(within(row).getByText(COUNT_RECORD.statement)).toBeInTheDocument();
-    expect(within(row).queryByText(COUNT_RECORD.mechanism)).not.toBeInTheDocument();
-  });
-
-  it("shows a registry mismatch under its own heading, not the superseded block", async () => {
-    const REGISTRY_PROBLEM: OperationalizationRecord = {
-      ...COUNT_RECORD,
-      registry_problem: "class 'open' is not among subject 'flower'’s attributes' values",
-    };
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [REGISTRY_PROBLEM],
-      statement_fields: LISTED.statement_fields,
-    });
-
-    render(<ResultsTab />);
-    const row = await rowFor(REGISTRY_PROBLEM);
-
-    expect(within(row).getByText(/registry mismatch/i)).toBeInTheDocument();
-    expect(within(row).getByText(REGISTRY_PROBLEM.registry_problem!)).toBeInTheDocument();
-    expect(within(row).queryByText(/changed since this was confirmed/i)).not.toBeInTheDocument();
-  });
-
-  it("lists a record whose delivery kind this tab computes no view for", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
-
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-
-    expect(within(row).getByText("per_plant_count_aggregate")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: /confirm this record/i })).toBeEnabled();
-  });
-
-  it("confirms with the record_seen hash of what was displayed", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
-    const confirmSpy = vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_fields: { count_objective: "every visible object" },
-      audit_warning: null,
-    });
-    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
-      ...COUNT_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    useStore.setState({ user: "breeder" });
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
-    // The app-set name rides the post, so the record's identity_from_request stays honest.
-    expect(confirmSpy.mock.calls[0][0]).toEqual({
-      project_root: "C:/proj",
-      trait: "subject_b_total",
-      delivery_kind: "per_plant_count_aggregate",
-      record_seen: "hash-of-the-displayed-record",
-      confirmed: true,
-      user: "breeder",
-    });
-    expect(await within(row).findByText(/confirmed by user:breeder/i)).toBeInTheDocument();
-  });
-
-  it("re-renders what is on file when the record moved since it was displayed", async () => {
-    const MOVED: OperationalizationRecord = {
-      ...COUNT_RECORD,
-      statement: "Only the objects on the plant's own leader, summed over that plant's images.",
-      record_seen: "hash-of-the-record-on-file",
-    };
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
-    vi.spyOn(resultsApi, "confirmOperationalization").mockRejectedValue(
-      new StructuredRefusalError(
-        { message: "the operationalization moved since it was read", record: MOVED },
-        409,
-        "the operationalization moved since it was read",
-      ),
-    );
-
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    expect(await within(row).findByText(MOVED.statement)).toBeInTheDocument();
-    expect(within(row).queryByText(COUNT_RECORD.statement)).not.toBeInTheDocument();
-    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
-  });
-
-  it("offers no withdrawal for a record nobody has confirmed", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
-
-    render(<ResultsTab />);
-    const row = await rowFor(COUNT_RECORD);
-
-    expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
-  });
-
-  it("withdraws with confirmed false and the row comes back unconfirmed", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [CONFIRMED_RECORD],
-      statement_fields: LISTED.statement_fields,
-    });
-    const confirmSpy = vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
-      confirmed_by: null,
-      confirmed_at: null,
-      identity_from_request: null,
-      confirmed_fields: null,
-      audit_warning: null,
-    });
-    vi.spyOn(resultsApi, "operationalization").mockResolvedValue(COUNT_RECORD);
-
-    render(<ResultsTab />);
-    const row = await rowFor(CONFIRMED_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /withdraw this confirmation/i }));
-
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
-    expect(confirmSpy.mock.calls[0][0]).toEqual({
-      project_root: "C:/proj",
-      trait: "subject_b_total",
-      delivery_kind: "per_plant_count_aggregate",
-      record_seen: "hash-of-the-displayed-record",
-      confirmed: false,
-    });
-    expect(await within(row).findByText("Not confirmed")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: /confirm this record/i })).toBeEnabled();
-    expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
-  });
-
-  it("re-renders what is on file when the record moved since the withdrawal was offered", async () => {
-    const MOVED: OperationalizationRecord = {
-      ...CONFIRMED_RECORD,
-      statement: "Only the objects on the plant's own leader, summed over that plant's images.",
-      record_seen: "hash-of-the-record-on-file",
-    };
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [CONFIRMED_RECORD],
-      statement_fields: LISTED.statement_fields,
-    });
-    vi.spyOn(resultsApi, "confirmOperationalization").mockRejectedValue(
-      new StructuredRefusalError(
-        { message: "the operationalization moved since it was read", record: MOVED },
-        409,
-        "the operationalization moved since it was read",
-      ),
-    );
-
-    render(<ResultsTab />);
-    const row = await rowFor(CONFIRMED_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /withdraw this confirmation/i }));
-
-    expect(await within(row).findByText(MOVED.statement)).toBeInTheDocument();
-    expect(within(row).queryByText(CONFIRMED_RECORD.statement)).not.toBeInTheDocument();
-    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
-  });
-
+describe("ResultsTab meaning refusals", () => {
   it("routes a refusal by its kind even when its text reads like the calibration one", async () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -799,9 +548,6 @@ describe("ResultsTab operationalization records", () => {
       new StructuredRefusalError(
         {
           kind: "operationalization",
-          state: 2,
-          trait: "subject_a",
-          delivery_kind: "state_crossing_dates",
           message: "an unvalidated number is not what this refusal is about",
         },
         400,
@@ -817,6 +563,7 @@ describe("ResultsTab operationalization records", () => {
     expect(
       await screen.findByText(/an unvalidated number is not what this refusal is about/),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open the setup tab/i })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /ask the agent to calibrate this/i }),
     ).not.toBeInTheDocument();
@@ -878,9 +625,6 @@ describe("ResultsTab operationalization records", () => {
         json: async () => ({
           detail: {
             kind: "operationalization",
-            state: 2,
-            trait: "subject_a",
-            delivery_kind: "state_crossing_dates",
             message: "stated but not confirmed by the breeder",
           },
         }),
@@ -904,325 +648,12 @@ describe("ResultsTab operationalization records", () => {
   });
 });
 
-describe("ResultsTab trait-spec authoring statements", () => {
-  // Every authored value below is distinct once rendered, so a `getByText` match inside the row
-  // is unambiguous: two authored fields that both rendered "none" would collide.
-  const TRAIT_SPEC_RECORD: TraitSpecStatementRecord = {
-    trait: "subject_a",
-    statement_fields: {
-      delivers: ["subject_a_50per_date"],
-      positive_value: "subject_a_open",
-      milestone_fractions: [0.5, 0.95],
-      milestone_on: "positive_fraction",
-      majority_milestone: "95per",
-      crossing_unconfirmed: true,
-      phenology_prefix: "subj_a_col",
-      majority_label: "most subject_a open",
-      count_objective: "count_unbiased",
-      count_bias_tolerance_frac: 0.1,
-      count_error_tolerance: 2.5,
-      classifier_agreement_floor: 0.41,
-      ordinal_agreement_floor: 0.4,
-      regression_skill_floor: 0.6,
-      notes: "Authored from the packing-shed conversation.",
-    },
-    rationale: "Breeder said the 50% and 95% open crossing dates matter most for harvest timing.",
-    stated_by: "author_trait_spec",
-    stated_at: "2026-02-01T10:00:00+00:00",
-    relayed_note: "Answered during the site visit.",
-    agent_client_name: null,
-    agent_client_version: null,
-    agent_session: null,
-    terminal_session: null,
-    harness_session: null,
-    harness_effort_at_connect: null,
-    confirmed_by: null,
-    confirmed_at: null,
-    identity_from_request: null,
-    confirmed_current: false,
-    record_seen: "hash-of-the-displayed-trait-spec",
-  };
-
-  const LISTED_TRAIT_SPEC = {
-    records: [TRAIT_SPEC_RECORD],
-    unresolved: [],
-    statement_fields: ["statement_fields", "rationale", "stated_by", "stated_at", "relayed_note"],
-  };
-
-  function rowFor(record: TraitSpecStatementRecord) {
-    return screen.findByTestId(`trait-spec-statement-${record.trait}`);
-  }
-
-  it("shows the rationale and every authored field the served statement carries", async () => {
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
-
-    render(<ResultsTab />);
-    const row = await rowFor(TRAIT_SPEC_RECORD);
-
-    expect(within(row).getByText(TRAIT_SPEC_RECORD.rationale!)).toBeInTheDocument();
-    expect(within(row).getByText(TRAIT_SPEC_RECORD.stated_by!)).toBeInTheDocument();
-    expect(within(row).getByText(TRAIT_SPEC_RECORD.relayed_note!)).toBeInTheDocument();
-    const authored: Record<string, unknown> = TRAIT_SPEC_RECORD.statement_fields!;
-    for (const value of Object.values(authored)) {
-      const text = Array.isArray(value) ? value.join(", ") : value === true ? "yes" : String(value);
-      expect(within(row).getByText(text)).toBeInTheDocument();
-    }
-  });
-
-  it("shows only what the served list names, so a field the server drops leaves the row", async () => {
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
-      records: [TRAIT_SPEC_RECORD],
-      unresolved: [],
-      statement_fields: ["rationale"],
-    });
-
-    render(<ResultsTab />);
-    const row = await rowFor(TRAIT_SPEC_RECORD);
-
-    expect(within(row).getByText(TRAIT_SPEC_RECORD.rationale!)).toBeInTheDocument();
-    expect(within(row).queryByText(TRAIT_SPEC_RECORD.stated_by!)).not.toBeInTheDocument();
-    expect(within(row).queryByText("subject_a_open")).not.toBeInTheDocument();
-  });
-
-  it("confirms with the record_seen hash of what was displayed and posts record_seen", async () => {
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
-    const confirmSpy = vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      record_seen: "hash-of-the-displayed-trait-spec",
-      audit_warning: null,
-    });
-    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
-      ...TRAIT_SPEC_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    useStore.setState({ user: "breeder" });
-    render(<ResultsTab />);
-    const row = await rowFor(TRAIT_SPEC_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
-    expect(confirmSpy.mock.calls[0][0]).toEqual({
-      project_root: "C:/proj",
-      trait: "subject_a",
-      record_seen: "hash-of-the-displayed-trait-spec",
-      confirmed: true,
-      user: "breeder",
-    });
-    expect(await within(row).findByText(/confirmed by user:breeder/i)).toBeInTheDocument();
-  });
-
-  it("re-renders what is on file when the statement moved since it was displayed", async () => {
-    const MOVED: TraitSpecStatementRecord = {
-      ...TRAIT_SPEC_RECORD,
-      rationale: "Revised: only the 95% crossing date matters now.",
-      record_seen: "hash-of-the-statement-on-file",
-    };
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
-    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          kind: "trait_spec_authoring",
-          message: "the trait-spec statement moved since it was read",
-          record: MOVED,
-        },
-        409,
-        "the trait-spec statement moved since it was read",
-      ),
-    );
-
-    render(<ResultsTab />);
-    const row = await rowFor(TRAIT_SPEC_RECORD);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    expect(await within(row).findByText(MOVED.rationale!)).toBeInTheDocument();
-    expect(within(row).queryByText(TRAIT_SPEC_RECORD.rationale!)).not.toBeInTheDocument();
-    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
-  });
-});
-
-describe("ResultsTab audit_warning banner", () => {
-  const COUNT_RECORD: OperationalizationRecord = {
-    trait: "subject_b_total",
-    delivery_kind: "per_plant_count_aggregate",
-    statement: "Every isolated object of the subject on a plant, summed over that plant's images.",
-    mechanism: "The detector's objects at the operating point the calibration holdout fixed.",
-    measured_subject: "subject_b",
-    delivered_phenotypes: ["subject_b_count"],
-    delivered_value_keys: ["n_objects"],
-    stated_by: "state_trait_operationalization",
-    stated_at: "2026-02-01T10:00:00+00:00",
-    relayed_note: "",
-    agent_client_name: null,
-    agent_client_version: null,
-    agent_session: null,
-    terminal_session: null,
-    harness_session: null,
-    harness_effort_at_connect: null,
-    confirmed_by: null,
-    confirmed_at: null,
-    identity_from_request: null,
-    confirmed_current: false,
-    superseded: [],
-    registry_problem: null,
-    delivers: [],
-    record_seen: "hash-of-the-displayed-record",
-  };
-
-  it("renders a warning banner when the operationalization confirmation lands but its audit line does not", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [COUNT_RECORD],
-      statement_fields: ["statement"],
-    });
-    vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_fields: {},
-      audit_warning: "committed and unrecorded, do not blind-retry",
-    });
-    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
-      ...COUNT_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId(
-      `operationalization-${COUNT_RECORD.trait}::${COUNT_RECORD.delivery_kind}`,
-    );
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    expect(
-      await within(row).findByText(/committed and unrecorded, do not blind-retry/i),
-    ).toBeInTheDocument();
-  });
-
-  it("renders no warning banner when the operationalization confirmation's audit line lands cleanly", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
-      records: [COUNT_RECORD],
-      statement_fields: ["statement"],
-    });
-    vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_fields: {},
-      audit_warning: null,
-    });
-    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
-      ...COUNT_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId(
-      `operationalization-${COUNT_RECORD.trait}::${COUNT_RECORD.delivery_kind}`,
-    );
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    await waitFor(() =>
-      expect(within(row).getByText(/confirmed by user:breeder/i)).toBeInTheDocument(),
-    );
-    expect(screen.queryByText(/Warning:/i)).not.toBeInTheDocument();
-  });
-
-  const TRAIT_SPEC_RECORD: TraitSpecStatementRecord = {
-    trait: "subject_a",
-    statement_fields: { count_objective: "count_unbiased" },
-    rationale: "Breeder said count-unbiased is right for this trait.",
-    stated_by: "author_trait_spec",
-    stated_at: "2026-02-01T10:00:00+00:00",
-    relayed_note: "",
-    agent_client_name: null,
-    agent_client_version: null,
-    agent_session: null,
-    terminal_session: null,
-    harness_session: null,
-    harness_effort_at_connect: null,
-    confirmed_by: null,
-    confirmed_at: null,
-    identity_from_request: null,
-    confirmed_current: false,
-    record_seen: "hash-of-the-displayed-trait-spec",
-  };
-
-  it("renders a warning banner when the trait-spec confirmation lands but its audit line does not", async () => {
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
-      records: [TRAIT_SPEC_RECORD],
-      unresolved: [],
-      statement_fields: ["rationale"],
-    });
-    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      record_seen: "hash-of-the-displayed-trait-spec",
-      audit_warning: "committed and unrecorded, do not blind-retry",
-    });
-    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
-      ...TRAIT_SPEC_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId(`trait-spec-statement-${TRAIT_SPEC_RECORD.trait}`);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    expect(
-      await within(row).findByText(/committed and unrecorded, do not blind-retry/i),
-    ).toBeInTheDocument();
-  });
-
-  it("renders no warning banner when the trait-spec confirmation's audit line lands cleanly", async () => {
-    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
-      records: [TRAIT_SPEC_RECORD],
-      unresolved: [],
-      statement_fields: ["rationale"],
-    });
-    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      record_seen: "hash-of-the-displayed-trait-spec",
-      audit_warning: null,
-    });
-    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
-      ...TRAIT_SPEC_RECORD,
-      confirmed_by: "user:breeder",
-      confirmed_at: "2026-02-02T09:00:00+00:00",
-      identity_from_request: true,
-      confirmed_current: true,
-    });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId(`trait-spec-statement-${TRAIT_SPEC_RECORD.trait}`);
-    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
-
-    await waitFor(() =>
-      expect(within(row).getByText(/confirmed by user:breeder/i)).toBeInTheDocument(),
-    );
-    expect(screen.queryByText(/Warning:/i)).not.toBeInTheDocument();
-  });
-});
-
 describe("ResultsTab delivery events (read-only)", () => {
   const DELIVERY_EVENT: DeliveryEventRecord = {
     event_id: "abc123",
     trait: "subject_a",
+    trait_revision: 1,
+    trait_revision_sha256: "b".repeat(64),
     delivery_kind: "state_crossing_dates",
     door: "results.export_csv",
     output_path: "C:/proj/results_export/subject_a_phenology.csv",
@@ -1274,7 +705,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     const row = await screen.findByTestId("delivery-abc123");
 
     expect(within(row).getByText("subject_a")).toBeInTheDocument();
-    expect(within(row).getByText("state_crossing_dates")).toBeInTheDocument();
+    expect(within(row).getByText("revision 1, state_crossing_dates")).toBeInTheDocument();
     expect(within(row).getByText("results.export_csv")).toBeInTheDocument();
     expect(within(row).getByText(/2026-02-03T12:00:00\+00:00/)).toBeInTheDocument();
     expect(
@@ -1510,330 +941,6 @@ describe("ResultsTab delivery events (read-only)", () => {
       within(row).getByText(/Superseded: a mis-stated crop was corrected upstream/),
     ).toBeInTheDocument();
     expect(within(row).getByText(/replaced by replacement-1/)).toBeInTheDocument();
-  });
-});
-
-describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
-  function mockTreeAndMappings() {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: [],
-      subjects: [],
-      model_names: [],
-      subjects_by_date: {},
-      models_by_date: {},
-      prediction_dirs: {},
-      label_problem: null,
-    });
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
-  }
-
-  async function buildWithTolerance(nn_tolerance_m: { value: number; source: string }) {
-    mockTreeAndMappings();
-    vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
-      mapping: {},
-      unreadable: {},
-      summary: {
-        per_date: {
-          "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 },
-        },
-        totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
-      },
-      nn_tolerance_m,
-      max_match_distance_m: nn_tolerance_m.value * 3,
-    });
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-    await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
-  }
-
-  it("names the plot's grid pitch for source grid_pitch", async () => {
-    await buildWithTolerance({ value: 0.75, source: "grid_pitch" });
-    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
-    expect(screen.getByText(/derived from the plot's grid pitch/)).toBeInTheDocument();
-  });
-
-  it("names the stated value for source stated", async () => {
-    await buildWithTolerance({ value: 3, source: "stated" });
-    expect(
-      await screen.findByText(
-        "Match tolerance 3.00 m (the stated value); matches accepted out to 9.00 m",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("names the capped stated value for source stated_capped", async () => {
-    await buildWithTolerance({ value: 2, source: "stated_capped" });
-    expect(await screen.findByText(/capped to the grid pitch/)).toBeInTheDocument();
-  });
-
-  it("renders a source this map does not know as its own raw string", async () => {
-    await buildWithTolerance({ value: 5, source: "future_branch" });
-    expect(await screen.findByText(/future_branch/)).toBeInTheDocument();
-  });
-
-  it("sends supersede only once the checkbox is checked", async () => {
-    await buildWithTolerance({ value: 3, source: "stated" });
-
-    expect(resultsApi.buildPlantMapping).toHaveBeenCalledWith(
-      expect.objectContaining({ supersede: false }),
-    );
-
-    fireEvent.click(screen.getByLabelText(/supersede a mapping a delivery event still cites/i));
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-    await waitFor(() =>
-      expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
-        expect.objectContaining({ supersede: true }),
-      ),
-    );
-  });
-
-  it("shows a citing-events 409 beside the supersede checkbox rather than only a toast", async () => {
-    mockTreeAndMappings();
-    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
-      new StructuredRefusalError(
-        { message: "plant mapping 'valley' is cited by delivery event(s) ['evt-1']" },
-        409,
-        "plant mapping 'valley' is cited by delivery event(s) ['evt-1']",
-      ),
-    );
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-
-    expect(await screen.findByText(/cited by delivery event\(s\)/)).toBeInTheDocument();
-  });
-
-  it("adopts the committed mapping and appends the gap message when the route's own line is lost", async () => {
-    mockTreeAndMappings();
-    const gapMessage = "gui_build_plant_mapping completed and its audit entry could not be written";
-    const committed = {
-      mapping: {},
-      unreadable: {},
-      summary: {
-        per_date: {
-          "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 },
-        },
-        totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
-      },
-      nn_tolerance_m: { value: 0.75, source: "grid_pitch" },
-      max_match_distance_m: 2.25,
-    };
-    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: gapMessage, committed },
-        409,
-        gapMessage,
-      ),
-    );
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-
-    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(gapMessage))).toBeInTheDocument();
-  });
-
-  it("adopts nothing and shows the panel message when the archive receipt failed (committed: null)", async () => {
-    mockTreeAndMappings();
-    const gapMessage =
-      "gui_build_plant_mapping completed and its audit entry could not be written. The new " +
-      "record was never persisted under this name. Rebuild with supersede=True once the " +
-      "audit log's destination is repaired.";
-    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: gapMessage, committed: null },
-        409,
-        gapMessage,
-      ),
-    );
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-
-    expect(await screen.findByText(new RegExp(gapMessage.slice(0, 40)))).toBeInTheDocument();
-  });
-
-  function buildMappingWith(
-    perDate: Record<
-      string,
-      {
-        n_images: number;
-        n_mapped: number;
-        n_unattributed: number;
-        avg_distance_m: number | null;
-      }
-    >,
-    totalsUnattributed: number,
-  ) {
-    const totalImages = Object.values(perDate).reduce((sum, d) => sum + d.n_images, 0);
-    const totalMapped = Object.values(perDate).reduce((sum, d) => sum + d.n_mapped, 0);
-    vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
-      mapping: {},
-      unreadable: {},
-      summary: {
-        per_date: perDate,
-        totals: {
-          n_dates: Object.keys(perDate).length,
-          n_images: totalImages,
-          n_mapped: totalMapped,
-          n_unattributed: totalsUnattributed,
-        },
-      },
-      nn_tolerance_m: { value: 3, source: "stated" },
-      max_match_distance_m: 9,
-    });
-  }
-
-  async function buildFromInputs() {
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
-      target: { value: "valley-plants" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
-  }
-
-  it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
-    mockTreeAndMappings();
-    buildMappingWith(
-      { "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 } },
-      1,
-    );
-    await buildFromInputs();
-
-    expect(
-      await screen.findByText(/1 captures across this mapping's dates are attributed to no plant/),
-    ).toBeInTheDocument();
-  });
-
-  it("renders no mapping-wide line when the total is zero", async () => {
-    mockTreeAndMappings();
-    buildMappingWith(
-      { "2026-01-01": { n_images: 2, n_mapped: 2, n_unattributed: 0, avg_distance_m: 1.4 } },
-      0,
-    );
-    await buildFromInputs();
-
-    await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
-    expect(
-      screen.queryByText(/attributed to no plant \(no readable position/),
-    ).not.toBeInTheDocument();
-  });
-
-  it("renders 'no distances' for a date with no recorded mean", async () => {
-    mockTreeAndMappings();
-    buildMappingWith(
-      { "2026-01-01": { n_images: 2, n_mapped: 0, n_unattributed: 2, avg_distance_m: null } },
-      2,
-    );
-    await buildFromInputs();
-
-    expect(await screen.findByText(/avg no distances/)).toBeInTheDocument();
-  });
-
-  it("loading an already-built mapping by name shows its own summary", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: [],
-      subjects: [],
-      model_names: [],
-      subjects_by_date: {},
-      models_by_date: {},
-      prediction_dirs: {},
-      label_problem: null,
-    });
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley-2026"] });
-    vi.spyOn(resultsApi, "loadPlantMapping").mockResolvedValue({
-      mapping: {},
-      summary: {
-        per_date: {
-          "2026-01-01": { n_images: 4, n_mapped: 4, n_unattributed: 0, avg_distance_m: 0.9 },
-        },
-        totals: { n_dates: 1, n_images: 4, n_mapped: 4, n_unattributed: 0 },
-      },
-      nn_tolerance_m: { value: 2, source: "stated" },
-      max_match_distance_m: 6,
-    });
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
-      target: { value: "valley-2026" },
-    });
-
-    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
-    expect(resultsApi.loadPlantMapping).toHaveBeenCalledWith("valley-2026");
-  });
-
-  it("clears the loaded summary once the typed name no longer matches a stored mapping", async () => {
-    vi.spyOn(api.dataset, "tree").mockResolvedValue({
-      dataset_root: "C:/data",
-      dates_with_images: [],
-      subjects: [],
-      model_names: [],
-      subjects_by_date: {},
-      models_by_date: {},
-      prediction_dirs: {},
-      label_problem: null,
-    });
-    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley-2026"] });
-    vi.spyOn(resultsApi, "loadPlantMapping").mockResolvedValue({
-      mapping: {},
-      summary: {
-        per_date: {
-          "2026-01-01": { n_images: 4, n_mapped: 4, n_unattributed: 0, avg_distance_m: 0.9 },
-        },
-        totals: { n_dates: 1, n_images: 4, n_mapped: 4, n_unattributed: 0 },
-      },
-      nn_tolerance_m: { value: 2, source: "stated" },
-      max_match_distance_m: 6,
-    });
-
-    render(<ResultsTab />);
-    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    const nameInput = screen.getByPlaceholderText("valley-2026");
-    fireEvent.change(nameInput, { target: { value: "valley-2026" } });
-
-    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
-
-    fireEvent.change(nameInput, { target: { value: "valley-2026-draft" } });
-
-    expect(screen.queryByText(/mapped 4 of 4, 0 attributed to no plant/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Match tolerance \d/)).not.toBeInTheDocument();
   });
 });
 

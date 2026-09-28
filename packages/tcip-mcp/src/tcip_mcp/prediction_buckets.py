@@ -38,6 +38,7 @@ from pathlib import Path
 
 from tcip_annotation.json_io import prediction_documents
 from tcip_mcp.pipelines.resolution import dataset_hash
+from tcip_mcp.project_paths import project_state_dir
 
 
 def bucket_stems(*dirs: Path | str) -> set[str]:
@@ -116,13 +117,6 @@ def bucket_stems_digest(*dirs: Path | str, images_dir: Path | str) -> str:
             h.update(Path(source).read_bytes())
         h.update(b"\0")
     return h.hexdigest()[:16]
-
-
-def review_state_dir_of(root: str | Path) -> Path:
-    """``<root>/.tcip/state``: the review-verdict store for the dataset at ``root``.
-    ``ReviewEngine`` owns the shard layout inside it.
-    """
-    return Path(root, ".tcip", "state")
 
 
 def bucket_key_of(bucket_dir: str | Path | None) -> str:
@@ -464,7 +458,7 @@ def stage_prediction_shapes(
         dataset_root,
         model_name,
         date,
-        review_state_dir=review_state_dir_of(dataset_root),
+        review_state_dir=project_state_dir(dataset_root),
         overwrite=overwrite,
         count_review_state=True,
     )

@@ -29,12 +29,13 @@ from tcip_mcp.pipelines.postprocessing.export import (
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE, DeliveryRefused, applied_operating_point,
 )
-from tcip_mcp.project_paths import resolve_output_path
+from tcip_mcp.project_paths import project_state_dir, resolve_output_path
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.inference.predictor import TileGeometry
     from tcip_mcp.pipelines.resolution import Acknowledgment, ResolvedParam
+    from tcip_mcp.traits import TraitRevision
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +139,8 @@ register_store(
     )
 )
 """One tiled raster pass' resume state: an ``identity`` record naming the pass a bucket is mid-way
-through, plus one ``batch-<index>`` record per tile batch already predicted. Sits under
-``<bucket>/.tcip/raster_pass_progress/``, outside ``prediction_documents``' own non-recursive glob
-of the bucket root. Written, resumed from and deleted with no audit line. Not frozen, so a reader
-checks the identity record's own ``schema_version`` against
-``_RASTER_PASS_PROGRESS_SCHEMA_VERSION`` itself."""
+through, plus one ``batch-<index>`` record per tile batch already predicted, under
+``<bucket>/.tcip/raster_pass_progress/``."""
 
 _RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
 
@@ -767,7 +765,6 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
         BucketHoldsDocuments,
         resolve_prediction_bucket,
         resolve_writable_bucket,
-        review_state_dir_of,
     )
 
     out_path = resolve_output_path(output_dir)
@@ -779,7 +776,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
 
     # The guard reads the bucket's own dataset verdict store; no dataset root means no store to guard against.
     dataset_root = bucket_dataset_root(out_path)
-    review_state_dir = None if dataset_root is None else review_state_dir_of(dataset_root)
+    review_state_dir = None if dataset_root is None else project_state_dir(dataset_root)
 
     try:
         if canonical is not None:
@@ -960,7 +957,7 @@ def _clear_door_refusal_reason(recorded_path: str) -> str | None:
     """
     from tcip_mcp.dataset_layout import canonical_prediction_bucket
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, stamp_names_raster
-    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_count, review_state_dir_of
+    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_count
 
     canonical = canonical_prediction_bucket(recorded_path)
     if canonical is None:
@@ -969,7 +966,7 @@ def _clear_door_refusal_reason(recorded_path: str) -> str | None:
     stamp = read_operating_point_sidecar(Path(recorded_path))
     if stamp is not None and stamp_names_raster(stamp):
         return "its stamp names a whole-raster pass, out of that door's scope"
-    count = review_state_count(review_state_dir_of(dataset_root), bucket_key_of(Path(recorded_path)))
+    count = review_state_count(project_state_dir(dataset_root), bucket_key_of(Path(recorded_path)))
     if count:
         return "it carries review state"
     return None
@@ -1352,7 +1349,7 @@ def clear_prediction_bucket(
     )
     from tcip_mcp.pipelines.resolution import sidecar_key, stamp_names_raster
     from tcip_mcp.prediction_buckets import (
-        bucket_content_digest, bucket_key_of, bucket_stems, review_state_count, review_state_dir_of,
+        bucket_content_digest, bucket_key_of, bucket_stems, review_state_count,
     )
     from tcip_store import StoreError, VersionConflict
 
@@ -1378,7 +1375,7 @@ def clear_prediction_bucket(
         return {"error": f"{source}: operating_point.json will not decode ({exc}); refused as "
                          "unreadable, since the record codec cannot move what it cannot decode."}
 
-    review_state_dir = review_state_dir_of(dataset_root)
+    review_state_dir = project_state_dir(dataset_root)
     source_key = bucket_key_of(source)
     resuming = cleared_bucket is not None
     destination: Path
@@ -1983,12 +1980,12 @@ def deliver_per_image_counts(
     path resolves it through the bucket's own stamp-recorded ``image_filenames`` map, and refuses a
     bucket whose stamp does not name each of its documents.
 
-    ``trait``'s per-image-count operationalization must be recorded and breeder-confirmed, checked
-    before the pass runs (live) or the bucket is read (bucket regime). Only the CSV's own
-    delivery-gate refusal returns ``image_count`` and ``total_detections`` beside the error; an
-    operationalization refusal, and every refusal the publisher raises before the CSV's own gate
-    runs (a fabricated tile scale, an unearned count claim, a frozen lineage pointer), carry
-    neither.
+    ``trait``'s latest confirmed revision must state a per-image-count operationalization; it is
+    resolved once, before either regime reads or runs anything, and the writer binds the buckets it
+    reads to it. Only the CSV's own delivery-gate refusal returns ``image_count`` and
+    ``total_detections`` beside the error; an operationalization refusal, and every refusal the
+    publisher raises before the CSV's own gate runs (a fabricated tile scale, an unearned count
+    claim, a frozen lineage pointer), carry neither.
 
     The live regime's ``checkpoint_sha256``/``experiment_id`` are the run's asserted identity; the
     bucket regime's are the stamp's asserted identity, with no ``conf_source``. The CSV's own
@@ -2042,15 +2039,10 @@ def deliver_per_image_counts(
             existing bucket to read (required, resolved the same way; no redirect, since nothing is
             written).
     """
-    from tcip_mcp.operationalization import (
-        PER_IMAGE_COUNT,
-        OperationalizationRefused,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
+    from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused
     from tcip_mcp.project_paths import resolve_output_path
-    from tcip_mcp.traits import TraitUnknownError
+    from tcip_mcp.traits import PER_IMAGE_COUNT, TraitUnknownError
 
     live = checkpoint_path is not None or images_dir is not None
     if live and (checkpoint_path is None or images_dir is None):
@@ -2088,15 +2080,19 @@ def deliver_per_image_counts(
     if not output_path:
         return {"error": "output_path is required"}
     output_path = str(resolve_output_path(output_path))
+    try:
+        revision = confirmed_revision(PER_IMAGE_COUNT, project_root=None, trait=trait)
+    except (OperationalizationRefused, TraitUnknownError) as exc:
+        return {"error": str(exc)}
 
     if not live:
         assert predictions_dir is not None  # the regime check above already requires it
         try:
             return per_image_counts_from_bucket(
-                predictions_dir, output_path, trait=trait, project_root=None,
+                predictions_dir, output_path, revision=revision, project_root=None,
                 acknowledgment=None)
         except OperationalizationRefused as exc:
-            return {"error": exc.check.message}
+            return {"error": str(exc)}
         except DeliveryRefused as exc:
             reason = (
                 f"{exc} This door takes no acknowledgment: acknowledge and re-export through "
@@ -2111,17 +2107,6 @@ def deliver_per_image_counts(
     # live is True here (the bucket regime above always returns); the regime check higher up
     # already requires both when live.
     assert checkpoint_path is not None and images_dir is not None
-
-    # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
-    try:
-        spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
-    except TraitUnknownError as e:
-        return {"error": str(e)}
-    # A per_image_count delivery names no positive class, so check_operationalization ignores a
-    # registry for this kind regardless of what one would resolve to.
-    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
-    if not stated.ok:
-        return {"error": stated.message}
 
     bucket = bucket_root = None
     resolution = None
@@ -2202,14 +2187,14 @@ def deliver_per_image_counts(
     }
     try:
         csv_path, tail, summary = export_detection_csv(
-            csv_rows, output_path, provenance=provenance, trait=trait,
+            csv_rows, output_path, provenance=provenance, revision=revision,
             operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
         )
     except StoreError as exc:
         return {"error": str(exc)}
     except OperationalizationRefused as exc:
-        return {"error": exc.check.message}
+        return {**bucket_fields, "error": str(exc)}
     except DeliveryRefused as exc:
         reason = str(exc)
         if bucket is None:
@@ -2309,52 +2294,31 @@ def _bucket_csv_rows(bucket_path: Path, stamp: dict) -> list[dict]:
 
 
 def per_image_counts_from_bucket(
-    predictions_dir: str, output_path: str, *, trait: str,
+    predictions_dir: str, output_path: str, *, revision: TraitRevision,
     project_root: str | Path | None = None,
     acknowledgment: Acknowledgment | None = None,
 ) -> dict:
     """Count the detections in each document of the existing prediction bucket
     ``predictions_dir`` and write them as the per-image count CSV at ``output_path`` through
-    ``export_detection_csv``, leaving the bucket untouched; returns the export's tail and counts.
+    ``export_detection_csv`` under the confirmed trait ``revision``, leaving the bucket untouched;
+    returns the export's tail and counts.
 
-    The stamp's ``images_dir``, ``raster_path`` and ``trait`` are checked before any document is
-    counted; its ``operating_point``, ``checkpoint_sha256`` and ``experiment_id`` are read after
-    counting, so a stamp lacking one of those raises ``KeyError`` naming it once the documents
-    have been read and before anything is written.
+    The stamp's ``images_dir`` and ``raster_path`` are checked before any document is counted;
+    its ``operating_point``, ``checkpoint_sha256`` and ``experiment_id`` are read after counting,
+    so a stamp lacking one of those raises ``KeyError`` naming it once the documents have been
+    read and before anything is written.
 
-    Runs the ``per_image_count`` meaning check first, against ``trait`` and ``project_root``,
-    before the bucket is touched. ``OperationalizationRefused`` (``tcip_mcp.operationalization``)
-    carries the failed check and no counts, raised from this call's own pre-check, from
-    ``export_detection_csv``'s own pre-check (which also reads each recorded bucket's ``id_map``
-    for the confirmed subject), or from that writer's post-gate re-check; ``DeliveryRefused``
+    ``OperationalizationRefused`` (``tcip_mcp.operationalization``) is the writer's binding of the
+    bucket to ``revision``, with no counts and nothing written; ``DeliveryRefused``
     (``pipelines.resolution``) is the writer's own gate refusal, its ``facts`` attribute set to
     this call's counts-bearing facts; ``CountDeliveryRefused`` (``pipelines.resolution``) covers
-    everything else this door refuses on (a missing stamp, a whole-raster bucket, an unknown or
-    mismatched trait, a document the stamp's filename map does not name, an empty bucket), each
-    carrying the same facts.
+    everything else this door refuses on (a missing stamp, a whole-raster bucket, a document the
+    stamp's filename map does not name, an empty bucket), each carrying the same facts.
     """
-    from tcip_mcp.operationalization import (
-        PER_IMAGE_COUNT,
-        OperationalizationRefused,
-        check_operationalization,
-        resolve_trait_and_record,
-    )
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, CountDeliveryRefused, read_operating_point_sidecar, stamp_names_raster,
     )
-    from tcip_mcp.traits import TraitUnknownError
     from tcip_store import StoreError
-
-    try:
-        spec, record, _specs_dir = resolve_trait_and_record(
-            trait, PER_IMAGE_COUNT, project_root=project_root)
-    except TraitUnknownError as exc:
-        raise CountDeliveryRefused(str(exc)) from exc
-    # A per_image_count delivery names no positive class, so check_operationalization ignores a
-    # registry for this kind regardless of what one would resolve to.
-    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
-    if not stated.ok:
-        raise OperationalizationRefused(stated)
 
     bucket_path = resolve_output_path(predictions_dir)
     sidecar = read_operating_point_sidecar(bucket_path)
@@ -2374,11 +2338,6 @@ def per_image_counts_from_bucket(
         raise CountDeliveryRefused(
             f"{bucket_path}'s stamp records neither images_dir nor raster_path: it is not a "
             "per-image prediction bucket this door can read.")
-    stamp_trait = sidecar["trait"]
-    if stamp_trait is not None and stamp_trait != trait:
-        raise CountDeliveryRefused(
-            f"{bucket_path}'s stamp was recorded for trait {stamp_trait!r}, not {trait!r}: a "
-            "bucket produced for one trait cannot deliver a per-image count under another.")
 
     image_results = _bucket_csv_rows(bucket_path, sidecar)
     if not image_results:
@@ -2396,7 +2355,7 @@ def per_image_counts_from_bucket(
     }
     try:
         csv_path, tail, summary = export_detection_csv(
-            image_results, output_path, provenance=provenance, trait=trait,
+            image_results, output_path, provenance=provenance, revision=revision,
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
             acknowledgment=acknowledgment, project_root=project_root,
         )

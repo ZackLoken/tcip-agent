@@ -15,7 +15,6 @@ within it.
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 
 import pytest
 from pathlib import Path
@@ -31,9 +30,15 @@ from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
 from tcip_mcp.pipelines.resolution import Acknowledgment  # noqa: E402
-from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
-from tests._operationalization_fixtures import schema_basis  # noqa: E402
-from tests._trait_fixtures import BUD_OPENING  # noqa: E402
+from tcip_mcp.project_paths import project_state_dir  # noqa: E402
+from tcip_mcp.traits import TraitRevision  # noqa: E402
+from tests._trait_fixtures import BUD_OPENING, entry, propose_and_confirm  # noqa: E402
+from tests.test_phenology_tools import _write_preds  # noqa: E402
+
+
+def _revision(project_root: Path) -> TraitRevision:
+    """BUD_OPENING as a confirmed revision at ``project_root``, the way a delivery door holds it."""
+    return propose_and_confirm(project_root, BUD_OPENING)
 
 # A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
 # so it carries every key the writer's cells read even as that shape grows.
@@ -53,21 +58,6 @@ def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "bud"
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     write_sidecar(dir_path, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}})
-
-
-def _preds(dir_path: Path, stem: str, subjects: list[str], *, attribute: str | None = None,
-          object_subject: str = "bud") -> None:
-    """Detector shape (``attribute=None``): each decoded name lands straight in ``subject``.
-    Classified shape: every record carries ``object_subject`` with its value under ``attribute``.
-    """
-    dir_path.mkdir(parents=True, exist_ok=True)
-    if attribute is None:
-        anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
-                for s in subjects]
-    else:
-        anns = [Annotation(subject=object_subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
-                           attributes={attribute: s}) for s in subjects]
-    json_io.write_annotations(dir_path / f"{stem}.json", anns, 8, 8)
 
 
 # ── date helpers (unchanged) ──────────────────────────────────────────────
@@ -280,9 +270,9 @@ class _Assignment:
 def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["closed", "closed"], attribute="opening")
+    _write_preds(d1, "P1_a", ["closed", "closed"], attribute="opening")
     _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    _preds(d2, "P1_b", ["open", "open"], attribute="opening")
+    _write_preds(d2, "P1_b", ["open", "open"], attribute="opening")
     _sidecar(d2, {"closed": 0, "open": 1}, attribute="opening")
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
@@ -290,7 +280,7 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
                                         plants=["P1"])
 
     assert out["positive_class_assessed"] is True
@@ -306,12 +296,12 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
 
 def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _preds(d1, "P1_a", ["bud"])
+    _write_preds(d1, "P1_a", ["bud"], attribute=None)
     _sidecar(d1, {"bud": 0})
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
                                         plants=["P1"])
 
     assert out["positive_class_assessed"] is False
@@ -330,7 +320,7 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
                                         plants=["P1"])
 
     row = out["rows"][0]
@@ -347,9 +337,9 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     # computed from the subset that happened to be usable.
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["open"], attribute="opening")
+    _write_preds(d1, "P1_a", ["open"], attribute="opening")
     _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    _preds(d2, "P1_b", ["bud"])  # bare-detector date, unclassified
+    _write_preds(d2, "P1_b", ["bud"], attribute=None)  # bare-detector date, unclassified
     _sidecar(d2, {"bud": 0})
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
@@ -357,7 +347,7 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_value="open", spec=BUD_OPENING,
+    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
                                         plants=["P1"])
 
     row = out["rows"][0]
@@ -373,7 +363,7 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
 
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _preds(d1, "P1_a", ["open"], attribute="opening")
+    _write_preds(d1, "P1_a", ["open"], attribute="opening")
     _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
@@ -440,9 +430,9 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
     refuses rather than delivering a silent bare number."""
     with pytest.raises(ValueError, match="unvalidated dimension"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING,
+            "test", [], tmp_path / "out.csv", _revision(tmp_path),
             flags={"classifier": None, "operating_point": None}, acknowledgment=None,
-            basis=schema_basis(), document_reconciliations={}, producer={},
+            document_reconciliations={}, producer={},
             dimension_reconciliations={}, predictions_by_date={},
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
@@ -458,8 +448,8 @@ def test_write_phenology_csv_refuses_a_count_only_reconciliation_with_nothing_on
 
     with pytest.raises(ValueError, match="classifier_operating_point"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-            basis=schema_basis(), document_reconciliations=count_only, producer={},
+            "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+            document_reconciliations=count_only, producer={},
             dimension_reconciliations=dimension_reconciliations,
             predictions_by_date=predictions_by_date, project_root=tmp_path,
             plant_mapping=_NO_MAPPING)
@@ -473,10 +463,10 @@ def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date
     does not fire, so a legitimate acknowledged, bucket-less call still writes rather than being
     refused for a document it never had a chance to reconcile."""
     phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING,
+        "test", [], tmp_path / "out.csv", _revision(tmp_path),
         flags={"classifier": None, "operating_point": None},
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="nothing to reconcile"),
-        basis=schema_basis(), document_reconciliations={}, producer={},
+        document_reconciliations={}, producer={},
         dimension_reconciliations={}, predictions_by_date={},
         project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert (tmp_path / "out.csv").exists()
@@ -518,9 +508,8 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
     phenology.write_phenology_csv(
-        "test.missing_stamp", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
+        "test.missing_stamp", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="missing sidecar"),
-        basis=schema_basis(),
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {
@@ -549,16 +538,16 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
 
     with pytest.raises(ValueError, match="classifier"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=incomplete, acknowledgment=None,
-            basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+            "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=incomplete, acknowledgment=None,
+            document_reconciliations=document_reconciliations, producer={},
             dimension_reconciliations=dimension_reconciliations,
             predictions_by_date=predictions_by_date, project_root=tmp_path,
             plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert cells["positive_state_classifier_validated"]
@@ -602,9 +591,8 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
+        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"),
-        basis=schema_basis(),
         document_reconciliations={
             "operating_point": recon,
             "classifier_operating_point": {
@@ -628,12 +616,12 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     phenology.write_phenology_csv(
-        "test.direct_writer_call", [], out_csv, BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test.direct_writer_call", [], out_csv, _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.direct_writer_call"]
     assert len(records) == 1, records
@@ -657,16 +645,16 @@ def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     cells = phenology.write_phenology_csv(
-        "test.fully_validated_ack", [], out_csv, BUD_OPENING, flags=flags,
+        "test.fully_validated_ack", [], out_csv, _revision(tmp_path), flags=flags,
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="just in case"),
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert cells["acknowledged_by"] is None
     assert cells["acknowledgment_reason"] is None
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.fully_validated_ack"]
     assert len(records) == 1, records
@@ -676,33 +664,30 @@ def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_
 
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
     """There is no ``stamp`` parameter: the writer composes its own provenance cells and
-    returns them, so this pins that the set it returns is exactly the schema's provenance columns
-    plus the trait's own majority crossing-unconfirmed marker."""
+    returns them, so this pins that the set it returns is exactly the schema's provenance columns."""
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
-    expected = (set(phenology.PROVENANCE_COLUMNS)
-                | {phenology.majority_crossing_unconfirmed_column(BUD_OPENING)})
-    assert set(cells) == expected
+    assert set(cells) == set(phenology.PROVENANCE_COLUMNS)
 
 
 def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
     """The curve table gets its own writer, sharing the same gate/cells/event machinery as the
-    milestone table, minus the milestone-only majority crossing-unconfirmed marker."""
+    milestone table."""
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
     row = {"plant_id": "P1", "accession": "acc-9", "date": "2026-02-11", "n_images": 1,
           "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
 
     phenology.write_phenology_curve_csv(
-        "test", [row], tmp_path / "curve.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test", [row], tmp_path / "curve.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -725,8 +710,8 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
@@ -739,17 +724,17 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
 
 
 _SPEC_SHAPES = [
-    # The shape a config-authored trait produces by simply omitting both majority fields, both at
-    # their dataclass defaults, which made the phantom names doubly malformed (`b__date`).
-    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b"),
+    # An entry stating both majority fields empty, which once made the phantom names doubly
+    # malformed (`b__date`).
+    entry("b", BUD_OPENING.delivers, milestone_fractions=(0.1, 0.9), phenology_prefix="b"),
     # A majority label with no majority milestone: a column must not be built from the label
     # alone without a milestone to source it.
-    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b",
-              majority_label="peak"),
+    entry("b", BUD_OPENING.delivers, milestone_fractions=(0.1, 0.9), phenology_prefix="b",
+          majority_label="peak"),
     # A majority milestone naming a crossing the trait does not compute: the column is real (the
     # spec names it) and its value is honestly None, which is not the same as a phantom.
-    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b",
-              majority_milestone="95per", majority_label="peak"),
+    entry("b", BUD_OPENING.delivers, milestone_fractions=(0.1, 0.9), phenology_prefix="b",
+          majority_milestone="95per", majority_label="peak"),
     BUD_OPENING,
 ]
 
@@ -765,54 +750,9 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     produced = set(phenology.plant_milestones(series, spec))
     schema = set(phenology.phenology_csv_columns(spec))
     prefixed = {c for c in schema if c.startswith(spec.phenology_prefix + "_")}
-    # The crossing-unconfirmed marker is stamped by the writer rather than computed here, and
-    # exists only when the spec names a majority alias for it to qualify.
-    marker = phenology.majority_crossing_unconfirmed_column(spec)
-    stamped = {marker} if marker else set()
-    assert prefixed - produced - stamped == set()
+    assert prefixed - produced == set()
     assert produced - schema == set()  # and nothing computed is silently dropped
     assert not any(c.startswith(f"{spec.phenology_prefix}__") for c in schema)
-
-
-# Trait-neutral, but carrying the field shape a registered trait's config authors, so the column
-# name below is the one a real delivery builds rather than one a bare stub happens to allow.
-_MAJORITY_ALIAS_SPEC = TraitSpec(
-    name="unit",
-    count_objective=COUNT_UNBIASED,
-    localization=CENTER_MATCH,
-    localization_tolerance="half_class_avg_size",
-    localization_tolerance_frac=0.5,
-    positive_value="present",
-    milestone_fractions=(0.05, 0.50, 0.95),
-    milestone_on="positive_fraction",
-    majority_milestone="95per",
-    crossing_unconfirmed=True,
-    phenology_prefix="unit",
-    majority_label="peak",
-)
-
-
-def test_the_majority_crossing_unconfirmed_column_name_has_one_owner():
-    """The marker column is named from the spec's own prefix and majority label, and the schema
-    declares exactly the name that owner returns, so a delivery door stamping through the same owner
-    cannot name the column differently from the schema that must declare it.
-    """
-    assert (phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)
-            == "unit_peak_crossing_unconfirmed")
-    declared = [c for c in phenology.phenology_csv_columns(_MAJORITY_ALIAS_SPEC)
-                if c.endswith("_crossing_unconfirmed")]
-    assert declared == [phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)]
-
-
-def test_a_spec_naming_no_majority_crossing_has_no_marker_column():
-    """Nothing qualifies an alias the spec never names, so the owner returns no name and the schema
-    declares no marker column, while the trait's own milestone dates still ship.
-    """
-    no_alias = replace(_MAJORITY_ALIAS_SPEC, majority_milestone="")
-    assert phenology.majority_crossing_unconfirmed_column(no_alias) is None
-    columns = phenology.phenology_csv_columns(no_alias)
-    assert not [c for c in columns if c.endswith("_crossing_unconfirmed")]
-    assert "unit_95per_date" in columns
 
 
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_path):
@@ -824,9 +764,9 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     id_map = {"closed": 0, "open": 1}
     for d in (d1, d2):
         _sidecar(d, id_map, attribute="opening")
-    _preds(d1, "GOOD", ["open", "closed"], attribute="opening")
-    _preds(d2, "GOOD", ["open", "open"], attribute="opening")
-    _preds(d1, "BAD", ["open", "open"], attribute="opening")
+    _write_preds(d1, "GOOD", ["open", "closed"], attribute="opening")
+    _write_preds(d2, "GOOD", ["open", "open"], attribute="opening")
+    _write_preds(d1, "BAD", ["open", "open"], attribute="opening")
     # BAD's second date is never predicted on: the missing image excludes its milestones.
     mapping = {
         "2026-02-11": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
@@ -834,7 +774,7 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     }
     res = phenology.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_value="open", spec=BUD_OPENING, plants=["GOOD", "BAD"])
+        spec=BUD_OPENING, plants=["GOOD", "BAD"])
     by_plant = {r["plant_id"]: r for r in res["rows"]}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
     assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
@@ -849,7 +789,7 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     d = tmp_path / "2026-02-11"
     _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
     for i in range(3):
-        _preds(d, f"IMG{i}", ["open", "closed"], attribute="opening")
+        _write_preds(d, f"IMG{i}", ["open", "closed"], attribute="opening")
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
     per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
@@ -868,7 +808,7 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_pa
     delivery scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
     d = tmp_path / "2026-02-11"
     _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
-    _preds(d, "P1_a", ["open"], attribute="opening")
+    _write_preds(d, "P1_a", ["open"], attribute="opening")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
@@ -884,14 +824,14 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_pat
     at delivery scope, not a per-call return value."""
     d = tmp_path / "2026-02-11"
     _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
-    _preds(d, "P1_a", ["open"], attribute="opening")
+    _write_preds(d, "P1_a", ["open"], attribute="opening")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY1", None, None),
         _Assignment("STRAY2", "", None),
     ]}
     out = phenology.per_plant_phenology(
-        mapping, {"2026-02-11": str(d)}, positive_value="open", spec=BUD_OPENING, plants=["P1"])
+        mapping, {"2026-02-11": str(d)}, spec=BUD_OPENING, plants=["P1"])
     assert [r["plant_id"] for r in out["rows"]] == ["P1"]
     assert "n_images_unmapped" not in out
 
@@ -904,8 +844,8 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
         _real_delivery_flags(tmp_path))
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgment=None,
-        basis=schema_basis(), document_reconciliations=document_reconciliations, producer={},
+        "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
+        document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
         predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")

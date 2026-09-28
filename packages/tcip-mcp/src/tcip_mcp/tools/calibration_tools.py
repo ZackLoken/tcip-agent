@@ -267,12 +267,13 @@ def calibrate_scalar_operating_point(
         resolve_ordinal_operating_point,
         resolve_regression_operating_point,
     )
+    from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
     from tcip_mcp.pipelines.resolution import csv_dataset_hash
-    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.traits import TraitUnknownError
 
     try:
-        get_trait(trait_name)
-    except TraitUnknownError as e:
+        latest_confirmed(trait_name)
+    except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.model_build import recorded_model_dims

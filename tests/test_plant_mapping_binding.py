@@ -16,17 +16,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
+from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 from tcip_mcp.traits import registered_crops
 
-from tests._binding_fixtures import register_plant_registry_for
+from tests._binding_fixtures import register_plant_registry_for, write_geo_image
 from tests.test_second_trait_acceptance import _ID_MAP, _seed_currant_bloom_trait
 
 _SCOPE = {"subject": "flower", "attribute": "bloom_state", "id_map": _ID_MAP}
@@ -56,27 +56,6 @@ def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     return root
 
 
-def _deg_to_dms(value: float) -> tuple[float, float, float]:
-    v = abs(value)
-    d = int(v)
-    m_full = (v - d) * 60
-    m = int(m_full)
-    s = round((m_full - m) * 60, 4)
-    return (float(d), float(m), s)
-
-
-def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None:
-    """A tiny JPEG carrying EXIF DateTimeOriginal + GPS lat/lon (as plant_mapping reads)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    exif = Image.Exif()
-    exif[0x8769] = {0x9003: when.strftime("%Y:%m:%d %H:%M:%S")}
-    exif[0x8825] = {
-        0x0001: "N" if lat >= 0 else "S", 0x0002: _deg_to_dms(lat),
-        0x0003: "E" if lon >= 0 else "W", 0x0004: _deg_to_dms(lon),
-    }
-    Image.new("RGB", (8, 8)).save(path, exif=exif)
-
-
 def _write_scene(
     dataset_root: Path, *, dates: list[str] = DATES, plants: list[dict] | None = None,
 ) -> tuple[Path, Path, dict[str, str]]:
@@ -97,7 +76,7 @@ def _write_scene(
         bucket.mkdir(parents=True, exist_ok=True)
         for j, plant in enumerate(plants):
             stem = f"{plant['plot']}_{date.replace('-', '')}"
-            _write_geo_image(
+            write_geo_image(
                 images_root / date / f"{stem}.jpg", plant["lat"], plant["lon"],
                 base_time + timedelta(minutes=j))
             json_io.write_annotations(
@@ -394,7 +373,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -417,7 +396,7 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
 
     p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
     (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
-    _write_geo_image(
+    write_geo_image(
         images_root / DATES[0] / f"{p2_stem}.jpg", PLANTS[1]["lat"], PLANTS[1]["lon"],
         datetime(2026, 2, 11, 10, 45))
 
@@ -431,7 +410,7 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -465,7 +444,7 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -487,7 +466,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
     target = images_root / DATES[0] / f"{stem}.jpg"
     # Several meters east: nowhere near either recorded plant, so nothing matches the distance
     # this mapping's own row recorded for it.
-    _write_geo_image(
+    write_geo_image(
         target, PLANTS[0]["lat"], PLANTS[0]["lon"] + 0.0002, datetime(2026, 2, 11, 9, 30))
 
     out_csv = tmp_path / "out.csv"
@@ -516,7 +495,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
     target = images_root / DATES[0] / f"{stem}.jpg"
-    _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
+    write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
@@ -545,7 +524,7 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
     target = images_root / DATES[0] / f"{stem}.jpg"
-    _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
+    write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
@@ -582,7 +561,7 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -614,7 +593,7 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -689,7 +668,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -810,10 +789,11 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
 
 def _cite_mapping(tmp_path: Path, name: str) -> None:
     """A real, schema-valid ``delivery_events`` record citing the mapping under ``name``, through
-    the platform's own writer rather than a hand-filed store record: no bucket evidence and no
-    trait is needed for a citation, only the mapping's own disclosure."""
+    the platform's own writer rather than a hand-filed store record: no bucket evidence is needed
+    for a citation, only the mapping's own disclosure and a confirmed trait revision."""
     from tcip_mcp.pipelines.postprocessing import plant_mapping as pm_module
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+    from tests._trait_fixtures import seed_confirmed_count
 
     build = pm_module.load_mapping(tmp_path, name)
     assert build is not None
@@ -822,8 +802,8 @@ def _cite_mapping(tmp_path: Path, name: str) -> None:
     record_delivery_binding_event(
         "test_delivery_door", None, None,
         document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None,
-        plant_mapping=disclosure, project_root=tmp_path,
+        acknowledgment=None, revision=seed_confirmed_count(tmp_path),
+        delivery_kind="per_image_count", plant_mapping=disclosure, project_root=tmp_path,
     )
 
 
@@ -920,7 +900,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     assert len(events) == 1, events
@@ -972,7 +952,7 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     assert len(events) == 1, events
@@ -1007,7 +987,7 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -1051,7 +1031,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -1089,7 +1069,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
 
     p2_stem = f"{plants3[1]['plot']}_{DATES[0].replace('-', '')}"
     moved = images_root / DATES[0] / f"{p2_stem}.jpg"
-    _write_geo_image(
+    write_geo_image(
         moved, plants3[1]["lat"], plants3[1]["lon"] + 0.0002, datetime(2026, 2, 11, 9, 31))
     per_plant_csvs[1].unlink()
 
@@ -1106,7 +1086,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -1157,7 +1137,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 
     from tcip_mcp.pipelines import resolution
 
-    scope = resolution.delivery_events_scope(tmp_path)
+    scope = project_state_dir(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
@@ -1278,7 +1258,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
     _seed_currant_bloom_trait(tmp_path)
 
     extra_source = tmp_path / "extra_source"
-    _write_geo_image(extra_source / "P3_extra.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 40))
+    write_geo_image(extra_source / "P3_extra.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 40))
     res = ingest_images(
         source=str(extra_source), name="ds", site="orchard block",
         project_path=str(dataset_root), date_from=DATES[0])
@@ -1310,8 +1290,8 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     date_dir = images_root / DATES[0]
-    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
-    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+    write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
 
     build_res = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
@@ -1409,8 +1389,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     date_dir = images_root / DATES[0]
-    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
-    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+    write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
     grouped = detect_and_write_band_groups(
         date_dir, explicit_groups={"aux": {"b1": "aux_b1.jpg", "b2": "aux_b2.jpg"}})
     assert grouped["formed"], grouped
@@ -1455,8 +1435,8 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     bad.write_bytes(b"not a real jpeg")
     (date_dir / "raster.npy").write_bytes(b"not really a numpy array, list_logical_images "
                                            b"never decodes it")
-    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
-    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+    write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
     grouped = detect_and_write_band_groups(
         date_dir, explicit_groups={"aux": {"b1": "aux_b1.jpg", "b2": "aux_b2.jpg"}})
     assert grouped["formed"], grouped

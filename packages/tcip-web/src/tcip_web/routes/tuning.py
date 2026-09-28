@@ -589,11 +589,9 @@ def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
     """Where this sweep's clean-named trial links live, apart from the real trial dirs: under
     ``root`` (the sweep's own launch root) when given, else the current platform root.
     """
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.project_paths import project_state_dir
 
-    if root is not None:
-        return Path(root) / ".tcip" / "state" / "tensorboard_views" / sweep_id
-    return resolve_state(Path(".tcip") / "state" / "tensorboard_views" / sweep_id)
+    return project_state_dir(root) / "tensorboard_views" / sweep_id
 
 
 def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] = None) -> Path:

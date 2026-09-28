@@ -64,6 +64,10 @@ breeder or an operator runs against a project are documented in `README.md` and
 - `generate_frozen_manifest.py` - generates `frozen-formats.json`, the shipped freeze
   commitment, from the store registry; `tests/test_frozen_manifest.py` regenerates it in
   process and refuses any drift from the committed file.
+- `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait
+  listings the frontend tests read, by proposing and confirming traits in a scratch project and
+  serving them through the traits route. Run after changing the trait record's shape;
+  `tests/test_frontend_trait_fixture.py` fails when the checked-in file is stale.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
   canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after
