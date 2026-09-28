@@ -34,7 +34,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
-hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization"]
+# bayesian-optimization<2: Ray Tune's BayesOptSearch (2.58) calls bayes_opt.UtilityFunction, removed in 2.0.
+hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization<2"]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0"]
 
 [build-system]
