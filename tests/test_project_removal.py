@@ -1371,17 +1371,14 @@ def test_release_response_refusal_names_the_bound_root_for_the_backends_own_proj
         project_paths.restore_binding(before)
 
 
-def test_refuses_a_live_run_then_admits_once_it_is_stale(client, tmp_path):
+def test_refuses_a_live_run_then_admits_once_it_is_stale(client, tmp_path, monkeypatch):
     from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     ws = tmp_path.parent
     open_project, target = _seed(ws)
     exp_id = "exp1"
-    ts.replace(
-        experiments.status_key(exp_id, root=target),
-        {"state": "training", "heartbeat": "2099-01-01T00:00:00+00:00"},
-        expect=ts.Version.ABSENT,
-    )
+    opened_run(target, detection_config(tmp_path / "run-data"), experiment_id=exp_id)
 
     resp = client.post(
         "/api/projects/remove",
@@ -1390,12 +1387,7 @@ def test_refuses_a_live_run_then_admits_once_it_is_stale(client, tmp_path):
     assert resp.status_code == 409
     assert exp_id in resp.json()["detail"]
 
-    current = ts.read_versioned(experiments.status_key(exp_id, root=target))
-    ts.replace(
-        experiments.status_key(exp_id, root=target),
-        {"state": "completed", "heartbeat": "2026-01-01T00:00:00+00:00"},
-        expect=current.version,
-    )
+    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
     resp2 = client.post(
         "/api/projects/remove",
         json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
@@ -1433,30 +1425,41 @@ def test_refuses_a_non_terminal_inference_job_then_admits_once_terminal(client, 
             _registry.jobs.pop("j1", None)
 
 
-def test_refuses_a_non_terminal_tuning_job_then_admits_once_terminal(client, tmp_path):
-    from tcip_web.routes.tuning import HPOJob, _registry
+def test_refuses_a_running_sweep_then_admits_once_it_ended(client, tmp_path):
+    """A sweep opened under the target reads running off its own directory and refuses removal
+    naming it; once its final status is written the same request is admitted."""
+    from tcip_mcp import experiments, workspace
+    from tcip_mcp.tools.training_tools import open_sweep
+    from tests._verified_checkpoint_fixtures import detection_config
 
     ws = tmp_path.parent
     open_project, target = _seed(ws)
-    job = HPOJob(sweep_id="sw1", status="running", platform_root=str(target))
-    _registry.register(job.sweep_id, job, job_root=job.platform_root)
+    workspace.activate_project(target.name)
     try:
-        resp = client.post(
-            "/api/projects/remove",
-            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
-        )
-        assert resp.status_code == 409
-        assert "sw1" in resp.json()["detail"]
-
-        job.status = "completed"
-        resp2 = client.post(
-            "/api/projects/remove",
-            json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
-        )
-        assert resp2.status_code == 200
+        opened = open_sweep(
+            detection_config(tmp_path / "sweep-data"), None, n_trials=1, search_alg="random",
+            scheduler="none", grace_period=5, reduction_factor=3, warm_start=False,
+            baseline_params=None, max_concurrent=1, resources_per_trial=None, study_name="sw1",
+            split_draws=1, split_draw_seeds=None, search_seed=0, trial_budget=None,
+            relaunched_from=None)
     finally:
-        with _registry.lock:
-            _registry.jobs.pop("sw1", None)
+        workspace.activate_project(open_project.name)
+    assert not isinstance(opened, dict), opened
+    assert opened.directory.is_relative_to(target), opened.directory
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp.status_code == 409
+    assert "sw1" in resp.json()["detail"]
+
+    experiments.write_final_status(opened.directory, "completed", None)
+    resp2 = client.post(
+        "/api/projects/remove",
+        json={"name": "sample_plot_target", "confirm_name": "sample_plot_target", "user": "t"},
+    )
+    assert resp2.status_code == 200
 
 
 def test_refuses_a_non_terminal_review_priority_queue_job_then_admits_once_terminal(client, tmp_path):

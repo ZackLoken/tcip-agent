@@ -29,7 +29,7 @@ from tests._population import mapped_plants
 def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_real_bindings(
     tmp_path: Path,
 ) -> None:
-    sha = record_producing_run(tmp_path, "exp-producer")
+    sha = record_producing_run("exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
@@ -75,7 +75,7 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
 ) -> None:
     """A real delivery's document_reconciliations and dimension_reconciliations come back
     through read_delivery_events exactly as the door computed them."""
-    sha = record_producing_run(tmp_path, "exp-producer")
+    sha = record_producing_run("exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
@@ -107,7 +107,7 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
 def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     tmp_path: Path,
 ) -> None:
-    sha = record_producing_run(tmp_path, "exp-producer")
+    sha = record_producing_run("exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
 

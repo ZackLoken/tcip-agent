@@ -82,8 +82,8 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.model_tools import register_model
+    from tests.tiny_trainer_fixtures import trainer_run
 
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bright_region_detector",
@@ -96,7 +96,7 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
     }
     train_ds, _val, _partition = auto_train_val("detection", data_cfg, None)
     collate = task_collate("detection")
-    run = create_run(config, str(out_dir), id=out_dir.name)
+    run = trainer_run(config, out_dir, has_val_loader=True, id=out_dir.name)
     completed = train(run, DataLoader(train_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate))
     assert completed.status == "completed", completed.status

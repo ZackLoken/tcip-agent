@@ -1046,9 +1046,8 @@ def resolve_sizes(
     Read over every sample the loaders are built from: a class reaching only one side sizes both,
     and two sources disagreeing about their band count refuse. A stated band count is taken as
     given and nothing is probed. A built-in loader's ground truth derives at most one count, its
-    ``ground_truth_count``, and that derived count is the one resolved: a stated count other than
-    it refuses, and a stated count that ground truth does not derive refuses (a scoped run's class
-    count is its map's length).
+    ``ground_truth_count``, and that derived count is the one resolved: any stated count refuses
+    (a scoped run's class count is its map's length).
 
     For a task no built-in loader reads and for a bespoke ``dataset_source``, the band count the
     sources carry and only the counts the caller states.
@@ -1063,28 +1062,21 @@ def resolve_sizes(
         resolved["num_channels"] = _band_count(samples)
     if cls is None:
         return resolved
-    name = cls.ground_truth_count
-    underived = [stated for stated in GROUND_TRUTH_COUNTS if stated in resolved and stated != name]
-    if underived:
+    stated_counts = [count for count in GROUND_TRUTH_COUNTS if count in resolved]
+    if stated_counts:
         raise ValueError(
-            f"this {task} run states {underived}, a count its ground truth does not derive: a "
-            f"second count beside the one the run's own ground truth or class map carries would "
-            f"size a head the record does not describe. Drop {underived} from data."
+            f"this {task} run states {stated_counts}: a built-in loader's count is the one its "
+            f"ground truth or class map derives, never an input, and a second value beside it "
+            f"would size a head the record does not describe. Drop {stated_counts} from data."
         )
+    name = cls.ground_truth_count
     if name is None:
         return resolved
     ids = (Counter(int(v) for s in samples
                    for v in np.unique(cls.read_mask(Path(s.ground_truth))))
            if cls.ground_truth_shape == MASK
            else Counter(int(value) for value in _values_by_sample(samples)))
-    held = num_classes_from_distribution(ids)
-    if resolved.get(name, held) != held:
-        raise ValueError(
-            f"this {task} run states {name}={resolved[name]}, and the ground truth it was handed "
-            f"derives {name}={held}: a built-in loader's count is the one its ground truth "
-            f"derives. Drop {name} from data, or fix the ground truth."
-        )
-    resolved[name] = held
+    resolved[name] = num_classes_from_distribution(ids)
     return resolved
 
 

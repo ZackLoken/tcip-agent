@@ -138,8 +138,9 @@ def test_unbacked_stamp_does_not_deliver(tmp_path):
 
 
 def test_record_absent_from_the_experiment_store_floors(tmp_path):
-    """A pointer at an experiment that never ran, and at a row no experiment holds, both floor."""
-    from tcip_mcp.experiments import create_experiment, experiments_scope
+    """A pointer at a run that never ran, and at a row no run holds, both floor."""
+    from tcip_mcp.experiments import experiments_dir
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
@@ -150,9 +151,9 @@ def test_record_absent_from_the_experiment_store_floors(tmp_path):
     no_experiment = _count_validity(pred_dir)
     assert no_experiment["validated"] == "false"
     note = no_experiment["binding_notes"][str(pred_dir)]
-    assert "exp_that_never_ran" in note and experiments_scope() in note
+    assert "exp_that_never_ran" in note and str(experiments_dir()) in note
 
-    create_experiment("exp_that_never_ran", {"derived_from": "an experiment with no such row"})
+    opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp_that_never_ran")
     no_row = _count_validity(pred_dir)
     assert no_row["validated"] == "false"
     assert "0123456789abcdef" in no_row["binding_notes"][str(pred_dir)]
@@ -467,23 +468,23 @@ def test_validated_stamp_without_a_trait_is_refused_at_write(tmp_path):
 # --- the residual, recorded rather than implied away ---------------------------------------
 
 def test_a_row_appended_through_the_storage_seam_still_delivers(tmp_path):
-    """The storage seam's own append is generic and public, and nothing here closes it.
+    """The run directory's own row append is generic and public, and nothing here closes it.
 
-    Making the validations appender module-private removes the supported way to hand over a verdict;
-    it does not remove the way. An in-process caller that appends a row it authored, and stamps a
-    bucket naming that row, delivers validated. This is the boundary as it stands, and it fails the
-    day someone believes it moved.
+    Keeping the validations appender to the calibration doors removes the supported way to hand
+    over a verdict; it does not remove the way. An in-process caller that appends a row it
+    authored, and stamps a bucket naming that row, delivers validated. This is the boundary as it
+    stands, and it fails the day someone believes it moved.
     """
-    import tcip_store
-
-    from tcip_mcp.experiments import create_experiment, validation_digest, validations_key
+    from tcip_mcp.experiments import VALIDATIONS_FILE, append_row, validation_digest
     from tcip_mcp.pipelines.resolution import claim_payload, write_sidecar
     from tcip_mcp.prediction_buckets import bucket_content_digest
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     stamp = _count_stamp()
-    create_experiment(PRODUCING_RUN, {"derived_from": "a run whose validations were never earned"})
+    run_dir = opened_run(None, detection_config(tmp_path / "run-data"),
+                         experiment_id=PRODUCING_RUN)
     body = {
         "document": "operating_point", "trait": TRAIT,
         "claim": claim_payload(stamp, document="operating_point"),
@@ -493,7 +494,7 @@ def test_a_row_appended_through_the_storage_seam_still_delivers(tmp_path):
         "covered_buckets": {"predictions/live/2026-03-04": bucket_content_digest(pred_dir)},
         "dataset_root": str(root.resolve()), "recorded_at": "2026-03-04T12:00:00+00:00",
     }
-    tcip_store.append(validations_key(PRODUCING_RUN), body)
+    append_row(run_dir / VALIDATIONS_FILE, body)
 
     write_sidecar(pred_dir, {**stamp, "validated_by": {
         "experiment_id": PRODUCING_RUN, "record_digest": validation_digest(body)}})
@@ -554,7 +555,7 @@ def test_a_claim_earned_through_the_two_phases_delivers_validated(tmp_path):
     """The gate runs once over the evidence, the record covers the files that landed, and it
     verifies."""
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import read_validations
+    from tcip_mcp.experiments import VALIDATIONS_FILE, find_run, read_rows
     from tcip_mcp.prediction_buckets import bucket_content_digest
 
     root = tmp_path / "ds"
@@ -562,7 +563,8 @@ def test_a_claim_earned_through_the_two_phases_delivers_validated(tmp_path):
 
     experiment_id = stamped["validated_by"]["experiment_id"]
     assert experiment_id.startswith("calibration_")  # no producing run, so the claim hangs off one
-    row = next(r for r in read_validations(experiment_id) if r["claim"])
+    rows, _ = read_rows(find_run(experiment_id) / VALIDATIONS_FILE)
+    row = next(r for r in rows if r["claim"])
     assert row["producing_experiment_id"] is None
     assert row["covered_buckets"] == {
         "predictions/live/2026-03-04": bucket_content_digest(pred_dir)}

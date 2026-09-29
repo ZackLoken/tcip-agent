@@ -208,9 +208,9 @@ regardless, and is unaffected by a caller's project root.
   `burrs_density`), a raster count inherits that undercount.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `run_inference` publishes with (the same bucket-immutability resolution, refusing on a
-  verdict or on a document a prior run left with none; the tile gate, count-claim gate,
-  frozen-lineage-pointer refusal, write, lineage link, gated only by `allow_unvalidated_staging`,
-  never a route to ship the CSV unvalidated), then hands `export_detection_csv` that bucket; a
+  verdict or on a document a prior run left with none; the tile gate, count-claim gate and
+  write, gated only by `allow_unvalidated_staging`, never a route to ship the CSV unvalidated;
+  the bucket's stamp names the run that produced its checkpoint, the one link back), then hands `export_detection_csv` that bucket; a
   document refusal returns before the checkpoint is loaded. The CSV's own delivery gate
   then runs exactly once, inside the writer, never a second time at the door. Without a
   `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own

@@ -65,7 +65,7 @@ def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overr
     monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, model_source={
+    ckpt = registered_checkpoint(tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
         "task": "detection",

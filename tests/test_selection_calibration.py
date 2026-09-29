@@ -18,7 +18,7 @@ pytest.importorskip("pycocotools")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines.data.split_construction import recorded_side  # noqa: E402
+from tcip_mcp.pipelines.data.split_construction import partition_samples  # noqa: E402
 from tests._clear_prediction_bucket_fixtures import write_image  # noqa: E402
 from tests._regime_fixtures import stub_pass  # noqa: E402
 
@@ -426,20 +426,21 @@ def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_sel
     tmp_path: Path,
 ):
     import tcip_mcp.pipelines.calibration as calibration
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
     other_out = tmp_path / "m2"
     _draw(root, other_out, seed=3)
-
-    bound = _CalStub()
-    bound.config["data"]["split"] = {"selection_binding": {"selection_dir": str(other_out)}}
+    resolved_run(None, {"split": {"selection_dir": str(other_out)}},
+                 experiment_id="exp-bound-other")
 
     with pytest.raises(ValueError, match="bound to the selection"):
         calibration.calibrate_operating_point(
-            stub_pass(bound), "bud_opening", str(root / "annotations" / DATES[0]),
-            str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
+            stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), selection_dir=str(out),
+            experiment_id="exp-bound-other", **_CAL_KWARGS)
 
 
 def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selection_respelled(
@@ -451,13 +452,12 @@ def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selec
     import os
 
     import tcip_mcp.pipelines.calibration as calibration
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
-
-    bound = _CalStub()
-    bound.config["data"]["split"] = {"selection_binding": {"selection_dir": str(out)}}
+    resolved_run(None, {"split": {"selection_dir": str(out)}}, experiment_id="exp-bound-own")
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -465,8 +465,9 @@ def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selec
         respellings = [str(out) + os.sep, str(out).replace(os.sep, "/"), os.path.relpath(out)]
         for spelling in respellings:
             _bundle, _dh, _n_excl, evidence = calibration.calibrate_operating_point(
-                stub_pass(bound), "bud_opening", str(root / "annotations" / DATES[0]),
-                str(root / "images" / DATES[0]), selection_dir=spelling, **_CAL_KWARGS)
+                stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
+                str(root / "images" / DATES[0]), selection_dir=spelling,
+                experiment_id="exp-bound-own", **_CAL_KWARGS)
             assert evidence["reference_inputs"]["stated_values"]["selection_dir"] == spelling
     finally:
         os.chdir(cwd)
@@ -480,7 +481,7 @@ def _evaluate_under(root: Path, out: Path, tmp_path: Path, **kwargs):
 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     return evaluate_model(
         ckpt, str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0]), selection_dir=str(out), **kwargs)
 
@@ -741,7 +742,7 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
 
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import experiment_dir, find_validation, observe
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import (
         dataset_hash, read_operating_point_sidecar, verify_stamp_binding,
@@ -769,9 +770,9 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
     result = itools.run_inference(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "baseline" / DATES[0]),
@@ -787,7 +788,8 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
     assert binding.claimed is True
 
     pointer = stamp["validated_by"]
-    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    row = find_validation(observe(experiment_dir(pointer["experiment_id"])),
+                          pointer["record_digest"])
     identity = row["reference_identity"]
     assert identity["label_stems"]["calibration"]["count"] == len(universe)
     assert identity["stated_values"]["selection_dir"] == str(out)
@@ -799,12 +801,11 @@ def test_a_calibration_date_holding_no_training_members_is_checked_not_unresolva
     The producer's foreground floor is global, so that is legitimate work: the checks read the
     directory the calibration named, find its training side explicitly empty, and answer checked
     with no leak, never "this run recorded no training provenance"."""
-    from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
     from tcip_mcp.pipelines.operating_point import (
         _selection_disjointness, _train_disjointness,
     )
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -825,23 +826,18 @@ def test_a_calibration_date_holding_no_training_members_is_checked_not_unresolva
         samples=tuple(_sided(s) for s in drawn.samples), scope=drawn.scope, seed=drawn.seed,
         group_by=drawn.group_by))
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment("exp-calibration-only-date", {})
-    persist_run_partition("exp-calibration-only-date", data_cfg,
-                          partition=partition)
+    run_id = resolved_run(None, {"split": {"selection_dir": str(out)}}).name
 
     cal_labels = str(_labels_dir(root, DATES[1]))
     cal_ids = {Path(s.ground_truth).stem for s in drawn.samples
                if Path(s.ground_truth).parent.name == DATES[1]}
 
-    trained = _train_disjointness(
-        "exp-calibration-only-date", cal_ids, set(), calibration_labels_dir=cal_labels)
+    trained = _train_disjointness(run_id, cal_ids, set(), calibration_labels_dir=cal_labels)
     assert trained["unresolvable"] is False and trained["checked"] is True
     assert not trained["leaked_stems"]
 
     selected = _selection_disjointness(
-        "exp-calibration-only-date", cal_ids, set(),
+        run_id, cal_ids, set(),
         selection_dir=str(out), calibration_labels_dir=cal_labels)
     assert selected["applicable"] is True
     assert selected["unresolvable"] is False
@@ -855,18 +851,14 @@ def test_a_crop_annotated_after_the_draw_is_grouped_by_the_policy_the_selection_
     sibling crop of a training parent, annotated after the draw, is in no map; the recorded policy
     is what says which parent it belongs to, so a calibration universe holding it is caught as a
     leak of that parent's group rather than read as an unrelated stem."""
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
     from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment("exp-late-crop", {})
-    persist_run_partition("exp-late-crop", data_cfg, partition=partition)
+    run_id = resolved_run(None, {"split": {"selection_dir": str(out)}}).name
 
     labels_dir = _labels_dir(root)
     trained_here = sorted(_side_this_date(drawn, "train"))
@@ -879,7 +871,7 @@ def test_a_crop_annotated_after_the_draw_is_grouped_by_the_policy_the_selection_
         [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))], IMG, IMG)
 
     resolved = _train_disjointness(
-        "exp-late-crop", {late_crop}, set(), calibration_labels_dir=str(labels_dir))
+        run_id, {late_crop}, set(), calibration_labels_dir=str(labels_dir))
 
     recorded_key = next(s.group for s in drawn.on("train")
                         if Path(s.ground_truth).stem == parent
@@ -918,7 +910,8 @@ def test_a_sample_backed_loaders_records_name_the_members_the_partition_recorded
     records = records_over_loader(
         _NoDetections(), loader, torch.device("cpu"), "detection")
 
-    assert {r["image_id"] for r in records} == set(recorded_side(partition, "train"))
+    assert {r["image_id"] for r in records} == {
+        s.member for s in partition_samples(partition) if s.side == "train"}
 
 
 class _BespokeStemDataset:
@@ -975,31 +968,33 @@ def test_a_bespoke_datasets_own_stems_name_its_records(tmp_path: Path):
 
 
 def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, monkeypatch):
-    """``draw_splits`` draws three sides; ``auto_train_val`` binds an experiment to the
-    selection's train/val and persists that partition (no trainer runs here, and the calibration
-    itself is stubbed); ``run_inference`` calibrates under it with that run as producer; the
-    sealed row carries ``label_stems.calibration`` and a checked, leak-free
-    ``selection_disjointness``; and ``verify_stamp_binding`` verifies the delivered bucket."""
+    """``draw_splits`` draws three sides; a run bound to the selection's train/val resolves that
+    partition and completes a checkpoint (the calibration itself is stubbed); ``run_inference``
+    calibrates that checkpoint with its run as producer; the sealed row carries
+    ``label_stems.calibration`` and a checked, leak-free ``selection_disjointness``; and
+    ``verify_stamp_binding`` verifies the delivered bucket."""
     import tcip_mcp.pipelines.calibration as calibration
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
 
-    from tcip_mcp.experiments import create_experiment, find_validation
+    from tcip_mcp.experiments import experiment_dir, find_validation, observe
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import (
         dataset_hash, read_operating_point_sidecar, verify_stamp_binding,
     )
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, worker_run
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    experiment_id = "exp_round_trip_bound"
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    run_dir = worker_run(None, {
+        "model_source": dict(BUILT_DETECTOR), "training_source": "tests.bespoke_models:save_built_weights",
+        "data": {"split": {"selection_dir": str(out)}}})
+    experiment_id = run_dir.name
+    completed = observe(run_dir).checkpoint
+    assert completed is not None
 
     universe = _calibration_this_date(drawn)
     dh = dataset_hash(root / "annotations" / DATES[0], stems=universe)
@@ -1023,17 +1018,13 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, dh, 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     result = itools.run_inference(
-        str(ckpt), images_dir=str(root / "images" / DATES[0]),
+        completed["path"], images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "bound" / DATES[0]),
         device="cpu", tile=False, trait="bud_opening",
         calibration_labels_dir=str(root / "annotations" / DATES[0]),
-        selection_dir=str(out), experiment_id=experiment_id)
+        selection_dir=str(out))
     assert "error" not in result, result
     bucket = result["output_dir"]
 
@@ -1043,7 +1034,9 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     assert binding.claimed is True
 
     pointer = stamp["validated_by"]
-    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert pointer["experiment_id"] == experiment_id
+    row = find_validation(observe(experiment_dir(pointer["experiment_id"])),
+                          pointer["record_digest"])
     assert row["reference_identity"]["label_stems"]["calibration"]["count"] == len(universe)
     assert row["selection_disjointness"]["applicable"] is True
     assert row["selection_disjointness"]["checked"] is True

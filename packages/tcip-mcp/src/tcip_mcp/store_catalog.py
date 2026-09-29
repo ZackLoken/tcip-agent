@@ -11,15 +11,13 @@ import os
 from pathlib import Path
 
 from tcip_store import registered_stores
-from tcip_store.layout_claims import (
-    CURATED, EXPERIMENTS, HPO_ROOT, PREDICTION_BUCKET, ROOT, RUN, SPLITS, STATE, SWEEP,
-)
+from tcip_store.layout_claims import PREDICTION_BUCKET, ROOT, RUN, SPLITS, STATE
 
 from tcip_annotation import json_io, review_engine  # noqa: F401
+from tcip_mcp import experiments
 from tcip_mcp import (  # noqa: F401
     audit,
     dataset_layout,
-    experiments,
     model_registry,
     operationalization,
     project_record,
@@ -29,19 +27,17 @@ from tcip_mcp import (  # noqa: F401
     workspace,
 )
 from tcip_mcp.project_paths import project_state_dir
-from tcip_mcp.pipelines import model_build, resolution  # noqa: F401
+from tcip_mcp.pipelines import resolution  # noqa: F401
 from tcip_mcp.pipelines.data import band_groups, selection, splits  # noqa: F401
-from tcip_mcp.pipelines.data.split_construction import bound_selection_dir
 from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
 from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
-from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo  # noqa: F401
+from tcip_mcp.pipelines.training import hpo  # noqa: F401
 from tcip_mcp.tools import (  # noqa: F401
     data_tools,
     inference_tools,
     meta_tools,
     project_tools,
     proposal_tools,
-    training_tools,
 )
 
 
@@ -73,27 +69,19 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
 
     Every root here comes from a record the project itself holds, or from walking a directory a
     record already named, never from a directory guessed with no record behind it: the registered
-    dataset roots from the project's own registry, an HPO sweep's directory found under the
-    project's own recorded HPO root, and a run's output directory, selection binding,
-    curated-dataset artifact and prediction-bucket lineage from that run's own
-    ``experiments/<id>/`` members. A recorded directory that no longer exists is skipped.
+    dataset roots from the project's own registry, and each run directory with the selection its
+    resolved record bound. A recorded directory that no longer exists is skipped.
 
     Per layout:
 
-    - ``ROOT``/``STATE``/``EXPERIMENTS``: the project's own root, plus ``.tcip/state`` and
-      ``.tcip/experiments`` under it; ``ROOT`` and ``STATE`` for every registered dataset too.
-    - ``HPO_ROOT``: ``.tcip/hpo`` under the project root
-      (:func:`tcip_mcp.tools.training_tools.hpo_root`'s default).
-    - ``SWEEP``: one root per immediate subdirectory of the project's own HPO root
-      (:func:`~tcip_mcp.tools.training_tools.sweep_dir`).
-    - ``RUN``: each experiment's own ``status.json["output_dir"]``.
-    - ``SPLITS``: each experiment's own ``split.json["selection_binding"]["selection_dir"]``,
-      present only for a run bound to an existing selection.
-    - ``CURATED``: each experiment's own ``artifacts.json["curated_dataset"]["path"]``.
+    - ``ROOT``/``STATE``: the project's own root and ``.tcip/state`` under it, and every
+      registered dataset's.
+    - ``RUN``: each run directory (``experiments.run_observations``).
+    - ``SPLITS``: the selection directory each bound training run's partition names, off the same
+      walk, present only while that directory exists.
     - ``PREDICTION_BUCKET``: every model directory and its date subdirectories under each dataset's
       own ``predictions/`` tree, live and cleared alike
-      (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs` with ``include_cleared=True``), and
-      each experiment's own ``lineage.json["predictions"]``.
+      (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs` with ``include_cleared=True``).
     """
     root = Path(project_root).absolute()
     roots: list[tuple[str, str]] = []
@@ -101,35 +89,13 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
 
     _add(roots, seen, root, ROOT)
     _add(roots, seen, project_state_dir(root), STATE)
-    _add(roots, seen, root / ".tcip" / "experiments", EXPERIMENTS)
 
-    hpo_dir = training_tools.hpo_root(root=root)
-    _add(roots, seen, hpo_dir, HPO_ROOT)
-    if hpo_dir.is_dir():
-        for entry in sorted(p for p in hpo_dir.iterdir() if p.is_dir()):
-            _add(roots, seen, entry, SWEEP)
-
-    for exp_id in experiments.experiment_ids_with_status(root):
-        status = experiments.read_member(experiments.status_key(exp_id, root=root), {})
-        output_dir = status.get("output_dir") if isinstance(status, dict) else None
-        if output_dir:
-            _add_if_dir(roots, seen, Path(output_dir).absolute(), RUN)
-
-        split_doc = experiments.read_member(experiments.split_key(exp_id, root=root), {})
-        selection_dir = bound_selection_dir(split_doc)
-        if selection_dir:
-            _add_if_dir(roots, seen, Path(selection_dir).absolute(), SPLITS)
-
-        artifacts = experiments.read_member(experiments.artifacts_key(exp_id, root=root), {})
-        curated = artifacts.get("curated_dataset") if isinstance(artifacts, dict) else None
-        curated_path = curated.get("path") if isinstance(curated, dict) else None
-        if curated_path:
-            _add_if_dir(roots, seen, Path(curated_path).absolute(), CURATED)
-
-        lineage = experiments.read_member(experiments.lineage_key(exp_id, root=root), {})
-        predictions = lineage.get("predictions") if isinstance(lineage, dict) else None
-        if predictions:
-            _add_if_dir(roots, seen, Path(predictions).absolute(), PREDICTION_BUCKET)
+    for run in experiments.run_observations(root):
+        _add(roots, seen, run.directory.absolute(), RUN)
+        binding = (run.record["resolved"]["partition"]["selection"]
+                   if run.record["config"] is not None else None)
+        if binding is not None:
+            _add_if_dir(roots, seen, Path(binding["selection_dir"]).absolute(), SPLITS)
 
     for dataset_entry in project_tools.read_datasets(root):
         dataset_root = project_tools.dataset_entry_path(root, dataset_entry).absolute()

@@ -17,12 +17,11 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader  # noqa: E402
 
-from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, recorded_side,
-)
+from tcip_mcp.pipelines.data.split_construction import auto_train_val  # noqa: E402
+from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
@@ -156,7 +155,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
     assert recorded_side(partition, "train") and recorded_side(partition, "val")
     assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
         [f"img{i}" for i in range(4)]
-    assert sorted(partition) == [str(csv_path)]
+    assert {s["ground_truth"] for s in partition["samples"]} == {str(csv_path)}
     by_row = dict(rows)
     for key, rank in zip(train_ds.stems, train_ds._ranks):
         assert rank == by_row[train_ds.member_of(key)]
@@ -227,12 +226,13 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert train_ds.tile_size == 128 and val_ds.tile_size == 128
     assert train_ds.num_samples > 0 and val_ds.num_samples > 0
     assert set(train_ds.tile_entries).isdisjoint(set(val_ds.tile_entries))
-    assert data_cfg["split"]["resolved_group_by"] == "spatial_strip"
+    # The partition holds the one source; its regions are the spatial manifest's.
+    assert recorded_side(partition, "train") == [stem]
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["train_identities"] and manifest["val_identities"]
     assert set(manifest["train_identities"]).isdisjoint(set(manifest["val_identities"]))
@@ -356,11 +356,11 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(stems)
-    assert data_cfg["split"]["resolved_group_by"] == "stem"
+    assert partition["group_by"] == "stem"
 
 
 def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path: Path):
@@ -381,9 +381,9 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
-    assert data_cfg["split"]["resolved_group_by"] == "explicit_map"
+    assert partition["group_by"] == "explicit_map"
 
 
 # reserve_calibration_fraction: the four-way split (train/val/test/calibration).
@@ -410,16 +410,17 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     """The sizes a run's config states reach the one-source spatial route too: a run configured
     for one channel indexes its tile lattice and reads its tiles at one channel, rather than
     probing its own source back to three."""
-    images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True, "num_channels": 1,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
-    assert data_cfg["split"]["resolved_group_by"] == "spatial_strip"
+    assert recorded_side(partition, "train") == [stem]
+    assert "spatial_manifest" in data_cfg["split"]
     assert train_ds.expected_channels == val_ds.expected_channels == 1
     image, _target = train_ds[0]
     assert image.shape[0] == 1
@@ -614,7 +615,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     admitted = admit_over(images_dir, labels_dir, subject="bud")
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
         spatial_single_source_split(
-            admitted.every_sample()[0], admitted.scope, tiling, split_cfg, None,
+            admitted.every_sample()[0], admitted.scope, tiling, split_cfg,
             resolve_sizes("detection", {}, admitted.every_sample()))
 
 
@@ -731,7 +732,8 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
     }
-    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-77")
+    run = trainer_run(cfg, tmp_path / "out", has_val_loader=val_loader is not None,
+                      id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)

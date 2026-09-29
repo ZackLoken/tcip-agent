@@ -64,9 +64,9 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     platform's own checkpoint registration, load and ``build_predictor``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {}, "task": task}
-    path = registered_checkpoint(tmp_path, project_root=tmp_path, model_source=src)
+    path = foreign_checkpoint(tmp_path, model_source=src)
     return build_predictor(load_registered_checkpoint(path, project_path=str(tmp_path)),
                            device="cpu")

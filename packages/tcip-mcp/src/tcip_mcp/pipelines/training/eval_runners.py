@@ -1,52 +1,12 @@
-"""Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and writes
+"""Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and returns
 its scored result; ``evaluation.py`` keeps the metrics computation itself.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
-from tcip_store.file_backend import RootedFileLocator
-
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF, DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE,
 )
-
-_RESULTS_DOC = RootedFileLocator(suffix=".json")
-
-EVALUATION_RESULTS_STORE = "evaluation_results"
-register_store(
-    StoreDescriptor(
-        name=EVALUATION_RESULTS_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_RESULTS_DOC,
-    )
-)
-
-_RESULTS_DOCUMENT = "test_results"
-
-
-def evaluation_results_key(output_dir: Path | str) -> Key:
-    """Where one evaluation run's scored result lands, under the directory it was given.
-
-    Measurement output, so it is durable and written whole. ``last_writer_wins``: an
-    evaluation composes its entire result in memory and writes it once; a later evaluation
-    into the same directory is a new measurement replacing the old one, not a merge into it.
-    """
-    return Key(EVALUATION_RESULTS_STORE, str(Path(output_dir).resolve()), (_RESULTS_DOCUMENT,))
-
-
-def evaluation_results_path(output_dir: Path | str) -> Path:
-    """The result record's own file, spelled the way the caller spelled ``output_dir``, resolved
-    through the store's locator.
-    """
-    relative = _RESULTS_DOC.relative_path("", (_RESULTS_DOCUMENT,))
-    return Path(output_dir).joinpath(*relative.parts)
 
 
 def _producer_identity(checkpoint) -> dict:
@@ -65,35 +25,31 @@ _COMMON_EVAL_FIELDS = (
 )
 
 
-def write_evaluation_result(output_dir: Path | str, common: dict, extra: dict) -> dict:
-    """Write one evaluation-result record through ``store.replace`` on ``evaluation_results_key``.
-
-    ``common`` carries the identity tuple both regimes share (``_COMMON_EVAL_FIELDS``);
-    ``experiment_id`` may be ``None``, but every key must be present, or this refuses. ``extra``
-    carries this regime's own fields (metrics included) and is written through unmodified. A key
-    present in both ``common`` and ``extra`` refuses.
+def evaluation_result(common: dict, extra: dict) -> dict:
+    """One evaluation's result: ``common``, the identity tuple both regimes share
+    (``_COMMON_EVAL_FIELDS``, ``experiment_id`` possibly ``None`` but every key present, or this
+    refuses), followed by ``extra``, this regime's own fields (metrics included), unmodified. A key
+    present in both refuses.
     """
     missing = [field for field in _COMMON_EVAL_FIELDS if field not in common]
     if missing:
         raise ValueError(
-            f"write_evaluation_result: common is missing required field(s): {missing}")
+            f"evaluation_result: common is missing required field(s): {missing}")
     collisions = sorted(set(common) & set(extra))
     if collisions:
         raise ValueError(
-            f"write_evaluation_result: extra collides with common on field(s): {collisions}")
-    result = {**{field: common[field] for field in _COMMON_EVAL_FIELDS}, **extra}
-    store.replace(evaluation_results_key(output_dir), result)
-    return result
+            f"evaluation_result: extra collides with common on field(s): {collisions}")
+    return {**{field: common[field] for field in _COMMON_EVAL_FIELDS}, **extra}
 
 
 def run_test_evaluation(
-    checkpoint, model, loader, device, output_dir: str, *,
+    checkpoint, model, loader, device, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     tiling: dict | None = None, trait: str | None = None,
     selection_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
-    """Evaluate ``loader`` against ``model``, write ``test_results.json``.
+    """Evaluate ``loader`` against ``model`` and return the result (:func:`evaluation_result`).
 
     ``model`` is the caller's own built model, scored at the in-model operating point it was built
     with. ``checkpoint`` is that model's ``VerifiedCheckpoint``
@@ -107,7 +63,7 @@ def run_test_evaluation(
     for a delivery-grade metric.
 
     ``selection_dir``/``evaluated_stem_count`` are the caller's own record of the selection the
-    loader was narrowed to and how many of its samples the loader indexed: recorded verbatim when
+    loader was narrowed to and how many of its samples the loader indexed: carried verbatim when
     given, absent otherwise.
     """
     from tcip_mcp.pipelines.model_build import recorded_model_dims
@@ -134,13 +90,11 @@ def run_test_evaluation(
     if selection_dir is not None:
         extra["selection_dir"] = selection_dir
         extra["evaluated_stem_count"] = evaluated_stem_count
-    result = write_evaluation_result(output_dir, common, extra)
-    result["results_path"] = str(evaluation_results_path(output_dir))
-    return result
+    return evaluation_result(common, extra)
 
 
 def run_full_frame_evaluation(
-    checkpoint, images_dir: str, labels_dir: str, output_dir: str, *,
+    checkpoint, images_dir: str, labels_dir: str, *,
     conf_threshold: float | None = None, iou_threshold: float = 0.5,
     tile_size: int | None = None, overlap: float | None = None,
     cross_tile_nms: float | None = None,
@@ -299,6 +253,4 @@ def run_full_frame_evaluation(
             "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
             "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
         })
-    result = write_evaluation_result(output_dir, common, extra)
-    result["results_path"] = str(evaluation_results_path(output_dir))
-    return result
+    return evaluation_result(common, extra)

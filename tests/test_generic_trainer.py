@@ -8,9 +8,11 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
-from tcip_mcp.pipelines.training import run_registry as rr
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import create_run, draw_seed_if_unset
+from tcip_mcp.pipelines.training.run_registry import TrainRun, draw_seed_if_unset
+
+LOSS_OBJECTIVE = {"selection_metric": "loss", "higher_is_better": False}
+"""A run's objective when it selects on its training loss."""
 
 
 # mint_experiment_id: id uniqueness (same-second and cross-thread)
@@ -43,12 +45,6 @@ def test_mint_experiment_id_unique_across_threads():
         t.join()
 
     assert len(set(results)) == n
-    # Every id, once registered, is retrievable under itself (no silent overwrite).
-    for minted in results:
-        run = create_run({"model_source": {}}, "out", id=minted)
-        assert rr.get_run(minted) is not None
-        assert rr.get_run(minted).id == minted
-        assert run.id == minted
 
 
 # draw_seed_if_unset: reproducibility, every run gets a recorded seed
@@ -85,7 +81,8 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
     config = {"model_source": {}}
     draw_seed_if_unset(config)
-    run = create_run(config, str(tmp_path / "out"), id="auto-run-seed-applied")
+    run = TrainRun(id="auto-run-seed-applied", config=config, objective=LOSS_OBJECTIVE,
+                   output_dir=str(tmp_path / "out"))
     train(run, train_loader=None)  # fails at build, after seeding
 
     assert captured["seed"] == run.config["seed"]
@@ -101,7 +98,8 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     blocker.write_text("I am a file, not a directory")
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    run = create_run({"model_source": {}}, str(blocker / "out"), id="auto-run-unwritable")
+    run = TrainRun(id="auto-run-unwritable", config={"model_source": {}},
+                   objective=LOSS_OBJECTIVE, output_dir=str(blocker / "out"))
     run = train(run, train_loader=None)
 
     assert run.status == "failed"  # not stuck at "running"
@@ -119,9 +117,9 @@ def _run_artifacts(directory):
 
 def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
     """A checkpoint is only worth writing if ``torch.load`` returns the payload unchanged."""
-    key = gt.checkpoint_key(tmp_path, "model_best")
+    path = gt.checkpoint_path(tmp_path, "model_best")
 
-    landed = gt.write_checkpoint({"epoch": 3, "weights": torch.zeros(2, 2)}, key)
+    landed = gt.write_checkpoint({"epoch": 3, "weights": torch.zeros(2, 2)}, path)
 
     loaded = torch.load(landed, weights_only=False)
     assert loaded["epoch"] == 3
@@ -131,15 +129,15 @@ def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
 
 
 def test_a_failed_checkpoint_write_preserves_the_previous_one(tmp_path, monkeypatch):
-    key = gt.checkpoint_key(tmp_path, "model_best")
-    gt.write_checkpoint({"epoch": 1}, key)
+    path = gt.checkpoint_path(tmp_path, "model_best")
+    gt.write_checkpoint({"epoch": 1}, path)
 
     def broken_save(*args, **kwargs):
         raise RuntimeError("simulated crash mid-serialization")
 
     monkeypatch.setattr(gt.torch, "save", broken_save)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        gt.write_checkpoint({"epoch": 2}, key)
+        gt.write_checkpoint({"epoch": 2}, path)
     monkeypatch.undo()
 
     # The previous checkpoint is intact and loadable; the staged file was cleaned up.

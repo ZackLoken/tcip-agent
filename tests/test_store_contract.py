@@ -35,7 +35,6 @@ from tcip_annotation import json_io, review_engine
 from tcip_mcp import (
     audit,
     dataset_layout,
-    experiments,
     model_registry,
     project_record,
     project_status,
@@ -43,18 +42,17 @@ from tcip_mcp import (
     web_client,
     workspace,
 )
-from tcip_mcp.pipelines import image_utils, model_build, resolution
+from tcip_mcp.pipelines import image_utils, resolution
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 from tcip_mcp.pipelines.data import band_groups, selection, splits
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
-from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo
+from tcip_mcp.pipelines.training import hpo
 from tcip_mcp.tools import (
     inference_tools,
     meta_tools,
     project_tools,
-    training_tools,
     proposal_tools,
 )
 from tcip_store.file_backend import (
@@ -84,7 +82,6 @@ from tests._store_worker import (
     register_contract_stores,
     wait_for,
 )
-from tests.test_experiment_validations import _real_selection_disjointness
 
 register_contract_stores()
 
@@ -1400,6 +1397,34 @@ def test_an_append_inside_a_transaction_is_refused_and_the_same_append_outside_i
     assert ts.read(record) == {"n": 1}
 
 
+def test_a_transaction_over_blob_keys_commits_them_together_and_refuses_mixing_kinds(store):
+    """A transaction may name blobs as it names records: it reads each as bytes, stages each
+    write, and commits every one or, on a raise inside it, none. A set mixing a record and a blob
+    refuses before anything is held."""
+    first, second = store.key(BLOB, "first"), store.key(BLOB, "second")
+    ts.put_blob(second, b"kept")
+
+    with pytest.raises(RuntimeError):
+        with ts.transaction(first, second) as txn:
+            txn.write(first, b"staged")
+            raise RuntimeError("the caller found a conflict")
+    assert not ts.exists(first)
+    assert ts.read_blob_versioned(second).value == b"kept"
+
+    with ts.transaction(first, second) as txn:
+        assert txn.read(first, default=None) is None
+        assert txn.read(second) == b"kept"
+        txn.write(first, b"one")
+        txn.write(second, b"two")
+    assert ts.read_blob_versioned(first).value == b"one"
+    assert ts.read_blob_versioned(second).value == b"two"
+
+    with pytest.raises(ts.TransactionMisuse) as mixed:
+        with ts.transaction(store.key(LWW, "record"), first):
+            pass
+    assert "all records or all blobs" in str(mixed.value)
+
+
 def test_a_backend_refuses_to_exist_without_cross_process_locking(store, monkeypatch):
     monkeypatch.setitem(sys.modules, "filelock", None)
     with pytest.raises(ts.BackendUnavailable) as raised:
@@ -1804,17 +1829,11 @@ TRAIT_UNDER_TEST = "trait_under_test"
 DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
 EVENT_ID_UNDER_TEST = "a1b2c3d4e5f60718"
 EXPERIMENT = "exp_042"
-STUDY = "hpo_1a2b3c4d"
-TRIAL_DIR = "trial_00000"
 LOCK_IDENTITY = "d41d8cd98f00b204"
 SWEEP_IDENTITY = "7f3a1b9c2d4e5f60"
-SNAPSHOT_CONTENT = "ab12cd34"
-SNAPSHOT_FILENAME = "my_model.py"
 IMAGE_DATE = "2026-03-04"
 IMAGE_STEM = "a_1"
 IMAGE_EXT = ".JPG"
-
-CHECKPOINT_BYTES = b"PK\x03\x04not a real archive, only bytes handed to the store\x00\xff"
 
 SUBJECT_REGISTRY_BYTES = (
     '{\n'
@@ -1849,7 +1868,6 @@ BAND_GROUP_MANIFEST_BYTES = (
     '  }\n'
     '}\n'
 ).encode("utf-8")
-SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
 LABEL_BYTES = '{"annotations": [{"subject": "bud", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
 
@@ -1968,18 +1986,6 @@ def _real_cal_holdout_lock() -> dict:
     return _construct_via_scratch_backend(draw)
 
 
-def _real_job_registry_summary() -> list[dict]:
-    """The shape ``routes.inference._summary`` writes for one persisted job, called for real."""
-    from tcip_web.routes.inference import InferenceJob, _summary
-
-    job = InferenceJob(
-        job_id="j1", checkpoint_path="model_best.pt", images_dir="images/2026-03-04",
-        output_dir="predictions/live/2026-03-04", conf=0.5, cross_tile_nms=0.5,
-        overlap=0.2, status="completed", platform_root="C:/orchards/valley",
-    )
-    return [_summary(job)]
-
-
 REGISTERED = {
     "image_status": Registered(
         {"bud/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
@@ -2022,10 +2028,6 @@ REGISTERED = {
     "model_registry": Registered(
         [{"name": "detector_v1", "sha256": "0" * 64, "metrics": {"val_map50": 0.61}}],
         model_registry.registry_index_key, ".tcip/models/registry.json"),
-    "job_registry": Registered(
-        _real_job_registry_summary(),
-        lambda root: web_client.job_registry_key("inference_jobs"),
-        ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
     "workspace_active_project": Registered(
         "currant_bud_valley\n", lambda root: workspace.active_project_key(), ".active",
         pin=_pin_workspace),
@@ -2058,57 +2060,6 @@ REGISTERED = {
          "issued_at": "2026-03-04T12:00:00+00:00"},
         lambda root: web_client.canvas_open_binding_key(),
         ".tcip/state/canvas_open_binding.json", pin=_pin_workspace),
-    "experiment_config": Registered(
-        {"model_source": {"builder": "my_module:build"}, "training": {"epochs": 3}},
-        lambda root: experiments.config_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/config.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_status": Registered(
-        {"state": "created", "created": "2026-03-04T12:00:00+00:00"},
-        lambda root: experiments.status_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/status.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_lineage": Registered(
-        {"data_source": "ds", "model_weights": "model_best.pt"},
-        lambda root: experiments.lineage_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/lineage.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_artifacts": Registered(
-        {"weights": {"path": "model_best.pt", "recorded": "2026-03-04T12:00:00+00:00"}},
-        lambda root: experiments.artifacts_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/artifacts.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_env": Registered(
-        {"env": {"python": "3.12"}, "model_kind": "tcip_module", "resumed_from": None},
-        lambda root: experiments.env_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_split": Registered(
-        # every key split_construction.persist_run_partition writes for a run whose producer
-        # named its members, not only the ones a drawn run happens to vary
-        {"seed": 42, "dataset_id": "a1", "dataset_fingerprint": "7ac1",
-         "group_by": "stem_prefix",
-         "members": {"ü/annotations/2026-03-04": {
-             "train": ["img_001"], "val": ["img_002"],
-             "group_key_map": {"img_001": "img", "img_002": "img"},
-             "sources": {"img_001": "ü/images/img_001.jpg",
-                         "img_002": "ü/images/img_002.jpg"},
-             "row_keys": {},
-             "confirmation_bucket": "bud/2026-03-04",
-             "label_digests": {
-                 "at_split": {"img_001": "d1", "img_002": "d2"},
-                 "at_run": {"img_001": "d1", "img_002": "d2"},
-                 "ground_truth": {"img_001": "ü/annotations/2026-03-04/img_001.json",
-                                  "img_002": "ü/annotations/2026-03-04/img_002.json"}},
-         }}},
-        lambda root: experiments.split_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
-    "experiment_metrics": Registered(
-        {"epoch": 1, "timestamp": "2026-03-04T12:00:00+00:00", "loss": 0.5},
-        lambda root: experiments.metrics_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
     "operating_point_sidecar": Registered(
         {"trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
@@ -2217,54 +2168,10 @@ REGISTERED = {
         IMAGE_BYTES,
         lambda root: image_utils.flat_image_key(_band_group_dir(root), "cap_ü.jpg"),
         "images/cap_ü.jpg", root_of=_band_group_dir),
-    "run_checkpoint": Registered(
-        CHECKPOINT_BYTES, lambda root: generic_trainer.checkpoint_key(root, "model_best"),
-        "model_best.pt"),
-    "model_snapshot_manifest": Registered(
-        {"builder": "my_module:build",
-         "files": [{"file": f"{SNAPSHOT_CONTENT}/{SNAPSHOT_FILENAME}", "sha256": "0" * 64,
-                    "bytes": 27}],
-         "missing": [], "snapshot_errors": [], "seed": 7, "notes": "ü"},
-        lambda root: model_build.snapshot_manifest_key(root / EXPERIMENT),
-        f"{EXPERIMENT}/model_src/manifest.json"),
-    "model_snapshot_file": Registered(
-        SNAPSHOT_BYTES,
-        lambda root: model_build.snapshot_file_key(root, SNAPSHOT_CONTENT, SNAPSHOT_FILENAME),
-        f"model_src/{SNAPSHOT_CONTENT}/{SNAPSHOT_FILENAME}"),
-    "evaluation_results": Registered(
-        {"map50": 0.5, "tp": 3, "eval_regime": "full-frame-single-pass", "trait": "messgröße",
-         "loss": None, "loss_state": "positive_infinity"},
-        eval_runners.evaluation_results_key, "test_results.json"),
     "cal_holdout_split_lock": Registered(
         _real_cal_holdout_lock(),
         lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=root),
         f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
-    "hpo_sweep_manifest": Registered(
-        {"study_name": STUDY, "status": "running", "n_trials": 2,
-         "param_space": {"lr": [0.1, 0.01]},
-         "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-         "grace_period": 5, "reduction_factor": 3, "max_concurrent": 1,
-         "warm_start": False, "baseline_params": None, "resources_per_trial": None,
-         "cancel_requested": False},
-        lambda root: training_tools.sweep_manifest_key(STUDY),
-        f".tcip/hpo/{STUDY}/manifest.json", pin=_pin_platform_root,
-        root_of=lambda root: training_tools.hpo_root()),
-    "hpo_study_result": Registered(
-        {"best_params": {"lr": 0.01}, "best_value": 0.25, "n_trials": 2,
-         "all_trials": [
-             {"params": {"lr": 0.1}, "value": None,
-              "value_state": "positive_infinity", "state": "ERROR",
-              "error": "RuntimeError: worker exploded before reporting"},
-             {"params": None, "value": None, "iterations": None, "state": "ERROR",
-              "error": "the trial never answered Ray: its actor died during start"},
-         ]},
-        lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
-        pin=_pin_platform_root, root_of=lambda root: training_tools.hpo_root()),
-    "hpo_trial_config": Registered(
-        {"batch_size": 4, "trial_params": {"lr": 0.01}, "seed": 7},
-        lambda root: training_tools.trial_config_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
-        f".tcip/hpo/{STUDY}/{TRIAL_DIR}/resolved_config.json", pin=_pin_platform_root,
-        root_of=lambda root: training_tools.sweep_dir(STUDY)),
     "ray_dashboard": Registered(
         {"url": "http://127.0.0.1:8265", "pid": 4242, "started_at": "2026-01-01T00:00:00+00:00"},
         lambda root: hpo.ray_dashboard_key(), ".tcip/state/ray_dashboard.json",
@@ -2302,15 +2209,6 @@ REGISTERED = {
          "active_project": "grüne_reihe", "note": "session ended"},
         lambda root: web_client.learning_capture_key(root),
         ".tcip/learning_capture.jsonl"),
-    "hpo_trial_metrics": Registered(
-        {"epoch": 1, "val_loss": 0.25, "selection": 0.25},
-        lambda root: training_tools.trial_metrics_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
-        f".tcip/hpo/{STUDY}/{TRIAL_DIR}/metrics.jsonl", pin=_pin_platform_root,
-        root_of=lambda root: training_tools.sweep_dir(STUDY)),
-    "run_launch_config": Registered(
-        {"model_source": {"builder": "my_module:build"}, "data": {"scope": {"subject": "büsch"}},
-         "device": "cpu"},
-        lambda root: training_tools.launch_config_key(root), "launch_config.json"),
     "confidence_sweep": Registered(
         {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
          "checkpoint_sha256": "0" * 64,
@@ -2343,22 +2241,6 @@ REGISTERED = {
             project_state_dir(root), EVENT_ID_UNDER_TEST),
         f".tcip/state/delivery_supersessions/{EVENT_ID_UNDER_TEST}.json",
         root_of=project_state_dir),
-    # the experiment record's validation member
-    "experiment_validations": Registered(
-        # every field _VALIDATION_FIELDS requires, train_disjointness/selection_disjointness
-        # included, the latter the full shape resolver_selection_disjointness actually returns
-        {"document": "operating_point", "trait": "bud_opening_50per_date",
-         "claim": {"operating_point": {"conf": {"value": 0.42}}},
-         "validated_against": "held_out_annotations", "checkpoint_sha256": "0" * 64,
-         "producing_experiment_id": EXPERIMENT,
-         "reference_identity": {"calibration_dataset_hash": "9f2c1b0a4d6e8f31"},
-         "covered_buckets": {"predictions/live/2026-03-04": "7f3a1b9c2d4e5f60"},
-         "dataset_root": "dü", "recorded_at": "2026-03-04T12:00:00+00:00",
-         "train_disjointness": {"checked": True, "group_check": None},
-         "selection_disjointness": _real_selection_disjointness()},
-        lambda root: experiments.validations_key(EXPERIMENT),
-        f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
-        root_of=lambda root: Path(experiments.experiments_scope())),
     # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
     "delivery_events": Registered(
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST, "trait_revision": 1,

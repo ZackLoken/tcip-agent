@@ -19,7 +19,7 @@ import tempfile
 import threading
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -781,13 +781,10 @@ class OverviewJob:
     status: str = "pending"  # pending | running | completed | failed
     progress: float = 0.0
     error: "str | None" = None
-    thread: "threading.Thread | None" = field(default=None, repr=False)
 
 
-_overview_registry = jobstore.JobRegistry(None)
-"""The dict-plus-lock live registry for overview-build jobs (see ``jobstore.JobRegistry``); this
-one carries no root concept and persists nothing, unlike inference.py's, tuning.py's and
-review.py's priority queue, whose registries share the same home."""
+_overview_registry = jobstore.JobRegistry()
+"""The live registry for overview-build jobs (``jobstore.JobRegistry``), with no root concept."""
 
 
 class OverviewBuildPayload(BaseModel):
@@ -841,9 +838,7 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
         lambda: OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)),
     )
     if created:
-        thread = threading.Thread(target=_overview_worker, args=(job,), daemon=True)
-        job.thread = thread
-        thread.start()
+        threading.Thread(target=_overview_worker, args=(job,), daemon=True).start()
     return _overview_summary(job)
 
 

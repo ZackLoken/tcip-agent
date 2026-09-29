@@ -49,8 +49,7 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
-        experiment_id=exp["experiment_id"])
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
 
     assert "error" not in result, result
     assert result["conf_source"] == "block_calibration"
@@ -102,8 +101,7 @@ def test_the_raster_door_runs_at_the_operating_point_its_prepared_pass_states(tm
     prepared = _prepare_pass(
         load_registered_checkpoint(exp["checkpoint_path"]), images_dir=None, conf_threshold=0.0,
         device=None, tile=True, tile_size=TILE, overlap=0.2, cross_tile_nms=None,
-        max_dets=None, postprocess="nms", experiment_id=None,
-        tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
+        max_dets=None, postprocess="nms", tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
     assert not isinstance(prepared, str), prepared
     assert result["operating_point"] == prepared.raw_result()["operating_point"]
 
@@ -157,8 +155,7 @@ def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_deliver
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
-        experiment_id=exp["experiment_id"])
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
 
     assert "error" in result
     assert "deliver_orthomosaic_plant_counts" in result["error"]

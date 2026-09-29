@@ -22,7 +22,7 @@ run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0
 their declared order, deterministically and re-derivably. Ordering is the declared ``values`` order
 and never sorted. A run records the map it used: the producer that admitted its samples states the
 scope on the run's own data config (``data.scope``), which travels onto the checkpoint via the
-run's own config object and onto the durable experiment record. Decode reads that recorded map
+run's own config object and into the run's resolved record. Decode reads that recorded map
 (``ClassScope.of`` over the checkpoint's data section) and nothing else; a run whose ground truth
 carries its own classes records an empty scope.
 """

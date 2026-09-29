@@ -87,14 +87,12 @@ def test_platform_default_write_carries_the_version_stamp_and_no_scope(
     """A model-registry write (real production ``record_event`` caller, no ``scope`` of its
     own) stays a platform event: no ``schema_version`` field, and no ``scope`` either."""
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     reg = ModelRegistry(str(tmp_path))
-    first = tmp_path / "a.pt"
-    first.write_bytes(b"first")
-    second = tmp_path / "b.pt"
-    second.write_bytes(b"second, different")
-    reg.register_model("exp1", str(first), {}, metrics_source=None)
-    reg.register_model("exp1", str(second), {}, metrics_source=None)
+    first = checkpoint_file(tmp_path / "a.pt", "first")
+    reg.register_model("exp1", str(first), {})
+    reg.register_model("exp1-renamed", str(first), {})
 
     rows = list(ts.read_log(audit_module.audit_log_key(platform_root)).records)
     matches = [r for r in rows if r["tool"] == "model_registered"]

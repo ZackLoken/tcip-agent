@@ -15,15 +15,11 @@ The builder is also handed the run's width and count (:func:`model_dims`), never
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
-
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
-from tcip_store.file_backend import RootedFileLocator
 
 MODEL_SOURCE_KEY = "model_source"
 TRAINING_SOURCE_KEY = "training_source"
@@ -271,11 +267,8 @@ def _tcip_git_commit() -> str | None:
 
 
 def capture_env() -> dict:
-    """Best-effort snapshot of the code + library versions a run's reproducibility depends on.
-
-    Records the platform git commit (the decisive code) alongside the ML library versions; each
-    field is null rather than fatal when unresolvable, so provenance never sinks a run.
-    """
+    """The platform git commit, the Python and ML library versions and the CUDA version this
+    process runs, each ``None`` when it cannot be resolved."""
     import sys
 
     env: dict[str, Any] = {"python": sys.version.split()[0], "tcip_git_commit": _tcip_git_commit()}
@@ -294,93 +287,18 @@ def capture_env() -> dict:
     return env
 
 
-_SNAPSHOT_DIR = ("model_src",)
-_SNAPSHOT_MANIFEST_SUFFIX = ".json"
+SNAPSHOT_DIR = "model_src"
+"""The run-directory subdirectory a bespoke run's copied source files land in."""
 
 
-@dataclass(frozen=True)
-class _SnapshotManifestLocator:
-    """Places one experiment's snapshot manifest under that experiment's own directory.
+def snapshot_model_source(config: dict, run_dir: Path) -> dict | None:
+    """Copy a bespoke run's model, training and dataset source into ``<run_dir>/model_src/``,
+    each file content-addressed as ``<sha256[:8]>/<basename>``, and return what was copied.
 
-    The store is keyed off the experiments root so every experiment's members share one scope,
-    while the file still lands at ``<experiment_id>/model_src/<document>.json``. The generic
-    rooted locator cannot spell that: its prefix precedes every part, and here the first part
-    precedes the prefix.
-    """
-
-    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
-        experiment_id, document = parts
-        return PurePosixPath(
-            experiment_id, *_SNAPSHOT_DIR, f"{document}{_SNAPSHOT_MANIFEST_SUFFIX}"
-        )
-
-    def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
-        segments = relative_path.parts
-        if len(segments) != len(_SNAPSHOT_DIR) + 2:
-            return None
-        if segments[1:-1] != _SNAPSHOT_DIR:
-            return None
-        if not segments[-1].endswith(_SNAPSHOT_MANIFEST_SUFFIX):
-            return None
-        document = segments[-1][: -len(_SNAPSHOT_MANIFEST_SUFFIX)]
-        if not document:
-            return None
-        return (segments[0], document)
-
-
-SNAPSHOT_MANIFEST_STORE = "model_snapshot_manifest"
-register_store(
-    StoreDescriptor(
-        name=SNAPSHOT_MANIFEST_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_SnapshotManifestLocator(),
-    )
-)
-
-SNAPSHOT_FILE_STORE = "model_snapshot_file"
-register_store(
-    StoreDescriptor(
-        name=SNAPSHOT_FILE_STORE,
-        kind="blob",
-        key_fields=("content", "filename"),
-        frozen=True,
-        cannot_carry_field="a source file's raw bytes",
-        locator=RootedFileLocator(prefix=_SNAPSHOT_DIR),
-    )
-)
-
-
-def snapshot_manifest_key(exp_dir: Path | str) -> Key:
-    """What one run's source snapshot claims to hold: the files, the env, what was missed. A
-    record, keyed off the directory holding the experiment; ``last_writer_wins``.
-    """
-    directory = Path(exp_dir).resolve()
-    return Key(SNAPSHOT_MANIFEST_STORE, str(directory.parent), (directory.name, "manifest"))
-
-
-def snapshot_file_key(exp_dir: Path | str, content: str, filename: str) -> Key:
-    """One copied source file, addressed by its content and its own name.
-
-    Content-addressed so two distinct files sharing a basename never clobber each other, and
-    so the same file reached by two path spellings lands once.
-    """
-    return Key(SNAPSHOT_FILE_STORE, str(Path(exp_dir).resolve()), (content, filename))
-
-
-def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
-    """Copy a bespoke run's model + training + dataset source into ``<exp>/model_src/`` with sha256
-    + env.
-
-    Records the agent-written source files (each source's ``source_files`` + the builder/loop
-    module files) of ``model_source`` / ``training_source`` / ``data.dataset_source``. Best-effort:
-    a missing file is skipped and any failure returns without raising, and the manifest records
-    what it failed to capture (``missing``/``snapshot_errors``). Destination files are
-    content-addressed (``<sha256[:8]>/<basename>``). Returns the manifest, or ``None`` when there
-    is nothing bespoke to snapshot.
+    Covers each source's ``source_files`` and the module files of ``model_source``'s builder,
+    ``training_source`` and ``data.dataset_source``'s builder. A missing file is listed under
+    ``missing`` and a module that will not import under ``snapshot_errors``, never raised.
+    Returns ``None`` when nothing bespoke is named.
     """
     import hashlib
 
@@ -430,11 +348,13 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         if sha in seen_content:
             continue
         seen_content.add(sha)
-        store.put_blob(snapshot_file_key(exp_dir, sha[:8], p.name), data)
+        destination = run_dir / SNAPSHOT_DIR / sha[:8] / p.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
         entries.append({"file": f"{sha[:8]}/{p.name}", "src": str(p),
                         "sha256": sha, "bytes": len(data)})
 
-    manifest = {
+    return {
         "builder": builder,
         "training_source": training_source,
         "dataset_builder": dataset_builder,
@@ -442,20 +362,14 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         "files": entries,
         "missing": missing,
         "snapshot_errors": snapshot_errors,
-        "env": capture_env(),
     }
-    store.replace(snapshot_manifest_key(exp_dir), manifest)
-    return manifest
 
 
-def stamp_model_ref(payload: dict, *, experiment_id: str | None = None) -> dict:
-    """Stamp a checkpoint payload with its kind and experiment id, read off the run config the
-    payload carries under ``config``, the one place its ``model_source`` is recorded.
-
-    Uses ``setdefault``, so an explicit value the caller already put in ``payload`` wins.
-    ``experiment_id`` is stamped only when known.
-
-    Refuses to stamp ``kind`` onto a payload with no ``STATE_DICT_KEY``.
+def stamp_model_ref(payload: dict) -> dict:
+    """Stamp a checkpoint payload with its kind, read off the run config the payload carries under
+    ``config``, the one place its ``model_source`` is recorded. An explicit ``kind`` the caller
+    already put in ``payload`` wins. Refuses to stamp ``kind`` onto a payload with no
+    ``STATE_DICT_KEY``.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
@@ -468,7 +382,4 @@ def stamp_model_ref(payload: dict, *, experiment_id: str | None = None) -> dict:
                 "its weights."
             )
         payload.setdefault("kind", KIND_TCIP_MODULE)
-    eid = experiment_id if experiment_id is not None else config.get("experiment_id")
-    if eid is not None:
-        payload.setdefault("experiment_id", eid)
     return payload

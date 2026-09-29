@@ -15,7 +15,9 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 from tests._dense_op_fixtures import shifted_cal_holdout, toy_records  # noqa: E402
-from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    SCOPED_DATA, project_checkpoint, verified_checkpoint,
+)
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     build_coco_image_record,
     coco_detection_metrics,
@@ -30,23 +32,9 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
-def _stub_checkpoint(path: str = "ckpt.pt"):
-    """A VerifiedCheckpoint stand-in for a test that stubs build_predictor: no registry lookup
-    or file read behind it, since the predictor it would build is stubbed too."""
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    return stub_verified_checkpoint(path)
-
-
 def _patch_build_predictor(monkeypatch, predictor_mod, stub_factory):
-    """Stub build_predictor (its checkpoint argument is now positional) and the
-    load_registered_checkpoint a calling tool resolves it through, so a stubbed-predictor test
-    never needs a real registered checkpoint on disk."""
-    import tcip_mcp.model_registry as model_registry_mod
-
+    """Stub build_predictor so the registered checkpoint a test loads runs no forward pass."""
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: stub_factory())
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda *a, **kw: _stub_checkpoint())
 
 
 # ======================================================================
@@ -185,7 +173,7 @@ def _capture_run_test_evaluation(monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, **kw):
         captured["ds"] = loader.dataset
         captured["tiling"] = kw.get("tiling")
         return {"eval_regime": "tile-level"}
@@ -196,23 +184,48 @@ def _capture_run_test_evaluation(monkeypatch):
 
 def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import finished_run
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64}}
-    run = create_run({"data": data}, str(tmp_path / "out"), id="det-measure-tiled")
-    out = Path(run.output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt", data=data)
+    run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run.id, str(images_dir), str(labels_dir))
+    evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
-    assert captured["tiling"] == {"enabled": True, "tile_size": 64}
+    from tcip_mcp.experiments import run_resolution
+
+    assert captured["tiling"] == run_resolution(run_dir.name)["data"]["tiling"]
+    assert captured["tiling"]["tile_size"] == 64
+
+
+def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypatch):
+    """An evaluation of a completed run by its id writes nothing: the run's files before and after
+    are the same names holding the same bytes, no audit line is left for it, and the result comes
+    back to the caller."""
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    run_dir = finished_run(tmp_path, experiment_id="det-evaluated")
+
+    def snapshot() -> dict:
+        return {str(p.relative_to(run_dir)): p.read_bytes()
+                for p in sorted(run_dir.rglob("*")) if p.is_file()}
+
+    before = snapshot()
+    audit_before = list(ts.read_log(audit_log_key()).records)
+    result = evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
+
+    assert "error" not in result, result
+    assert snapshot() == before
+    assert list(ts.read_log(audit_log_key()).records) == audit_before
 
 
 def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
@@ -222,7 +235,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
+    ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(ckpt, str(images_dir), str(labels_dir))
@@ -244,8 +257,8 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
                 "builder_kwargs": {"min_size": 64, "max_size": 128,
                                    "image_mean": [0.4], "image_std": [0.2]},
                 "task": "detection"}
-    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="one_band.pt",
-                                 model_source=one_band, data={"num_channels": 1, "scope": scope})
+    ckpt = registered_checkpoint(tmp_path, model_source=one_band,
+                                 data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(ckpt, str(images_dir), str(labels_dir))
@@ -329,9 +342,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     }
     # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
     # detection and a substituted floor of 0.5 or 0.0 would not.
-    torch.manual_seed(0)
-    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt",
-                                 model_source=declares_its_point)
+    ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
     verified = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     _detections_as_ground_truth(verified.payload, images_dir, labels_dir, subject="bud")
 
@@ -348,9 +359,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     recorded: dict = {}
     run_test_evaluation = runners.run_test_evaluation
 
-    def _record(checkpoint, model, loader, device, output_dir, **kw):
+    def _record(checkpoint, model, loader, device, **kw):
         recorded.update(loader=loader, device=device, task=checkpoint.task, kw=kw)
-        return run_test_evaluation(checkpoint, model, loader, device, output_dir, **kw)
+        return run_test_evaluation(checkpoint, model, loader, device, **kw)
 
     monkeypatch.setattr(runners, "run_test_evaluation", _record)
 
@@ -393,7 +404,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
+    ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(ckpt, str(images_dir), str(labels_dir),
@@ -402,9 +413,8 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
 
 def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
-    import tcip_store as ts
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key, run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -431,12 +441,11 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     # This stub carries no persisted training tile geometry, so the delivery-grade
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
     # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
-    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
+    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
                                   tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
-    assert ts.exists(evaluation_results_key(tmp_path / "out"))
 
 
 def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, monkeypatch):
@@ -468,8 +477,8 @@ def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, mo
                     "labels": [1, 1], "count": 2}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                  str(tmp_path / "out"), tile_size=64, overlap=0.2)
+    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
+                                  tile_size=64, overlap=0.2)
     assert (r["tp"], r["fp"], r["fn"]) == (1, 0, 0)
 
 
@@ -509,12 +518,9 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
 
     monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
     bur = {"num_channels": 3, "scope": {"subject": "bur", "id_map": {"bur": 0}}}
-    run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt", config_data=bur),
-                              str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                              tile_size=64, overlap=0.2)
+    run_full_frame_evaluation(verified_checkpoint(tmp_path, data=bur),
+                              str(images_dir), str(labels_dir), tile_size=64, overlap=0.2)
     assert [g["bbox"] for gt, _ in scored for g in gt] == [[10.1, 10.1, 30.2, 20.2]]
     assert [d["bbox"] for _, dt in scored for d in dt] == [[10.1, 10.1, 30.2, 20.2]]
 
@@ -556,7 +562,7 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
+    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
                                   tile_size=64, overlap=0.2)
     assert r["contradicted_negatives"] == ["a.png"]
     # scored against the real content, not held out as a still-trusted negative
@@ -601,8 +607,7 @@ def _one_image(tmp_path):
 def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     captured = _stub_inference(monkeypatch, train_tile_size=224, train_overlap=0.1)
     r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=None, overlap=None)
@@ -619,8 +624,7 @@ def test_foreign_checkpoint_with_no_geometry_refuses_explicit_tile(tmp_path, mon
     never silently fabricate a scale to proceed on."""
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     _stub_inference(monkeypatch)  # no train geometry
     r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=None)
@@ -658,8 +662,8 @@ def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _NoGeometryStub()
         with pytest.raises(ValueError, match="tiling="):
-            run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"))
+            run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
+                                      str(labels_dir))
     finally:
         predictor_mod.build_predictor = predictor_mod_build
 
@@ -699,8 +703,8 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     predictor_mod_build = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _DerivedGeometryStub()
-        r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"))
+        r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
+                                      str(labels_dir))
     finally:
         predictor_mod.build_predictor = predictor_mod_build
     assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
@@ -712,8 +716,7 @@ def test_explicit_tile_size_wins(tmp_path, monkeypatch):
     deriving it, still stamped as the caller's own explicit statement."""
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     captured = _stub_inference(monkeypatch, train_tile_size=224)
     r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=224)
@@ -724,8 +727,7 @@ def test_explicit_tile_size_wins(tmp_path, monkeypatch):
 def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     _stub_inference(monkeypatch, train_tile_size=224)
     r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=512)
@@ -734,12 +736,10 @@ def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, m
 
 
 def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
-    """launch_training runs the training body in a real subprocess, so the effective
-    tiling geometry can only be known (and patched into the durable experiment record) once that
-    child builds the dataset, after launch_training has already returned. Polls for it instead of
-    asserting synchronously.
+    """launch_training resolves the run before its child starts, so the effective tiling
+    geometry is in the run's launch record when launch_training returns.
 
-    Also pins the isolation itself, not just the timing change: this monkeypatches
+    Also pins the isolation of the training body: this monkeypatches
     ``generic_trainer.train`` in this process to raise if ever called. If the run executed in this
     same interpreter, that monkeypatch would poison it and the "status == completed" assertion
     below would fail, since the poisoned ``train`` would be the one actually invoked. Because the
@@ -751,11 +751,10 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     import os
     import time
 
-    import tcip_store as ts
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.experiments import config_key
+    from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
 
@@ -792,25 +791,11 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(cfg, str(tmp_path / "out"))
+    res = training_tools.launch_training(cfg)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
-    key = config_key(eid)
 
-    deadline = time.monotonic() + 90
-    tiling: dict = {}
-    while time.monotonic() < deadline:
-        if ts.exists(key):
-            tiling = ts.read(key).get("data", {}).get("tiling", {})
-            if "tile_size" in tiling:
-                break
-        status = training_tools.monitor_training(eid)
-        if status.get("status") in ("failed", "canceled"):
-            pytest.fail(f"training subprocess ended early: {status}")
-        time.sleep(0.5)
-    else:
-        pytest.fail("timed out waiting for effective tiling geometry to be persisted")
-
+    tiling = run_resolution(eid)["data"]["tiling"]
     assert tiling["tile_size"] == 224  # TiledDetectionDataset default
     assert tiling["overlap"] == pytest.approx(0.2)
 
@@ -862,8 +847,7 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
 
     stub = _CalStub()
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu", tile=False)
     assert r["conf_source"] == "default"
     assert r["validated"] is False
@@ -903,8 +887,7 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     _one_image(tmp_path)
     r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
@@ -932,8 +915,7 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     _one_image(tmp_path)
 
     r_untiled = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
@@ -980,8 +962,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))
@@ -1021,8 +1002,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     img_a, img_b = tmp_path / "a.png", tmp_path / "b.png"
     Image.new("RGB", (100, 100)).save(img_a)
     Image.new("RGB", (100, 100)).save(img_b)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(
         str(ckpt), images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
@@ -1077,8 +1057,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
         p = tmp_path / f"{stem}.png"
         Image.new("RGB", (100, 100)).save(p)
         image_paths.append(str(p))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
 
     kwargs = dict(calibration_labels_dir=str(tmp_path), selection_dir=str(tmp_path / "m"))
     if give_calibration_images_dir:
@@ -1125,8 +1104,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
 
     img = tmp_path / "a.png"
     Image.new("RGB", (100, 100)).save(img)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(
         str(ckpt), images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
@@ -1148,8 +1126,7 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))  # no labels beside the image
@@ -1205,8 +1182,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
 
     _patch_build_predictor(monkeypatch, predictor_mod, _RegimeStub)
     monkeypatch.chdir(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
 
     run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                   trait="bud_opening", calibration_labels_dir=str(labels_dir))
@@ -1255,8 +1231,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
 
     _patch_build_predictor(monkeypatch, predictor_mod, _NoGeometryStub)
     monkeypatch.chdir(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                       trait="bud_opening", calibration_labels_dir=str(labels_dir))
@@ -1265,15 +1240,13 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
 
 
 def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_bud_trait_spec):
-    import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     from tests._binding_fixtures import calibrated_run_fields, run_result
 
     img = _one_image(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     sha = "the-checkpoint-behind-this-bucket"
 
     def _fake_run_inference_verified(*a, **kw):
@@ -1283,8 +1256,6 @@ def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_bud_tra
             **calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256=sha))
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
     r = itools.run_inference(str(ckpt), str(tmp_path), output_dir=str(out_dir), trait="bud_opening",
                              calibration_labels_dir=str(tmp_path))
@@ -1302,7 +1273,6 @@ def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, capt
     acknowledgment, so the CSV itself always refuses; the refusal still carries the operating
     point and the run's own narrowed conf reference for a caller to inspect.
     """
-    import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake_run_inference_verified(*a, **kw):
@@ -1316,11 +1286,8 @@ def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, capt
     from tests import _trait_fixtures as fx
 
     fx.seed_confirmed_count(tmp_path)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = project_checkpoint(tmp_path)
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     return itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
                                   calibration_labels_dir=str(tmp_path))

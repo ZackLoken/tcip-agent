@@ -1,6 +1,5 @@
 """clear_prediction_bucket: every refusal it makes before any write, each asserted on its own
-sentence, and the bracket's own refusal naming the door for a terminal experiment's own bucket.
-Interrupted clears, fault injection and the review-landed-during-move race live in
+sentence. Interrupted clears, fault injection and the review-landed-during-move race live in
 test_clear_prediction_bucket_resume.py instead."""
 
 from __future__ import annotations
@@ -115,54 +114,23 @@ def test_raster_stamp_refuses_naming_the_regime_out_of_scope(tmp_path, monkeypat
     assert ".tcip/" in result["error"]
 
 
-def test_no_experiment_refuses(tmp_path, monkeypatch):
-    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expNoExperimentField")
-    _set_stamp_field(built["bucket"], experiment_id=None)
-
-    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
-
-    result = clear_prediction_bucket(str(built["bucket"]), "should refuse: no experiment_id")
-    assert "error" in result
-    assert "names no experiment_id" in result["error"]
-
-
-def test_running_experiment_refuses_naming_the_variant_remedy(tmp_path, monkeypatch):
-    built = build_published_bucket(
-        tmp_path, monkeypatch, experiment_id="expRunning", state=None)
-
-    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
-
-    result = clear_prediction_bucket(str(built["bucket"]), "should refuse: not terminal")
-    assert "error" in result
-    assert "not terminal" in result["error"]
-    assert "@r<n>" in result["error"]
-
-
 def test_no_document_refuses_as_already_republishable(tmp_path, monkeypatch):
     """A stamp-only bucket (an empty first pass) has nothing to clear: it is already
     re-publishable in place through run_inference."""
-    from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.dataset_layout import prediction_dir
     from tests._clear_prediction_bucket_fixtures import stub_predictor
-    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
 
     stub_predictor(monkeypatch)
-    admit_any_checkpoint(monkeypatch, file_digest=True)
     dataset_root = tmp_path / "ds"
     empty_images = tmp_path / "empty_images"
     empty_images.mkdir()
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(None, experiment_id="expNoDocument")
 
-    exp_id = "expNoDocument"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
     bucket = prediction_dir(dataset_root, "m", "2026-03-02")
-    r1 = run_inference(str(ckpt), str(empty_images), output_dir=str(bucket), tile=False,
-                       experiment_id=exp_id)
+    r1 = run_inference(ckpt, str(empty_images), output_dir=str(bucket), tile=False)
     assert "error" not in r1, r1
-    update_status(exp_id, "completed")
 
     result = clear_prediction_bucket(str(bucket), "should refuse: no document")
     assert "error" in result
@@ -216,7 +184,9 @@ def test_review_on_removed_document_still_refuses(tmp_path, monkeypatch):
     assert "review" in result["error"]
 
 
-def test_existing_destination_without_cleared_bucket_refuses(tmp_path, monkeypatch):
+def test_an_existing_empty_destination_reads_as_an_unfinished_clear(tmp_path, monkeypatch):
+    """The destination directory is a clear's own record, so one already standing empty is an
+    unfinished clear of this source, refused naming it as the resume."""
     from tcip_mcp.dataset_layout import cleared_prediction_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
     import tcip_mcp.dataset_layout as dataset_layout_mod
@@ -229,8 +199,8 @@ def test_existing_destination_without_cleared_bucket_refuses(tmp_path, monkeypat
 
     result = clear_prediction_bucket(str(built["bucket"]), "should refuse: destination exists")
     assert "error" in result
-    assert "already exists" in result["error"]
-    assert "cleared_bucket=" not in result["error"]
+    assert "is on record and unfinished" in result["error"]
+    assert f"cleared_bucket={str(collide)!r}" in result["error"]
 
 
 def test_cleared_bucket_naming_the_source_itself_refuses(tmp_path, monkeypatch):
@@ -260,95 +230,38 @@ def test_cleared_bucket_naming_another_models_cleared_bucket_refuses(tmp_path, m
     assert "does not name" in result["error"]
 
 
-def test_cleared_bucket_naming_a_path_no_artifact_names_refuses(tmp_path, monkeypatch):
+def test_cleared_bucket_naming_a_path_no_clear_created_refuses(tmp_path, monkeypatch):
+    """A destination-shaped path no clear created is not the newest cleared bucket on record:
+    cleared_bucket_of works on strings, so the same refusal meets it whether or not it exists."""
     from tcip_mcp.dataset_layout import cleared_prediction_dir
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expCBNoArtifact")
     phantom = cleared_prediction_dir(built["dataset_root"], "m", "2026-03-02", "20200101T000000Z")
-
-    result = clear_prediction_bucket(
-        str(built["bucket"]), "should refuse: no artifact names it",
-        cleared_bucket=str(phantom))
-    assert "error" in result
-    assert "no cleared: artifact" in result["error"]
-
-
-def test_cleared_bucket_naming_a_nonexistent_path_no_artifact_names_refuses(tmp_path, monkeypatch):
-    """Same refusal as the path-shaped-but-unrecorded case: cleared_bucket_of works on strings,
-    never the filesystem, so a non-existent path is refused the identical way."""
-    from tcip_mcp.dataset_layout import cleared_prediction_dir
-    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
-
-    built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expCBNonExistent")
-    phantom = cleared_prediction_dir(built["dataset_root"], "m", "2026-03-02", "20200101T000000Z")
     assert not phantom.exists()
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "should refuse: non-existent, unrecorded",
+        str(built["bucket"]), "should refuse: no clear created it",
         cleared_bucket=str(phantom))
     assert "error" in result
-    assert "no cleared: artifact" in result["error"]
+    assert "not the newest cleared bucket on record" in result["error"]
 
 
-def test_bracket_names_the_door_for_a_terminal_experiments_recorded_bucket(tmp_path, monkeypatch):
-    """The refusal a caller meets for a terminal experiment's own published bucket is the
-    document refusal at resolution, naming the suggested @r<n> variant; a run into that variant
-    is then refused by pointer_frozen, since the recorded pointer names the original bucket, not
-    the variant. That is exactly when the bracket's own refusal fires (terminal, populated,
-    differs), so it names the door and quotes the recorded path as the one to pass it."""
+def test_a_run_into_the_suggested_variant_publishes(tmp_path, monkeypatch):
+    """The refusal a caller meets for a run's own published bucket is the document refusal at
+    resolution, naming the suggested @r<n> variant; no run record pins a bucket, so a run into
+    that variant publishes."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expBracketNamesDoor")
     source = built["bucket"]
 
     first_retry = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
-        experiment_id="expBracketNamesDoor")
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
     assert "error" in first_retry
     suggested = first_retry["suggested_bucket"]
     assert suggested is not None
 
     second = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=suggested, tile=False,
-        experiment_id="expBracketNamesDoor")
-    assert "error" in second
-    assert "clear_prediction_bucket" in second["error"]
-    assert repr(str(source)) in second["error"]
-
-
-def test_bracket_names_no_remedy_when_the_recorded_pointer_is_a_bucket_the_door_itself_refuses(
-        tmp_path, monkeypatch):
-    """When the terminal experiment's own recorded pointer is a bucket clear_prediction_bucket
-    itself would refuse (here, a bespoke path outside any dataset's predictions/ layout), the
-    bracket's message does not promise a remedy that does not apply."""
-    from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
-    from tcip_mcp.tools.inference_tools import run_inference
-    from tests._clear_prediction_bucket_fixtures import stub_predictor, write_image
-    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
-
-    stub_predictor(monkeypatch)
-    admit_any_checkpoint(monkeypatch, file_digest=True)
-    exp_id = "expBracketBespokePointer"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    bespoke = tmp_path / "bespoke_predictions"
-    bespoke.mkdir()
-    relink = update_lineage(exp_id, predictions=str(bespoke))
-    assert "error" not in relink, relink
-    update_status(exp_id, "completed")
-
-    images_dir = tmp_path / "images"
-    write_image(images_dir / "img.png")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-
-    dataset_root = tmp_path / "ds"
-    out = prediction_dir(dataset_root, "m", "2026-03-02")
-    result = run_inference(
-        str(ckpt), str(images_dir), output_dir=str(out), tile=False, experiment_id=exp_id)
-    assert "error" in result
-    assert "clear_prediction_bucket refuses that bucket too" in result["error"]
-    assert "not a canonical bucket under a dataset root" in result["error"]
-    assert "clear_prediction_bucket(predictions_dir=" not in result["error"]
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=suggested, tile=False)
+    assert "error" not in second, second

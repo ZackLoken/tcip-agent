@@ -76,8 +76,8 @@ def _labels_for(tmp_path: Path, *stems: str) -> Path:
 
 
 def test_preflight_refuses_a_stem_collision(tmp_path):
-    """The run's own population is the one walk every preflight leg reads, so a collided bucket
-    is refused once, where that population is resolved."""
+    """The run's own resolution is the one walk every preflight leg reads, so a collided bucket
+    is refused once, where that resolution runs, as an issue naming both colliding files."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -91,14 +91,15 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
         "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}},
     }
-    with pytest.raises(AmbiguousImageStem):
-        preflight_config(cfg)
+    r = preflight_config(cfg)
+    assert r["valid"] is False
+    assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_reports_a_newer_written_bandgroup_manifest(tmp_path):
     """A ``.bandgroup`` manifest above this reader's ceiling propagates as
     ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design;
-    preflight must report that as an issue naming the images tree rather than raising through the
+    preflight must report that as an issue naming the version rather than raising through the
     tool boundary."""
     pytest.importorskip("torch")
     import tcip_store as ts
@@ -122,7 +123,8 @@ def test_preflight_reports_a_newer_written_bandgroup_manifest(tmp_path):
                  "scope": {"subject": SUBJECT}},
     }
     r = preflight_config(cfg)
-    assert any("could not be read" in i and "schema_version 2" in i for i in r["issues"]), r["issues"]
+    assert r["valid"] is False
+    assert any("schema_version 2" in i for i in r["issues"]), r["issues"]
 
 
 def test_doctor_image_stems_refuses_a_stem_collision(tmp_path):

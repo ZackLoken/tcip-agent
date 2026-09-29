@@ -174,18 +174,19 @@ _COLLISION_PROBE_STORE = "rail_collision_probe"
 _collision_probe_registered = False
 
 
-_COLLISION_PROBE_RUN_ID = "rail_collision_probe_run"
-"""A literal run id no other test's experiment ever uses, so this probe's claim collides only
-with a zip built to trigger it, never with an ordinary experiment created anywhere else in the
+_COLLISION_PROBE_EVENT_ID = "rail_collision_probe_event"
+"""A literal delivery-event id no other test ever uses, so this probe's claim collides only with
+a zip built to trigger it, never with an ordinary delivery event written anywhere else in the
 same pytest session."""
+
+_COLLISION_PROBE_MEMBER = f".tcip/state/delivery_events/{_COLLISION_PROBE_EVENT_ID}.json"
 
 
 def _register_collision_probe() -> None:
-    """A test-only store whose declared claim collides with the shipped EXPERIMENTS claim: a
-    ROOT-layout template that spells out .tcip/experiments/<the probe run id>/config.json in
-    full, the exact path the shipped experiment_config claim already owns one directory level
-    in. Registered once, process-wide, so the admitting test above this in file order must run
-    first.
+    """A test-only store whose declared claim collides with the shipped delivery_events claim: a
+    ROOT-layout template that spells out .tcip/state/delivery_events/<the probe event id>.json in
+    full, a path the shipped claim already owns under the root's state directory. Registered
+    once, process-wide, so the admitting test above this in file order must run first.
     """
     global _collision_probe_registered
     if _collision_probe_registered:
@@ -198,42 +199,41 @@ def _register_collision_probe() -> None:
         ts.StoreDescriptor(
             name=_COLLISION_PROBE_STORE,
             kind="record",
-            key_fields=("run_id", "document"),
+            key_fields=("event_id",),
             codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
-            locator=RootedFileLocator(prefix=(".tcip", "experiments"), suffix=".json"),
+            locator=RootedFileLocator(prefix=(".tcip", "state", "delivery_events"),
+                                      suffix=".json"),
             claim=Claim(
                 ROOT,
-                ((Constant(".tcip"), Constant("experiments"), Constant(_COLLISION_PROBE_RUN_ID),
-                  Patterned(literal("config"), tail=".json")),),
+                ((Constant(".tcip"), Constant("state"), Constant("delivery_events"),
+                  Patterned(literal(_COLLISION_PROBE_EVENT_ID), tail=".json")),),
             ),
         )
     )
 
 
-def test_import_admits_a_config_json_before_any_collision_is_registered(tmp_path):
+def test_import_admits_a_claimed_record_before_any_collision_is_registered(tmp_path):
     """The admitting side: run before test_import_refuses_a_runtime_registered_claim_collision
     registers the colliding claim, since register_store cannot be undone within a process."""
-    member = f".tcip/experiments/{_COLLISION_PROBE_RUN_ID}/config.json"
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {member: b"{}"})
+    zip_path = _hand_zip(tmp_path / "bundle.zip", {_COLLISION_PROBE_MEMBER: b"{}"})
     dest = tmp_path / "dest"
 
     result = import_project(str(zip_path), str(dest))
 
     assert "error" not in result
-    assert (dest / ".tcip" / "experiments" / _COLLISION_PROBE_RUN_ID / "config.json").is_file()
+    assert (dest / _COLLISION_PROBE_MEMBER).is_file()
 
 
 def test_import_refuses_a_runtime_registered_claim_collision_by_name(tmp_path):
     _register_collision_probe()
-    member = f".tcip/experiments/{_COLLISION_PROBE_RUN_ID}/config.json"
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {member: b"{}"})
+    zip_path = _hand_zip(tmp_path / "bundle.zip", {_COLLISION_PROBE_MEMBER: b"{}"})
     dest = tmp_path / "dest"
 
     result = import_project(str(zip_path), str(dest))
 
     assert "error" in result
-    assert "config.json" in result["error"]
+    assert f"{_COLLISION_PROBE_EVENT_ID}.json" in result["error"]
     assert not dest.exists()
 
 
@@ -476,17 +476,16 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
-    """initialize_project, register_dataset, a confirmed trait revision, an experiment's members,
-    an HPO sweep's members and a project-relative splits manifest, all through their own real
-    producers; archived, imported into a fresh destination, and read back through the store
-    under the default backend with no ``tcip adopt-store`` run.
-
-    launch_config.json is hand-placed (launch_training itself needs a real training launch to
-    produce one), stated as such; every other member here comes from the producer that writes it.
-    """
+    """initialize_project, register_dataset, a confirmed trait revision, a completed run's
+    directory, an HPO sweep's directory and a project-relative splits manifest, all through their
+    own real producers; archived, imported into a fresh destination, and read back under the
+    default backend with no ``tcip adopt-store`` run. The sweep's trial body is stood in for by
+    one that only resolves and opens the trial's run directory through the launcher's own
+    producer and writer."""
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.experiments import config_key, create_experiment, log_metrics, metrics_key, status_key
+    from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.traits import read_trait
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
@@ -503,31 +502,27 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     confirmed = seed_confirmed_count(root)
     assert confirmed.confirmed
 
-    create_experiment("exp1", {"trait": COUNT_TRAIT})
-    log_metrics("exp1", 1, {"loss": 0.5})
-    launch_config_path = root / ".tcip" / "experiments" / "exp1" / "launch_config.json"
-    launch_config_path.parent.mkdir(parents=True, exist_ok=True)
-    launch_config_path.write_text('{"data": {}}', encoding="utf-8")
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    def fake_trial(config, report, base_config, trial_dir):
-        trial_path = Path(trial_dir)
-        sweep_root, name = trial_path.parent, trial_path.name
-        ts.replace(tt.trial_config_key(sweep_root, name), config, expect=ts.Version.ABSENT)
-        ts.append(tt.trial_metrics_key(sweep_root, name), {"epoch": 1, "loss": 0.2})
+    finished_run(None, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
+
+    def fake_trial(point, report, base_config, trial_dir, *, objective, launched_by):
+        config = tt._apply_hpo_params(base_config, point)
+        tt.open_run(trial_dir, config, resolve_run(config, objective=objective).record,
+                    launched_by=launched_by, trial_params=point)
         report(0.2)
 
     def fake_search(**kw):
         kw["objective_fn"]({"lr": 0.1}, lambda value: None)
-        return {"best_params": {"lr": 0.1}, "best_value": 0.2, "n_trials": 1,
-                "study_name": kw["study_name"]}
+        return str(Path(kw["storage_path"]) / kw["study_name"])
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     hpo_result = tt.run_hyperparameter_search(
         base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                                       "task": "detection"},
-                     "data": {"images_dir": str(root / "images"),
-                              "labels_dir": str(root / "annotations"),
+                     "data": {"images_dir": str(root / "images" / "2026-03-04"),
+                              "labels_dir": str(root / "annotations" / "2026-03-04"),
                               "scope": {"subject": "bud"}}},
         n_trials=1, search_seed=0
     )
@@ -559,19 +554,17 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
         assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
-        assert ts.read(config_key("exp1", root=dest))["trait"] == COUNT_TRAIT
-        assert ts.read(status_key("exp1", root=dest))["metrics_logged"] is True
-        assert ts.read_log(metrics_key("exp1", root=dest)).records[0]["loss"] == 0.5
-        assert (dest / ".tcip" / "experiments" / "exp1" / "launch_config.json").is_file()
+        run_dir = experiments.find_run("exp1", root=dest)
+        assert run_dir is not None
+        observation = experiments.observe(run_dir)
+        assert observation.record["config"]["model_source"]["task"] == "detection"
+        rows = experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
+        assert rows[0]["loss"] == 0.5
+        assert observation.checkpoint is not None
 
-        assert ts.read(tt.study_result_key(study, str(dest / ".tcip" / "hpo")))["best_params"] == {
-            "lr": 0.1
-        }
-        assert ts.read(tt.sweep_manifest_key(study, str(dest / ".tcip" / "hpo")))["status"] == \
-            "completed"
-        trial_dirs = list((dest / ".tcip" / "hpo" / study).glob("trial_*"))
-        assert trial_dirs
-        assert ts.read(tt.trial_config_key(dest / ".tcip" / "hpo" / study, trial_dirs[0].name))
+        sweep = tt.read_sweep(tt.sweep_observation(study, root=dest))
+        assert sweep["status"] == "completed"
+        assert [t["params"] for t in sweep["trials"]] == [{"lr": 0.1}]
 
         selection = ts.read(selection_key(dest / "splits_out"))
         assert selection["scope"]["subject"] == "bud"

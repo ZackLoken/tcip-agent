@@ -11,6 +11,8 @@ import pytest
 
 import tcip_store as ts
 
+from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+
 
 # ── Audit logging ──
 
@@ -185,202 +187,75 @@ class TestAuditLogging:
 # ── Experiment tracking ──
 
 
-class TestExperiments:
-    def setup_method(self):
-        import tcip_mcp.experiments as exp
+def test_get_experiment_reads_the_run_directory(tmp_path):
+    import tcip_mcp.experiments as exp
 
-        self.tmpdir = Path(tempfile.mkdtemp())
-        self._experiments_dir = exp.EXPERIMENTS_DIR
-        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "ds", backbone="resnet50"),
+                         experiment_id="exp-005")
+    log_epoch(run_dir, 0, {"loss": 1.0})
 
-    def teardown_method(self):
-        import tcip_mcp.experiments as exp
-
-        # Restored here, not at each test's end, so a failing test cannot leave the next one
-        # reading this test's experiments.
-        exp.EXPERIMENTS_DIR = self._experiments_dir
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def test_create_experiment(self):
-        import tcip_mcp.experiments as exp
-
-        result = exp.create_experiment("exp-001", {"model": "resnet50"})
-        assert result["experiment_id"] == "exp-001"
-        assert result["state"] == "created"
-
-        # Every member document the record is made of exists, through the seam its own
-        # readers use (backend-general: creation is a claim about the record, not the layout).
-        assert ts.exists(exp.config_key("exp-001"))
-        assert ts.exists(exp.status_key("exp-001"))
-        assert ts.exists(exp.lineage_key("exp-001"))
-        assert ts.exists(exp.artifacts_key("exp-001"))
-
-    def test_create_duplicate_experiment(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-001", {"model": "resnet50"})
-        result = exp.create_experiment("exp-001", {"model": "resnet50"})
-        assert "error" in result
-
-    def test_log_metrics(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-002", {})
-        exp.log_metrics("exp-002", 0, {"loss": 1.5, "mAP50": 0.2})
-        exp.log_metrics("exp-002", 1, {"loss": 0.8, "mAP50": 0.5})
-
-        rows = exp.read_metrics("exp-002")
-        assert len(rows) == 2
-        assert rows[0]["epoch"] == 0
-        assert rows[1]["mAP50"] == 0.5
-
-    def test_update_status(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-003", {})
-        exp.update_status("exp-003", "running")
-        status = ts.read(exp.status_key("exp-003"))
-        assert status["state"] == "running"
-        assert status["started"] is not None
-
-        exp.update_status("exp-003", "completed")
-        status = ts.read(exp.status_key("exp-003"))
-        assert status["state"] == "completed"
-        assert status["ended"] is not None
-
-    def test_record_artifact(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-004", {})
-        exp.record_artifact("exp-004", "model_weights", "/path/to/model.pt")
-
-        artifacts = ts.read(exp.artifacts_key("exp-004"))
-        assert "model_weights" in artifacts
-        assert artifacts["model_weights"]["path"] == "/path/to/model.pt"
-
-    def test_get_experiment(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-005", {"backbone": "resnet50"})
-        exp.log_metrics("exp-005", 0, {"loss": 1.0})
-
-        result = exp.get_experiment("exp-005")
-        assert result["experiment_id"] == "exp-005"
-        assert result["config"]["backbone"] == "resnet50"
-        assert result["n_epochs"] == 1
-        assert len(result["metrics"]) == 1
-
-    def test_get_experiment_not_found(self):
-        import tcip_mcp.experiments as exp
-
-        result = exp.get_experiment("nonexistent")
-        assert "error" in result
-
-    def test_list_experiments(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-a", {})
-        exp.create_experiment("exp-b", {})
-        exp.update_status("exp-a", "completed")
-
-        listing = exp.list_experiments()
-        assert len(listing) == 2
-        names = {e["experiment_id"] for e in listing}
-        assert names == {"exp-a", "exp-b"}
-
-    def test_compare_experiments(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-x", {"model_source": {"builder": "my_models:resnet50_det",
-                                                         "task": "detection"}})
-        exp.create_experiment("exp-y", {"model_source": {"builder": "my_models:effb0_cls",
-                                                         "task": "classification"}})
-        exp.log_metrics("exp-x", 0, {"mAP50": 0.6})
-        exp.log_metrics("exp-y", 0, {"mAP50": 0.7})
-
-        result = exp.compare_experiments(["exp-x", "exp-y"], stale_seconds=600.0)
-        assert result["count"] == 2
-        exps = {e["experiment_id"]: e for e in result["experiments"]}
-        assert exps["exp-x"]["model"] == "my_models:resnet50_det"
-        assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
-
-    # -- overwrite_config_if_pristine --------------------------
-
-    def test_overwrite_config_if_pristine_rewrites_when_pristine(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-006", {"a": 1})
-        result = exp.overwrite_config_if_pristine("exp-006", {"a": 2, "seed": 7})
-        assert result["overwritten"] is True
-        config = ts.read(exp.config_key("exp-006"))
-        assert config == {"a": 2, "seed": 7}
-
-    def test_overwrite_config_if_pristine_refuses_once_metrics_exist(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-007", {"a": 1})
-        exp.log_metrics("exp-007", 0, {"loss": 1.0})
-        result = exp.overwrite_config_if_pristine("exp-007", {"a": 2})
-        assert "error" in result
-        config = ts.read(exp.config_key("exp-007"))
-        assert config == {"a": 1}  # untouched
-
-    def test_overwrite_config_if_pristine_refuses_when_terminal(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-008", {"a": 1})
-        exp.update_status("exp-008", "running")
-        exp.update_status("exp-008", "completed")
-        result = exp.overwrite_config_if_pristine("exp-008", {"a": 2})
-        assert "error" in result
-        config = ts.read(exp.config_key("exp-008"))
-        assert config == {"a": 1}
-
-    def test_log_metrics_stamps_the_status_record_before_its_append(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-009", {"a": 1})
-        assert "metrics_logged" not in ts.read(exp.status_key("exp-009"))
-
-        exp.log_metrics("exp-009", 0, {"loss": 1.0})
-        assert ts.read(exp.status_key("exp-009"))["metrics_logged"] is True
-
-    def test_overwrite_config_if_pristine_reads_the_marker_not_the_log(self):
-        """The predicate now decides pristineness from the status record's own field, not by
-        re-scanning the log: an experiment whose marker is set (with no rows at all, a state the
-        real log_metrics can never produce alone, manufactured here to isolate what the
-        predicate actually reads) still refuses."""
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-010", {"a": 1})
-        assert exp.read_metrics("exp-010") == []
-        key = exp.status_key("exp-010")
-        with ts.transaction(key) as txn:
-            status = txn.read(key, default={})
-            status["metrics_logged"] = True
-            txn.write(key, status)
-
-        result = exp.overwrite_config_if_pristine("exp-010", {"a": 2})
-        assert "error" in result
-        config = ts.read(exp.config_key("exp-010"))
-        assert config == {"a": 1}
-
-    def test_get_experiment_lineage(self):
-        import tcip_mcp.experiments as exp
-
-        exp.create_experiment("exp-l", {"model_source": {"builder": "m:f", "task": "detection"},
-                                        "data": {"images_dir": "/data/images",
-                                                 "scope": {"subject": "bud"}}},
-                             data_source="/data/images")
-        exp.update_lineage("exp-l", predictions="/preds/best")
-
-        result = exp.get_experiment_lineage("exp-l")
-        assert result["lineage"]["data_source"] == "/data/images"
-        assert result["lineage"]["predictions"] == "/preds/best"
-        assert result["lineage"]["data_config"]["task"] == "detection"
+    result = exp.get_experiment("exp-005")
+    assert result["experiment_id"] == "exp-005"
+    assert result["run"]["config"]["backbone"] == "resnet50"
+    assert result["final_status"] is None
+    assert result["n_epochs"] == 1
+    assert len(result["metrics"]) == 1
 
 
-# ── model registry replace-by-name is audited ──
+def test_get_experiment_not_found(tmp_path):
+    import tcip_mcp.experiments as exp
+
+    assert "error" in exp.get_experiment("nonexistent")
+
+
+def test_list_experiments(tmp_path):
+    import tcip_mcp.experiments as exp
+
+    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-a")
+    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-b")
+
+    listing = exp.list_experiments()
+    assert {e["experiment_id"] for e in listing} == {"exp-a", "exp-b"}
+    assert {e["state"] for e in listing} == {"running"}
+
+
+def test_compare_experiments(tmp_path):
+    import tcip_mcp.experiments as exp
+
+    x = opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-x")
+    y = opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-y")
+    log_epoch(x, 0, {"mAP50": 0.6})
+    log_epoch(y, 0, {"mAP50": 0.7})
+
+    result = exp.compare_experiments(["exp-x", "exp-y"])
+    assert result["count"] == 2
+    exps = {e["experiment_id"]: e for e in result["experiments"]}
+    assert exps["exp-x"]["model"] == "tests.bespoke_models:build_bespoke_detection"
+    assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
+
+
+def test_get_experiment_lineage(tmp_path):
+    import tcip_mcp.experiments as exp
+
+    config = detection_config(tmp_path / "ds")
+    opened_run(tmp_path, config, experiment_id="exp-l", parent_experiment="exp-k")
+
+    lineage = exp.get_experiment_lineage("exp-l")["lineage"]
+    assert lineage["data"]["images_dir"] == config["data"]["images_dir"]
+    assert lineage["data"]["scope"]["id_map"] == config["data"]["scope"]["id_map"]
+    assert lineage["parent_experiment"] == "exp-k"
+    assert lineage["checkpoint"] is None
+
+
+# ── a foreign registration is keyed by its bytes and audited ──
+
+
+def _entry(project: Path, sha256: str) -> dict:
+    """The one foreign entry ``project``'s registry holds for ``sha256``."""
+    from tcip_mcp.model_registry import registered_entries
+
+    [entry] = [e for e in registered_entries(project) if e["sha256"] == sha256]
+    return entry
 
 
 class TestModelRegistryReplaceAudit:
@@ -391,9 +266,9 @@ class TestModelRegistryReplaceAudit:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _ckpt(self, name: str, content: bytes) -> str:
-        p = self.tmpdir / name
-        p.write_bytes(content)
-        return str(p)
+        from tests._verified_checkpoint_fixtures import checkpoint_file
+
+        return str(checkpoint_file(self.tmpdir / name, content.decode()))
 
     def _rows(self) -> list[dict]:
         import tcip_mcp.audit as audit_mod
@@ -401,6 +276,9 @@ class TestModelRegistryReplaceAudit:
         return list(ts.read_log(audit_mod.audit_log_key()).records)
 
     def test_a_first_registration_and_a_replacement_each_leave_one_row(self):
+        """The same bytes registered again under another name replace their one entry, the row
+        naming the name it superseded; other bytes under the first name are an entry of their
+        own."""
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
@@ -408,20 +286,22 @@ class TestModelRegistryReplaceAudit:
         audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
-        reg.register_model("exp1", self._ckpt("a.pt", b"first"), {}, metrics_source=None)
-        first_sha = reg.get_model("exp1")["sha256"]
+        first_sha = reg.register_model("exp1", self._ckpt("a.pt", b"first"), {})["sha256"]
         (first,) = self._rows()
         assert first["tool"] == "model_registered"
-        assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha, "experiment_id": None}
+        assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha}
 
-        reg.register_model("exp1", self._ckpt("b.pt", b"second, different"), {}, metrics_source=None)
-        second_sha = reg.get_model("exp1")["sha256"]
-        assert first_sha != second_sha
+        reg.register_model("exp2", self._ckpt("a.pt", b"first"), {})
         _, replaced = self._rows()
-        assert replaced["tool"] == "model_registered"
-        assert replaced["arguments"]["name"] == "exp1"
-        assert replaced["arguments"]["superseded_sha256"] == first_sha
-        assert replaced["arguments"]["new_sha256"] == second_sha
+        assert replaced["arguments"] == {"name": "exp2", "new_sha256": first_sha,
+                                         "superseded_name": "exp1", "superseded_tags": []}
+        assert _entry(self.tmpdir, first_sha)["name"] == "exp2"
+
+        second_sha = reg.register_model("exp1", self._ckpt("b.pt", b"second, different"),
+                                        {})["sha256"]
+        assert second_sha != first_sha
+        assert "superseded_name" not in self._rows()[-1]["arguments"]
+        assert _entry(self.tmpdir, first_sha)["name"] == "exp2"
 
         audit_mod.AUDIT_ROOT = original
 
@@ -441,7 +321,7 @@ class TestModelRegistryReplaceAudit:
 
         rows = self._rows()
         assert [r["tool"] for r in rows] == ["model_registered", "model_registered", "model_registered"]
-        assert ["superseded_sha256" in r["arguments"] for r in rows] == [False, True, True]
+        assert ["superseded_name" in r["arguments"] for r in rows] == [False, False, True]
         assert "error" not in register_model(name="door", checkpoint_path=str(self.tmpdir / "c.pt"),
                                              config={}, project_path=str(self.tmpdir))
         assert len(self._rows()) == 3  # the same entry re-registered: nothing changed, no row
@@ -457,9 +337,9 @@ class TestModelRegistryReplaceAudit:
 
         reg = ModelRegistry(str(self.tmpdir))
         ckpt = self._ckpt("a.pt", b"same bytes")
-        reg.register_model("exp1", ckpt, {}, metrics_source=None)
+        reg.register_model("exp1", ckpt, {})
         before = ts.read_versioned(registry_index_key(self.tmpdir))
-        reg.register_model("exp1", ckpt, {}, metrics_source=None)
+        reg.register_model("exp1", ckpt, {})
 
         after = ts.read_versioned(registry_index_key(self.tmpdir))
         assert (after.value, after.version) == (before.value, before.version)
@@ -478,10 +358,10 @@ class TestModelRegistryReplaceAudit:
 
         reg = ModelRegistry(str(self.tmpdir))
         ckpt = self._ckpt("a.pt", b"same bytes")
-        reg.register_model("exp1", ckpt, {}, metrics_source=None)
-        reg.register_model("exp1", ckpt, {}, tags=["chestnut"], metrics_source=None)
+        sha = reg.register_model("exp1", ckpt, {})["sha256"]
+        reg.register_model("exp1", ckpt, {}, tags=["chestnut"])
 
-        assert ModelRegistry(str(self.tmpdir)).get_model("exp1")["tags"] == ["chestnut"]
+        assert _entry(self.tmpdir, sha)["tags"] == ["chestnut"]
         assert [e["tool"] for e in self._rows()] == ["model_registered", "model_registered"]
 
         audit_mod.AUDIT_ROOT = original
@@ -497,8 +377,7 @@ class TestModelRegistryReplaceAudit:
         audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
-        reg.register_model("exp1", self._ckpt("a.pt", b"first"), {}, metrics_source=None)
-        second_ckpt = self._ckpt("b.pt", b"second, different")
+        sha = reg.register_model("exp1", self._ckpt("a.pt", b"first"), {})["sha256"]
 
         def _refuse(*args, **kwargs):
             raise RuntimeError("the audit log could not be appended to")
@@ -506,10 +385,9 @@ class TestModelRegistryReplaceAudit:
         monkeypatch.setattr(audit_mod, "append", _refuse)
 
         with pytest.raises(audit_mod.AuditEntryNotWritten) as caught:
-            reg.register_model("exp1", second_ckpt, {}, metrics_source=None)
+            reg.register_model("exp2", self._ckpt("a.pt", b"first"), {})
 
         assert caught.value.tool == "model_registered"
-        reloaded = ModelRegistry(str(self.tmpdir)).get_model("exp1")
-        assert reloaded["file_size_bytes"] == len(b"second, different")
+        assert _entry(self.tmpdir, sha)["name"] == "exp2"
 
         audit_mod.AUDIT_ROOT = original

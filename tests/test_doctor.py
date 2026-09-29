@@ -96,19 +96,22 @@ def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
     assert "usage: tcip doctor " in capsys.readouterr().out
 
 
-def _register_absent_checkpoint(root: Path, name: str, checkpoint_path: str) -> None:
+def _register_absent_checkpoint(root: Path, name: str, checkpoint_path: Path) -> None:
     """A registry entry, written by the registry's own producer, naming a checkpoint file that
-    does not exist on this machine."""
-    from tcip_mcp.model_registry import _register_entry
+    no longer exists: registered while it did, then deleted."""
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
-    _register_entry(str(root), name=name, checkpoint_path=checkpoint_path, config={},
-                    metrics=None, tags=None, kind=None, metrics_source=None, experiment_id=None,
-                    sha256="0" * 64)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_file(checkpoint_path, f"{name} weights")
+    ModelRegistry(str(root)).register_model(name, str(checkpoint_path), {})
+    checkpoint_path.unlink()
 
 
 def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(tmp_path):
+    """``tmp_path`` sits under pytest's own temp tree, so a checkpoint there outside the project
+    is test pollution."""
     root = _project(tmp_path)
-    _register_absent_checkpoint(root, "junk", r"C:\Temp\pytest-of-x\model.pt")
+    _register_absent_checkpoint(root, "junk", tmp_path / "elsewhere" / "model.pt")
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
@@ -245,11 +248,14 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
         ann / "IMG_A.json",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
 
-    manifest_dir = root / ".tcip" / "experiments" / "exp1" / "model_src"
-    manifest_dir.mkdir(parents=True)
-    (manifest_dir / "manifest.json").write_text(json.dumps({
-        "files": [], "missing": ["agent_helper.py"], "snapshot_errors": [],
-    }))
+    from tests._verified_checkpoint_fixtures import (
+        BUILT_DETECTOR, detection_config, fixture_data_dir, opened_run,
+    )
+
+    opened_run(root, detection_config(
+        fixture_data_dir(root, "exp1"),
+        model_source={**BUILT_DETECTOR, "source_files": ["agent_helper.py"]}),
+        experiment_id="exp1")
     from tcip_mcp.project_record import record_site
 
     record_site(str(root), "north orchard")
@@ -401,14 +407,14 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
     root = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
     registry = ModelRegistry(str(root))
     paths = {}
-    for name, payload in (("currant_bud_detector_v1", b"weights"),
-                          ("chestnut_burr_counter_v3", b"other weights")):
-        ckpt = ckpt_dir / f"{name}.pt"
-        ckpt.write_bytes(payload)
-        registry.register_model(name=name, checkpoint_path=str(ckpt), config={}, metrics={},
-                                metrics_source=None)
+    for name, payload in (("currant_bud_detector_v1", "weights"),
+                          ("chestnut_burr_counter_v3", "other weights")):
+        ckpt = checkpoint_file(ckpt_dir / f"{name}.pt", payload)
+        registry.register_model(name=name, checkpoint_path=str(ckpt), config={}, metrics={})
         paths[name] = ckpt
     for ckpt in paths.values():
         ckpt.unlink()
@@ -426,8 +432,9 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     throwaway test checkpoint is not reported as merely missing, and an entry whose checkpoint
     was never written is not reported as pollution."""
     root = _layout_project(tmp_path, "2026-03-04")
-    ghost = str(Path(root.anchor) / "tcip_absent_models" / "orchard.pt")
-    scratch = str(Path(root.anchor) / "scratch" / "pytest-of-someone" / "run" / "last.pt")
+    # Inside the project, so never pollution; outside it under pytest's own temp tree, pollution.
+    ghost = root / ".tcip" / "models" / "orchard.pt"
+    scratch = tmp_path / "scratch" / "run" / "last.pt"
     _register_absent_checkpoint(root, "orchard_detector_v2", ghost)
     _register_absent_checkpoint(root, "scratch_detector", scratch)
 
@@ -446,11 +453,13 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     resolving inside the project is never pollution merely because the project's own location
     carries a temp-tree marker: only a checkpoint the root does not contain is scanned."""
     root = _layout_project(tmp_path, "2026-03-04")
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
     ckpt_dir = root / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True)
-    (ckpt_dir / "m.pt").write_bytes(b"weights")
+    checkpoint_file(ckpt_dir / "m.pt", "weights")
     ModelRegistry(str(root)).register_model(
-        name="m", checkpoint_path=str(ckpt_dir / "m.pt"), config={}, metrics_source=None)
+        name="m", checkpoint_path=str(ckpt_dir / "m.pt"), config={})
 
     res = _run(root)
 

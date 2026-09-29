@@ -44,7 +44,6 @@ def resolve_count_operating_point(
     dataset_root: str,
     project_root: str,
     *,
-    experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     selection_dir: str | None = None,
@@ -112,7 +111,7 @@ def resolve_count_operating_point(
               "postprocess": DEFAULT_POSTPROCESS, **(regime or {})}
     p = _prepare_pass(
         load_registered_checkpoint(checkpoint_path, project_path=project_root), images_dir=None,
-        conf_threshold=None, device=device, max_dets=None, experiment_id=experiment_id,
+        conf_threshold=None, device=device, max_dets=None,
         tile_batch_size=DEFAULT_TILE_BATCH_SIZE, **stated)
     if isinstance(p, str):
         raise CalibrationUsageError(p)
@@ -186,7 +185,8 @@ def resolve_count_operating_point(
         "calibration_labels_dir": labels_dir,
         "selection_sha256": selection_sha256,
     }
-    bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
+    bundle = resolve_operating_point(
+        trait, experiment_id=p.identity["experiment_id"], **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
 
     return CountCalibrationBundle(

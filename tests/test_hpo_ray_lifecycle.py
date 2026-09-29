@@ -24,20 +24,6 @@ import pytest
 DASHBOARD_HOST_PORT = "127.0.0.1:8265"
 
 
-class _Result:
-    config = {"lr": 0.1}
-    metrics = {"objective": 1.0, "training_iteration": 1}
-    error = None
-
-
-class _Results(list):
-    def __init__(self) -> None:
-        super().__init__([_Result()])
-
-    def get_best_result(self, metric=None, mode=None):
-        return self[0]
-
-
 class _FakeDaemonProcess:
     """Stands in for a Ray daemon's ``Popen``, as ``Node.all_processes`` holds it.
 
@@ -142,10 +128,9 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
             with order_lock:
                 self.index = next(order)
 
-        def fit(self) -> _Results:
+        def fit(self) -> None:
             entered[self.index].set()
             assert release[self.index].wait(timeout=30)
-            return _Results()
 
     tune = ModuleType("ray.tune")
     tune.loguniform = lambda low, high: (low, high)
@@ -158,6 +143,8 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     tune.TuneConfig = lambda **kwargs: kwargs
     tune.RunConfig = lambda **kwargs: kwargs
     tune.Tuner = _Tuner
+    tune.Callback = type("Callback", (), {})
+    tune.Stopper = type("Stopper", (), {})
 
     search = ModuleType("ray.tune.search")
 
@@ -196,7 +183,7 @@ def _patch_aiohttp_availability(monkeypatch, available: bool) -> None:
     monkeypatch.setattr(hpo, "find_spec", fake_find_spec)
 
 
-def _run_one_search() -> dict:
+def _run_one_search() -> str:
     from pathlib import Path
 
     from tcip_mcp.pipelines.training.hpo import tune_search

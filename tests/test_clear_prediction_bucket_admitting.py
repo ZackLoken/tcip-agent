@@ -1,5 +1,4 @@
-"""clear_prediction_bucket: the admitting round trip, for a dated and an undated bucket, a
-completed and a failed experiment, plus the lock's own pointer comparison."""
+"""clear_prediction_bucket: the admitting round trip, for a dated and an undated bucket."""
 
 from __future__ import annotations
 
@@ -35,11 +34,10 @@ def _bundle_class(accounting, path: Path) -> str:
 
 
 @pytest.mark.parametrize("date", ["2026-03-02", None])
-@pytest.mark.parametrize("state", ["completed", "failed"])
-def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypatch, date, state):
-    """A terminal experiment's bucket, dated or undated, completed or failed: cleared with a
-    reason, the source reads empty and unpublished, the cleared bucket holds the first run's
-    documents and stamp, and a second run in place then publishes."""
+def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypatch, date):
+    """A bucket, dated or undated: cleared with a reason, the source reads empty and unpublished,
+    the cleared bucket holds the first run's documents and stamp, the producing run's directory
+    gains nothing, and a second run in place then publishes."""
     from tcip_mcp.dataset_layout import (
         find_prediction, image_path, list_models, prediction_bucket_date, prediction_bucket_dirs,
     )
@@ -47,10 +45,12 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
 
-    exp_id = f"expAdmit_{state}_{date}"
-    built = build_published_bucket(
-        tmp_path, monkeypatch, experiment_id=exp_id, date=date, state=state)
+    from tcip_mcp.experiments import experiment_dir
+
+    exp_id = f"expAdmit_{date}"
+    built = build_published_bucket(tmp_path, monkeypatch, experiment_id=exp_id, date=date)
     dataset_root, source = built["dataset_root"], built["bucket"]
+    run_files_before = sorted(p.name for p in experiment_dir(exp_id).iterdir())
     original_stamp = earn_validated_stamp(source, dataset_root, trait=_EARNED_TRAIT)
     original_stems = bucket_stems(source)
     live_reference = str(image_path(dataset_root, date, "img", ".png"))
@@ -65,7 +65,6 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     assert "error" not in result, result
     assert result["resumed"] is False
     assert result["source_republished"] is False
-    assert result["cleared_artifact_recorded"] is True
     assert result["experiment_id"] == exp_id
     assert result["documents_moved_this_call"] == 1
     assert "operating_point" in result["stamps_moved_this_call"]
@@ -112,15 +111,8 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     cleared_class = _bundle_class(account_for(dataset_root), cleared_path / "img.json")
     assert cleared_class == live_class
 
-    # The experiment's artifacts carry the cleared path under its own cleared: name.
-    from tcip_mcp.experiments import get_experiment
-
-    experiment = get_experiment(exp_id)
-    cleared_artifacts = {
-        name: entry for name, entry in (experiment.get("artifacts") or {}).items()
-        if name.startswith("cleared:")
-    }
-    assert any(entry.get("path") == str(cleared_path) for entry in cleared_artifacts.values())
+    # The clear is recorded on the destination alone; the producing run's directory is untouched.
+    assert sorted(p.name for p in experiment_dir(exp_id).iterdir()) == run_files_before
 
     # The dataset audit log carries the door's own entry, naming the reason.
     from tcip_store import read_log
@@ -137,32 +129,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
 
     # A second run in place now publishes, and find_prediction answers the source path again.
     second = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
-        experiment_id=exp_id)
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
     assert "error" not in second, second
     assert bucket_stems(source) == {"img"}
     assert find_prediction(live_reference) == source / "img.json"
-
-
-def test_pointer_comparison_refuses_a_respelled_path(tmp_path, monkeypatch):
-    """The pointer comparison is the lock's own string equality: a path re-spelled through
-    update_lineage before the experiment ends is admitted there (a trailing separator appended),
-    but the door still refuses over the mismatch, quoting both strings."""
-    from tcip_mcp.experiments import update_lineage
-    from tcip_mcp.tools.inference_tools import clear_prediction_bucket
-
-    exp_id = "expPointerMismatch"
-    built = build_published_bucket(
-        tmp_path, monkeypatch, experiment_id=exp_id, state=None)
-    source = built["bucket"]
-    respelled = str(source) + "/"
-    relink = update_lineage(exp_id, predictions=respelled)
-    assert "error" not in relink, relink
-
-    from tcip_mcp.experiments import update_status
-    update_status(exp_id, "completed")
-
-    result = clear_prediction_bucket(str(source), "should refuse on pointer mismatch")
-    assert "error" in result
-    assert repr(respelled) in result["error"]
-    assert repr(str(source)) in result["error"]

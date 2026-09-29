@@ -307,14 +307,15 @@ class RenameResponse(BaseModel):
 
 
 def _job_conflict(target: Path) -> str | None:
-    """Every non-terminal job in the three registries whose ``platform_root`` is ``target``, or
-    whose server-recorded directories resolve under it, never a client-supplied path.
+    """The first unfinished job of this process's two in-memory job registries whose
+    ``platform_root`` is ``target``, or whose server-recorded directories resolve under it, never a
+    client-supplied path. A sweep's own directory answers for it
+    (``project_removal._live_run_conflict``).
     """
+    from tcip_mcp.experiments import TERMINAL_STATES
     from tcip_mcp.registry_paths import nearest_containing_ancestor
-    from tcip_mcp.tools import training_tools
 
-    from tcip_web import jobstore
-    from tcip_web.routes import inference, review, tuning
+    from tcip_web.routes import inference, review
 
     def _under(value: str) -> bool:
         if not value:
@@ -323,32 +324,21 @@ def _job_conflict(target: Path) -> str | None:
 
     target_str = str(target)
     for job in inference._registry.list():
-        if job.status in jobstore.TERMINAL_STATUSES:
+        if job.status in TERMINAL_STATES:
             continue
         if job.platform_root == target_str or any(
             _under(v) for v in (job.checkpoint_path, job.images_dir, job.output_dir)
         ):
             return (f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
                      "or wait for it to finish")
-    for job in tuning._registry.list():
-        if job.status in jobstore.TERMINAL_STATUSES:
-            continue
-        if job.platform_root == target_str:
-            return (f"HPO sweep {job.sweep_id!r} is not finished; ask the agent to cancel it or "
-                     "wait for it to finish")
-        if _under(
-            str(training_tools.sweep_dir(job.sweep_id, root=job.platform_root))
-        ):
-            return (f"HPO sweep {job.sweep_id!r} is not finished; ask the agent to cancel it or "
-                     "wait for it to finish")
     for job in review._pq_registry.list():
-        if job.status in jobstore.TERMINAL_STATUSES:
+        if job.status in TERMINAL_STATES:
             continue
         if job.platform_root == target_str or any(
             _under(v) for v in (job.checkpoint_path, job.images_dir, job.dataset_root)
         ):
             return (f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
-                    "wait for it to finish or restart the backend, which marks it interrupted")
+                    "wait for it to finish")
     return None
 
 

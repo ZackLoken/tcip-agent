@@ -22,7 +22,7 @@ import { useDisclosure } from "@/hooks/useDisclosure";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
-import { TERMINAL_STATUSES } from "@/lib/runStatus";
+import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
@@ -31,19 +31,15 @@ import {
   defaultChartSeries,
   mergeMetric,
   numericMetricKeys,
-  runOrderLine,
   RUN_REFRESH_MS,
 } from "@/tabs/trainingMetrics";
-
-// Runs can only be stopped while still active; terminal/historical runs show no button.
-const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
 /** What a run's launched_by field says about who started it, from the record alone: never a
- * guess, and never derived from process locality (external is a separate, unrendered fact). */
+ * guess. */
 function launcherSentence(launchedBy: TrainingRunSummary["launched_by"]): string {
   const launcher = typeof launchedBy?.launcher === "string" ? launchedBy.launcher : null;
   if (launcher === null) return "launcher not recorded";
@@ -138,7 +134,6 @@ function configRow(
   dataError: string | undefined,
   onStart: (selectionDir: string | null) => Promise<void>,
 ): LaunchPickerRow {
-  const pristine = cfg.state === "created";
   return {
     key: cfg.experiment_id,
     content: (
@@ -157,12 +152,10 @@ function configRow(
         </span>
       </>
     ),
-    branchLine: pristine
-      ? "Its first run, on the data paths it names"
-      : "A new run of this config on the data paths it names, as they are now, with the recorded seed",
-    branchLineForData: pristine
-      ? "Its first run, on the partition you chose"
-      : "A new run of this config on the partition you chose, with the recorded seed",
+    branchLine:
+      "A new run of this config on the data paths it names, as they are now, with the recorded seed",
+    branchLineForData:
+      "A new run of this config on the partition you chose, with the recorded seed",
     data: dataPickerFor(choices),
     dataLoading,
     dataError,
@@ -330,7 +323,7 @@ export function TrainingTab() {
     // A run already terminal when this stream opened is a rediscovery, not a transition the
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
     const knownAtOpen = runsRef.current.find((r) => r.experiment_id === selectedRun)?.status;
-    const alreadyTerminal = TERMINAL_STATUSES.has(knownAtOpen ?? "");
+    const alreadyTerminal = TERMINAL_STATES.has(knownAtOpen ?? "");
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
     // the toast names that once per selection, not once per silent retry.
     let errorToasted = false;
@@ -397,7 +390,7 @@ export function TrainingTab() {
       setTbNoLogs(null);
       return { url, error: null, done: true };
     }
-    const terminal = TERMINAL_STATUSES.has(detail.status ?? "");
+    const terminal = TERMINAL_STATES.has(detail.status ?? "");
     if (!terminal) return { url: null, error: null, done: false };
     if (noLogs) {
       setTbNoLogs({ error: detail.error ?? null });
@@ -447,7 +440,7 @@ export function TrainingTab() {
   );
 
   const selectedRunSummary = runs.find((r) => r.experiment_id === selectedRun);
-  const selectedRunTerminal = TERMINAL_STATUSES.has(selectedRunSummary?.status ?? "");
+  const selectedRunTerminal = TERMINAL_STATES.has(selectedRunSummary?.status ?? "");
 
   const noLogsMessage = tbNoLogs
     ? tbNoLogs.error
@@ -677,7 +670,7 @@ export function TrainingTab() {
         )}
         {runs.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            {runOrderLine("run", "experiment id")}
+            Every recorded run, sorted by experiment id.
           </div>
         )}
         <ul className="space-y-1">
@@ -741,14 +734,10 @@ export function TrainingTab() {
                       >
                         Compare
                       </button>
-                      {TRAINING_CANCELLABLE.has(r.status) && (
+                      {!TERMINAL_STATES.has(r.status) && (
                         <button
                           type="button"
-                          title={
-                            r.status === "running"
-                              ? "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
-                              : "Cancels a run that has not started yet."
-                          }
+                          title="Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses."
                           aria-label={`Cancel ${r.experiment_id}`}
                           aria-describedby={
                             cancelError ? `cancel-error-${r.experiment_id}` : undefined

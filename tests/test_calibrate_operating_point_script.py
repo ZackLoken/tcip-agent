@@ -21,7 +21,7 @@ pytest.importorskip("torch")
 
 
 from tests._producer_fixtures import admission_of
-from tests._verified_checkpoint_fixtures import admit_any_checkpoint as _stub_checkpoint_load
+from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
 
 def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
@@ -62,7 +62,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     # ``from tcip_mcp.pipelines.inference.predictor import build_predictor`` (a lazy import inside
     # the function body), so patching the defining module's attribute intercepts both calls.
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
-    _stub_checkpoint_load(monkeypatch)
+    ckpt = foreign_checkpoint(tmp_path, name="script-model")
 
     # ---- script path ----
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
@@ -88,7 +88,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
+    rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -98,11 +98,9 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
     img = tmp_path / "a.png"
     Image.new("RGB", (100, 100)).save(img)
-    run_inference(str(ckpt), images_dir=str(Path(str(img)).parent), device="cpu", tile=False)
+    run_inference(ckpt, images_dir=str(Path(str(img)).parent), device="cpu", tile=False)
 
     assert len(max_dets_calls) == 2
     script_cap, mcp_cap = max_dets_calls
@@ -127,7 +125,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
         return _Predictor()
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
-    _stub_checkpoint_load(monkeypatch)
+    ckpt = foreign_checkpoint(tmp_path, name="script-model")
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
@@ -156,7 +154,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
+    rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -192,7 +190,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda checkpoint=None, *, device, max_dets=None, **kw: _Predictor())
-    _stub_checkpoint_load(monkeypatch)
+    ckpt = foreign_checkpoint(tmp_path, name="script-model")
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
@@ -219,7 +217,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
+    rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -243,7 +241,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda *a, **kw: _Predictor())
-    _stub_checkpoint_load(monkeypatch)
+    ckpt = foreign_checkpoint(tmp_path, name="script-model")
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.admit",
                         lambda *a, **kw: admission_of(["a", "b"]))
@@ -269,7 +267,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
+    rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -306,7 +304,7 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
 def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkeypatch, tmp_path, capsys):
     """A labeled split too small to divide into cal/holdout is a usage refusal, not a traceback:
     the library's CalibrationUsageError becomes a printed message and rc=2."""
-    _stub_checkpoint_load(monkeypatch)
+    ckpt = foreign_checkpoint(tmp_path, name="script-model")
 
     class _Predictor:
         def __init__(self):
@@ -328,7 +326,7 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
+    rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
 
@@ -359,9 +357,7 @@ def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()

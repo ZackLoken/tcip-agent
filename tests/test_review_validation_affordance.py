@@ -384,11 +384,11 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert sc["operating_point"]["conf"]["validated_against"] == "reviewer_confirmed_annotations"
     # The claim is earned: a record outside the bucket answers for it, under the trait it names.
     assert sc["trait"] == "bud_opening"
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
     from tcip_mcp.pipelines.resolution import verify_stamp_binding
 
     pointer = sc["validated_by"]
-    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    row = find_validation(find_observation(pointer["experiment_id"]), pointer["record_digest"])
     assert row is not None
     assert row["trait"] == "bud_opening"
     assert row["reference_identity"]["stated_values"]["review_image_count"] == 6
@@ -562,10 +562,10 @@ def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_vers
     assert "schema_version" not in sc
     assert sc["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
 
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
 
     pointer = sc["validated_by"]
-    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    row = find_validation(find_observation(pointer["experiment_id"]), pointer["record_digest"])
     assert row is not None
     assert "schema_version" not in row
     assert row["claim"]["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}

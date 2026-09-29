@@ -15,18 +15,12 @@ export interface TrainingRunSummary {
    * run's config cannot resolve one. */
   best_metric_name?: string | null;
   output_dir?: string;
-  config_summary?: Record<string, unknown>;
-  /** Set on every run reconstructed from a disk record and absent from this process's own run
-   * registry, whatever its status; a process-locality fact only, never a statement about who
-   * launched it (that is ``launched_by``, below). */
-  external?: boolean;
-  /** Who launched this run, from the record itself: ``{"launcher": "gui" | "agent" | "process"
-   * | <other>}``, the identity fields alongside ``"agent"`` when an MCP handshake declared them,
-   * or absent when the launch's tracking never reached the stamp, or the stamp failed. */
+  /** Who launched this run, from its run record: ``{"launcher": "gui" | "agent" | "process"
+   * | <other>}``, the identity fields alongside ``"agent"`` when an MCP handshake declared them. */
   launched_by?: Record<string, unknown> | null;
-  /** The status record's own last-heartbeat instant (ISO-8601), when the record carries one:
-   * no process id is persisted anywhere, so this is the one signal a stale ``running`` row
-   * (its process gone, read as live for the rest of the heartbeat window) can show. */
+  /** The run directory's last sign of life (ISO-8601): no process id is recorded anywhere, so
+   * this is the one signal a stale ``running`` row (its process gone, read as live for the rest
+   * of the heartbeat window) can show. */
   heartbeat?: string | null;
 }
 
@@ -102,13 +96,12 @@ export interface CompareRegistryEntry {
   registered_at: string | null;
 }
 
-/** The run's own partition, from its persisted split record (never the launch config's own
- * pre-launch intent), reduced to the four states a comparison names. */
+/** The run's own partition, from its resolved record (never the launch config's own pre-launch
+ * intent), reduced to the four states a comparison names. */
 export interface CompareSplit {
-  case: "bound" | "drawn" | "none" | "error";
+  case: "bound" | "drawn" | "spatial" | "none";
   selection_dir?: string;
   seed?: number | null;
-  error?: string;
 }
 
 /** One marked experiment's own column in the comparison, every value labeled by which record
@@ -117,9 +110,7 @@ export interface CompareSplit {
 export interface CompareExperiment {
   experiment_id: string;
   error?: string;
-  recorded_state?: string | null;
   state?: string | null;
-  log_locked?: boolean;
   n_epochs?: number;
   n_rows?: number;
   last_logged_metrics?: MetricRow;
@@ -133,10 +124,9 @@ export interface CompareExperiment {
   dataset_id?: string | null;
   dataset_fingerprint?: string | null;
   split?: CompareSplit;
-  /** This experiment's own registered entries; absent, with registry_error naming why, when
-   * the project's registry index can't be read or matched at all. */
+  /** The run's own completed checkpoint as a one-entry list; empty for a run that did not
+   * complete. */
   registry?: CompareRegistryEntry[];
-  registry_error?: string;
 }
 
 export interface CompareResult {

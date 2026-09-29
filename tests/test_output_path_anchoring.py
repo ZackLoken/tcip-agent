@@ -30,20 +30,17 @@ def test_a_relative_output_path_resolves_under_the_platform_state_root(tmp_path:
     assert resolve_output_path(Path("runs") / "exp1") == tmp_path / "runs" / "exp1"
 
 
-def test_hpo_root_anchors_a_relative_output_dir_to_the_platform_state_root(tmp_path: Path) -> None:
-    from tcip_mcp.tools.training_tools import hpo_root
+def test_a_sweeps_directory_lies_under_the_platform_state_root(tmp_path: Path) -> None:
+    from tcip_mcp.tools.training_tools import sweep_dir
 
-    assert hpo_root("sweeps/hpo_1") == tmp_path / "sweeps" / "hpo_1"
-    assert hpo_root("") == tmp_path / ".tcip" / "hpo"
-    explicit = tmp_path / "explicit_sweeps"
-    assert hpo_root(str(explicit)) == explicit
+    assert sweep_dir("hpo_1") == tmp_path / ".tcip" / "hpo" / "hpo_1"
 
 
 def test_launch_training_defaults_into_the_platform_state_roots_experiment_store(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """With no output_dir named, a run's weights and logs land in the platform state root's own
-    experiment store, beside its experiment record, never in the launching process's cwd."""
+    """A run's weights and logs land in its own directory under the platform state root's
+    experiments directory, never in the launching process's cwd."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 

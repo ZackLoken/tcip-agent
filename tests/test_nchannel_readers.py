@@ -45,7 +45,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
 
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -56,12 +56,13 @@ def test_grayscale_classification_end_to_end(tmp_path):
     (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
 
     ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
-                        stated={"num_classes": 2, "num_channels": 1})
+                        stated={"num_channels": 1})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "task": "classification"}
     cfg = {"model_source": model_source, "data": data, "device": "cpu",
            "stages": [{"freeze_to": -1, "epochs": 1}],
            "mixed_precision": False, "early_stopping": {"enabled": False}}
-    run = train(create_run(cfg, str(tmp_path / "out"), id="auto-run-39"), loader)
+    run = train(trainer_run(cfg, tmp_path / "out", has_val_loader=False, id="auto-run-39"),
+                loader)
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

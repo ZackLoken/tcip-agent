@@ -1,8 +1,7 @@
-"""Three registered stores wrap a top-level JSON array of entries rather than a keyed record: the
-project dataset registry and the web job registry declare ``cannot_carry_field`` naming the
-array-top shape, since neither has an object to hold ``schema_version`` on. The model registry
-index wraps into ``{entries: [...]}`` and declares a cleared ``cannot_carry_field``, covered
-separately below.
+"""The project dataset registry wraps a top-level JSON array of entries rather than a keyed
+record, and declares ``cannot_carry_field`` naming the array-top shape, since it has no object to
+hold ``schema_version`` on. The model registry index wraps into ``{entries: [...]}`` and declares a
+cleared ``cannot_carry_field``, covered separately below.
 """
 
 from __future__ import annotations
@@ -10,6 +9,8 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+
+import pytest
 
 import tcip_store as ts
 from tcip_mcp.model_registry import (
@@ -19,10 +20,8 @@ from tcip_mcp.model_registry import (
     registry_index_key,
 )
 from tcip_mcp.tools.project_tools import DATASET_REGISTRY_STORE, read_datasets, register_dataset
-from tcip_mcp.web_client import JOB_REGISTRY_STORE, job_registry_key
 from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
 from tcip_store.store import _backend
-from tcip_web import jobstore
 
 
 def _damage_record(key: ts.Key, data: bytes) -> None:
@@ -45,16 +44,11 @@ def _damage_record(key: ts.Key, data: bytes) -> None:
         conn.close()
 
 
-def _cannot_carry_stores() -> tuple[str, ...]:
-    return (DATASET_REGISTRY_STORE, JOB_REGISTRY_STORE)
-
-
-def test_every_still_array_topped_store_declares_cannot_carry_with_the_array_top_wording():
-    for name in _cannot_carry_stores():
-        descriptor = ts.get_descriptor(name)
-        assert descriptor.frozen
-        assert descriptor.cannot_carry_field, name
-        assert "array" in descriptor.cannot_carry_field
+def test_the_array_topped_store_declares_cannot_carry_with_the_array_top_wording():
+    descriptor = ts.get_descriptor(DATASET_REGISTRY_STORE)
+    assert descriptor.frozen
+    assert descriptor.cannot_carry_field
+    assert "array" in descriptor.cannot_carry_field
 
 
 def test_model_registry_declares_a_cleared_cannot_carry_field_and_ceiling_one():
@@ -65,9 +59,11 @@ def test_model_registry_declares_a_cleared_cannot_carry_field_and_ceiling_one():
 
 
 def test_model_registry_document_composes_with_its_own_declaration(tmp_path: Path):
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"weights")
-    ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {}, metrics_source=None)
+    pytest.importorskip("torch")
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    ckpt = checkpoint_file(tmp_path / "m.pt", "weights")
+    ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {})
 
     raw = ts.read(registry_index_key(tmp_path))
     assert "schema_version" not in raw
@@ -87,12 +83,3 @@ def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):
     entries = read_datasets(tmp_path)
     assert entries and isinstance(entries, list)
     ts.check_schema_version(ts.get_descriptor(DATASET_REGISTRY_STORE), entries)
-
-
-def test_job_registry_composes_with_its_own_declaration(tmp_path: Path):
-    key = job_registry_key("inference_jobs", root=tmp_path)
-    jobstore.persist_to(key, [{"id": "job-1", "state": "completed"}])
-
-    entries = jobstore.load("inference_jobs")
-    assert entries and isinstance(entries, list)
-    ts.check_schema_version(ts.get_descriptor(JOB_REGISTRY_STORE), entries)

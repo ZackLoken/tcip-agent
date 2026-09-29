@@ -972,7 +972,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root),
     )
 
     assert res["passed"] is True, res
@@ -1033,7 +1033,7 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path),
     )
 
     assert "error" in res
@@ -1070,7 +1070,7 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(out), dataset_root=str(root), experiment_id=None,
+        output_dir=str(out), dataset_root=str(root),
     )
 
     assert res["passed"] is True, res
@@ -1082,9 +1082,10 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert binding.producing_experiment_id is None  # the calibration hangs off its own experiment
 
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
 
-    row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
+    row = find_validation(find_observation(res["validated_by"]["experiment_id"]),
+                          res["validated_by"]["record_digest"])
     # Sealed-disjointness liveness through the real classifier resolver: gate_evidence is read
     # correctly end to end, not silently lost to a stale key lookup that would leave these null.
     assert row["train_disjointness"] is not None
@@ -1116,7 +1117,7 @@ def test_calibrate_classifier_operating_point_refuses_a_dataset_root_its_gt_dirs
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(stated), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(stated),
     )
 
     # Both roots, quoted the way the message quotes every path it names.
@@ -1145,7 +1146,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_h
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root),
     )
 
     assert res["passed"] is False
@@ -1177,7 +1178,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root),
     )
 
     assert res["passed"] is False
@@ -1546,9 +1547,9 @@ def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> Non
 def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_reachable(
     tmp_path: Path,
 ) -> None:
-    """experiment_id=None (a foreign/unregistered checkpoint) skips train-disjointness rather than
-    failing closed: the classifier-validity stamp is still reachable for an otherwise clean
-    reference."""
+    """Prediction buckets naming no producing run (a foreign checkpoint's) skip
+    train-disjointness rather than failing closed: the classifier-validity stamp is still
+    reachable for an otherwise clean reference."""
     root = _ds_root(tmp_path)
     _write_bud_opening_registry(root)
     cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
@@ -1561,7 +1562,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root),
     )
 
     assert res["passed"] is True, res
@@ -1596,7 +1597,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root),
     )
 
     assert res["passed"] is True, res
@@ -1902,9 +1903,9 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
 
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
+    from tests.tiny_trainer_fixtures import trainer_run
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
@@ -1915,12 +1916,12 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
+    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source, data), "seed": 0}, str(tmp_path / "out"),
-                     id="auto-run-44")
+    run = trainer_run({**_train_config(model_source, data), "seed": 0}, tmp_path / "out",
+                      has_val_loader=False, id="auto-run-44")
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -1967,9 +1968,9 @@ def test_calibrate_scalar_operating_point_regression_e2e(
 
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
+    from tests.tiny_trainer_fixtures import trainer_run
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
@@ -1984,8 +1985,8 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
-    run = create_run({**_train_config(model_source, data), "seed": 0}, str(tmp_path / "out"),
-                     id="auto-run-45")
+    run = trainer_run({**_train_config(model_source, data), "seed": 0}, tmp_path / "out",
+                      has_val_loader=False, id="auto-run-45")
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -2060,7 +2061,7 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
     The checkpoint is a real file, since the stamp and the record both name it by content hash."""
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import dataset_root_of
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT,
         read_ordinal_operating_point_sidecar,
@@ -2119,7 +2120,8 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
 
     sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     assert stamp["checkpoint_sha256"] == sha
-    row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
+    row = find_validation(find_observation(res["validated_by"]["experiment_id"]),
+                          res["validated_by"]["record_digest"])
     assert row["checkpoint_sha256"] == sha
     assert binding.checkpoint_sha256 == sha
     # Sealed-disjointness liveness: the resolver's gate_evidence key is read correctly end to end,
@@ -2198,7 +2200,7 @@ def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_buck
     run those records were earned under, rather than leaving a reader to trust the stamps."""
     from tests._binding_fixtures import record_producing_run
 
-    sha = record_producing_run(tmp_path, "exp-producer")
+    sha = record_producing_run("exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
@@ -2266,7 +2268,7 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     record that says which buckets stood behind the numbers, with no call line beside it."""
     from tests._binding_fixtures import record_producing_run
 
-    sha = record_producing_run(tmp_path, "exp-producer")
+    sha = record_producing_run("exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"

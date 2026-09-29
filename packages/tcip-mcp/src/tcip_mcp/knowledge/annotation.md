@@ -97,7 +97,7 @@ bearing (denormalizing, cropping, drawing); go through `load_image`.
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for a named `project_root`, not restricted to images/annotations; refuses when the GUI's open project does not agree |
 | `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
-| `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage; under a classified bucket's own recorded scope a rejected value call is never a hard negative (the model named the wrong state, not the object's absence), so it lands in `unconfirmed_negatives` instead |
+| `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives), its manifest naming the verdicts it read; under a classified bucket's own recorded scope a rejected value call is never a hard negative (the model named the wrong state, not the object's absence), so it lands in `unconfirmed_negatives` instead |
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 

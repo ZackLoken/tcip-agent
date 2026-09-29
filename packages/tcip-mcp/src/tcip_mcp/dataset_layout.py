@@ -358,23 +358,29 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
     return identity
 
 
-def require_dataset_identity(dataset_root: str | Path) -> dict:
-    """The dataset's identity record (``{crop, id, fingerprint}``), decoded through
-    :func:`decode_dataset_identity_document`.
-
-    Read through the store, never a bare file check. Raises ``ValueError`` naming
-    ``register_dataset`` when the record is absent or malformed; a
-    :class:`tcip_store.SchemaVersionRefused` propagates uncaught.
-    """
+def read_dataset_identity(dataset_root: str | Path) -> dict | None:
+    """The dataset's identity record (``{crop, id, fingerprint}``) decoded through
+    :func:`decode_dataset_identity_document`, or ``None`` for a dataset never registered. A record
+    that does not decode raises ``ValueError``; :class:`tcip_store.SchemaVersionRefused`
+    propagates."""
     import tcip_store
 
     stored = tcip_store.read_blob_versioned(dataset_identity_key(dataset_root), default=None)
     if stored.value is None:
+        return None
+    return decode_dataset_identity_document(stored.value, dataset_root=dataset_root)
+
+
+def require_dataset_identity(dataset_root: str | Path) -> dict:
+    """:func:`read_dataset_identity`, refusing with ``ValueError`` naming ``register_dataset`` a
+    dataset never registered."""
+    identity = read_dataset_identity(dataset_root)
+    if identity is None:
         raise ValueError(
             f"{dataset_root} carries no dataset identity record "
             f"({dataset_identity_path(dataset_root)} absent); register it first with "
             "register_dataset")
-    return decode_dataset_identity_document(stored.value, dataset_root=dataset_root)
+    return identity
 
 
 def image_status_path(dataset_root: str | Path) -> Path:

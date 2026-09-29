@@ -1,8 +1,8 @@
 """The provenance identity spine.
 
-Locks the additive provenance stamping across the spine: checkpoint experiment_id plus a
-computed-once sha256, the terminal-state lock (additive-only), the enriched capture_env,
-the run's partition, and the producing-model stamps on the delivery CSV and manifest surfaces.
+Locks the provenance across the spine: a checkpoint's producing run read off the run's own
+final status beside a computed-once sha256, the enriched capture_env, a selection's own digests
+and seed, and the producing-model stamps on the delivery CSV and manifest surfaces.
 """
 
 from __future__ import annotations
@@ -23,48 +23,23 @@ def test_capture_env_records_code_and_libraries():
     assert env["python"]
 
 
-# ── stamp_model_ref carries experiment_id (optional) ───────────────────────────
-
-def test_stamp_model_ref_stamps_experiment_id():
-    from tcip_mcp.pipelines.model_build import stamp_model_ref
-
-    src = {"model_source": {"builder": "x:y", "task": "detection"}}
-    payload = stamp_model_ref({"model_state_dict": {}, "config": src}, experiment_id="expZ")
-    assert payload["experiment_id"] == "expZ"
-
-    # From config when not passed explicitly.
-    payload2 = stamp_model_ref(
-        {"model_state_dict": {}, "config": {**src, "experiment_id": "expC"}})
-    assert payload2["experiment_id"] == "expC"
-
-    # Absent id -> no key fabricated (raw/foreign checkpoints legitimately have none).
-    payload3 = stamp_model_ref({"model_state_dict": {}, "config": src})
-    assert "experiment_id" not in payload3
-
-
 # ── identity resolved off a verified, registry-matched checkpoint ──────────────
 
-def test_resolve_model_identity_from_registry(tmp_path, monkeypatch):
-    """A registered checkpoint that carries no stamped experiment_id still resolves one, through
-    the binding a run's own completion recorded (``checkpoint.producer``), not a caller-asserted
-    tag."""
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+def test_resolve_model_identity_from_the_runs_final_status(tmp_path, monkeypatch):
+    """A completed run's checkpoint resolves its producer through the binding the run's own
+    final status recorded, not a caller-asserted tag or a stamp in the payload."""
+    pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = tmp_path / "best.pt"
-    torch.save({"model_state_dict": {}}, ckpt)
-    create_experiment("expR", {"model_source": {"builder": "x:y"}})
-    assert "error" not in complete_run("expR", str(ckpt))
-    reg = register_model_from_experiment("expR", str(ckpt), name="m1")
-    assert "error" not in reg, reg
+    ckpt = registered_checkpoint(None, experiment_id="expR")
 
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     ident = resolve_model_identity(checkpoint)
     assert ident["sha256"] and len(ident["sha256"]) == 64
     assert ident["experiment_id"] == "expR"
-    assert ident["checkpoint"] == "best"
+    assert ident["checkpoint"] == "model_final"
 
 
 def test_resolve_model_identity_foreign_checkpoint(tmp_path):
@@ -77,7 +52,7 @@ def test_resolve_model_identity_foreign_checkpoint(tmp_path):
 
     ckpt = tmp_path / "foreign.pt"
     torch.save({"model_state_dict": {}}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {}, metrics_source=None)
+    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {})
 
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     ident = resolve_model_identity(checkpoint)
@@ -85,11 +60,10 @@ def test_resolve_model_identity_foreign_checkpoint(tmp_path):
     assert ident["experiment_id"] is None  # no run -> honest null, not a failure
 
 
-def test_resolve_model_identity_reads_checkpoint_own_experiment_id(tmp_path):
-    """The ordinary train-then-calibrate workflow saves a checkpoint stamped with its own
-    ``experiment_id`` (via ``stamp_model_ref``); ``resolve_model_identity`` must read that stamp
-    directly rather than resolving it only from the registry's own ``experiment:`` tag, which
-    would otherwise silently bypass the train-disjointness gate whenever the two disagree."""
+def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
+    """A checkpoint payload that states an ``experiment_id`` of its own is a claim nothing
+    answers for: the producer is only ever the run whose final status names the digest, so a
+    foreign checkpoint resolves none, whatever its payload says."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import (
         ModelRegistry, load_registered_checkpoint, resolve_model_identity,
@@ -97,88 +71,12 @@ def test_resolve_model_identity_reads_checkpoint_own_experiment_id(tmp_path):
 
     ckpt = tmp_path / "stamped.pt"
     torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {}, metrics_source=None)
+    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {})
 
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     ident = resolve_model_identity(checkpoint)
-    assert ident["experiment_id"] == "expStamped"
+    assert ident["experiment_id"] is None
     assert ident["sha256"]
-
-
-def test_resolve_model_identity_caller_experiment_id_wins_over_stamp(tmp_path):
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import (
-        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
-    )
-
-    ckpt = tmp_path / "stamped.pt"
-    torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {}, metrics_source=None)
-
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
-    ident = resolve_model_identity(checkpoint, experiment_id="expCaller")
-    assert ident["experiment_id"] == "expCaller"
-
-
-# ── terminal-state lock is additive-only ────────────────────────────────────
-
-@pytest.fixture()
-def exp_store(tmp_path, monkeypatch):
-    import tcip_mcp.experiments as exp
-    monkeypatch.setattr(exp, "EXPERIMENTS_DIR", tmp_path / "experiments")
-    # Route the refused-mutation audit to the tmp project so it never touches the repo log.
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    return exp
-
-
-def test_update_status_refuses_to_leave_terminal(exp_store):
-    import tcip_store as ts
-
-    exp = exp_store
-    exp.create_experiment("t1", {})
-    exp.update_status("t1", "completed")
-    res = exp.update_status("t1", "running")
-    assert "error" in res
-    assert ts.read(exp.status_key("t1"))["state"] == "completed"
-
-
-def test_log_metrics_refuses_new_epoch_when_terminal(exp_store):
-    exp = exp_store
-    exp.create_experiment("t2", {})
-    exp.log_metrics("t2", 0, {"loss": 1.0})
-    exp.update_status("t2", "completed")
-    res = exp.log_metrics("t2", 1, {"loss": 0.5})
-    assert "error" in res
-    assert len(exp.read_metrics("t2")) == 1  # no new epoch appended
-
-
-def test_lineage_additive_first_write_allowed_overwrite_refused(exp_store):
-    import tcip_store as ts
-
-    exp = exp_store
-    exp.create_experiment("t3", {})
-    exp.update_status("t3", "completed")
-    # First write into a still-empty field is permitted (a later predictions link relies on this).
-    exp.update_lineage("t3", predictions="/preds/run")
-    lin = ts.read(exp.lineage_key("t3"))
-    assert lin["predictions"] == "/preds/run"
-    # Overwriting the now-populated field is refused; the recorded value stands.
-    exp.update_lineage("t3", predictions="/preds/other")
-    lin2 = ts.read(exp.lineage_key("t3"))
-    assert lin2["predictions"] == "/preds/run"
-
-
-def test_record_artifact_additive_only_when_terminal(exp_store):
-    import tcip_store as ts
-
-    exp = exp_store
-    exp.create_experiment("t4", {})
-    exp.update_status("t4", "completed")
-    exp.record_artifact("t4", "predictions", "/preds")   # new name -> allowed
-    res = exp.record_artifact("t4", "predictions", "/other")  # existing -> refused
-    assert "error" in res
-    arts = ts.read(exp.artifacts_key("t4"))
-    assert arts["predictions"]["path"] == "/preds"
 
 
 # ── draw_splits manifest embeds dataset_hash + seed ─────────────────────────────
@@ -217,7 +115,7 @@ def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
     """A run whose own record answers for the checkpoint a delivery names it by."""
     from tests._binding_fixtures import record_producing_run
 
-    return record_producing_run(tmp_path, experiment_id)
+    return record_producing_run(experiment_id)
 
 
 def test_export_detection_csv_carries_provenance(tmp_path):

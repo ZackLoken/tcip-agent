@@ -113,52 +113,28 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     assert stamped["train_native_size"] is None
 
 
-# ── the durable experiment record mirror ──────────────────────────────
+# ── the run's resolved record, for a launched run and an HPO trial alike ──
 
 
-def test_a_mirrored_untiled_section_drops_stale_geometry(tmp_path, monkeypatch):
-    """The resolved data section is mirrored whole, so an untiled run's record keeps no stale
-    requested tile_size from the config it was launched with."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_store as ts
+class _ServedDataset:
+    def __len__(self):
+        return 4
 
-    from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
-
-    create_experiment("exp1", {"model_source": {"builder": "x:y"},
-                               "data": {"images_dir": "img",
-                                        "tiling": {"enabled": True, "tile_size": 640}}})
-    _mirror_data_section("exp1", {"images_dir": "img", "tiling": {"enabled": False},
-                                  "train_native_size": [64, 48]})
-
-    cfg = ts.read(config_key("exp1"))
-    assert cfg["data"]["tiling"] == {"enabled": False}
-    assert cfg["data"]["train_native_size"] == [64, 48]
-    assert cfg["data"]["images_dir"] == "img"
-    assert cfg["model_source"] == {"builder": "x:y"}
+    def __getitem__(self, i):
+        return i
 
 
-# ── the HPO trial records the same truth in its resolved-config snapshot ──
+class _TiledServedDataset(_TiledStub, _ServedDataset):
+    pass
 
 
-def _patch_trial_machinery(monkeypatch, train_ds):
-    import torch.utils.data as tud
-
-    from tcip_mcp.pipelines.data import samplers
+def _serve(monkeypatch, train_ds):
+    """The run's datasets resolved to ``train_ds`` with no validation side, so the resolved
+    record carries only what the stamp wrote."""
     from tcip_mcp.pipelines.data import split_construction as sc
-    from tcip_mcp.pipelines.training import generic_trainer as gt
-
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        run.best_metric = 1.0
-        run.status = "completed"
-        return run
 
     monkeypatch.setattr(
-        sc, "auto_train_val", lambda task, data_cfg, transforms: (train_ds, None, None))
-    monkeypatch.setattr(gt, "train", fake_train)
-    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
-    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
+        sc, "auto_train_val", lambda task, data_cfg, transforms, **_: (train_ds, None, None))
 
 
 def _base_config(tiling):
@@ -166,76 +142,55 @@ def _base_config(tiling):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls", "tiling": tiling},
-        "batch_size": 2,
+        "batch_size": 2, "evaluation": {"selection_metric": "loss"},
     }
 
 
-def test_hpo_trial_resolved_config_replaces_unrealized_tiling(monkeypatch, tmp_path):
-    """A trial that trained untiled must not leave the base config's requested tile_size in
-    resolved_config, the record a later reader takes for the trial's geometry."""
-    import tcip_store as ts
+def _resolved_data(run_dir) -> dict:
+    """The data section ``run_dir``'s launch record says its run resolved."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
 
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
-
-    class _UntiledTrialDataset:
-        def __len__(self):
-            return 4
-
-        def __getitem__(self, i):
-            return i
-
-    _patch_trial_machinery(monkeypatch, _UntiledTrialDataset())
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4}, [].append,
-                   _base_config({"enabled": True, "tile_size": 999}), str(trial_dir))
-
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["data"]["tiling"] == {"enabled": False}
+    return read_record(run_dir / RUN_FILE)["resolved"]["data"]
 
 
-def test_hpo_trial_resolved_config_records_effective_tile_geometry(monkeypatch, tmp_path):
-    import tcip_store as ts
+def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(monkeypatch, tmp_path):
+    """The resolved data section is recorded whole, so an untiled run's record keeps no stale
+    requested tile_size from the config it was launched with."""
+    from tests._verified_checkpoint_fixtures import opened_run
 
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    _serve(monkeypatch, _ServedDataset())
+    run_dir = opened_run(tmp_path, _base_config({"enabled": True, "tile_size": 640}))
 
-    class _TiledTrialDataset(_TiledStub):
-        def __len__(self):
-            return 4
-
-        def __getitem__(self, i):
-            return i
-
-    _patch_trial_machinery(monkeypatch, _TiledTrialDataset())
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4}, [].append, _base_config({"enabled": True}), str(trial_dir))
-
-    tiling = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))["data"]["tiling"]
-    assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
+    data = _resolved_data(run_dir)
+    assert data["tiling"] == {"enabled": False}
+    assert data["images_dir"] == "imgs"
 
 
-def test_hpo_trial_registers_under_its_resolved_trial_directory_never_by_id(monkeypatch, tmp_path):
-    """create_run's id for a trial is not an experiment id: it is the trial directory's own
-    resolved absolute path, unique across concurrent sweeps where a directory basename is not,
-    and list_runs hides it from the Training tab's default listing."""
-    from pathlib import Path
-
-    from tcip_mcp.pipelines.training.run_registry import list_runs
+def _trial(tmp_path, base_config):
+    """One HPO trial run through the sweep's own trial body; its run directory."""
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    class _UntiledTrialDataset:
-        def __len__(self):
-            return 4
+    trial_dir = tmp_path / "hpo_study" / "trial_0"
+    trial_dir.parent.mkdir()
+    _run_hpo_trial({"lr": 3e-4}, [].append, base_config, trial_dir,
+                   objective={"selection_metric": "loss", "higher_is_better": False},
+                   launched_by={"launcher": "process"})
+    return trial_dir
 
-        def __getitem__(self, i):
-            return i
 
-    _patch_trial_machinery(monkeypatch, _UntiledTrialDataset())
-    trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4}, [].append,
-                   _base_config({"enabled": True, "tile_size": 999}), str(trial_dir))
-    expected_id = str(Path(trial_dir).resolve())
+def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, tmp_path):
+    """A trial that trained untiled must not leave the base config's requested tile_size in its
+    resolved record, the record a later reader takes for the trial's geometry."""
+    _serve(monkeypatch, _ServedDataset())
+    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}))
 
-    assert all(row["id"] != expected_id for row in list_runs())
-    hidden = list_runs(include_hpo_trials=True)
-    row = next(r for r in hidden if r["id"] == expected_id)
-    assert row["origin"] == "hpo_trial"
+    assert _resolved_data(trial_dir)["tiling"] == {"enabled": False}
+
+
+def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
+        monkeypatch, tmp_path):
+    _serve(monkeypatch, _TiledServedDataset())
+    trial_dir = _trial(tmp_path, _base_config({"enabled": True}))
+
+    tiling = _resolved_data(trial_dir)["tiling"]
+    assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}

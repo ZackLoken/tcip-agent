@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -27,7 +26,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, stored_number
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 
@@ -69,11 +68,8 @@ _NO_SCHEDULER = {"none", "fifo", ""}
 _HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 
 SPLIT_DRAW_SEED_KEY = "data.split.seed"
-"""The dotted param-space key ``run_hyperparameter_search``'s ``split_draws`` axis sweeps and ``tune_search``
-pairs with every sampled point via ``grid_keys``; the one definition every site that names the
-axis (``run_hyperparameter_search``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself,
-``split_draw_search_space``, ``_search_space_and_points`` and ``planned_trial_count``)
-reads, rather than a literal repeated at each site."""
+"""The dotted param-space key a sweep's ``split_draws`` axis sweeps, paired with every sampled
+point."""
 
 
 def get_default_space() -> dict:
@@ -436,44 +432,29 @@ def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
                 ray.shutdown()
 
 
-_TERMINAL_COLOR_CODE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-def trial_error_text(error: BaseException) -> str:
-    """One line naming a failed trial's error, fit for a durable record and a panel.
-
-    Ray wraps a trial's exception in a ``RayTaskError`` whose text is the worker's whole
-    traceback, terminal color codes and absolute paths included. The record keeps the cause's
-    own type and message on one line instead: the last non-empty line of the cause's text
-    (a traceback's own last line is its exception line), color codes stripped.
-    """
-    cause = getattr(error, "cause", None)
-    source = cause if isinstance(cause, BaseException) else error
-    lines = [line.strip() for line in _TERMINAL_COLOR_CODE.sub("", str(source)).splitlines()]
-    message = next((line for line in reversed(lines) if line), "")
-    name = type(source).__name__
-    return message if message.startswith(f"{name}:") else f"{name}: {message}"
-
-
-def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) -> tuple[Any, Any]:
+def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
     """A ``ray.tune.Stopper`` for cooperative-first, Ray-hard-stop-as-fallback sweep cancel, paired
     with the ``ray.tune.Callback`` that feeds its whole-experiment decision.
 
-    Per-trial (``Stopper.__call__``): True whenever ``stop_all_when()`` says the cancel file
-    exists, so Tune ends that trial after the report it just made. Whole-experiment
-    (``Stopper.stop_all``): True once the cancel file exists and either the callback's own live set
+    Per-trial (``Stopper.__call__``): True whenever a cancel of ``sweep_root`` is requested
+    (``experiments.cancel_requested``), so Tune ends that trial after the report it just made.
+    Whole-experiment
+    (``Stopper.stop_all``): True once a cancel is requested and either the callback's own live set
     (every trial id Ray has started and not yet completed or errored, kept current from
     ``on_trial_start``/``on_trial_complete``/``on_trial_error``) is empty, or the heartbeat stale
-    window has passed since the file was written, at which point Ray's own stop kills whatever
-    actor a trial that never polls ``should_cancel`` left running.
+    window has passed since the first request's recorded time (``experiments.request_cancel``), at
+    which point Ray's own stop kills whatever actor a trial that never polls ``should_cancel`` left
+    running.
 
     Returns ``(stopper, callback)``; the caller wires the stopper onto ``run_config.stop`` and the
     callback into ``run_config.callbacks``.
     """
     from ray.tune import Callback, Stopper
 
+    from tcip_mcp.experiments import cancel_requested
+
     class _LiveTrialsCallback(Callback):
-        """Tracks the trial ids Ray currently holds live, for :class:`_SweepStopper.stop_all`."""
+        """The trial ids Ray currently holds live: started and not yet completed or errored."""
 
         def __init__(self) -> None:
             self.live_trial_ids: set[str] = set()
@@ -491,22 +472,18 @@ def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) ->
 
     class _SweepStopper(Stopper):
         def __call__(self, trial_id: str, result: dict) -> bool:
-            return bool(stop_all_when())
+            return cancel_requested(sweep_root)
 
         def stop_all(self) -> bool:
-            if not stop_all_when():
+            if not cancel_requested(sweep_root):
                 return False
-            from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, TCIP_HEARTBEAT_STALE_SECONDS
+            from datetime import datetime, timezone
 
-            sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
-            try:
-                written_at = sentinel.stat().st_mtime
-            except OSError:
-                return False
-            import time as _time
-            if _time.time() - written_at > TCIP_HEARTBEAT_STALE_SECONDS:
-                return True
-            return not live_trials.live_trial_ids
+            from tcip_mcp.experiments import CANCEL_FILE, HEARTBEAT_STALE_SECONDS, read_record
+
+            requested = datetime.fromisoformat(read_record(sweep_root / CANCEL_FILE)["requested"])
+            waited = (datetime.now(timezone.utc) - requested).total_seconds()
+            return waited > HEARTBEAT_STALE_SECONDS or not live_trials.live_trial_ids
 
     return _SweepStopper(), live_trials
 
@@ -602,15 +579,15 @@ def tune_search(
     storage_path: str | None = None,
     study_name: str = "tcip_hpo",
     resources_per_trial: dict | None = None,
-    stop_all_when: Callable[[], bool] | None = None,
     split_draws: int = 1,
-) -> dict:
-    """Run an HPO sweep on Ray Tune.
+) -> str:
+    """Run an HPO sweep on Ray Tune and return its TensorBoard logdir, Ray's experiment store
+    ``<storage_path>/<study_name>``. A cancel requested of that directory
+    (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`).
 
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
-            ``report(value)`` for each step it wants the searcher/scheduler to see (report at least
-            once; the last value is the trial's result under ``mode``).
+            ``report(value)`` for each step it wants the searcher/scheduler to see.
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
@@ -626,27 +603,17 @@ def tune_search(
             fraction for sharing). Omit to derive one from the host's real GPU count and
             ``max_concurrent``. A cluster this sweep starts is sized to ``cpu`` times
             ``max_concurrent`` CPUs (:func:`_ray_session`).
-        stop_all_when: Cooperative-cancel signal, ``None`` (the default) runs the sweep to
-            completion. See :func:`_build_sweep_stopper`.
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
             axis (:func:`split_draw_search_space`; raises ``ValueError`` naming the axis when it is
             missing) and :func:`build_search_alg` builds the native sampler with
             ``constant_grid_search``, so every sampled point is trained once per seed whether
             ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
-
-    Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
-    ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``). Each
-    ``all_trials`` row is ``{"params", "value", "iterations", "state"}``, ``state`` one of
-    ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` line on any ``ERROR`` row, as
-    :func:`trial_error_text` renders it. A trial whose actor never answered Ray's first bookkeeping
-    call comes back with ``params``, ``value`` and ``iterations`` all ``None``. A sweep in which no
-    trial reported the metric raises ``RuntimeError`` out of ``get_best_result``.
     """
     if not storage_path:
         raise ValueError(
             "tune_search needs storage_path: trial results are persisted where the caller "
             "says, never Ray's own home-directory default. run_hyperparameter_search resolves it for a "
-            "training sweep (the project's own .tcip/hpo via hpo_root/sweep_dir); a bespoke "
+            "training sweep (the project's own .tcip/hpo via sweeps_dir/sweep_dir); a bespoke "
             "search names its own directory."
         )
 
@@ -697,16 +664,14 @@ def tune_search(
     # A trainable with no CPU request gets one CPU from Ray, so the cluster is sized the same way.
     cluster_cpus = math.ceil(float(resources.get("cpu", 1.0)) * max(max_concurrent, 1))
 
+    stopper, live_trials_callback = _build_sweep_stopper(Path(storage_path) / study_name)
     run_kwargs: dict[str, Any] = {
         "verbose": 0,
         "storage_path": Path(storage_path).resolve().as_posix(),
         "name": study_name,
+        "stop": stopper,
+        "callbacks": [live_trials_callback],
     }
-    if stop_all_when is not None:
-        stopper, live_trials_callback = _build_sweep_stopper(
-            stop_all_when, Path(storage_path) / study_name)
-        run_kwargs["stop"] = stopper
-        run_kwargs["callbacks"] = [live_trials_callback]
 
     removed_env: dict[str, str] = {}
     for var in _ENV_VARS_RAY_TUNE_REFUSES:
@@ -730,49 +695,7 @@ def tune_search(
                 ),
                 run_config=tune.RunConfig(**run_kwargs),
             )
-            results = tuner.fit()
+            tuner.fit()
     finally:
         os.environ.update(removed_env)
-
-    all_trials = []
-    for i in range(len(results)):
-        r = results[i]
-        if r.config is None:
-            # Ray's config reads the trial's result metrics, filled the moment its actor answers
-            # Ray's first bookkeeping call; a trial whose actor never answered has nothing to name.
-            text = (
-                "the trial never answered Ray: its actor died during start or never received "
-                "one, so it has no params, value or iteration count of its own"
-            )
-            if r.error:
-                text = f"{text} ({trial_error_text(r.error)})"
-            all_trials.append({
-                "params": None, **stored_number("value", None), "iterations": None,
-                "state": "ERROR", "error": text,
-            })
-            continue
-        row = {
-            "params": {k: r.config.get(k) for k in space},
-            **stored_number("value", (r.metrics or {}).get(metric)),
-            "iterations": (r.metrics or {}).get("training_iteration"),
-            "state": "ERROR" if r.error else "COMPLETE",
-        }
-        if r.error:
-            row["error"] = trial_error_text(r.error)
-        all_trials.append(row)
-
-    best = results.get_best_result(metric=metric, mode=mode)
-    assert best.config is not None
-    result: dict[str, Any] = {
-        "best_params": {k: best.config.get(k) for k in space},
-        **stored_number("best_value", (best.metrics or {}).get(metric)),
-        "n_trials": len(results),
-        "study_name": study_name,
-        "all_trials": all_trials,
-        "search_alg": (search_alg or "random"),
-        "scheduler": (scheduler if scheduler is not None else "none"),
-        "warm_start": warm_start,
-        "baseline_params": (baseline_params or get_default_baseline_params()) if warm_start else None,
-    }
-    result["tensorboard_logdir"] = f"{run_kwargs['storage_path']}/{study_name}"
-    return result
+    return f"{run_kwargs['storage_path']}/{study_name}"

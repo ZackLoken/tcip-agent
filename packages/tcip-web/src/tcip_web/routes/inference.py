@@ -23,20 +23,17 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from tcip_mcp.pipelines.data.splits import same_directory
 from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS
-from tcip_mcp.web_client import INFERENCE_JOBS, current_root
+from tcip_mcp.web_client import current_root
 from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
-
-if TYPE_CHECKING:
-    from tcip_web.jobstore import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -66,22 +63,20 @@ class InferenceJob:
     postprocess: str = DEFAULT_POSTPROCESS  # cross-tile merge, one of CROSS_TILE_MERGES
     total: int = 0
     done: int = 0
-    status: JobStatus = "pending"
+    status: str = "pending"  # one of jobstore.JOB_STATES
     error: Optional[str] = None
     warning: Optional[str] = None
     # Set when a line the publishing library writes for this run could not be written: a distinct
     # fact from warning, never reused for it. The predictions and their stamp are on disk regardless.
     audit_warning: Optional[str] = None
-    # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the
-    # run. A rehydrated job's count is whatever the last persist wrote, never a live measurement.
+    # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the run.
     dropped_boxes: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    # The platform root this job launched under, resolved on whichever thread constructs it
-    # (the request thread for a real launch); a rehydrated job restates the persisted value.
+    # The platform root this job launched under, resolved on the thread that constructs it.
     platform_root: str = field(default_factory=_current_root)
     # The dataset root the launch resolved its bucket under, which the publication is recorded
-    # under; never in _summary, so a rehydrated job never answers an in-flight match.
+    # under.
     dataset_root: Optional[Path] = None
     requested_model_name: str = ""
     date: Optional[str] = None
@@ -93,39 +88,11 @@ def _summary(job: InferenceJob) -> dict:
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
         "warning": job.warning, "audit_warning": job.audit_warning,
         "dropped_nonpositive_boxes": job.dropped_boxes,
-        "platform_root": job.platform_root,
     }
 
 
-def _from_summary(s: dict) -> InferenceJob:
-    """A persisted summary, rehydrated: only the fields the API exposes are restored. An
-    interrupted job's ``done`` and ``dropped_boxes`` are whatever the last persist wrote.
-    """
-    return InferenceJob(
-        job_id=s["job_id"],
-        checkpoint_path="",
-        images_dir=s["images_dir"],
-        output_dir=s["output_dir"],
-        total=s["total"],
-        done=s["done"],
-        platform_root=s["platform_root"],
-        status=jobstore.rehydrated_status(s),
-        error=s["error"],
-        warning=s["warning"],
-        audit_warning=s["audit_warning"],
-        dropped_boxes=s["dropped_nonpositive_boxes"],
-    )
-
-
-_registry = jobstore.JobRegistry(
-    INFERENCE_JOBS, to_summary=_summary, from_summary=_from_summary,
-)
-"""The dict-plus-lock live registry for this route's own jobs (see ``jobstore.JobRegistry``),
-the shared home review.py's priority queue and tuning.py's sweeps adopt too."""
-
-
-def _persist() -> None:
-    _registry.persist()
+_registry = jobstore.JobRegistry()
+"""This route's own live jobs (``jobstore.JobRegistry``)."""
 
 
 def _register(job: InferenceJob) -> None:
@@ -142,26 +109,15 @@ def _list_jobs() -> list[InferenceJob]:
     return _registry.list(current_root())
 
 
-def rehydrate_for_current_root() -> None:
-    """Merge this root's persisted jobs, not already live, into memory via :func:`_from_summary`.
-
-    A persisted non-terminal job is surfaced as ``interrupted``. Merges by job id, so it never
-    displaces a job still live from another root, and bounds the dict afterwards the same way
-    registering a job does.
-    """
-    _registry.rehydrate()
-
-
 # ── Worker ─────────────────────────────────────────────────────────────
 
 
 def _worker(job: InferenceJob) -> None:
     # Held through try/except, assigned to job.status only in finally, after the publication is
     # attempted. "running" (never a terminal read) until a branch below names the real outcome.
-    terminal_status: JobStatus = "running"
+    terminal_status = "running"
     try:
         job.status = "running"
-        _persist()
 
         from tcip_mcp.audit import AuditEntryNotWritten
         from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
@@ -181,8 +137,7 @@ def _worker(job: InferenceJob) -> None:
             checkpoint, images_dir=job.images_dir, conf_threshold=job.conf, device=None,
             tile=job.tile, tile_size=job.tile_size, overlap=job.overlap,
             cross_tile_nms=job.cross_tile_nms, max_dets=job.max_dets,
-            postprocess=job.postprocess, experiment_id=None,
-            tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
+            postprocess=job.postprocess, tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
         if isinstance(prepared, str):
             terminal_status = "failed"
             job.error = prepared
@@ -222,7 +177,6 @@ def _worker(job: InferenceJob) -> None:
         job.error = str(exc)
     finally:
         job.status = terminal_status
-        _persist()
 
 
 # ── Request/response ───────────────────────────────────────────────────
@@ -383,7 +337,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
         await websocket.close()
         return
     try:
-        from tcip_web import jobstore
+        from tcip_mcp.experiments import TERMINAL_STATES
 
         last_done = -1
         while True:
@@ -400,7 +354,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                 })
             # Terminate on any terminal state: a canceled/interrupted job never
             # reaches completed/failed, so keying only on those spun this loop forever.
-            if job.status in jobstore.TERMINAL_STATUSES:
+            if job.status in TERMINAL_STATES:
                 await websocket.send_json({
                     "type": "final",
                     "job_id": job.job_id,

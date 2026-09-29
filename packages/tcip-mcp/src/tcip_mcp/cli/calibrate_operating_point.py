@@ -8,7 +8,7 @@ Usage:
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> --project-root <project_root> \
-        [--experiment-id <id>] [--holdout-ratio 0.5] [--device cpu] [--selection-dir <dir>]
+        [--holdout-ratio 0.5] [--device cpu] [--selection-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project-root (register it with
 register_model first); this script refuses one it is not, naming the digest and the root. The
@@ -39,8 +39,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="The registry root the checkpoint must be named under: this script "
                              "binds only the backend, and platform_state_root() falls back to "
                              "the working directory, which would search an empty index.")
-    parser.add_argument("--experiment-id", default=None,
-                        help="Producing experiment id recorded in the printed provenance.")
     parser.add_argument("--holdout-ratio", type=float, default=DEFAULT_HOLDOUT_RATIO,
                         help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
                              "effect on the first calibration call for this labels_dir's GT identity"
@@ -86,7 +84,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         result = resolve_count_operating_point(
             checkpoint_path=args.checkpoint, trait=args.trait, labels_dir=args.labels_dir,
             images_dir=args.images_dir, dataset_root=args.dataset_root,
-            project_root=args.project_root, experiment_id=args.experiment_id, group_by=args.group_by, group_key_map=group_key_map,
+            project_root=args.project_root, group_by=args.group_by, group_key_map=group_key_map,
             selection_dir=args.selection_dir, holdout_ratio=args.holdout_ratio, seed=args.seed,
             device=args.device,
         )

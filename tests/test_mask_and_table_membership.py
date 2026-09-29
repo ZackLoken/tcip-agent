@@ -20,12 +20,31 @@ from PIL import Image  # noqa: E402
 
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, persist_run_partition, recorded_side as _side,
+    auto_train_val, partition_samples,
 )
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
+
+def _side(partition: dict, side: str) -> list[str]:
+    """The member names a resolved partition put on ``side``."""
+    return sorted({s.member for s in partition_samples(partition) if s.side == side})
+
+
+def _resolved(experiment_id: str, task: str, data_cfg: dict):
+    """A run over ``data_cfg`` resolved by the launcher's own producer: what its launch record
+    says it resolved, and the train and val datasets the child's own context producer builds its
+    loaders from out of that record."""
+    from tcip_mcp.experiments import observe, run_resolution
+    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    run_dir = opened_run(None, {"model_source": {"task": task}, "data": data_cfg},
+                         experiment_id=experiment_id)
+    ctx = prepare_run_context(observe(run_dir))
+    val = ctx.val_loader.dataset if ctx.val_loader is not None else None
+    return run_resolution(experiment_id), ctx.train_loader.dataset, val
 
 
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
@@ -76,7 +95,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     out = tmp_path / "m"
     drawn = _drawn(root, masks_dir, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}, "num_classes": 2}
+    data_cfg = {"split": {"selection_dir": str(out)}}
     train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
 
     assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
@@ -100,7 +119,7 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
     held_out = {s.identity for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert sorted(partition) == [str(csv_path)]
+    assert {s.ground_truth for s in partition_samples(partition)} == {str(csv_path)}
 
 
 def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_path: Path):
@@ -138,7 +157,7 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     drawn = _drawn(root, masks_dir, out)
 
     train_ds, _val_ds, _partition = auto_train_val(
-        "semantic_seg", {"split": {"selection_dir": str(out)}, "num_classes": 2}, None)
+        "semantic_seg", {"split": {"selection_dir": str(out)}}, None)
 
     by_identity = {s.identity: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -178,7 +197,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     built from those samples, so membership is read off the loaders rather than off a record."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
     train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
@@ -217,7 +236,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
     assert _side(partition, "train") == sorted(members[train_ds])
-    assert partition[str(csv_path)]["val"] == sorted(members[val_ds])
+    assert _side(partition, "val") == sorted(members[val_ds])
     # The maps themselves, not what ``member_of``'s fallback could answer for a bare key.
     for ds in (train_ds, val_ds):
         assert ds.sample_sources is not None and ds.sample_ground_truth is not None
@@ -235,10 +254,9 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
 def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     """A row key is already the member's own name. Stripping a suffix from it would read ``a.1``
     and ``a.2`` as one member, collapsing two rows in the loaders' own membership, in the
-    persisted partition, and in the leakage check that joins a calibration image against the
+    resolved partition, and in the leakage check that joins a calibration image against the
     training side by that name.
     """
-    from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.pipelines.data.datasets import record_stems_of
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
@@ -257,27 +275,25 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                 "split": {"val_ratio": 0.5, "seed": 3, "group_by": "stem"}}
-    train_ds, val_ds, partition = auto_train_val("classification", data_cfg, None)
+    resolved, train_ds, val_ds = _resolved("exp-dotted", "classification", data_cfg)
 
     # The loaders name every row apart, not one collapsed member.
     named = set(record_stems_of(train_ds) or []) | set(record_stems_of(val_ds) or [])
     assert named == set(dotted)
     assert len(record_stems_of(train_ds) or []) == train_ds.num_samples
 
-    create_experiment("exp-dotted", {"data": data_cfg})
-    persist_run_partition("exp-dotted", data_cfg, partition=partition)
-    record = read_run_partition("exp-dotted")
-    scope = record["members"][str(csv_path)]
-    assert sorted(scope["train"] + scope["val"]) == sorted(dotted)
-    assert sorted(scope["group_key_map"]) == sorted(dotted)
+    samples = partition_samples(resolved["partition"])
+    assert sorted(s.member for s in samples) == sorted(dotted)
+    trained = _side(resolved["partition"], "train")
+    validated = _side(resolved["partition"], "val")
 
     # A calibration over one training row is that row leaking, and the check names it: with the
     # names collapsed, every row would answer for every other one instead.
     leaked = _train_disjointness(
-        "exp-dotted", {scope["train"][0]}, set(), calibration_labels_dir=str(csv_path))
-    assert leaked["leaked_groups"] == [scope["train"][0]]
+        "exp-dotted", {trained[0]}, set(), calibration_labels_dir=str(csv_path))
+    assert leaked["leaked_groups"] == [trained[0]]
     clean = _train_disjointness(
-        "exp-dotted", {scope["val"][0]}, set(), calibration_labels_dir=str(csv_path))
+        "exp-dotted", {validated[0]}, set(), calibration_labels_dir=str(csv_path))
     assert clean["leaked_groups"] == [] and clean["leaked_stems"] == []
 
 
@@ -285,15 +301,11 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
 
 
 def _frozen(experiment_id: str, task: str, data_cfg: dict) -> dict:
-    """Train a run through the platform's own producer, record the data section it resolved (the
-    record a run's own subprocess mirrors), persist its partition, and freeze it."""
-    from tcip_mcp.experiments import create_experiment
+    """Resolve a run through the child's own producer, which records its resolved record, and
+    freeze it."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    _train, _val, partition = auto_train_val(task, data_cfg, None)
-    create_experiment(experiment_id, {"model_source": {"builder": "m:f", "task": task},
-                                      "data": data_cfg})
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
+    _resolved(experiment_id, task, data_cfg)
     return freeze_selection(experiment_id)
 
 
@@ -303,7 +315,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     and a later run binds to exactly that partition."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
     result = _frozen("exp-mask-freeze", "semantic_seg", data_cfg)
@@ -317,8 +329,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
         assert Path(sample.ground_truth).is_file()
 
     train_ds, val_ds, partition = auto_train_val(
-        "semantic_seg", {"split": {"selection_dir": result["selection_dir"]}, "num_classes": 2},
-        None)
+        "semantic_seg", {"split": {"selection_dir": result["selection_dir"]}}, None)
     assert sorted(train_ds.stems) == sorted(s.identity for s in frozen.on("train"))
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
@@ -352,16 +363,11 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
     the run never saw."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"val_ratio": 0.25, "seed": 7}}
-    from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    _train, _val, partition = auto_train_val("semantic_seg", data_cfg, None)
-    create_experiment("exp-mask-moved", {"model_source": {"builder": "m:f",
-                                                          "task": "semantic_seg"},
-                                         "data": data_cfg})
-    persist_run_partition("exp-mask-moved", data_cfg, partition=partition)
+    _resolved("exp-mask-moved", "semantic_seg", data_cfg)
 
     edited = np.zeros((16, 16), dtype=np.uint8)
     edited[:12, :12] = 1
@@ -381,7 +387,6 @@ def test_an_unchanged_table_reports_no_member_as_moved(tmp_path: Path):
     it in. A table scope holds one file answering for every member, so reconstructing a per-image
     document path there would report every calibration member as changed the moment it is read.
     """
-    from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.pipelines.operating_point import _resolve_label_movement
 
     root = tmp_path / "ds"
@@ -389,16 +394,14 @@ def test_an_unchanged_table_reports_no_member_as_moved(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    _train, _val, partition = auto_train_val("classification", data_cfg, None)
-    create_experiment("exp-table-movement", {"data": data_cfg})
-    persist_run_partition("exp-table-movement", data_cfg, partition=partition)
-    record = read_run_partition("exp-table-movement")
+    resolved, _train, _val = _resolved(
+        "exp-table-movement", "classification", {"split": {"selection_dir": str(out)}})
+    partition = resolved["partition"]
 
     held_out = {s.member for s in drawn.on("calibration")}
     movement = _resolve_label_movement(
-        record["members"][str(csv_path)]["label_digests"], held_out, str(csv_path), None,
-        record["selection_binding"]["selection_sha256"])
+        partition_samples(partition), partition["ground_truth_digests"], held_out,
+        str(csv_path), None, partition["selection"]["selection_sha256"])
 
     assert movement["labels_moved_draw_to_run"] == []
     assert movement["labels_moved_run_to_now"] == []
@@ -408,7 +411,6 @@ def test_an_unchanged_table_reports_no_member_as_moved(tmp_path: Path):
 def test_an_edited_table_reports_its_members_as_moved(tmp_path: Path):
     """The same window still catches a real edit: the table rewritten after the run digests
     differently, so every member it answers for reads as moved."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.pipelines.operating_point import _resolve_label_movement
 
     root = tmp_path / "ds"
@@ -416,19 +418,17 @@ def test_an_edited_table_reports_its_members_as_moved(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    _train, _val, partition = auto_train_val("classification", data_cfg, None)
-    create_experiment("exp-table-edited", {"data": data_cfg})
-    persist_run_partition("exp-table-edited", data_cfg, partition=partition)
-    record = read_run_partition("exp-table-edited")
+    resolved, _train, _val = _resolved(
+        "exp-table-edited", "classification", {"split": {"selection_dir": str(out)}})
+    partition = resolved["partition"]
 
     with open(csv_path, "a", newline="") as handle:
         csv.writer(handle).writerow(("later", 2))
 
     held_out = sorted(s.member for s in drawn.on("calibration"))
     movement = _resolve_label_movement(
-        record["members"][str(csv_path)]["label_digests"], set(held_out), str(csv_path),
-        None, record["selection_binding"]["selection_sha256"])
+        partition_samples(partition), partition["ground_truth_digests"], set(held_out),
+        str(csv_path), None, partition["selection"]["selection_sha256"])
 
     assert movement["labels_moved_run_to_now"] == held_out
 
@@ -439,16 +439,14 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     lets the selection check see the bound run's own validation rows; naming none would answer
     that no scope was given and let a calibration over the checkpoint's own selection side pass
     unseen. The predictor is a stand-in returning each row's recorded value, so what is exercised
-    is the door's own provenance rather than a model's accuracy.
+    is the door's own provenance rather than a model's accuracy; the checkpoint is the one the
+    bound run itself completed with.
     """
-    import torch
-
-    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.experiments import observe
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
-    from tcip_mcp.tools.model_tools import register_model
     from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
+    from tests._verified_checkpoint_fixtures import worker_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     # One trait in the project, so what this exercises is the door's provenance, not the trait.
     propose_and_confirm(tmp_path, with_fields(BUD_OPENING, regression_skill_floor=0.0))
 
@@ -457,18 +455,13 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    _train, _val, partition = auto_train_val("regression", data_cfg, None)
-    create_experiment("exp-scalar-scope", {"data": data_cfg})
-    persist_run_partition("exp-scalar-scope", data_cfg, partition=partition)
-
-    checkpoint = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "kind": "tcip_module",
-                "config": {"model_source": {"task": "regression"},
-                           "data": {"num_channels": 3, "scope": {}}}}, checkpoint)
-    assert "error" not in register_model(
-        name="table-scope", checkpoint_path=str(checkpoint), config={},
-        project_path=str(tmp_path))
+    run_dir = worker_run(None, {
+        "model_source": {"builder": "tests.scorer_models:build_linear", "task": "regression"},
+        "data": {"split": {"selection_dir": str(out)}},
+        "training_source": "tests.bespoke_models:save_built_weights", "device": "cpu",
+    }, experiment_id="exp-scalar-scope")
+    checkpoint = observe(run_dir).checkpoint
+    assert checkpoint is not None, run_dir
 
     by_row = {key: float(value) for key, value in
               (row.split(",") for row in
@@ -482,10 +475,9 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
                         lambda *a, **kw: _RecordedValues())
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", checkpoint_path=str(checkpoint),
+        trait_name="bud_opening", checkpoint_path=checkpoint["path"],
         images_dir=str(images_dir), csv_path=str(csv_path), criterion="r_squared",
-        output_dir=str(tmp_path / "calib"), dataset_root=str(root),
-        experiment_id="exp-scalar-scope", group_by="stem",
+        output_dir=str(tmp_path / "calib"), dataset_root=str(root), group_by="stem",
     )
 
     assert "error" not in result, result
@@ -540,35 +532,35 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
     return images_dir, masks_dir
 
 
-def test_a_stated_class_count_other_than_the_derived_one_refuses_on_the_run_path(tmp_path: Path):
-    """A built-in loader's count is the one its ground truth derives: a config stating another,
-    below or above it, refuses on the run path before any loader is built, and a config stating
-    the derived count records that count."""
+def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(tmp_path: Path):
+    """A built-in loader's count is the one its ground truth derives, never an input: a config
+    stating one refuses on the run path before any loader is built, whether it is below, above or
+    equal to the derived count, and a config stating none records the derived count."""
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     base = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
             "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
 
-    for wrong in (2, 9):
-        with pytest.raises(ValueError, match=f"num_classes={wrong}, and the ground truth"):
+    for stated in (2, 3, 9):
+        with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
             auto_train_val(
-                "semantic_seg", {**base, "num_classes": wrong, "split": dict(base["split"])},
+                "semantic_seg", {**base, "num_classes": stated, "split": dict(base["split"])},
                 None)
 
-    stated = {**base, "num_classes": 3, "split": dict(base["split"])}
-    _train_ds, val_ds, _partition = auto_train_val("semantic_seg", stated, None)
+    unstated = {**base, "split": dict(base["split"])}
+    _train_ds, val_ds, _partition = auto_train_val("semantic_seg", unstated, None)
     assert val_ds is not None
-    assert stated["num_classes"] == 3 and stated.get("num_ranks") is None
+    assert unstated["num_classes"] == 3 and unstated.get("num_ranks") is None
 
 
-def test_a_table_run_stating_a_count_its_values_do_not_derive_refuses(tmp_path: Path):
-    """Table values ``0`` and ``1`` derive two classes; nine stated beside them refuses by name,
-    and the unstated run records two."""
+def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
+    """Table values ``0`` and ``1`` derive two classes; a count stated beside them refuses by
+    name, and the unstated run records two."""
     from tests._producer_fixtures import run_over
 
     images_dir, csv_path = _table_dataset(tmp_path / "table")
     with open(csv_path, "w", newline="") as handle:
         csv.writer(handle).writerows([("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))])
-    with pytest.raises(ValueError, match="num_classes=9"):
+    with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
         run_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 9})
 
     _dataset, data = run_over("classification", str(images_dir), str(csv_path))
@@ -693,38 +685,30 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
     each route is for; what they may not do is disagree about which members that directory holds,
     where it is, or what each member's ground truth digests to now.
     """
-    from tcip_mcp.experiments import create_experiment, read_run_partition
-
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     out = tmp_path / "m"
     _drawn(root, masks_dir, out)
 
-    def persisted(experiment_id: str, data_cfg: dict) -> dict:
-        _train, _val, partition = auto_train_val("semantic_seg", data_cfg, None)
-        create_experiment(experiment_id, {"data": data_cfg})
-        persist_run_partition(experiment_id, data_cfg, partition=partition)
-        return read_run_partition(experiment_id)
+    def trained(experiment_id: str, data_cfg: dict) -> dict:
+        """Every member the run trains or validates on, with the ground truth, its digest at the
+        run and the source the record names for it."""
+        partition = _resolved(experiment_id, "semantic_seg", data_cfg)[0]["partition"]
+        at_run = partition["ground_truth_digests"]
+        return {s.member: (s.ground_truth, at_run[s.ground_truth], s.source)
+                for s in partition_samples(partition) if s.side in ("train", "val")}
 
-    bound = persisted("exp-mask-bound",
-                      {"split": {"selection_dir": str(out)}, "num_classes": 2})
-    drawn = persisted("exp-mask-drawn",
-                      {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                       "num_classes": 2, "split": {"val_ratio": 0.25, "seed": 7}})
+    bound = trained("exp-mask-bound", {"split": {"selection_dir": str(out)}})
+    drawn = trained("exp-mask-drawn",
+                    {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
+                     "split": {"val_ratio": 0.25, "seed": 7}})
 
-    scope = str(masks_dir)
-    assert sorted(bound["members"]) == sorted(drawn["members"]) == [scope]
-    bound_block, drawn_block = bound["members"][scope], drawn["members"][scope]
+    assert {Path(truth).parent for truth, _digest, _source in (*bound.values(), *drawn.values())
+            } == {masks_dir}
     # The bound run holds out a calibration side the drawn one trains on, so the two agree on
     # every member they both name rather than on the union.
-    bound_named = set(bound_block["train"]) | set(bound_block["val"])
-    drawn_named = set(drawn_block["train"]) | set(drawn_block["val"])
-    assert bound_named and drawn_named and bound_named <= drawn_named
-    shared = bound_named & drawn_named
-    assert {k: v for k, v in bound_block["label_digests"]["at_run"].items() if k in shared} == \
-        {k: v for k, v in drawn_block["label_digests"]["at_run"].items() if k in shared}
-    assert {k: v for k, v in bound_block["sources"].items() if k in shared} == \
-        {k: v for k, v in drawn_block["sources"].items() if k in shared}
+    assert bound and drawn and set(bound) <= set(drawn)
+    assert {member: bound[member] for member in bound} == {member: drawn[member] for member in bound}
 
 
 def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_path: Path):
@@ -738,7 +722,6 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
 
     root = tmp_path / "ds"
@@ -753,46 +736,44 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
 
     split = {"group_by": "stem", "val_ratio": 0.25, "seed": 11}
 
-    def persisted(experiment_id: str, task: str, data_cfg: dict) -> tuple[dict, dict, dict]:
-        """The persisted record, and what the loaders this run actually built say each member's
-        own ground truth and source are."""
-        train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
-        create_experiment(experiment_id, {"data": data_cfg})
-        persist_run_partition(experiment_id, data_cfg, partition=partition)
+    def resolved(experiment_id: str, task: str, data_cfg: dict) -> tuple[dict, dict, dict]:
+        """The resolved partition, and what the loaders this run actually built say each
+        member's own ground truth and source are."""
+        record, train_ds, val_ds = _resolved(experiment_id, task, data_cfg)
         served_truth = {ds.sample_members[key]: ds.sample_ground_truth[key]
                         for ds in (train_ds, val_ds) for key in ds.sample_ground_truth}
         served_sources = {ds.sample_members[key]: ds.sample_sources[key]
                           for ds in (train_ds, val_ds) for key in ds.sample_sources}
-        return read_run_partition(experiment_id), served_truth, served_sources
+        return record["partition"], served_truth, served_sources
 
-    document_run, document_served, document_sources = persisted(
+    document_run, document_served, document_sources = resolved(
         "exp-shape-document", "detection", {
             "images_dir": str(images_dir), "labels_dir": str(labels_dir),
             "scope": {"subject": "leaf"}, "split": dict(split)})
-    mask_run, mask_served, mask_sources = persisted(
+    mask_run, mask_served, mask_sources = resolved(
         "exp-shape-mask", "semantic_seg", {
-            "images_dir": str(images_dir), "labels_dir": str(masks_dir), "num_classes": 2,
+            "images_dir": str(images_dir), "labels_dir": str(masks_dir),
             "split": dict(split)})
 
     assert set(document_run) == set(mask_run), "one record shape, whatever the ground truth is"
     assert document_run["group_by"] == mask_run["group_by"] == "stem"
-    assert sorted(document_run["members"]) == [str(labels_dir)]
-    assert sorted(mask_run["members"]) == [str(masks_dir)]
 
-    document_block = document_run["members"][str(labels_dir)]
-    mask_block = mask_run["members"][str(masks_dir)]
-    assert set(document_block) == set(mask_block)
-    for field in ("train", "val", "group_key_map"):
-        assert document_block[field] == mask_block[field], field
+    def by_member(partition: dict) -> dict:
+        return {s.member: s for s in partition_samples(partition)}
+
+    document_samples, mask_samples = by_member(document_run), by_member(mask_run)
+    assert {Path(s.ground_truth).parent for s in document_samples.values()} == {labels_dir}
+    assert {Path(s.ground_truth).parent for s in mask_samples.values()} == {masks_dir}
+    assert {m: (s.side, s.group) for m, s in document_samples.items()} == {
+        m: (s.side, s.group) for m, s in mask_samples.items()}
 
     # One assertion over both shapes: each path the record names for a member is the path the
     # loader that trained on it read, so a record naming any other file fails here.
-    for block, served, sources in ((document_block, document_served, document_sources),
-                                   (mask_block, mask_served, mask_sources)):
-        assert block["label_digests"]["ground_truth"] == served
-        assert block["sources"] == sources
-        assert set(served) == set(block["train"]) | set(block["val"])
+    for samples, served, sources in ((document_samples, document_served, document_sources),
+                                     (mask_samples, mask_served, mask_sources)):
+        assert {m: s.ground_truth for m, s in samples.items()} == served
+        assert {m: s.source for m, s in samples.items()} == sources
 
     # Two runs over one set of images name the same pixels per member: a source wrong the same
     # way in a producer and in the record it writes agrees with itself, and fails only here.
-    assert document_block["sources"] == mask_block["sources"]
+    assert document_sources == mask_sources

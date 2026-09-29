@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from tests._clear_prediction_bucket_fixtures import write_image
-from tests._dense_op_fixtures import shifted_cal_holdout, toy_records
 from tests._regime_fixtures import stub_pass, tiled_regime
 
 # no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
@@ -30,7 +29,6 @@ torch = pytest.importorskip("torch")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines.data.split_construction import recorded_side  # noqa: E402
 
 IMG = 32
 
@@ -73,130 +71,67 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-# The train-disjointness gate must not permanently block a record whose grouping policy this
-# reader cannot reproduce: one that recorded none, and the group_key_map route.
+def _resolved(run_dir: Path) -> dict:
+    """What the run's launch record says it resolved."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
 
-def test_a_record_with_no_group_policy_is_not_permanently_blocked_when_disjoint(
-    tmp_path, monkeypatch,
-):
-    """A record carrying no grouping policy at all, which is what a run that resolved none writes,
-    falls back to the exact-stem check and validates when genuinely disjoint, rather than mapping
-    to unresolvable=True forever."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_ext"), {"members": {
-        str(tmp_path / "labels"): {"train": ["train_a", "train_b"], "val": []}}})
-
-    cal, hold = shifted_cal_holdout()
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
-                                staged_conf_floor=0.01, experiment_id="exp_ext")
-    conf = b.get("conf")
-    assert conf.validated_against == "held_out_annotations"  # not permanently blocked
-    td = conf.gate_evidence["train_disjointness"]
-    assert td["unresolvable"] is False
-    assert td["group_check"] == "not_performed"
-    assert td["leaked_stems"] == []
+    return read_record(run_dir / RUN_FILE)["resolved"]
 
 
-def test_a_record_with_no_group_policy_still_catches_a_real_leak(tmp_path, monkeypatch):
-    """The exact-stem fallback must still refuse a genuine leak, not just always pass."""
-    import tcip_store
+def _side(run_dir: Path, side: str) -> list:
+    """The samples the run's resolved partition put on ``side``."""
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    # Training trained on "c_a", the same stem the calibration reference uses below.
-    tcip_store.replace(split_key("exp_ext2"), {"members": {
-        str(tmp_path / "labels"): {"train": ["c_a", "other_stem"], "val": []}}})
-
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
-                                calibration_records=toy_records("c"),
-                                holdout_records=toy_records("h", shift=3.0),
-                                experiment_id="exp_ext2")
-    conf = b.get("conf")
-    assert conf.validated_against == "false"
-    td = conf.gate_evidence["train_disjointness"]
-    assert td["unresolvable"] is False
-    assert td["group_check"] == "not_performed"
-    assert td["leaked_stems"] == ["c_a"]  # caught even with no group policy at all
+    return [s for s in partition_samples(_resolved(run_dir)["partition"]) if s.side == side]
 
 
 def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
-    """group_key_map, exercised through auto_train_val -> persist_run_partition ->
-    _train_disjointness, must not permanently block the model, and the persisted map must
-    actually be used for a real group-level leak check, not just declared unresolvable."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
+    """group_key_map, exercised through the launcher's own resolution -> _train_disjointness, must
+    not permanently block the model: the recorded groups resolve every calibration stem."""
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     stems = ["imgA0", "imgA1", "imgB0", "imgB1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
     group_key_map = {"imgA0": "gA", "imgA1": "gA", "imgB0": "gB", "imgB1": "gB"}
-    data_cfg = {
+    run_dir = resolved_run(tmp_path, {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "auto_val": True,
         "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": dict(group_key_map)},
-    }
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
+    }, experiment_id="e1")
+    assert _resolved(run_dir)["partition"]["group_by"] == "explicit_map"
+    train, val = _side(run_dir, "train"), _side(run_dir, "val")
     # The two groups (gA/gB) never straddle train/val: group-coherent by construction.
-    train_groups = {group_key_map[Path(s).stem] for s in train_ds.stems}
-    val_groups = {group_key_map[Path(s).stem] for s in val_ds.stems}
-    assert train_groups.isdisjoint(val_groups)
-
-    create_experiment("e1", {})
-    persist_run_partition("e1", data_cfg, partition=partition)
-    split = read_run_partition("e1")
-    assert split["group_by"] == "explicit_map"
-    # The map itself, not just the policy name.
-    assert split["members"][str(labels_dir)]["group_key_map"] == group_key_map
+    assert {s.group for s in train}.isdisjoint({s.group for s in val})
 
     # A calibration reference drawn from val's own stems must not be permanently blocked.
-    val_stems = {Path(s).stem for s in val_ds.stems}
-    td = _train_disjointness("e1", val_stems, set(), calibration_labels_dir=str(labels_dir))
+    td = _train_disjointness("e1", {s.member for s in val}, set(),
+                             calibration_labels_dir=str(labels_dir))
     assert td["unresolvable"] is False
-    assert td["group_check"] == "performed"  # every stem covered by the persisted map
+    assert td["group_check"] == "performed"  # every stem covered by the recorded groups
     assert td["leaked_groups"] == []
 
-    # The mechanism genuinely checks groups, not just exact stems: a calibration id that is a
-    # different stem mapped to the same group as a training stem must be caught.
-    train_group = group_key_map[Path(train_ds.stems[0]).stem]
-    data_cfg["split"]["group_key_map"]["extra_leak_stem"] = train_group
-    partition[str(labels_dir)]["group_key_map"]["extra_leak_stem"] = train_group
-    persist_run_partition("e1", data_cfg, partition=partition)
-    td_leak = _train_disjointness(
-        "e1", {"extra_leak_stem"}, set(), calibration_labels_dir=str(labels_dir))
-    assert td_leak["unresolvable"] is False
-    assert td_leak["leaked_groups"] == [train_group]
+    # A training stem named as calibration is caught at its recorded group.
+    td_leak = _train_disjointness("e1", {train[0].member}, set(),
+                                  calibration_labels_dir=str(labels_dir))
+    assert td_leak["leaked_groups"] == [train[0].group]
 
 
 def test_a_drawn_validation_side_is_checked_end_to_end(tmp_path):
-    """A run's own drawn validation side, driven through auto_train_val ->
-    persist_run_partition -> _selection_disjointness: the record names those val members and the
-    scope they live under, so a calibration reading that same directory is checked against them
-    like any other side. A reader that skipped this route would report no overlap where the
-    calibration is measuring on exactly the images the checkpoint was chosen against."""
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    """A run's own drawn validation side, driven through the launcher's own resolution ->
+    _selection_disjointness: the record names those val members and the scope they live under,
+    so a calibration reading that same directory is checked against them like any other side. A
+    reader that skipped this route would report no overlap where the calibration is measuring on
+    exactly the images the checkpoint was chosen against."""
     from tcip_mcp.pipelines.operating_point import _selection_disjointness
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", ["t0", "t1", "v0", "v1"])
-    data_cfg = {
+    run_dir = resolved_run(tmp_path, {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
         "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
-    }
-    _train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
-    val_member = recorded_side(partition, "val")[0]
-
-    create_experiment("exp-drawn-val", {})
-    persist_run_partition("exp-drawn-val", data_cfg, partition=partition)
+    }, experiment_id="exp-drawn-val")
+    val_member = _side(run_dir, "val")[0].member
 
     leaked = _selection_disjointness(
         "exp-drawn-val", {val_member}, set(), selection_dir="some/selection",
@@ -210,51 +145,6 @@ def test_a_drawn_validation_side_is_checked_end_to_end(tmp_path):
         calibration_labels_dir=str(labels_dir))
     assert clean["applicable"] is True
     assert clean["leaked_stems"] == [] and clean["leaked_groups"] == []
-
-
-def test_a_record_with_no_per_scope_membership_is_unresolvable_for_the_selection_check(tmp_path):
-    """A run recorded before the per-scope members block existed leaves flat train and val lists
-    and one labels directory. Which directory its val members live under is then not on record, so
-    comparing them against whichever directory a calibration read would answer for a scope the
-    record never stated: it would name a leak that is only a shared filename, or clear one it
-    never checked. It answers unresolvable instead, and the same record before the block was
-    stripped is checked for real."""
-    from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
-    from tcip_mcp.pipelines.operating_point import _selection_disjointness
-
-    images_dir, labels_dir = _detection_dataset(tmp_path / "ds", ["t0", "t1", "v0", "v1"])
-    data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
-        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
-    }
-    _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment("exp-unscoped-record", {})
-    persist_run_partition("exp-unscoped-record", data_cfg, partition=partition)
-    val_member = recorded_side(partition, "val")[0]
-
-    def _check(cal_id: str, labels: str) -> dict:
-        return _selection_disjointness(
-            "exp-unscoped-record", {cal_id}, set(), selection_dir="some/selection",
-            calibration_labels_dir=labels)
-
-    # Admits valid work: as produced, the record's own members answer the check.
-    assert _check(val_member, str(labels_dir))["applicable"] is True
-    assert _check(val_member, str(labels_dir))["unresolvable"] is False
-
-    # The record a run from before that block wrote: the real writer's own output with the
-    # per-scope membership taken back out, which is exactly what such a record lacks.
-    import tcip_store
-
-    recorded = tcip_store.read(split_key("exp-unscoped-record"))
-    tcip_store.replace(split_key("exp-unscoped-record"),
-                       {k: v for k, v in recorded.items() if k != "members"})
-
-    for cal_id in (val_member, "t0"):
-        answer = _check(cal_id, str(labels_dir))
-        assert answer["unresolvable"] is True, cal_id
-        assert answer["leaked_stems"] == [] and answer["leaked_groups"] == []
-        assert "per-scope membership" in answer["reason"]
 
 
 DATE = "2-11-26"
@@ -290,7 +180,7 @@ def test_a_drawn_run_and_a_drawn_selection_spell_one_group_key(tmp_path):
     """A run that draws its own split and a selection ``draw_splits`` writes record the same group
     key for one stem under one directory."""
     from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, partition_samples
     from tcip_mcp.tools.data_tools import draw_splits
 
     root = tmp_path / "ds"
@@ -299,7 +189,7 @@ def test_a_drawn_run_and_a_drawn_selection_spell_one_group_key(tmp_path):
     _train_ds, val_ds, partition = auto_train_val(
         "detection", _dated_run_config(images_dir, labels_dir), None)
     assert val_ds is not None
-    drawn_keys = partition[str(labels_dir)]["group_key_map"]
+    drawn_keys = {Path(s.ground_truth).stem: s.group for s in partition_samples(partition)}
 
     out = tmp_path / "m"
     result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
@@ -349,7 +239,7 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
     }
 
     assert preflight_config(copy.deepcopy(config))["issues"] == []
-    launched = launch_training(copy.deepcopy(config), str(tmp_path / "out"))
+    launched = launch_training(copy.deepcopy(config))
     assert "error" not in launched, launched
 
     # The same config the door admitted is one the real draw accepts.
@@ -361,23 +251,17 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
 def test_a_crop_annotated_after_a_drawn_run_is_caught_as_its_parents_group(tmp_path):
     """A sibling crop of a training parent, annotated after the run and in no recorded map, is
     caught as a leak of that parent's own recorded group."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
     from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = tmp_path / "ds"
     images_dir, labels_dir, _stems = _dated_detection_dataset(root)
-    data_cfg = _dated_run_config(images_dir, labels_dir)
+    run_dir = resolved_run(tmp_path, _dated_run_config(images_dir, labels_dir),
+                           experiment_id="e-dated-drawn")
 
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment("e-dated-drawn", {})
-    persist_run_partition("e-dated-drawn", data_cfg, partition=partition)
-
-    split = read_run_partition("e-dated-drawn")
-    recorded = split["members"][str(labels_dir)]["group_key_map"]
-    trained = recorded_side(split["members"], "train")
+    trained = _side(run_dir, "train")
     assert trained, "the fixture must train on this directory for the leak to be a leak"
-    parent = trained[0].rsplit("_", 2)[0]
+    parent = trained[0].member.rsplit("_", 2)[0]
     late_crop = f"{parent}_9_0"
     _save_png(images_dir / f"{late_crop}.png")
     json_io.write_annotations(
@@ -387,7 +271,7 @@ def test_a_crop_annotated_after_a_drawn_run_is_caught_as_its_parents_group(tmp_p
     resolved = _train_disjointness(
         "e-dated-drawn", {late_crop}, set(), calibration_labels_dir=str(labels_dir))
 
-    assert resolved["leaked_groups"] == [recorded[trained[0]]]
+    assert resolved["leaked_groups"] == [trained[0].group]
 
 
 def test_no_group_is_reproduced_for_a_directory_the_record_names_nothing_under(tmp_path):
@@ -395,20 +279,15 @@ def test_no_group_is_reproduced_for_a_directory_the_record_names_nothing_under(t
     live under, so a bare stem of them belongs to no one capture date. Read against a directory the
     record names nothing under, the check reports what it can prove, that no member is that stem,
     rather than grouping two unrelated dates' images into one and refusing legitimate work."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
     from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = tmp_path / "ds"
     images_dir, labels_dir, _stems = _dated_detection_dataset(root)
-    data_cfg = _dated_run_config(images_dir, labels_dir)
+    run_dir = resolved_run(tmp_path, _dated_run_config(images_dir, labels_dir),
+                           experiment_id="e-other-date")
 
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment("e-other-date", {})
-    persist_run_partition("e-other-date", data_cfg, partition=partition)
-
-    trained = recorded_side(read_run_partition("e-other-date")["members"], "train")
-    parent = trained[0].rsplit("_", 2)[0]
+    parent = _side(run_dir, "train")[0].member.rsplit("_", 2)[0]
     elsewhere = root / "annotations" / "2-12-01"
     elsewhere.mkdir(parents=True)
 
@@ -424,169 +303,98 @@ def test_no_group_is_reproduced_for_a_directory_the_record_names_nothing_under(t
 # a spatial split's manifest never reads as a bare-stem leak, and _train_disjointness still
 # catches a genuine same-source reference.
 
-def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatch):
-    """A tile_prefix split.json is untouched by the spatial_strip branch in
-    _train_disjointness."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
+def test_train_disjointness_named_group_by_resolves_every_stem_to_its_recorded_group(tmp_path):
+    """A tile_prefix run's recorded groups answer the check: a calibration stem of a trained
+    source is caught at that source's group, with nothing falling through to the exact-stem
+    fallback."""
     from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tests._verified_checkpoint_fixtures import resolved_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    labels_dir = str(tmp_path / "labels")
-    tcip_store.replace(split_key("exp_named"), {
-        "members": {labels_dir: {"train": ["srcA_0_0", "srcA_0_1", "srcB_0_0"], "val": []}},
-        "group_by": "tile_prefix"})
+    images_dir, labels_dir = _detection_dataset(
+        tmp_path / "ds", ["srcA_0_0", "srcA_0_1", "srcB_0_0", "srcB_0_1"])
+    run_dir = resolved_run(tmp_path, {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "split": {"group_by": "tile_prefix", "val_ratio": 0.5, "seed": 1},
+    }, experiment_id="exp_named")
+    trained = _side(run_dir, "train")[0]
+
     result = _train_disjointness(
-        "exp_named", {"srcB_0_0"}, set(), calibration_labels_dir=labels_dir)
-    # leaked_stems stays empty here: a named group_by resolves every train and reference stem,
-    # so nothing falls through to the exact-stem fallback; leaked_groups is the real signal.
+        "exp_named", {trained.member}, set(), calibration_labels_dir=str(labels_dir))
     assert result == {
         "checked": True, "unresolvable": False,
-        "leaked_groups": ["srcB"], "leaked_stems": [], "group_check": "performed",
+        "leaked_groups": [trained.group], "leaked_stems": [], "group_check": "performed",
     }
 
 
-def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, monkeypatch):
-    import tcip_store
+def _spatial_run(tmp_path: Path, experiment_id: str) -> tuple[Path, str]:
+    """A within-image spatial split over one large source, resolved by the launcher's own
+    producer; the run directory and the source's stem."""
+    from tests._verified_checkpoint_fixtures import resolved_run
 
-    from tcip_mcp.experiments import split_key
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    run_dir = resolved_run(tmp_path, {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }, experiment_id=experiment_id)
+    return run_dir, stem
+
+
+def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path):
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_spatial"), {
-        "spatial": {"train_identities": ["mosaic::strip_x_1"],
-                    "val_identities": ["mosaic::strip_x_0"]},
-        "group_by": "spatial_strip",
-    })
+    _run_dir, stem = _spatial_run(tmp_path, "exp_spatial")
 
     # A reference drawn from the same source is a real leak: region-scoping aside, the trained
     # pixels and the reference still share one source image.
-    leaked = _train_disjointness("exp_spatial", {"mosaic"}, set())
-    assert leaked["group_check"] == "spatial_strip"
-    assert leaked["leaked_groups"] == ["mosaic"]
-    assert leaked["unresolvable"] is False
+    leaked = _train_disjointness("exp_spatial", {stem}, set())
+    assert leaked == {
+        "checked": True, "unresolvable": False,
+        "leaked_groups": [stem], "leaked_stems": [], "group_check": "spatial_strip",
+    }
+    # cal_rects/hold_rects default to None: stating them as None answers the same.
+    assert _train_disjointness("exp_spatial", {stem}, set(),
+                               cal_rects=None, hold_rects=None) == leaked
 
     clean = _train_disjointness("exp_spatial", {"other_mosaic"}, set())
     assert clean["leaked_groups"] == []
 
 
-def test_train_disjointness_rects_kwargs_default_none_is_byte_identical(tmp_path, monkeypatch):
-    """cal_rects/hold_rects default to None: passing them explicitly as None must produce
-    byte-identical output to every existing caller, which omits them entirely."""
-    import tcip_store
+def test_the_geometric_check_is_containment_in_a_non_train_region():
+    """Given cal/hold rects against a spatial manifest, the check is geometric containment (fully
+    inside a non-train region, the four-way split's calibration region included, and disjoint from
+    every train region), and catches a leak the lexical check alone would miss: a rect that spills
+    into train from a source stem that isn't literally the training source's own name."""
+    from tcip_mcp.pipelines.operating_point import _spatial_strip_geometric_disjointness
 
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.pipelines.operating_point import _train_disjointness
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_noop"), {
-        "spatial": {"train_identities": ["mosaic::strip_x_1"], "val_identities": []},
-        "group_by": "spatial_strip"})
-
-    omitted = _train_disjointness("exp_noop", {"mosaic"}, set())
-    explicit_none = _train_disjointness(
-        "exp_noop", {"mosaic"}, set(), cal_rects=None, hold_rects=None)
-    assert omitted == explicit_none == {
-        "checked": True, "unresolvable": False,
-        "leaked_groups": ["mosaic"], "leaked_stems": [], "group_check": "spatial_strip",
+    spatial = {
+        "train_region": [[0, 0, 500, 1000]],
+        "val_region": [[500, 0, 650, 1000]],
+        "calibration_region": [[650, 0, 800, 1000]],
+        "test_region": [[800, 0, 1000, 1000]],
     }
 
+    def _check(cal=None, hold=None) -> list[str]:
+        return _spatial_strip_geometric_disjointness(spatial, cal, hold)["leaked_groups"]
 
-def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkeypatch):
-    """When a caller supplies cal_rects/hold_rects against a spatial_strip split, the check
-    becomes geometric containment (fully inside a persisted non-train region, disjoint from
-    every persisted train region) instead of the lexical same-source check, and catches a leak
-    the lexical check alone would miss: a rect that spills into train from a source stem that
-    isn't literally the training source's own name."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.pipelines.operating_point import _train_disjointness
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_geo"), {
-        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
-        "spatial": {
-            "train_region": [[0, 0, 500, 1000]],
-            "val_region": [[500, 0, 750, 1000]],
-            "test_region": [[750, 0, 1000, 1000]],
-        },
-    })
-
-    clean = _train_disjointness(
-        "exp_geo", {"mosaic"}, set(), cal_rects={"mosaic": (550, 100, 700, 300)})
-    assert clean["leaked_groups"] == []
-    assert clean["group_check"] == "spatial_strip_geometric"
-    assert clean["unresolvable"] is False
-
-    # A rect from a source whose name is not "mosaic" at all: the lexical check has nothing
-    # to key off, but the region it actually covers spills into the persisted train area.
-    leaked = _train_disjointness(
-        "exp_geo", set(), {"other_mosaic"}, hold_rects={"other_mosaic": (10, 10, 100, 100)})
-    assert leaked["leaked_groups"] == ["other_mosaic"]
-
+    assert _check({"mosaic": (550, 100, 600, 300)}) == []
+    assert _check({"mosaic": (680, 100, 780, 300)}, {"mosaic": (850, 100, 950, 300)}) == []
+    assert _check(hold={"other_mosaic": (10, 10, 100, 100)}) == ["other_mosaic"]
     # Straddling the train/val boundary: not fully contained in any single non-train region.
-    straddling = _train_disjointness(
-        "exp_geo", {"mosaic"}, set(), cal_rects={"mosaic": (400, 100, 600, 300)})
-    assert straddling["leaked_groups"] == ["mosaic"]
-
-
-def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tmp_path, monkeypatch):
-    """A rect fully inside a persisted calibration_region (the four-way split's own reserved
-    calibration side, distinct from val/test) must clear the geometric check exactly like a
-    val/test rect does: calibration_region belongs in the non-train set the geometric check
-    admits against."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
-    from tcip_mcp.pipelines.operating_point import _train_disjointness
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_geo4"), {
-        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
-        "spatial": {
-            "train_region": [[0, 0, 500, 1000]],
-            "val_region": [[500, 0, 650, 1000]],
-            "calibration_region": [[650, 0, 800, 1000]],
-            "test_region": [[800, 0, 1000, 1000]],
-        },
-    })
-
-    clean = _train_disjointness(
-        "exp_geo4", {"mosaic"}, {"mosaic"},
-        cal_rects={"mosaic": (680, 100, 780, 300)}, hold_rects={"mosaic": (850, 100, 950, 300)})
-    assert clean["leaked_groups"] == []
-    assert clean["group_check"] == "spatial_strip_geometric"
-
-    leaked = _train_disjointness(
-        "exp_geo4", {"mosaic"}, set(), cal_rects={"mosaic": (100, 100, 300, 300)})
-    assert leaked["leaked_groups"] == ["mosaic"]
+    assert _check({"mosaic": (400, 100, 600, 300)}) == ["mosaic"]
 
 
 def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tmp_path):
-    """The real pipeline: auto_train_val -> persist_run_partition persists train_region/
-    val_region, and _train_disjointness's geometric check reads them back correctly: a
-    calibration rect drawn from inside the persisted val region reads clean, and one drawn
-    from inside the persisted train region is caught."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
+    """The real pipeline: the launcher's own resolution records train_region/val_region, and
+    _train_disjointness's geometric check reads them back correctly: a calibration rect drawn from
+    inside the recorded val region reads clean, and one drawn from inside the recorded train
+    region is caught."""
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
 
-    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
-    }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
-
-    create_experiment("exp_geo_e2e", {})
-    persist_run_partition("exp_geo_e2e", data_cfg)
-    split = read_run_partition("exp_geo_e2e")
-    train_region = split["spatial"]["train_region"]
-    val_region = split["spatial"]["val_region"]
+    run_dir, stem = _spatial_run(tmp_path, "exp_geo_e2e")
+    spatial = _resolved(run_dir)["data"]["split"]["spatial_manifest"]
+    train_region = spatial["train_region"]
+    val_region = spatial["val_region"]
     assert train_region and val_region
 
     def _shrunk(rect):
@@ -623,24 +431,13 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
     mapping an identity back to its stem, per the other test in this section) - but the bare
     stem must still never appear as a member on its own, and a different-source reference
     must still read clean end to end through the real training-launch path."""
-    from tcip_mcp.experiments import create_experiment, read_run_partition
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tests._verified_checkpoint_fixtures import partition_side
 
-    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
-    }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
-
-    create_experiment("exp_spatial_e2e", {})
-    persist_run_partition("exp_spatial_e2e", data_cfg)
-    split = read_run_partition("exp_spatial_e2e")
-    assert split["group_by"] == "spatial_strip"
-    trained = split["spatial"]["train_identities"]
+    run_dir, stem = _spatial_run(tmp_path, "exp_spatial_e2e")
+    resolved = _resolved(run_dir)
+    assert partition_side(resolved["partition"], "train") == [stem]
+    trained = resolved["data"]["split"]["spatial_manifest"]["train_identities"]
     assert stem not in trained  # the bare stem itself is never a member
     assert all("::strip_" in s for s in trained)
 
@@ -669,17 +466,18 @@ def test_review_to_records_stems_the_image_id():
 def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_path, monkeypatch):
     """Extensioned review ids in the same tile group as training stems must be caught, not
     silently reported clean."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.feedback.review_calibration import resolve_operating_point_from_review
+    from tests._verified_checkpoint_fixtures import resolved_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    # Trained on two tiles of source "srcA".
-    labels_dir = str(tmp_path / "labels")
-    tcip_store.replace(split_key("exp_review"), {
-        "members": {labels_dir: {"train": ["srcA_0_0", "srcA_0_1"], "val": []}},
-        "group_by": "tile_prefix"})
+    # Trained on the tiles of one source; the review below names further tiles of it.
+    images, labels = _detection_dataset(
+        tmp_path / "ds", ["srcA_0_0", "srcA_0_1", "srcB_0_0", "srcB_0_1"])
+    labels_dir = str(labels)
+    run_dir = resolved_run(tmp_path, {
+        "images_dir": str(images), "labels_dir": labels_dir, "scope": {"subject": "bud"},
+        "split": {"group_by": "tile_prefix", "val_ratio": 0.5, "seed": 1},
+    }, experiment_id="exp_review")
+    source = _side(run_dir, "train")[0].group
 
     def _entry(gt, pred, conf):
         return {"action": "accepted", "class_id": 0, "iscrowd": False, "reviewed_by": "", "class_name": "", "conf_threshold": None, "missed_object_attested": False, "gt_bbox_norm": gt, "pred_bbox_norm": pred,
@@ -690,17 +488,17 @@ def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_pa
     # records aren't excluded from the gate as unadjudicated: this test is about train
     # disjointness, not FN-coverage.
     review_state = {"image": {
-        "srcA_0_2.jpg": {"img_status": "completed", "gt_preexisting": True,
-                         "detections": [_entry([0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.05)]},
-        "srcA_0_3.jpg": {"img_status": "completed", "gt_preexisting": True,
-                         "detections": [_entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
+        f"{source}_0_2.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
+            _entry([0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.05)]},
+        f"{source}_0_3.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
+            _entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
         review_state, "bud_opening", **tiled_regime(), group_by="stem", experiment_id="exp_review",
         bucket_identities=[_IDENTITY], scope_root=tmp_path,
         calibration_labels_dir=labels_dir)
     td = bundle.get("conf").gate_evidence["train_disjointness"]
-    assert td["leaked_groups"] == ["srcA"]  # matched despite the .jpg extension on the review id
+    assert td["leaked_groups"] == [source]  # matched despite the .jpg extension on the review id
     assert bundle.get("conf").validated_against == "false"
 
 
@@ -1080,17 +878,13 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 # --- Minor: resolve_model_identity off a load_registered_checkpoint object. -------------------
 
 def test_minor_resolve_model_identity_reads_the_codebase_own_stamped_checkpoints(tmp_path):
-    """weights_only=True must still read a checkpoint saved the way stamp_model_ref produces it:
-    the rail must admit valid work, not only reject foreign payloads."""
-    from tcip_mcp.model_registry import (
-        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
-    )
+    """weights_only=True must still read a checkpoint the envelope saves, and the identity names
+    the run that completed it: the rail must admit valid work, not only reject foreign
+    payloads."""
+    from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = tmp_path / "m.pt"
-    torch.save({"model_state_dict": {"w": torch.zeros(2, 2)},
-               "optimizer_state_dict": {"state": {}, "param_groups": [{"lr": 1e-3}]},
-               "experiment_id": "exp_abc", "kind": "tcip_module"}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
+    ckpt = registered_checkpoint(tmp_path, experiment_id="exp_abc")
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     identity = resolve_model_identity(checkpoint)
     assert identity["experiment_id"] == "exp_abc"

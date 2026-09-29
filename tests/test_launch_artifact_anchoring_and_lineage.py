@@ -1,9 +1,9 @@
 """What a launched run records about where it wrote and which data it trained on.
 
-Two ends of the reproduce-a-number chain meet at ``launch_training``: the artifact directory a
-later reader resolves from the experiment record, and the dataset identity the immutable lineage
-carries. The training body itself is a separate process, so these tests stand in for the child and
-assert only what the parent resolves, writes and hands to it.
+Two ends of the reproduce-a-number chain meet at ``launch_training``: the run directory a later
+reader resolves, and the dataset identity its run record carries. The training body itself is a
+separate process, so these tests stand in for the child and assert only what the parent resolves,
+writes and hands to it.
 """
 
 from __future__ import annotations
@@ -12,8 +12,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-import tcip_store as ts
 
 
 @pytest.fixture
@@ -73,16 +71,24 @@ def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
                  "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
+        "evaluation": {"selection_metric": "loss"},
     }
 
 
-def test_a_relative_output_dir_anchors_to_the_platform_state_root_not_the_process_cwd(
+def _launch_record(res: dict) -> dict:
+    """The launch record of the run ``res`` names."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
+
+    return read_record(Path(res["output_dir"]) / RUN_FILE)
+
+
+def test_the_run_directory_lies_under_the_platform_state_root_not_the_process_cwd(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
-    """A relative ``output_dir`` names a directory inside the project. The run directory handed to
-    the child, the launch config written into it, and the path stamped into the experiment's
-    status.json all resolve under the platform state root, never under the launching process's
-    cwd."""
+    """The run directory handed to the child and the run record written into it resolve under the
+    platform state root's experiments directory, never under the launching process's cwd."""
     pytest.importorskip("torchvision")
+    from tcip_mcp.experiments import RUN_FILE, experiments_dir
+
     project = tmp_path / "project"
     server_cwd = tmp_path / "server_cwd"
     project.mkdir()
@@ -91,51 +97,20 @@ def test_a_relative_output_dir_anchors_to_the_platform_state_root_not_the_proces
     monkeypatch.chdir(server_cwd)
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), "runs/nightly")
-
-    from tcip_mcp.tools.training_tools import launch_config_key
+    res = training_tools_launch(_detection_config(images_dir, labels_dir))
 
     run_dir = Path(res["output_dir"])
-    assert run_dir == project / "runs" / "nightly" / res["experiment_id"]
-    assert ts.exists(launch_config_key(run_dir))
-    assert not (server_cwd / "runs").exists()
+    assert run_dir == experiments_dir(project) / res["experiment_id"]
+    assert (run_dir / RUN_FILE).is_file()
+    assert list(server_cwd.iterdir()) == []
 
-    argv = recorded_children[0].argv
-    assert argv[argv.index("--output-dir") + 1] == str(run_dir)
-
-    from tcip_mcp.experiments import status_key
-
-    status = ts.read(status_key(res["experiment_id"]))
-    assert status["output_dir"] == str(run_dir)
+    [argv] = [c.argv for c in recorded_children if "--run-dir" in c.argv]
+    assert argv[argv.index("--run-dir") + 1] == str(run_dir)
 
 
-def test_an_absolute_output_dir_stays_the_callers_own_choice(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
-    """The anchoring never captures a path the caller already made explicit: an absolute
-    ``output_dir`` outside the project is honored, with the run still nested under its run id."""
-    pytest.importorskip("torchvision")
-    project = tmp_path / "project"
-    scratch = tmp_path / "scratch_volume"
-    project.mkdir()
-    scratch.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-
-    images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), str(scratch))
-
-    from tcip_mcp.tools.training_tools import launch_config_key
-
-    assert Path(res["output_dir"]) == scratch / res["experiment_id"]
-    assert ts.exists(launch_config_key(scratch / res["experiment_id"]))
-    # The experiment record itself still belongs to the project, wherever the weights go.
-    from tcip_mcp.experiments import status_key
-
-    assert ts.exists(status_key(res["experiment_id"], root=project))
-
-
-def test_launched_run_records_the_datasets_identity_in_its_lineage(
+def test_launched_run_records_the_datasets_identity_in_its_run_record(
         tmp_path: Path, recorded_children) -> None:
-    """The lineage carries the identity of the data section's dataset, so the metric this run
+    """The run record carries the identity of the data section's dataset, so the metric this run
     produces can be traced back to the exact content it trained on. A registered dataset's minted
     id and its recomputed fingerprint both land there, not None."""
     pytest.importorskip("torchvision")
@@ -146,21 +121,17 @@ def test_launched_run_records_the_datasets_identity_in_its_lineage(
     registered = register_dataset(str(ds_root), crop="currant")
     assert registered["id"] and registered["fingerprint"]
 
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir))
 
-    from tcip_mcp.experiments import lineage_key
-
-    lineage = ts.read(lineage_key(res["experiment_id"]))
-    assert lineage["dataset_id"] == registered["id"]
-    assert lineage["dataset_fingerprint"] == registered["fingerprint"]
+    dataset = _launch_record(res)["dataset"]
+    assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}
 
 
 def test_launch_records_what_the_smoke_contract_checked(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
-    """launch_training persists a model_contract record (subject/gating/batch_source/dims/issues/
-    gradient_magnitudes) onto the config every checkpoint embeds, so config.json and
-    launch_config.json both carry what the launch-time smoke actually checked, and the caller's
-    own config dict is never the one mutated to carry it."""
+    """launch_training records a model_contract (subject/gating/batch_source/dims/issues/
+    gradient_magnitudes) on the run record, what the launch-time smoke actually checked, and the
+    caller's own config dict is never the one mutated to carry it."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
@@ -168,21 +139,14 @@ def test_launch_records_what_the_smoke_contract_checked(
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     launched_config = _detection_config(images_dir, labels_dir)
-    res = training_tools_launch(launched_config, "")
+    res = training_tools_launch(launched_config)
     assert "model_contract" not in launched_config
 
-    from tcip_mcp.experiments import config_key
-    from tcip_mcp.tools.training_tools import launch_config_key
-
-    config = ts.read(config_key(res["experiment_id"]))
-    record = config["model_contract"]
+    record = _launch_record(res)["model_contract"]
     assert record["subject"] == "the model as built at launch, before any training step"
     assert record["gating"] is True
     assert record["issues"] == []
     assert isinstance(record["gradient_magnitudes"], dict) and record["gradient_magnitudes"]
-
-    launch_config = ts.read(launch_config_key(Path(res["output_dir"])))
-    assert launch_config["model_contract"] == record
 
 
 def test_launch_omitting_overfit_check_records_null(
@@ -194,13 +158,10 @@ def test_launch_omitting_overfit_check_records_null(
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir))
     assert res["overfit_check"] is None
 
-    from tcip_mcp.experiments import config_key
-
-    config = ts.read(config_key(res["experiment_id"]))
-    assert config["model_contract"]["overfit_check"] is None
+    assert _launch_record(res)["model_contract"]["overfit_check"] is None
 
 
 def test_launch_with_overfit_check_records_the_rendered_report(
@@ -216,15 +177,13 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        _detection_config(images_dir, labels_dir), "", overfit_check=True)
+        _detection_config(images_dir, labels_dir), overfit_check=True)
     assert "error" not in res, res
     assert res["overfit_check"] is not None
     assert "passed" in res["overfit_check"]
 
-    from tcip_mcp.experiments import config_key
-
-    config = ts.read(config_key(res["experiment_id"]))
-    assert config["model_contract"]["overfit_check"] == res["overfit_check"]
+    record = _launch_record(res)["model_contract"]
+    assert record["overfit_check"] == res["overfit_check"]
 
 
 def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
@@ -236,7 +195,6 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     pytest.importorskip("torchvision")
     from tcip_store import check_json_value
 
-    from tcip_mcp.experiments import config_key
     from tcip_mcp.tools import training_tools
 
     project = tmp_path / "project"
@@ -252,11 +210,12 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
                  "scope": {"subject": "bud"}, "auto_val": False},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
+        "evaluation": {"selection_metric": "loss"},
     }
-    res = training_tools.launch_training(config, "", overfit_check=True)
+    res = training_tools.launch_training(config, overfit_check=True)
     assert "error" not in res, res
 
-    record = ts.read(config_key(res["experiment_id"]))["model_contract"]
+    record = _launch_record(res)["model_contract"]
     check_json_value(record, path="model_contract")
     report = record["overfit_check"]
     assert report["passed"] is False
@@ -264,42 +223,36 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     assert report.get("final_state") in ("nan", "positive_infinity", "negative_infinity")
 
 
-def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_training_keys(
+def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
-    """The writer is the real launch_training, driven the same way the tests above drive it
-    (training_tools_launch over _canonical_dataset/_detection_config, Popen and TensorBoard
-    stubbed by recorded_children so no subprocess actually spawns). The reader is the same read
-    the training child performs: tcip_store.read(launch_config_key(output_dir)), the call
-    subprocess_worker.run() makes, not a second parse of config.json. The trainer's keys sit at
-    the config's top level, and run_registry.draw_seed_if_unset draws a seed into
-    config["seed"] before the record is written, so the document the worker reads must carry
-    both, plus the model_contract launch_training records and the resolved experiment_id: a
-    document only the writer's own test has seen is one the worker's read could silently
-    disagree with."""
+    """The writer is the real launch_training (Popen and TensorBoard stubbed by
+    recorded_children so no subprocess actually spawns); the reader is the one the training
+    child performs, the run directory's own ``run.json``. The trainer's keys sit at the config's
+    top level and ``draw_seed_if_unset`` draws a seed into it before the record is written, so
+    the config the worker reads carries both, in the directory the run's own id names."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir))
 
-    from tcip_mcp.tools.training_tools import launch_config_key
+    record = _launch_record(res)
+    config = record["config"]
 
-    launch_config = ts.read(launch_config_key(Path(res["output_dir"])))
-
-    assert isinstance(launch_config["seed"], int)
-    assert isinstance(launch_config["model_contract"], dict)
-    assert launch_config["experiment_id"] == res["experiment_id"]
-    assert launch_config["device"] == "cpu"
-    assert "training" not in launch_config
+    assert Path(res["output_dir"]).name == res["experiment_id"]
+    assert isinstance(config["seed"], int)
+    assert config["device"] == "cpu"
+    assert "training" not in config
+    assert "experiment_id" not in config
 
 
-def training_tools_launch(config: dict, output_dir: str) -> dict:
+def training_tools_launch(config: dict) -> dict:
     """Launch and assert the config was accepted, so a preflight refusal never reads as a
     provenance failure in the tests above."""
     from tcip_mcp.tools import training_tools
 
-    res = training_tools.launch_training(config, output_dir=output_dir)
+    res = training_tools.launch_training(config)
     assert "error" not in res, res
     return res

@@ -45,11 +45,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Rehydrate persisted job/sweep/run registries so GUI history survives a restart.
-
-    Their worker threads don't survive, so rehydrated non-terminal entries surface as
-    'interrupted' (a record, not a resumable job; see ``jobstore``).
-    """
+    """Bind the startup root, read the canvas-open binding once, size GDAL's block cache and warm
+    the agent terminal, before the app serves."""
     log_exposure_opt_in()
     await asyncio.to_thread(_bind_startup_root_serialized)
     # The canvas-open binding record outlives this process's restart; read it once now so the
@@ -59,16 +56,6 @@ async def _lifespan(_app: FastAPI):
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     configure_gdal_cache()
-    try:
-        from tcip_web.routes import inference, review, tuning
-
-        for rehydrate in (inference.rehydrate_for_current_root, tuning.rehydrate_for_current_root,
-                          review.rehydrate_for_current_root):
-            rehydrate()
-        # Training runs aren't rehydrated from a state file: the training list route
-        # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
-    except Exception:  # pragma: no cover - rehydrate is best-effort
-        logger.exception("job registry rehydrate failed")
     # Warm the cold first-spawn cost (tcip_mcp import + PowerShell/.NET) off the request path.
     try:
         from tcip_web import terminal
@@ -446,15 +433,6 @@ def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
         return {"platform_root_problem": str(exc)}
 
     repin_platform_root(marker_root)
-    try:
-        from tcip_web.routes import inference, review, tuning
-
-        inference.rehydrate_for_current_root()
-        tuning.rehydrate_for_current_root()
-        review.rehydrate_for_current_root()
-    except Exception:  # pragma: no cover - rehydrate is best-effort, same as at startup
-        logger.exception("job registry rehydrate failed after a platform-root repin")
-
     result: dict[str, Any] = {"platform_root": str(marker_root)}
     if sent_name is not None and sent_name != marker_name:
         result["platform_root_disagreement"] = {"event_name": sent_name, "marker_name": marker_name}

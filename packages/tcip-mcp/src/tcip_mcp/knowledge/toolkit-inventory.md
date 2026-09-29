@@ -91,14 +91,16 @@ one convenience, not a requirement.
 | Group | Methods |
 |-------|---------|
 | model / correctness | `ctx.build_model`, `ctx.check_contract`, `ctx.overfit_check` (voluntary diagnostic, non-gating; `launch_training(overfit_check=True)` runs the same diagnostic at launch, before your `train(ctx)` ever starts), `ctx.default_train` |
-| data | `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation`, `ctx.auto_train_val` |
+| data | `ctx.train_loader`/`ctx.val_loader` (built from the partition the launch resolved), `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation` |
 | optimize / schedule / freeze | `ctx.build_optimizer`, `ctx.build_scheduler`, `ctx.apply_stage_freeze` (progressive-unfreeze + monotonic guard: the primitive the default trainer uses), `ctx.compute_lr_scale`, `ctx.set_seed`, `ctx.evaluate`, `ctx.compute_class_weights` |
 | measurement | `ctx.calibrate` (resolve a trait's operating point from record gate evidence: the derived, held-out-validated point), `ctx.mask_geometry`, `ctx.instance_geometries` |
-| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`; refuses a payload with no `model_state_dict`, since that stamped kind is what a predictor sniffs to load the weights; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`), `ctx.record_artifact` (a free-form sink for any name except the reserved `"model_weights"`, routed to `ctx.set_final_weights` instead, with a warning), `ctx.should_cancel`, `ctx.set_final_weights` (declares the deliverable checkpoint), `ctx.report_objective` (reports HPO trial progress for pruning, no-op outside HPO) |
+| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`; refuses a payload with no `model_state_dict`, since that stamped kind is what a predictor sniffs to load the weights; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`), `ctx.record_artifact` (copies a file in under a name of its own), `ctx.should_cancel`, `ctx.set_final_weights` (declares which saved tag is the deliverable), `ctx.report_objective` (records a `selection` row under the run's objective, the value an HPO trial reports) |
 
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
-provenance-snapshotted no matter what the loop does. Registration additionally needs the checkpoint
-to be findable: save under `"model_best"`/`"model_final"`, or call `ctx.set_final_weights` yourself.
+provenance-snapshotted no matter what the loop does; each tag and artifact name is written once, and
+every sink refuses once the run has ended. Registration additionally needs the checkpoint to be
+saved by the loop: under `"model_best"`/`"model_final"`, or any tag named with
+`ctx.set_final_weights`.
 
 ## Hyperparameter search: Ray Tune (`pipelines.training.hpo`, `run_hyperparameter_search`)
 

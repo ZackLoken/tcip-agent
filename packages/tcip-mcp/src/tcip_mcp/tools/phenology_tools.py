@@ -424,7 +424,6 @@ def calibrate_classifier_operating_point(
     holdout_pred_dir: str,
     output_dir: str,
     dataset_root: str,
-    experiment_id: str | None = None,
     subject: str | None = None,
     attribute: str | None = None,
 ) -> dict:
@@ -446,7 +445,9 @@ def calibrate_classifier_operating_point(
     rather than a measurement; the pred dirs are predictions by definition and are not held to it,
     and when a GT dir's own dataset root contradicts the stated ``dataset_root``.
 
-    This door takes no selection: the caller hands it four already-split directories.
+    This door takes no selection: the caller hands it four already-split directories. The
+    producing checkpoint and run are the ones the prediction buckets' stamps name
+    (``resolution.stamped_producer``); a run named gates train-disjointness.
 
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
@@ -461,9 +462,6 @@ def calibrate_classifier_operating_point(
             root; loose directories the layout cannot place refuse nothing here. A GT dir whose
             prediction bucket carries no usable vocabulary of its own must itself resolve the
             registry its own dataset root carries (``_classification_items``).
-        experiment_id: The classifier checkpoint's training run's record id (one run's immutable
-            record, ``tcip_mcp.experiments``), if known, gates train-disjointness. ``None`` (a
-            foreign/unregistered checkpoint) skips that check.
         subject / attribute: The object class and the attribute carrying the trait's
             positive-class axis, for prediction dirs that carry no stamp; a stamped prediction dir
             records its own and refuses them (``_classification_items``).
@@ -495,12 +493,6 @@ def calibrate_classifier_operating_point(
                                            attribute=attribute, positive_value=spec.positive_value)
     except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
-    # One spelling of the resolver's inputs, for the report and the validation record's replay.
-    resolver_inputs: dict[str, Any] = {
-        "calibration_items": cal_items, "holdout_items": hold_items,
-        "calibration_labels_dir": calibration_gt_dir}
-    result = resolve_classifier_operating_point(
-        trait_name, experiment_id=experiment_id, **resolver_inputs)
 
     from tcip_mcp.project_paths import resolve_output_path
 
@@ -509,10 +501,17 @@ def calibrate_classifier_operating_point(
     )
 
     try:
-        checkpoint_sha256 = stamped_producer({"calibration_pred_dir": calibration_pred_dir,
-                                              "holdout_pred_dir": holdout_pred_dir})["sha256"]
+        producer = stamped_producer({"calibration_pred_dir": calibration_pred_dir,
+                                     "holdout_pred_dir": holdout_pred_dir})
     except ProducerDiffers as exc:
         return {"error": str(exc)}
+    checkpoint_sha256, experiment_id = producer["sha256"], producer["experiment_id"]
+    # One spelling of the resolver's inputs, for the report and the validation record's replay.
+    resolver_inputs: dict[str, Any] = {
+        "calibration_items": cal_items, "holdout_items": hold_items,
+        "calibration_labels_dir": calibration_gt_dir}
+    result = resolve_classifier_operating_point(
+        trait_name, experiment_id=experiment_id, **resolver_inputs)
     out = resolve_output_path(output_dir)
     stamp = {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],

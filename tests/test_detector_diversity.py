@@ -84,8 +84,8 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_annotation import json_io
+    from tests.tiny_trainer_fixtures import trainer_run
     from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
@@ -119,7 +119,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         # No val_loader below: loss is the only metric coherent to select on without one.
         "evaluation": {"selection_metric": "loss"},
     }
-    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-8")
+    run = trainer_run(cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8")
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
     assert math.isfinite(run.metrics_history[-1]["train_loss"])

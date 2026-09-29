@@ -77,7 +77,7 @@ def test_the_subprocess_derives_an_unstated_kind_and_leaves_the_trait_entry_alon
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(cfg, str(tmp_path / "out"))
+    res = training_tools.launch_training(cfg)
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
 

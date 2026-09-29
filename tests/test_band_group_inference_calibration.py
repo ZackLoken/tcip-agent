@@ -101,7 +101,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     p = _prepare_pass(
         checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=False,
         tile_size=None, overlap=None, cross_tile_nms=None, max_dets=100, postprocess="nms",
-        experiment_id=None, tile_batch_size=8)
+        tile_batch_size=8)
     assert not isinstance(p, str), p
 
     seen_sources = []

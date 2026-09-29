@@ -52,7 +52,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
+    def _fake(ckpt, images_dir, labels_dir, **kw):
         captured.update(kw)
         return {"eval_regime": "full-frame-tiled-inference"}
 
@@ -61,7 +61,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-le-100")
+    ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True, max_dets=50)
@@ -71,27 +71,22 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
     """The door's own pass-through: an unstated max_dets reaches run_full_frame_evaluation as
     None, and the runner itself, not the door, resolves it to the delivery-grade default. Proven
-    on the runner's own persisted record rather than a fake's captured kwarg, since the door no
-    longer resolves this value itself."""
-    from pathlib import Path
-
-    import tcip_store as ts
+    on the runner's own result rather than a fake's captured kwarg, since the door no longer
+    resolves this value itself."""
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
-    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
     from tcip_mcp.tools.training_tools import evaluate_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-default")
+    ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True, tiling={"tile_size": 128, "overlap": 0.0})
     assert "error" not in r, r
-    on_disk = ts.read(evaluation_results_key(Path(ckpt).parent))
-    assert on_disk["max_dets"] == DEFAULT_MAX_DETS == 1000
-    assert on_disk["operating_point"]["max_dets"]["source"] == "default"
+    assert r["max_dets"] == DEFAULT_MAX_DETS == 1000
+    assert r["operating_point"]["max_dets"]["source"] == "default"
 
 
 def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
@@ -103,7 +98,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, **kw):
         captured.update(kw)
         return {"eval_regime": "tile-level"}
 
@@ -112,7 +107,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-default")
+    ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir))
     assert captured["max_dets"] == 100
@@ -124,7 +119,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, **kw):
         captured.update(kw)
         return {"eval_regime": "tile-level"}
 
@@ -133,7 +128,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-explicit")
+    ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                    max_dets=7)
@@ -148,22 +143,17 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
 
     captured: dict = {}
 
-    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
+    def _fake(ckpt, images_dir, labels_dir, **kw):
         captured.update(kw, checkpoint=ckpt)
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    torch.save({"config": {"model_source": {"task": "detection"},
-                           "data": {"tiling": {"tile_size": 384, "overlap": 0.15},
-                                    "scope": {"subject": "bud", "id_map": {"bud": 0}}}}}, ckpt)
-    from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import SCOPED_DATA, registered_checkpoint
 
-    result = register_model(name="bare-ckpt-stamped-tiling", checkpoint_path=str(ckpt), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
+    ckpt = registered_checkpoint(
+        tmp_path, data={**SCOPED_DATA, "tiling": {"tile_size": 384, "overlap": 0.15}})
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True)
@@ -188,7 +178,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-geometry-refusal")
+    ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True)
@@ -211,7 +201,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-unreadable-label")
+    ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True)
@@ -253,14 +243,13 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
                     "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5,
                     "cap_hit": True}
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    checkpoint = verified_checkpoint(tmp_path)
     build_predictor_orig = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _ManyDetectionsStub()
-        r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"), max_dets=2)
+        r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir), max_dets=2)
     finally:
         predictor_mod.build_predictor = build_predictor_orig
     assert r["max_dets"] == 2  # honored verbatim
@@ -278,7 +267,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
 
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
     array = np.zeros((128, 128, 5), dtype=np.uint8)
@@ -299,8 +288,8 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
     build_predictor_orig = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _OneBandStub()
-        r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
-                                      str(labels_dir), str(tmp_path / "out"))
+        r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
+                                      str(labels_dir))
     finally:
         predictor_mod.build_predictor = build_predictor_orig
 
@@ -341,16 +330,15 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    checkpoint = verified_checkpoint(tmp_path)
     build_predictor_orig = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
-        r_default = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "default"))
+        r_default = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
         r_stated = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "stated"),
+            checkpoint, str(images_dir), str(labels_dir),
             conf_threshold=0.5, cross_tile_nms=0.3, max_dets=2)
     finally:
         predictor_mod.build_predictor = build_predictor_orig
@@ -400,23 +388,21 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    checkpoint = verified_checkpoint(tmp_path)
     build_predictor_orig = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
         with pytest.raises(ValueError, match="only in geometries a detection loader"):
-            run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"))
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
 
         # Admits valid work: the same eight images, their documents carrying boxes, score.
         for index in range(8):
             json_io.write_annotations(
                 str(labels_dir / f"p{index}.json"),
                 [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
-        scored = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                           str(tmp_path / "boxes"))
+        scored = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
     finally:
         predictor_mod.build_predictor = build_predictor_orig
     assert scored["n_images"] == 8
@@ -445,15 +431,14 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    checkpoint = verified_checkpoint(tmp_path)
     build_predictor_orig = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
         with pytest.raises(ValueError, match="neither a .csv table nor a directory"):
-            run_full_frame_evaluation(checkpoint, str(images_dir), str(tmp_path / "labels"),
-                                      str(tmp_path / "out"))
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(tmp_path / "labels"))
     finally:
         predictor_mod.build_predictor = build_predictor_orig
 

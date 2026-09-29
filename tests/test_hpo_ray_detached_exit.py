@@ -84,7 +84,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
             report(1.0)
 
         storage_path = sys.argv[1]
-        result = tune_search(
+        logdir = tune_search(
             objective_fn=objective_fn,
             param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
             num_samples=1,
@@ -100,7 +100,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 
         print("PIDS " + " ".join(str(pid) for pid in pids), flush=True)
         print("DESCENDANTS " + " ".join(str(pid) for pid in descendants), flush=True)
-        print("n_trials=" + str(result["n_trials"]), flush=True)
+        print("logdir=" + logdir, flush=True)
         print("EXIT_OK", flush=True)
 
 
@@ -111,7 +111,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 
 
 def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_behind(tmp_path):
-    """Asserts the subprocess exits 0 and completed its one trial, and that every process Ray
+    """Asserts the subprocess exits 0 having finished its sweep, and that every process Ray
     started for the sweep, the table daemons the subprocess captured from Ray's node and every
     descendant those daemons spawned (the trial worker, the dashboard agent, the runtime-env
     agent), is gone once the subprocess exits."""
@@ -161,7 +161,7 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
         proc.wait(timeout=240)
         output = output_path.read_text(encoding="utf-8", errors="replace")
         assert proc.returncode == 0, f"detached sweep exited {proc.returncode}:\n{output}"
-        assert "n_trials=1" in output, output
+        assert f"logdir={storage_path.resolve().as_posix()}/tcip_hpo" in output, output
 
         daemon_pids, descendant_pids = read_reported_pids()
         assert daemon_pids, "the subprocess never reported the daemon pids it read from Ray's node"

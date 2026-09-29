@@ -42,8 +42,6 @@ const NO_MARKED_CHECKPOINT = "none of the marked experiments registered a checkp
 const NOT_RANKED_NO_CHECKPOINT = `not ranked: ${NO_REGISTERED_CHECKPOINT}`;
 /** Shown beside a disabled Rank when a marked column's own registry can't be read, in place of
  * a chooser built from the columns that could: ranking never silently drops the unreadable one. */
-const REGISTRY_UNREADABLE_FOR_RANK =
-  "registry unreadable for a marked run; see the checkpoints above";
 const OPEN_PROJECT_FOR_METRICS = "open the project to stream metrics";
 const RANK_REASON_ID = "rank-disabled-reason";
 
@@ -59,7 +57,7 @@ function splitLine(split: CompareSplit | undefined): string {
     return `bound to ${split.selection_dir}${split.seed != null ? ` (seed ${split.seed})` : ""}`;
   }
   if (split.case === "drawn") return `drawn again (seed ${split.seed ?? UNRECORDED})`;
-  if (split.case === "error") return `unreadable: ${split.error}`;
+  if (split.case === "spatial") return "a within-image spatial split";
   return "no split record";
 }
 
@@ -216,17 +214,15 @@ export function RunComparison({
 
   const registryEntriesCount = columns.reduce((sum, c) => sum + (c.exp?.registry?.length ?? 0), 0);
   const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.hasEntry);
-  const hasRegistryError = columns.some((c) => c.hasEntry && c.exp?.registry_error);
-  const noMarkedCheckpoint = allColumnsLoaded && !hasRegistryError && registryEntriesCount === 0;
+  const noMarkedCheckpoint = allColumnsLoaded && registryEntriesCount === 0;
   const columnsWithNoCheckpoint = columns.filter(
-    (c) => c.hasEntry && !c.exp?.registry_error && (c.exp?.registry?.length ?? 0) === 0,
+    (c) => c.hasEntry && (c.exp?.registry?.length ?? 0) === 0,
   );
   // A column that registered a checkpoint but never stamped the ranked metric never just drops
   // out of the answer silently; it is named the same way a column with no checkpoint at all is.
   const columnsMissingRankedMetric = columns.filter(
     (c) =>
       c.hasEntry &&
-      !c.exp?.registry_error &&
       (c.exp?.registry?.length ?? 0) > 0 &&
       !(c.exp?.registry ?? []).some((entry) => typeof entry.metrics?.[rankedMetric] === "number"),
   );
@@ -244,13 +240,11 @@ export function RunComparison({
   const needsDirection = rankMetric !== "" && !hasDeclaredDirection(rankMetric);
   const rankDisabledReason = noMarkedCheckpoint
     ? NO_MARKED_CHECKPOINT
-    : hasRegistryError
-      ? REGISTRY_UNREADABLE_FOR_RANK
-      : !rankMetric
-        ? "choose a metric before ranking"
-        : needsDirection && rankDirection === null
-          ? "choose a ranking direction before ranking"
-          : null;
+    : !rankMetric
+      ? "choose a metric before ranking"
+      : needsDirection && rankDirection === null
+        ? "choose a ranking direction before ranking"
+        : null;
 
   const runSeries: RunSeries[] = marked.map((m) => ({
     experimentId: m.experimentId,
@@ -463,8 +457,6 @@ export function RunComparison({
                 <td key={c.experimentId} className="px-2 py-1 align-top">
                   {!c.hasEntry ? (
                     <span className="text-tcip-muted">{NOT_IN_ANSWER}</span>
-                  ) : c.exp?.registry_error ? (
-                    <span className="text-tcip-fp">{c.exp.registry_error}</span>
                   ) : c.exp?.registry && c.exp.registry.length > 0 ? (
                     <ul className="space-y-1">
                       {c.exp.registry.map((entry) => (
@@ -571,10 +563,6 @@ export function RunComparison({
           {noMarkedCheckpoint ? (
             <span id={RANK_REASON_ID} className="text-[11px] text-tcip-muted">
               {NO_MARKED_CHECKPOINT}
-            </span>
-          ) : hasRegistryError ? (
-            <span id={RANK_REASON_ID} className="text-[11px] text-tcip-muted">
-              {REGISTRY_UNREADABLE_FOR_RANK}
             </span>
           ) : (
             <>

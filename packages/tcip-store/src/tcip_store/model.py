@@ -80,7 +80,9 @@ class LogPage:
 class Capabilities:
     """What the bound backend actually guarantees, so a caller refuses rather than degrades.
 
-    ``multi_key_atomic_commit``: a transaction's staged writes land all-or-nothing.
+    ``multi_key_atomic_commit``: a record transaction's staged writes land all-or-nothing, a
+    crash included. No backend promises it of a blob transaction, whose files a failure puts back
+    while the put-back succeeds, and a crash or a failed put-back can leave a prefix of.
     ``cross_machine_exclusion``: the lock excludes writers on another machine.
     ``durable_replace``: a returned durable write survives a power loss, rename included.
     ``durable_append``: an append that returned survives a power loss.

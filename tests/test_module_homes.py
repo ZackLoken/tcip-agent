@@ -107,13 +107,11 @@ def _assert_one_home(
 
 
 def test_split_construction_functions_have_one_home():
-    """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity``,
-    ``persist_run_partition`` and
+    """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity`` and
     ``spatial_split_raster_identity`` moved out of ``training_tools.py`` into
     ``pipelines/data/split_construction.py`` (beside ``splits.py``), public and unaliased."""
     _assert_one_home(
         {"auto_train_val", "spatial_single_source_split", "dataset_identity",
-         "persist_run_partition",
          "spatial_split_raster_identity"},
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),
@@ -131,11 +129,11 @@ def test_get_worst_predictions_has_one_home():
 
 
 def test_run_registry_functions_have_one_home():
-    """``create_run``, ``get_run``, ``list_runs`` and ``cancel_run`` moved out of
-    ``generic_trainer.py`` into ``pipelines/training/run_registry.py``, as one unit with
-    ``TrainRun`` (checked separately below, it is a class, not a function)."""
+    """``draw_seed_if_unset`` lives in ``pipelines/training/run_registry.py`` beside
+    ``TrainRun`` (checked separately below, it is a class, not a function), never in
+    ``generic_trainer.py``."""
     _assert_one_home(
-        {"create_run", "get_run", "list_runs", "cancel_run"},
+        {"draw_seed_if_unset"},
         _module_path("pipelines/training/generic_trainer.py"),
         _module_path("pipelines/training/run_registry.py"),
     )
@@ -152,22 +150,12 @@ def test_collation_functions_have_one_home():
 
 
 def test_eval_runner_functions_have_one_home():
-    """``run_test_evaluation``, ``run_full_frame_evaluation``, ``write_evaluation_result``,
-    ``evaluation_results_path`` and ``_producer_identity`` moved out of ``evaluation.py`` into
-    ``pipelines/training/eval_runners.py``, as one unit; ``evaluation_results_key`` (checked
-    separately below, it names the evaluation_results store, not a function these five call,
-    though it does move with them) travels too."""
+    """``run_test_evaluation``, ``run_full_frame_evaluation``, ``evaluation_result`` and
+    ``_producer_identity`` live in ``pipelines/training/eval_runners.py`` as one unit, never in
+    ``evaluation.py``."""
     _assert_one_home(
-        {"run_test_evaluation", "run_full_frame_evaluation", "write_evaluation_result",
-         "evaluation_results_path", "_producer_identity"},
-        _module_path("pipelines/training/evaluation.py"),
-        _module_path("pipelines/training/eval_runners.py"),
-    )
-
-
-def test_evaluation_results_key_has_one_home():
-    _assert_one_home(
-        {"evaluation_results_key"},
+        {"run_test_evaluation", "run_full_frame_evaluation", "evaluation_result",
+         "_producer_identity"},
         _module_path("pipelines/training/evaluation.py"),
         _module_path("pipelines/training/eval_runners.py"),
     )
@@ -445,7 +433,7 @@ def test_images_overview_builds_define_no_own_dict_or_lock():
 
 
 def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
-    """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape;
+    """jobstore.JobRegistry is the one home for the register/get/evict shape;
     review.py's priority queue, images.py's overview builds, inference.py and tuning.py all
     adopt the same class rather than each restating it around its own dict-plus-lock registry."""
     jobstore_path = _web_module_path("jobstore.py")

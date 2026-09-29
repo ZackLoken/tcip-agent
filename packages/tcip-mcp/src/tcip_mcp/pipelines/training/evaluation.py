@@ -5,9 +5,7 @@
   * the composite selection objective (lower = better);
   * a task-agnostic two-pass ``evaluate()``.
 
-pycocotools is imported lazily inside the COCO functions. Every pycocotools call is wrapped in
-``redirect_stdout`` because ``createIndex``/``loadRes``/``summarize`` print to stdout, which would
-corrupt the MCP stdio transport.
+Every pycocotools call runs with stdout redirected, since it prints to stdout.
 """
 
 from __future__ import annotations
@@ -78,21 +76,9 @@ HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
     "pixel_acc": True,
 }
 """Direction of a better value, keyed by the bare (un-``val_``-prefixed) metric name, for every
-scalar ``evaluate()`` (or ``governing_counts``) actually returns across the tasks it scores. A
-metric's value alone never says which way is better, so a ranking that guessed from the key's
-spelling could promote a worse model under an unfamiliar name. A raw count (``tp``/``fp``/``fn``)
-or a signed bias has no such direction and is left out rather than assigned an arbitrary one; a
-non-finite value's state companion (``tcip_store.values.NOT_FINITE_SUFFIX``) is excluded by that
-suffix rule, not listed here.
-
-``map75`` and the operating-point curve's ``abs_count_error_mean``/``count_error_p90``/
-``count_bias_std`` are left out on purpose, not merely unnoticed: ``coco_detection_metrics``
-computes ``map75`` internally but ``evaluate()`` never surfaces it, and the three curve
-statistics come only from ``_count_stats_at_conf`` inside ``derive_operating_point_curve``'s
-calibration path, never from ``evaluate()``/``governing_counts``. None of the four ever reaches
-a checkpoint's ``metrics`` dict or a registry entry, so nothing here needs to rank them yet.
-``count_bias_mean`` is signed (over- and under-counting are both present in the same value) and
-has no direction to declare at all."""
+scalar ``evaluate()`` (or ``governing_counts``) returns across the tasks it scores. A raw count
+(``tp``/``fp``/``fn``), a signed bias (``count_bias_mean``) and a non-finite value's state
+companion (``tcip_store.values.NOT_FINITE_SUFFIX``) have no direction and are not listed."""
 
 
 def _rounded(value):
@@ -387,20 +373,16 @@ def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -
 
 def center_match_pairs(gt_centers: list[tuple[float, float]], dt_centers: list[tuple[float, float]],
                        tolerance: float, *, policy: str) -> list[tuple[int, int]]:
-    """The greedy nearest-center 1:1 matcher behind both the count and the classifier calibration's
-    identity pairing, under two stated policies.
+    """A greedy nearest-center 1:1 matcher under one of two stated policies.
 
     Inputs are plain ``(x, y)`` centers. Distance is Euclidean, the tolerance inclusive (``d <=
     tolerance`` matches). Returns ``(gt_index, dt_index)`` pairs, indices into the two input lists.
 
-    ``policy="score_first"`` walks ``dt_centers`` in the order given (a caller passing detections
-    score-descending resolves a duplicate claim on one ground truth by keeping the
-    higher-confidence detection); among equidistant unused ground truths the last index wins. A
-    detection with no recorded score has no place in that order.
+    ``policy="score_first"`` walks ``dt_centers`` in the order given, each claiming its nearest
+    unused ground truth; among equidistant unused ground truths the last index wins.
 
     ``policy="distance_first"`` sorts every (gt, dt) pair within tolerance by distance ascending
-    and claims the closest first, ties broken by ``(gt index, dt index)`` ascending: the identity
-    policy, for records whose score acceptance dropped.
+    and claims the closest first, ties broken by ``(gt index, dt index)`` ascending.
 
     Neither policy deduplicates the false-positive count: ``fp = len(dt_centers) - len(pairs)``
     counts every detection that never claimed a ground truth, duplicates included.
@@ -649,14 +631,9 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
 
 
 def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> list[int]:
-    """The class ids to break the sweep down by: those the records carry in gt or dt, derived from
-    the data in hand rather than a registry read or a pinned id space.
-
-    An explicit ``class_id`` is returned as-is, the caller has already scoped the sweep to it, and
-    it stays the breakdown's one key even on records that turn out to carry none of it. Every
-    annotation and detection must carry ``category_id``; a per-class breakdown of records that do
-    not identify their classes is not something to guess at.
-    """
+    """The class ids to break the sweep down by: ``[class_id]`` when given, whether or not the
+    records carry it, else every ``category_id`` the records' gt and dt carry, sorted. An
+    annotation or detection with no ``category_id`` raises ``KeyError``."""
     if class_id is not None:
         return [class_id]
     ids = {a["category_id"] for rec in per_image for a in rec.get("gt", [])}
@@ -913,7 +890,8 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
 # ====================================================================
 
 def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int) -> dict:
-    """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias.
+    """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias, each per-class
+    mapping keyed by the class index as a string (a JSON object's key).
 
     ``count_bias[c] = (predicted count - true count) / true count``: the phenotype is the
     positive-state fraction, so a class the classifier over-predicts inflates the fraction even at
@@ -924,7 +902,7 @@ def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num
     if gt.numel() == 0:
         return {"accuracy": 0.0, "f1": 0.0, "per_class": {}, "count_bias": {}}
     accuracy = (pred == gt).float().mean().item()
-    per_class: dict[int, dict] = {}
+    per_class: dict[str, dict] = {}
     f1s = []
     for c in range(num_classes):
         tp = int(((pred == c) & (gt == c)).sum())
@@ -934,7 +912,7 @@ def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num
         pred_count = int((pred == c).sum())
         prf = precision_recall_f1(tp, fp, fn)
         f1s.append(prf["f1"])
-        per_class[c] = {**prf, "support": support,
+        per_class[str(c)] = {**prf, "support": support,
                         "count_bias": (pred_count - support) / support if support > 0 else 0.0}
     return {
         "accuracy": accuracy,

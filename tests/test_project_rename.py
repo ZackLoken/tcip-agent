@@ -187,18 +187,11 @@ def test_the_open_project_refuses_by_the_shared_chain(client, tmp_path):
 
 
 def test_a_live_run_refuses_through_the_shared_chain(client, tmp_path):
-    import datetime
-
-    from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     ws = tmp_path.parent
     _, target = _seed(ws)
-    ts.replace(
-        experiments.status_key("exp1", root=target),
-        {"experiment_id": "exp1", "state": "created",
-         "heartbeat": datetime.datetime.now(datetime.timezone.utc).isoformat()},
-        expect=ts.Version.ABSENT,
-    )
+    opened_run(target, detection_config(tmp_path / "run-data"), experiment_id="exp1")
 
     resp = client.post(
         "/api/projects/rename",
@@ -304,15 +297,11 @@ def test_the_shared_lock_serializes_a_removal_and_a_rename_request(client, tmp_p
 
 
 def test_records_refusal_names_experiments(client, tmp_path):
-    from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import finished_run
 
     ws = tmp_path.parent
     _, target = _seed(ws)
-    ts.replace(
-        experiments.status_key("exp1", root=target),
-        {"experiment_id": "exp1", "state": "created"},
-        expect=ts.Version.ABSENT,
-    )
+    finished_run(target, experiment_id="exp1")
 
     resp = client.post(
         "/api/projects/rename",
@@ -386,39 +375,27 @@ def test_records_refusal_names_delivery_events(client, tmp_path):
     assert "delivery_events" in resp.json()["detail"]
 
 
-def test_records_refusal_names_job_registry(client, tmp_path):
-    from tcip_mcp.web_client import INFERENCE_JOBS, job_registry_key
-
-    ws = tmp_path.parent
-    _, target = _seed(ws)
-    ts.replace(job_registry_key(INFERENCE_JOBS, root=target), [{"job_id": "j1"}])
-
-    resp = client.post(
-        "/api/projects/rename",
-        json={"name": "sample_plot_target", "new_name": "sample_plot_renamed",
-              "confirm_name": "sample_plot_target", "user": "t"},
-    )
-    assert resp.status_code == 409
-    assert "job_registry" in resp.json()["detail"]
-
-
-def test_records_refusal_names_hpo_sweep_manifest_and_an_empty_sweep_dir_refuses_nothing(
-    client, tmp_path,
+def test_records_refusal_names_a_sweep_and_an_empty_sweep_dir_refuses_nothing(
+    client, tmp_path, monkeypatch, real_hpo_base_config,
 ):
+    from tcip_mcp.experiments import sweeps_dir
     from tcip_mcp.tools import training_tools
 
     ws = tmp_path.parent
     _, target = _seed(ws)
-    hpo_root = training_tools.hpo_root(root=target)
-    (hpo_root / "empty-sweep").mkdir(parents=True)
-    # A real sweep's own directory exists on disk (Ray's trial storage) whichever backend
-    # the manifest record itself binds to.
-    (hpo_root / "real-sweep").mkdir(parents=True)
-    ts.replace(
-        training_tools.sweep_manifest_key("real-sweep", root=target),
-        {"study_name": "real-sweep", "status": "running"},
-        expect=ts.Version.ABSENT,
-    )
+    (sweeps_dir(target) / "empty-sweep").mkdir(parents=True)
+    assert "hpo_sweeps" not in project_rename.project_records_present(target)
+
+    def fake_search(**kw):
+        return {"best_params": {"lr": 0.1}, "best_value": 0.25, "n_trials": 1,
+                "study_name": kw["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    with monkeypatch.context() as pinned:
+        pinned.setenv("TCIP_STATE_ROOT", str(target))
+        swept = training_tools.run_hyperparameter_search(
+            base_config=real_hpo_base_config, n_trials=1, search_seed=0)
+    assert "error" not in swept, swept
 
     resp = client.post(
         "/api/projects/rename",
@@ -426,7 +403,7 @@ def test_records_refusal_names_hpo_sweep_manifest_and_an_empty_sweep_dir_refuses
               "confirm_name": "sample_plot_target", "user": "t"},
     )
     assert resp.status_code == 409
-    assert "hpo_sweep_manifest" in resp.json()["detail"]
+    assert "hpo_sweeps" in resp.json()["detail"]
 
 
 def test_a_released_canvas_binding_does_not_refuse(client, tmp_path):
@@ -896,30 +873,6 @@ def test_phase_two_keeps_the_marker_when_its_completion_line_does_not_write(
     assert "marker stands" in outcomes[0]["note"]
     assert (ws / "sample_plot_renamed").is_dir()
     assert workspace.pending_rename_record(ws / "sample_plot_renamed") is not None
-
-
-def test_a_sweep_manifest_that_cannot_be_read_refuses_the_rename(client, tmp_path, monkeypatch):
-    """guard. The records bound fails closed on a sweep manifest the store refuses to read: a
-    manifest that cannot be read is not proof that no sweep names this project's path."""
-    ws = tmp_path.parent
-    _open_project, target = _seed(ws)
-
-    from tcip_mcp.tools import training_tools
-
-    sweep_dir = training_tools.hpo_root(root=target) / "hpo_probe"
-    sweep_dir.mkdir(parents=True, exist_ok=True)
-
-    real_read = ts.read
-
-    def _refuse_manifest(key, default=None):
-        if key.store == "hpo_sweep_manifest":
-            raise ts.DecodeError("the manifest is not readable")
-        return real_read(key, default=default)
-
-    monkeypatch.setattr(project_rename.tcip_store, "read", _refuse_manifest)
-    present = project_rename.project_records_present(target)
-
-    assert "hpo_sweep_manifest" in present
 
 
 def test_the_records_refusal_leads_with_the_breeders_own_sentence(client, tmp_path):

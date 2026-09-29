@@ -134,18 +134,14 @@ def _image_stems(root: Path) -> dict[str, str]:
 
 def check_negatives(root: Path, findings: list, *, census: dict | None,
                     seen: "set[str] | None" = None) -> None:
-    """A negative is empty labels + human Complete, per subject: flag every disk/status
-    disagreement.
-
-    Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
-    subject and date, so the disagreement is checked per subject present in the file. An
-    image-level record (a subject with no geometry) counts as content for that subject. Reads the
-    status store through the storage seam.
+    """Flag every disagreement between a label file and the status store's confirmed negatives,
+    per subject and date: a confirmed negative whose label holds that subject's annotations (an
+    image-level record counts), a confirmed negative with no label file, and one line counting
+    the images with no label record.
 
     ``census`` is the run's one dataset census (:func:`_census`), ``None`` when it could not be
-    taken; ``seen`` carries a stem-collision message across the checks that enumerate the same
-    ``images/`` tree, so one collision is reported once per run. An unreadable label is
-    :func:`check_data_quality`'s finding.
+    taken, which checks nothing; ``seen`` carries a stem-collision message across the checks that
+    enumerate the same ``images/`` tree, so one collision is reported once per run.
     """
     from tcip_mcp.dataset_layout import (
         annotation_date, annotations_hold_subject, bucket_subject_date,
@@ -332,20 +328,20 @@ def check_registry(root: Path, findings: list) -> None:
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
 
-    Every way the registry index can refuse to be read (a store that will not decode, a database
-    file that will not open) comes out as a finding, not as a traceback.
+    Every way the registry can refuse to be read (a store that will not decode, a database file
+    that will not open) comes out as a finding, not as a traceback.
     """
     from tcip_store import StoreError
 
     from tcip_mcp.dataset_layout import prediction_bucket_dirs
-    from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
+    from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.registry_paths import (
         RegistryPathEmpty, RegistryPathTraversal, is_at_or_under, resolved_registry_path,
     )
 
     try:
-        entries = read_registry_index(root)
+        entries = registered_entries(root)
     except (StoreError, RegistryVersionRefused) as exc:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
@@ -379,7 +375,7 @@ def check_registry(root: Path, findings: list) -> None:
 
 
 def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
-    from tcip_mcp.pipelines.model_build import SNAPSHOT_MANIFEST_STORE
+    from tcip_mcp.experiments import training_runs
 
     unstamped = 0
     for label in map(Path, census["labels"] if census is not None else []):
@@ -392,26 +388,13 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
     if unstamped:
         findings.append(("info", f"{unstamped} GT annotations carry no created_by"))
 
-    # Bespoke-run source snapshots: a manifest that failed to capture a declared
-    # file is now self-describing rather than silently indistinguishable from a complete one.
-    experiments_dir = root / ".tcip" / "experiments"
-    if experiments_dir.is_dir():
-        for exp_dir in experiments_dir.iterdir():
-            manifest_path = exp_dir / "model_src" / "manifest.json"
-            if not manifest_path.is_file():
-                continue
-            manifest = _load(manifest_path)
-            if not isinstance(manifest, dict):
-                continue
-            _note_version(
-                findings, str(manifest_path.relative_to(root)), SNAPSHOT_MANIFEST_STORE, manifest
-            )
-            missing = manifest.get("missing") or []
-            errors = manifest.get("snapshot_errors") or []
-            if missing or errors:
-                findings.append(("warn", f"{manifest_path.relative_to(root)}: source snapshot "
-                                f"incomplete: {len(missing)} missing file(s), "
-                                f"{len(errors)} import error(s)"))
+    # A bespoke run's source snapshot names what it failed to capture in its run.json.
+    for run in training_runs(root):
+        source = run.record["source"]
+        if source is not None and (source["missing"] or source["snapshot_errors"]):
+            findings.append(("warn", f"{run.directory.relative_to(root)}: source snapshot incomplete: "
+                            f"{len(source['missing'])} missing file(s), "
+                            f"{len(source['snapshot_errors'])} import error(s)"))
 
 
 def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
@@ -548,7 +531,6 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
             (root, "region_completeness_digest"),
         ),
         "check_state": ((project_state_dir(root), "review_verdicts"),),
-        "check_provenance": ((root / ".tcip" / "experiments", "model_snapshot_manifest"),),
     }
 
 

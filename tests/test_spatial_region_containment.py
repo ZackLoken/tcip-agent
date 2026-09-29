@@ -25,12 +25,20 @@ MOSAIC_W, MOSAIC_H = 4000, 3000
 
 
 def _write_split(tmp_path: Path, experiment_id: str, spatial: dict) -> None:
-    import tcip_store as ts
-    from tcip_mcp.experiments import split_key
+    """A real run under the pinned root, opened by the launcher's own producer and writer, whose
+    launch record is then set past that writer to state a within-image spatial split with
+    ``spatial`` as its manifest."""
+    from tcip_store import RECORD_JSON
 
-    ts.replace(split_key(experiment_id, root=tmp_path), {
-        "train": ["mosaic::strip_x_0"], "group_by": "spatial_strip", "spatial": spatial,
-    })
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+
+    run_dir = opened_run(None, detection_config(tmp_path / f"{experiment_id}-data"),
+                         experiment_id=experiment_id)
+    record = read_record(run_dir / RUN_FILE)
+    record["resolved"]["data"]["split"] = {"spatial_manifest": {
+        "train_identities": ["mosaic::strip_x_0"], **spatial}}
+    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
 
 
 def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak(tmp_path):
@@ -92,15 +100,14 @@ def _mosaic_dataset(root: Path) -> tuple[Path, Path, str]:
 def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_the_unattested(
         tmp_path):
     """Driven through the real writer rather than a hand-written manifest, so the reader's key
-    names are checked against what the split persister actually records.
+    names are checked against what the run's resolved record actually carries.
 
     A four-way split reserves its own calibration region; a rect inside it must read clean, and a
     rect outside every persisted region (here beyond the mosaic's own extent, the shape a caller
     passing coordinates from a different raster produces) must read as a leak.
     """
-    import tcip_store as ts
-    from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
@@ -109,12 +116,8 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
-
-    create_experiment("exp_four_way", {})
-    persist_run_partition("exp_four_way", data_cfg)
-    spatial = ts.read(split_key("exp_four_way"))["spatial"]
+    resolved_run(None, data_cfg, experiment_id="exp_four_way")
+    spatial = run_resolution("exp_four_way")["data"]["split"]["spatial_manifest"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"
 
@@ -136,16 +139,13 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     assert leaked["leaked_groups"] == [stem]
 
 
-def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_seed_stays(
-        tmp_path):
-    """The spatial-strip layout is governed by declared order alone, so the persisted
-    ``experiment_split`` record's ``spatial`` block carries no ``seed`` key and the record's own
-    top-level ``seed``, the seed the run's draw used, is ``None``: this route draws nothing,
-    whatever ``data.split.seed`` the config states.
+def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
+    """The spatial-strip layout is governed by declared order alone, so the run's resolved
+    partition carries no drawn seed and its spatial manifest no ``seed`` key: this route draws
+    nothing, whatever ``data.split.seed`` the config states.
     """
-    import tcip_store as ts
-    from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
@@ -153,12 +153,8 @@ def test_persisted_split_record_spatial_block_carries_no_seed_while_top_level_se
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None
+    resolved_run(None, data_cfg, experiment_id="exp_spatial_no_seed")
+    resolved = run_resolution("exp_spatial_no_seed")
 
-    create_experiment("exp_spatial_no_seed", {})
-    persist_run_partition("exp_spatial_no_seed", data_cfg)
-    record = ts.read(split_key("exp_spatial_no_seed"))
-
-    assert record["seed"] is None
-    assert "seed" not in record["spatial"]
+    assert resolved["partition"]["seed"] is None
+    assert "seed" not in resolved["data"]["split"]["spatial_manifest"]

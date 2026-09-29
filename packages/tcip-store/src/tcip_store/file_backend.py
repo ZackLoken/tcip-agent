@@ -259,8 +259,9 @@ class FileBackend:
 
     Every write takes its key's lock inside the call, replaces through a temp file in the
     destination directory, and flushes when the store declares itself durable. Multi-key
-    transactions stage every write, then apply in the caller's declared key order, which is
-    a prefix guarantee across a crash and not atomicity; ``capabilities()`` says so.
+    transactions stage every write, then apply in the caller's declared key order, putting every
+    touched key back on a failure while that put-back succeeds; across a crash, or a put-back that
+    fails, that is a prefix guarantee and not atomicity, and ``capabilities()`` says so.
     """
 
     def __init__(self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
@@ -357,13 +358,13 @@ class FileBackend:
             yield
 
     @contextmanager
-    def _blob_conform_rail(self, key: Key) -> Generator[None]:
+    def _blob_conform_rail(self, keys: Sequence[Key]) -> Generator[None]:
         """Refuse a blob write onto a record's own path beside the database that owns it.
 
-        The target is matched against the claims in memory first, with no lock and nothing read
-        from disk. A matching target locks every root a match implies, in canonical path order,
-        refuses when any of those roots holds a database at all, and otherwise keeps the locks
-        across its own publish.
+        Each target is matched against the claims in memory first, with no lock and nothing read
+        from disk. Matching targets lock every root a match implies, once each, in canonical path
+        order, refuse when any of those roots holds a database at all, and otherwise keep the locks
+        across their own publish.
 
         The refusal is unconditional rather than scoped to what the database currently holds, so a
         caller-named document whose filename matches a claim is refused beside any database;
@@ -372,32 +373,34 @@ class FileBackend:
         # imported here rather than at module scope: the claims module is composed on this one
         from tcip_store.layout_claims import anchored_matches
 
-        matches = anchored_matches(self.path_for(key))
+        matches = [
+            (key, match) for key in keys for match in anchored_matches(self.path_for(key))
+        ]
         if not matches:
             yield
             return
         roots: dict[str, Path] = {}
-        for match in matches:
+        for _, match in matches:
             roots.setdefault(canonical_path(match.root), match.root)
         with ExitStack() as held:
             for canonical, root in sorted(roots.items()):
                 try:
                     held.enter_context(transition_lock(str(root), timeout_s=self.lock_timeout_s))
                 except self._timeout_error:
-                    raise StoreBusy((key,), key, self.lock_timeout_s) from None
+                    raise StoreBusy(tuple(keys), keys[0], self.lock_timeout_s) from None
                 db_path = database_file(str(root))
                 if not db_path.is_file():
                     continue
-                colliding = sorted(
-                    {
-                        match.store
-                        for match in matches
-                        if canonical_path(match.root) == canonical
-                    }
-                )
+                colliding = [
+                    (key, match.store)
+                    for key, match in matches
+                    if canonical_path(match.root) == canonical
+                ]
+                target = colliding[0][0]
+                stores = sorted({store for key, store in colliding if key == target})
                 raise StoreError(
-                    f"writing a blob to {self.path_for(key)} would put it where "
-                    f"{', '.join(colliding)} keeps its own entries, and {db_path} holds this "
+                    f"writing a blob to {self.path_for(target)} would put it where "
+                    f"{', '.join(stores)} keeps its own entries, and {db_path} holds this "
                     "root's records, so the file would be state the database never sees. "
                     "Rename the output, or write it to a directory no record store is rooted "
                     "at."
@@ -516,7 +519,8 @@ class FileBackend:
     @contextmanager
     def transaction(self, keys: Sequence[Key], *, timeout_s: float | None = None) -> Generator["_FileTxn"]:
         named = tuple(keys)
-        with self._conform_rail(named), self._locked(named, timeout_s):
+        rail = self._blob_conform_rail if _is_blob(named[0]) else self._conform_rail
+        with rail(named), self._locked(named, timeout_s):
             txn = _FileTxn(self, named)
             yield txn
             txn.apply()
@@ -748,7 +752,7 @@ class FileBackend:
     def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._blob_conform_rail(key), self._locked([key]):
+        with self._blob_conform_rail([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             temp = self._stage_bytes(path, data, durable=descriptor.durable)
@@ -759,7 +763,7 @@ class FileBackend:
     def write_blob(self, key: Key, *, expect: Version | None = None) -> Generator[BinaryIO]:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._blob_conform_rail(key), self._locked([key]):
+        with self._blob_conform_rail([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             fd, temp = tempfile.mkstemp(
@@ -817,6 +821,8 @@ class _FileTxn:
                     raise _deleted_in_transaction(key)
                 return default
             return staged.value
+        if _is_blob(key):
+            return self._backend.read_blob_versioned(key, default=default).value
         return self._backend.read_versioned(key, default=default).value
 
     def write(self, key: Key, value: Any) -> None:
@@ -829,7 +835,8 @@ class _FileTxn:
 
     def apply(self) -> None:
         """Encode and stage every write, then apply in the declared key order; every temp file is
-        written before any rename.
+        written before any rename. A failure while applying puts every key this apply already
+        touched back as it was, leaving none of the writes while that put-back itself succeeds.
         """
         pending = [(key, self._staged[key]) for key in self._keys if key in self._staged]
         try:
@@ -838,22 +845,47 @@ class _FileTxn:
                     continue
                 descriptor = get_descriptor(key.store)
                 path = self._backend.path_for(key)
+                data = staged.value if _is_blob(key) else _encode(descriptor, key, staged.value)
                 staged.temp_path = self._backend._stage_bytes(
-                    path, _encode(descriptor, key, staged.value), durable=descriptor.durable
+                    path, data, durable=descriptor.durable
                 )
         except BaseException:
             for _, staged in pending:
                 if staged.temp_path is not None:
                     _remove_quietly(staged.temp_path)
             raise
-        for key, staged in pending:
-            descriptor = get_descriptor(key.store)
-            path = self._backend.path_for(key)
-            if staged.removed:
-                self._backend._remove_entry(path, durable=descriptor.durable)
-            else:
-                assert staged.temp_path is not None
-                self._backend._apply_staged(staged.temp_path, path, durable=descriptor.durable)
+        # Each touched key's prior bytes, staged beside it: None where it held nothing.
+        restores: list[tuple[Path, str | None, bool]] = []
+        try:
+            for key, staged in pending:
+                durable = get_descriptor(key.store).durable
+                path = self._backend.path_for(key)
+                previous = self._backend._read_bytes(path)
+                restores.append((path, None if previous is None else
+                                 self._backend._stage_bytes(path, previous, durable=durable),
+                                 durable))
+                if staged.removed:
+                    self._backend._remove_entry(path, durable=durable)
+                else:
+                    assert staged.temp_path is not None
+                    self._backend._apply_staged(staged.temp_path, path, durable=durable)
+        except BaseException:
+            for _, staged in pending:
+                if staged.temp_path is not None:
+                    _remove_quietly(staged.temp_path)
+            for path, restore, durable in reversed(restores):
+                if restore is None:
+                    self._backend._remove_entry(path, durable=durable)
+                else:
+                    self._backend._apply_staged(restore, path, durable=durable)
+            raise
+        for _, restore, _ in restores:
+            if restore is not None:
+                _remove_quietly(restore)
+
+
+def _is_blob(key: Key) -> bool:
+    return get_descriptor(key.store).kind == "blob"
 
 
 def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:

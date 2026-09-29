@@ -100,25 +100,6 @@ describe("RunComparison data lines", () => {
     expect(await screen.findByText(/bound to splits\/d1/)).toBeInTheDocument();
     expect(screen.getByText(/drawn again \(seed 42\)/)).toBeInTheDocument();
   });
-
-  it("renders the library's own registry_error text with no added prefix", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          {
-            experiment_id: "exp-a",
-            registry_error: "registry unreadable: simulated decode failure",
-          },
-          { experiment_id: "exp-b" },
-        ],
-      }),
-    );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
-    expect(
-      await screen.findByText("registry unreadable: simulated decode failure"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/registry unreadable: registry unreadable/)).not.toBeInTheDocument();
-  });
 });
 
 describe("RunComparison on a change of the marked set", () => {
@@ -664,29 +645,6 @@ describe("RunComparison disabled Rank's reason", () => {
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
       "choose a metric before ranking",
     );
-  });
-
-  it("says the registry is unreadable for a marked run beside a disabled Rank, instead of an empty chooser", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          {
-            experiment_id: "exp-a",
-            registry_error: "registry unreadable: simulated decode failure",
-          },
-          { experiment_id: "exp-b", registry: [] },
-        ],
-      }),
-    );
-    render(<RunComparison marked={MARKED} projectRoot={null} />);
-
-    const reason = await screen.findByText(
-      "registry unreadable for a marked run; see the checkpoints above",
-    );
-    expect(screen.queryByRole("combobox", { name: "Rank by metric" })).not.toBeInTheDocument();
-    const rankButton = screen.getByRole("button", { name: "Rank" });
-    expect(rankButton).toBeDisabled();
-    expect(rankButton).toHaveAttribute("aria-describedby", reason.id);
   });
 });
 

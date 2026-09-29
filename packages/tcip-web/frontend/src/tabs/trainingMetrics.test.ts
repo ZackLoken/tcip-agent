@@ -124,11 +124,8 @@ describe("defaultChartSeries (the live metrics chart's default series rule)", ()
   });
 });
 
-describe("runOrderLine (the Training/Tuning tabs' shared order sentence)", () => {
-  it("names the running process, not a browser window, for both a run and a sweep noun", () => {
-    expect(runOrderLine("run", "experiment id")).toBe(
-      "Runs this running process itself launched come first, in launch order; every other recorded run follows, sorted by experiment id.",
-    );
+describe("runOrderLine (the Tuning tab's order sentence)", () => {
+  it("names the running process, not a browser window", () => {
     expect(runOrderLine("sweep", "sweep id")).toBe(
       "Sweeps this running process itself launched come first, in launch order; every other recorded sweep follows, sorted by sweep id.",
     );

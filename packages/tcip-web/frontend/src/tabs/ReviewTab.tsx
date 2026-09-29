@@ -5,7 +5,7 @@ import { api } from "@/api/client";
 import { subjectsApi, subjectColor, type ImageStatus } from "@/api/subjects";
 import { committedOf, isAuditEntryNotWritten } from "@/api/http";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
-import type { ActionPayload } from "@/api/types.generated";
+import type { ActionPayload, JobStatus } from "@/api/types.generated";
 import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
@@ -264,14 +264,11 @@ export function ReviewTab() {
   const [pqModels, setPqModels] = useState<RegisteredModel[]>([]);
   const [pqModelPath, setPqModelPath] = useState("");
   const [pqJobId, setPqJobId] = useState<string | null>(null);
-  const [pqStatus, setPqStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
+  const [pqStatus, setPqStatus] = useState<"idle" | JobStatus>("idle");
   const [pqQueue, setPqQueue] = useState<
     { image: string; score: number; calibration_member?: boolean }[] | null
   >(null);
   const [pqError, setPqError] = useState<string | null>(null);
-  // Set when the calibration side couldn't be marked (an unreadable split record or selection);
-  // no queue entry then carries calibration_member, and this names why.
-  const [pqMarksUnresolved, setPqMarksUnresolved] = useState<string | null>(null);
   // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
   // can turn it back off to browse in the ordinary (positional) order without discarding the queue.
   const [pqUseOrder, setPqUseOrder] = useState(false);
@@ -293,7 +290,6 @@ export function ReviewTab() {
     setPqQueue(null);
     setPqError(null);
     setPqUseOrder(false);
-    setPqMarksUnresolved(null);
   }, [visKey]);
 
   useEffect(() => {
@@ -307,7 +303,6 @@ export function ReviewTab() {
           setPqStatus("completed");
           setPqQueue(body.queue);
           setPqUseOrder(true);
-          setPqMarksUnresolved(body.marks_unresolved ?? null);
         } else if (body.status === "failed") {
           setPqStatus("failed");
           setPqError(body.error ?? "The priority queue could not be computed.");
@@ -329,7 +324,6 @@ export function ReviewTab() {
     setPqStatus("running");
     setPqError(null);
     setPqQueue(null);
-    setPqMarksUnresolved(null);
     try {
       const res = await api.review.launchPriorityQueue({
         dataset_root: dataset.dataset_root,
@@ -1678,11 +1672,6 @@ export function ReviewTab() {
                 title="This image is on the bound run's calibration side; reviewing it edits a label inside that run's calibration universe, which its validation will disclose as moved"
               >
                 Calibration
-              </span>
-            )}
-            {imgName && !pqCalibrationByImage?.get(imgName) && pqQueue && pqMarksUnresolved && (
-              <span className="tcip-badge bg-tcip-warn/20 text-tcip-warn" title={pqMarksUnresolved}>
-                Calibration unknown
               </span>
             )}
             <button

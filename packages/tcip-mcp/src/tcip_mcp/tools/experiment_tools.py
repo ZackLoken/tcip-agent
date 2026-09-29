@@ -1,40 +1,8 @@
-"""Experiment tracking MCP tools: create, list, log, compare, and trace experiments."""
+"""Experiment MCP tools: read one run's directory, and list the project's runs."""
 
 from __future__ import annotations
 
-from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
-
-
-@mcp.tool()
-@audited
-def create_experiment(
-    experiment_id: str,
-    config: dict,
-    parent_experiment: str = "",
-    data_source: str = "",
-) -> dict:
-    """Create a new experiment to track a training run.
-
-    Use this tool when starting a new training run to track config,
-    metrics, artifacts, and data lineage. The experiment_id should be
-    descriptive, e.g. 'exp-001-<crop>-<trait>-det'.
-
-    Args:
-        experiment_id: The record's own id, one run's immutable record
-            (``tcip_mcp.experiments``); e.g. 'exp-001-<crop>-<trait>-det'.
-        config: Full training configuration to snapshot.
-        parent_experiment: Optional parent experiment ID for transfer learning lineage.
-        data_source: Optional description of the data source.
-    """
-    from tcip_mcp.experiments import create_experiment as _create
-
-    return _create(
-        experiment_id,
-        config,
-        parent_experiment=parent_experiment or None,
-        data_source=data_source or None,
-    )
 
 
 @mcp.tool()
@@ -42,20 +10,20 @@ def get_experiment(
     experiment_id: str, view: str = "full",
     metrics_limit: int | None = None, metrics_offset: int = 0,
 ) -> dict:
-    """Read an experiment record.
+    """Read one run's directory.
 
-    With ``view='full'`` (default) returns the full state: config, status, artifacts, lineage, and
-    metrics, the rows the run's own ``log_metrics`` appended, in order, oldest first; the last row
-    is only the last one logged, not a verified result. ``n_epochs`` is the number of distinct
-    epoch values logged; ``n_rows`` is the row count and the bound
-    ``metrics_limit``/``metrics_offset`` page against. With ``view='lineage'`` returns only the
-    data -> model -> predictions chain (data source, parent model, model weights path, predictions
-    path), enriched with the config's data-source block; ``metrics_limit``/``metrics_offset`` are
-    refused with a non-default value under ``view='lineage'``.
+    With ``view='full'`` (default) returns ``experiments.get_experiment``'s read: the launch
+    record, the resolved record and the final status (each ``None`` until written), the derived
+    state, and the metrics rows the run appended, oldest first; the last row is only the last one
+    logged, not a verified result. ``n_epochs`` is the number of distinct epoch values logged;
+    ``n_rows`` is the row count and the bound ``metrics_limit``/``metrics_offset`` page against.
+    With ``view='lineage'`` returns only the data-to-model chain
+    (``experiments.get_experiment_lineage``); ``metrics_limit``/``metrics_offset`` are refused with
+    a non-default value under ``view='lineage'``.
 
     Args:
-        experiment_id: The record to read, one run's immutable record (``tcip_mcp.experiments``).
-        view: 'full' for the complete record, 'lineage' for the traced chain only.
+        experiment_id: The run to read.
+        view: 'full' for the whole directory, 'lineage' for the traced chain only.
         metrics_limit: Maximum metrics rows to return, view='full' only. None returns all.
         metrics_offset: Row offset into the metrics log to start from, view='full' only.
     """
@@ -74,58 +42,25 @@ def get_experiment(
 
 @mcp.tool()
 def list_experiments(launched_only: bool = False) -> dict:
-    """Enumerate every experiment the store holds a status record for.
+    """Enumerate every run directory of the project: a training run and a calibration run of a
+    checkpoint no run produced alike. Use this to rediscover the project's runs after a session is
+    lost, before reaching for ``get_experiment`` (one run's full detail).
 
-    Covers every experiment, not only a training run: a calibration experiment (its id is
-    derived from a claim's content and cannot otherwise be reconstructed), a review-feedback
-    lineage, a pre-created experiment never launched, and a launched one. Use this to rediscover
-    what the store holds after a session is lost, before reaching for ``get_experiment`` (one
-    record's full detail).
-
-    ``launched_only=True`` switches to the other view this door serves: every training run this
-    platform can currently account for, merging this process's own in-memory registry with every
-    launched run's own record on disk (a run this session launched, another process launched, or
-    one that survived a restart), HPO trials excluded (they belong to the Tuning view). Costs one
-    status read and one config read per experiment record on disk, plus one metrics-log read per
-    launched record for its current epoch; the default view costs one status read total.
+    ``launched_only=True`` switches to the other view this door serves: every training run
+    directory, in id order, calibration runs and HPO trials excluded (a trial belongs to its
+    sweep).
 
     Returns:
         With ``launched_only=False`` (default), ``experiments``: a list of
-        ``{experiment_id, state, created, has_model_source}``, one per experiment.
-        ``has_model_source`` is whether the
-        config carries a ``model_source`` (a training run) versus an experiment tracking
-        something else. With ``launched_only=True``, ``runs``: the launched-run rows themselves,
-        see :func:`tcip_mcp.tools.training_tools._all_training_runs`.
+        ``{experiment_id, state, created, has_model_source}``, one per run directory
+        (``experiments.list_experiments``). With ``launched_only=True``, ``runs``: the training
+        run rows themselves, see :func:`tcip_mcp.tools.training_tools._all_training_runs`.
     """
     if launched_only:
         from tcip_mcp.tools.training_tools import _all_training_runs
 
-        return {"runs": _all_training_runs(read_progress=True)}
+        return {"runs": _all_training_runs()}
 
     from tcip_mcp.experiments import list_experiments as _list
 
     return {"experiments": _list()}
-
-
-def compare_experiments(experiment_ids: list[str]) -> dict:
-    """Side-by-side comparison of multiple experiments.
-
-    Returns, per experiment: ``recorded_state`` and the heartbeat-derived ``state`` (a launched
-    record only; a pre-created experiment never launched reports its ``recorded_state``),
-    ``log_locked`` (whether the metrics lock refuses further rows), ``last_logged_metrics`` (the
-    run's own log's last row, not a verified result), ``rows_after_end`` (rows whose own timestamp
-    is a later instant than the record's own ``ended``), ``n_epochs``/``n_rows``, the model builder
-    (``None`` when the config names none), ``task``/``subject``, ``status_error`` (the status
-    record's own failure reason), the run's own ``split`` partition, its ``registry`` entries
-    (absent, with ``registry_error`` naming why, when the project's registry index can't be read or
-    matched), and dataset identity; ``same_dataset_fingerprint`` is ``None`` when any compared id
-    is an error entry. Reads the heartbeat freshness window from ``$TCIP_HEARTBEAT_STALE_SECONDS``
-    (600s by default).
-
-    Args:
-        experiment_ids: List of experiment IDs to compare.
-    """
-    from tcip_mcp.experiments import compare_experiments as _compare
-    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
-
-    return _compare(experiment_ids, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)

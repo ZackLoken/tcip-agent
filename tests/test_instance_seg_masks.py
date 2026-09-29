@@ -355,14 +355,10 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
     """The delivery-gating eval never consumed masks: it reads boxes/scores/labels only, so a
     tile-trained Mask R-CNN must still evaluate here instead of crashing on the mask refusal."""
-    import tcip_store as ts
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.training.eval_runners import (
-        evaluation_results_key,
-        run_full_frame_evaluation,
-    )
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     _image(images_dir, "a.png")
@@ -373,11 +369,10 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
     r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                  str(tmp_path / "out"), tile_size=TILE, overlap=0.2)
+                                  tile_size=TILE, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
     assert r["n_gt"] == 1
-    assert ts.exists(evaluation_results_key(tmp_path / "out"))
     # task records the checkpoint's actual producer task, not a hardcoded "detection". iou_type
     # stays "bbox" regardless of task: this gate always scores boxes only, by design (see the
     # docstring).

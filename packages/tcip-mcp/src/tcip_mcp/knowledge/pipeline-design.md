@@ -150,27 +150,27 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
   sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
-  versioned, and provenance-snapshotted no matter what your loop does. `ctx.record_artifact` is a
-  free-form sink for any other name; the name `"model_weights"` is reserved for the run's
-  deliverable and is routed to `ctx.set_final_weights` instead, with a warning, rather than
-  recorded or raised. `ctx.default_train()` is one convenience, not a requirement: call it,
-  extend it, or replace it entirely.
+  versioned, and provenance-snapshotted no matter what your loop does. Each sink writes into the
+  run's own directory, each checkpoint tag and artifact name once, and refuses once the run has
+  ended. `ctx.record_artifact` copies any other file in under a name of its own.
+  `ctx.default_train()` is one convenience, not a requirement: call it, extend it, or replace it
+  entirely.
 
-  `state` reserves two top-level keys: `schema_version` (the platform's own checkpoint-version
-  field) and `config` (always this run's own launch config, the record every publishing door
-  reads a run's `data.scope` from). A `state` carrying either refuses;
-  name a bespoke loop's own field something else.
+  `state` reserves one top-level key, `config` (always this run's own launch config, the record
+  every publishing door reads a run's `data.scope` from). A `state` carrying it refuses; name a
+  bespoke loop's own field something else.
 
-  Registration needs one more fact your loop states explicitly. A checkpoint saved via
-  `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your
-  loop returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is not
-  registered as the run's deliverable unless you call `ctx.set_final_weights(path)` yourself. A
-  "completed" run with no discoverable weights and no `set_final_weights` call is marked `failed`
-  rather than registering a nonexistent path; audit/provenance are unconditional, registration
-  is not. Under `run_hyperparameter_search`, a bespoke loop whose own metrics don't share the stock trainer's key
-  names (`selection`/`val_objective`/`val_loss`, the only ones the automatic per-epoch pruning
-  signal recognizes) can call `ctx.report_objective(value)` directly to report trial progress for
-  pruning, a no-op outside HPO, safe to call unconditionally.
+  Registration needs one more fact your loop states explicitly. A checkpoint your loop saved via
+  `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is the deliverable once your loop
+  returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is the
+  deliverable only once you name that tag with `ctx.set_final_weights(tag)`, which refuses a tag
+  your loop saved nothing under. The deliverable is read back through the same verified reader
+  every loading door uses; a "completed" run with no deliverable, or one that reader refuses, is
+  marked `failed` naming why. Audit and provenance are unconditional, registration is not. A
+  metrics row carrying a `selection` value is the run's progress on its objective, and under
+  `run_hyperparameter_search` it reports trial progress for pruning and the trial's result; a
+  bespoke loop whose rows carry none records one with `ctx.report_objective(value)`, which writes
+  that row.
 
 When the plain blocks and your own primitives both plateau on a trait, the next move is to research the
 literature for a technique that fits; see the `cv-research` skill for the research→implement→validate

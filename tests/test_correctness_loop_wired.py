@@ -15,7 +15,7 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 
 def _broken_builder(**kwargs):
@@ -265,11 +265,12 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     assert synthetic["smoke"]["batch_source"] == "synthetic"
     assert synthetic["smoke"]["ok"] is True, synthetic["smoke"]["issues"]
     # The same model over the run's own batch reaches the same verdict.
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.model_contract import check_model_contract
     from tcip_mcp.tools.training_tools import _one_real_batch
 
-    batch, why = _one_real_batch("semantic_seg", cfg)
+    batch, why = _one_real_batch("semantic_seg", resolve_run(cfg).train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
     model = build_model(cfg, {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
@@ -304,28 +305,26 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
 
 def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeypatch):
-    """The smoked dataset is built the way the training path builds it, not from a private key
-    list.
-
-    A bespoke builder only has to accept what the training path passes it, which is the producer's
-    own four names: forwarding a directory here would reject a dataset that trains fine, turning
-    the contract rail into a blocker for valid work.
-    """
+    """The smoked dataset is the one the run's own resolution builds, which a bespoke builder
+    accepting only the producer's own four names builds fine."""
     monkeypatch.chdir(tmp_path)
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs, lbls = _admitted_tree(tmp_path)
     data = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
+    resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data})
 
-    batch, why = _one_real_batch("bunch_compactness", {"data": data})
+    batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why
     assert batch is not None
 
 
 def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
-    """Unsmokeable is a blocked launch, not a skipped check: the boundary stays proven."""
+    """A dataset that cannot produce an item blocks the launch at its resolution, naming the
+    builder's own reason, rather than reaching a skipped smoke check."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -339,12 +338,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     }
     r = preflight_config(cfg, smoke=True)
     assert r["valid"] is False
-    # Assert on what only the blocking path produces: "valid is False" alone is vacuous here,
-    # since an unrelated route (an unknown task falling through to a classification-shaped
-    # synthetic batch, which this model also rejects) could reach False too.
-    assert r["smoke"]["not_smokeable"]
-    assert any("measurement boundary is unproven" in i for i in r["issues"]), r["issues"]
-    # The real reason the batch could not be built is surfaced, not swallowed into the log.
+    # Only the builder raises this text, so the refusal is the unbuildable dataset's own.
     assert any("cannot open the source" in i for i in r["issues"]), r["issues"]
 
 
@@ -356,7 +350,7 @@ def _ctx_for(task: str, builder: str, data: dict):
     """A context over a run whose table ground truth recorded the empty scope admission writes."""
     config = {"model_source": {"builder": builder, "task": task}, "device": "cpu",
               "data": {"scope": {}, **data}}
-    run = create_run(config, "out", id="auto-run-6")
+    run = trainer_run(config, "out", has_val_loader=False, id="auto-run-6")
     return TrainContext(run=run, train_loader=None, val_loader=None)
 
 
@@ -403,7 +397,8 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     train_ds, _val_ds, _partition = auto_train_val("classification", data, None)
     assert (data["num_channels"], data["num_classes"]) == (3, 3)
     loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("classification"))
-    ctx = TrainContext(run=create_run(config, str(tmp_path / "out"), id="auto-run-62"),
+    ctx = TrainContext(run=trainer_run(config, tmp_path / "out", has_val_loader=False,
+                                       id="auto-run-62"),
                        train_loader=loader, val_loader=None)
 
     report = ctx.check_contract()
@@ -432,7 +427,9 @@ def test_ctx_apply_stage_freeze_matches_trainer_guard():
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-    ctx = TrainContext(run=create_run({}, "out", id="auto-run-7"), train_loader=None)
+    ctx = TrainContext(run=trainer_run({"model_source": {"task": "regression"}}, "out",
+                                       has_val_loader=False, id="auto-run-7"),
+                       train_loader=None)
     full = ctx.apply_stage_freeze(model, 0)
     assert full == sum(p.numel() for p in model.parameters())
     # A shrink relative to the previous stage violates the monotonic guard.

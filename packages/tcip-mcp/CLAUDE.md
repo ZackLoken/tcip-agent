@@ -38,7 +38,9 @@ src/tcip_mcp/
   operationalization.py    # the check every delivery door runs on the latest confirmed revision
   prediction_buckets.py    # prediction-bucket immutability: never overwrite predictions a human reviewed
   project_paths.py, workspace.py     # platform-state-root and workspace-root resolvers
-  experiments.py, model_registry.py   # experiment tracking (.tcip/experiments/) and the trained-model registry
+  experiments.py, model_registry.py   # run and sweep directories (.tcip/experiments/, .tcip/hpo/), each
+                                        # written once as it goes; the registry is completed runs plus
+                                        # the foreign checkpoints registered beside them
   identity.py             # the user:<name> identity convention, spelled once
   agent_identity.py       # the harness the MCP handshake declared, this run's minted session, and what
                             # the harness exported about itself, stamped on every audit line, trait

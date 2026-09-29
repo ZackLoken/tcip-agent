@@ -19,87 +19,62 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     """Freeze a finished run's own drawn train/val partition into a selection, so a later run can
     bind to the identical partition instead of drawing its own.
 
-    A run of any task freezes, whatever shape its ground truth is: the selection is composed scope
-    by scope from what the run's record says per scope, which members it holds, which file answered
-    for each, where its pixels came from and what that file digested to at run time.
+    A run of any task freezes, whatever shape its ground truth is: the selection is the run's own
+    train and val samples as its resolved partition records them, each carrying the digest its
+    ground truth had when the run read it.
 
-    Reads the run's ``split.json`` (through ``read_run_partition_checked``: a record that will not
-    decode refuses) and its durable config, and refuses, naming the primitive, when: no split
-    record exists for ``experiment_id`` or it does not decode; the split is spatial (region
-    identities, not stems); the run's val side is empty; a member's ground truth has moved since
-    the run (the file the record names now digests differently, the moved members named); a
-    selection already exists at the output directory; or the selection its config's ``scope``
-    composes is one :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
+    Reads the run's resolution (``experiments.run_resolution``) and refuses, naming the primitive,
+    when: ``experiment_id`` names no training run; the split is spatial (region identities, not
+    stems); the run's val side is empty; a member's ground truth has moved since the run (the file
+    the record names now digests differently, the moved members named); a selection already exists
+    at the output directory; or the selection its resolved ``scope`` composes is one
+    :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
 
     The frozen selection's ``calibration`` side is always empty, so the calibration doors' own
     floor refuses any calibration measurement against it by name; this tool's answer carries a
     ``note`` saying so.
 
     Args:
-        experiment_id: The finished run to freeze the drawn partition of, by its record id
-            (``tcip_mcp.experiments``).
+        experiment_id: The finished run to freeze the drawn partition of.
         output_path: Where to write the selection. Defaults to
             ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from the run's own recorded
             sources through ``dataset_root_of``; refused when that does not resolve (a source
             outside the canonical ``<dataset_root>/images/...`` layout).
     """
-    from tcip_mcp.dataset_layout import dataset_root_of
-    from tcip_mcp.experiments import config_key, read_member, read_run_partition_checked
-    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.data.label_queries import Admitted, samples_over
-    from tcip_mcp.pipelines.data.selection import (
-        ClassScope, Sample, Selection, read_selection_checked, write_selection,
-    )
-    from tcip_mcp.pipelines.resolution import members_moved_since
+    from dataclasses import replace
 
-    split, decode_error = read_run_partition_checked(experiment_id)
-    if decode_error is not None:
-        return {"error": f"the split record for {experiment_id!r} could not be read: {decode_error}"}
-    if not split:
-        return {"error": f"no split record for {experiment_id!r}: this run wrote no split.json "
-                         "(it never reached a real dataset build), so there is no drawn "
-                         "partition to freeze."}
-    if split["group_by"] == "spatial_strip":
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.experiments import run_resolution
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.data.selection import (
+        ClassScope, Selection, read_selection_checked, write_selection,
+    )
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
+    from tcip_mcp.pipelines.resolution import moved_since_run
+
+    try:
+        resolved = run_resolution(experiment_id)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    partition = resolved["partition"]
+    if "spatial_manifest" in resolved["data"]["split"]:
         return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
                          "freeze_selection binds a stem-keyed partition, which a spatial split "
                          "never draws."}
-
-    config = read_member(config_key(experiment_id), {})
-    config = config if isinstance(config, dict) else {}
     # The run's own class space, so what this selection records is what the checkpoint records.
-    scope = ClassScope.of(config.get("data") or {})
-    # Composed scope by scope, the way the record is written: a bare member name means one image
-    # only within its own scope, so two scopes' same-named members stay two members here.
-    moved: list[str] = []
-    samples: list[Sample] = []
-    n_train = n_val = 0
-    for _, block in sorted(split["members"].items()):
-        recorded = block["label_digests"]["ground_truth"]
-        digests = block["label_digests"]["at_run"]
-        train_stems, val_stems = block["train"], block["val"]
-        n_train, n_val = n_train + len(train_stems), n_val + len(val_stems)
-        here = sorted(set(train_stems) | set(val_stems))
-        records = [Admitted(member=m, source=block["sources"][m], ground_truth=recorded[m],
-                            row_key=block["row_keys"].get(m))
-                   for m in here]
-        try:
-            moved.extend(members_moved_since(recorded, digests, here))
-        except ValueError as exc:
-            return {"error": f"{experiment_id!r}'s recorded ground truth cannot be read per "
-                             f"member: {exc}"}
-        assignment = {stem: "train" for stem in train_stems}
-        assignment.update({stem: "val" for stem in val_stems})
-        # Through the one producer, over this scope's own sources, paths and group keys.
-        samples.extend(samples_over(
-            records, assignment, block["group_key_map"].__getitem__,
-            confirmation_bucket=block["confirmation_bucket"], digests=digests,
-        ))
+    scope = ClassScope.of(resolved["data"])
+    at_run = partition["ground_truth_digests"]
+    samples = [replace(s, ground_truth_digest=at_run[s.ground_truth])
+               for s in partition_samples(partition) if s.side in ("train", "val")]
+    n_train = sum(1 for s in samples if s.side == "train")
+    n_val = len(samples) - n_train
+    moved = moved_since_run(samples, at_run)
     if not n_val:
         return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
                          "a partition no bind can use."}
     if moved:
         return {"error": f"the ground truth of {len(moved)} member(s) changed since "
-                         f"{experiment_id!r} trained ({sorted(moved)[:5]}): a selection "
+                         f"{experiment_id!r} trained ({moved[:5]}): a selection "
                          "composed from them would bind a later run to ground truth this run "
                          "never saw. Freeze a run whose members have not moved, or draw a fresh "
                          "split over the current data."}
@@ -125,11 +100,11 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
 
     try:
         write_selection(out_dir, Selection(
-            samples=tuple(samples), scope=scope, seed=split["seed"], group_by=split["group_by"],
-            dataset_fingerprint=fingerprint,
+            samples=tuple(samples), scope=scope, seed=partition["seed"],
+            group_by=partition["group_by"], dataset_fingerprint=fingerprint,
         ))
     except ValueError as exc:
-        return {"error": f"{experiment_id!r}'s durable config: {exc}"}
+        return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
     return {
         "selection_dir": str(out_dir), "train": n_train, "val": n_val, "calibration": 0,
         "note": "the calibration side is empty (a training run's own drawn partition records "

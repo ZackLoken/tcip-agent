@@ -28,8 +28,9 @@ pytest.importorskip("torchvision")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, persist_run_partition, recorded_side,
+    auto_train_val, partition_samples,
 )
+from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
 SUBJECT = "bud"
@@ -114,18 +115,18 @@ def _membership(ds) -> set[str]:
     return {ds.member_of(key) for key in keys}
 
 
-def _persisted(experiment_id: str, data_cfg: dict, _train_ds, _val_ds, partition) -> dict:
-    """The record one ``auto_train_val`` answer persists, read back through the one reader.
+def _recorded(task: str, data_cfg: dict) -> dict:
+    """The partition the launcher's own producer resolves for a ``task`` run over ``data_cfg``,
+    read back from the launch record it writes: the record's members come from the producer,
+    never from a loader's own keys."""
+    import copy
 
-    Takes the loaders positionally so a caller can splat ``auto_train_val``'s own answer, and
-    hands the writer only the partition: the record's members come from the producer, never from
-    a loader's own keys.
-    """
-    from tcip_mcp.experiments import create_experiment, read_run_partition
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import opened_run
 
-    create_experiment(experiment_id, {"data": data_cfg})
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
-    return read_run_partition(experiment_id)
+    run_dir = opened_run(None, {"model_source": {"task": task}, "data": copy.deepcopy(data_cfg),
+                                "evaluation": {"selection_metric": "loss"}})
+    return run_resolution(run_dir.name)["partition"]
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -150,6 +151,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": SUBJECT}, "auto_val": False}
+    record = _recorded(task, data_cfg)
 
     train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
 
@@ -158,8 +160,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     assert recorded_side(partition, "train") == sorted(stems)
     assert recorded_side(partition, "val") == []
     _one_target(train_ds, task)
-    record = _persisted(f"exp-no-auto-val-{task}", data_cfg, train_ds, val_ds, partition)
-    assert record["members"][str(labels_dir)]["train"] == sorted(stems)
+    assert recorded_side(record, "train") == sorted(stems)
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -184,8 +185,9 @@ def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, ca
 
 
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path):
-    """The within-image route wraps the producer's own sample, and its region identities still
-    name the bare stem every consumer of the manifest joins on.
+    """The within-image route wraps the producer's own sample, records that one sample as its
+    partition, and its region identities still name the bare stem every consumer of the manifest
+    joins on.
 
     Detection alone: tiling wraps the detection loader, and no other task reaches this route.
     """
@@ -200,7 +202,8 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
 
     train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
-    assert val_ds is not None and partition is None
+    assert val_ds is not None
+    assert [s.member for s in partition_samples(partition)] == [stem]
     assert _membership(train_ds) == _membership(val_ds) == {stem}
     assert set(train_ds.tile_entries).isdisjoint(set(val_ds.tile_entries))
     manifest = data_cfg["split"]["spatial_manifest"]
@@ -222,17 +225,16 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
 
     whole_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}, "auto_val": False}
-    whole = _persisted("exp-whole", whole_cfg,
-                       *auto_train_val("detection", whole_cfg, None))
+    whole = _recorded("detection", whole_cfg)
 
     drawn_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
-    drawn = _persisted("exp-drawn", drawn_cfg, *auto_train_val("detection", drawn_cfg, None))
+    drawn = _recorded("detection", drawn_cfg)
 
-    scope = str(labels_dir)
-    assert sorted(whole["members"]) == sorted(drawn["members"]) == [scope]
-    here, there = whole["members"][scope], drawn["members"][scope]
-    assert sorted(here["train"] + here["val"]) == sorted(there["train"] + there["val"])
-    assert sorted(here["group_key_map"]) == sorted(there["group_key_map"])
-    assert here["label_digests"]["at_run"] == there["label_digests"]["at_run"]
-    assert here["sources"] == there["sources"]
+    def _held(record: dict) -> list[tuple]:
+        return sorted((s.member, s.source, s.ground_truth) for s in partition_samples(record))
+
+    assert _held(whole) == _held(drawn)
+    assert len(_held(whole)) == len(stems)
+    assert whole["ground_truth_digests"] == drawn["ground_truth_digests"]
+    assert recorded_side(whole, "val") == [] and recorded_side(drawn, "val") != []

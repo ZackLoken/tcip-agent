@@ -51,7 +51,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
 
     class FakePredictor:
         config = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}

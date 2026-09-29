@@ -267,14 +267,20 @@ def binding_release_available(target: Optional[Path], state: OpenProjectState) -
 
 
 def _live_run_conflict(target: Path) -> Optional[str]:
+    """The refusal a run or HPO sweep of ``target`` still running (``experiments.observe``)
+    answers with, or ``None``."""
     from tcip_mcp import experiments
-    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
 
-    for exp_id in experiments.experiment_ids_with_status(root=target):
-        status = experiments.read_member(experiments.status_key(exp_id, root=target), {})
-        if experiments.derived_state(status, TCIP_HEARTBEAT_STALE_SECONDS) == "running":
-            return (f"experiment {exp_id!r} is running; ask the agent to cancel it "
+    for run in experiments.run_observations(target):
+        if run.state == "running":
+            return (f"experiment {run.directory.name!r} is running; ask the agent to cancel it "
                      "(cancel_training) or wait for it to finish")
+    sweeps = experiments.sweeps_dir(target)
+    for sweep in sorted(sweeps.iterdir()) if sweeps.is_dir() else []:
+        if ((sweep / experiments.SWEEP_FILE).is_file()
+                and experiments.observe(sweep, experiments.SWEEP_FILE).state == "running"):
+            return (f"HPO sweep {sweep.name!r} is running; ask the agent to cancel it "
+                    "(cancel_hyperparameter_search) or wait for it to finish")
     return None
 
 
@@ -425,8 +431,8 @@ def _preview(
     :func:`dependent_projects_of`; a matching entry that carries a path but no id is named by its
     path.
 
-    Reads the target's experiment records (the live-run refusal check), which opens its database on
-    this request's thread and keeps it open for the process's life. ``releasable`` is
+    Reads the target's run directories (the live-run refusal check) and its registry, which opens
+    its database on this request's thread and keeps it open for the process's life. ``releasable`` is
     :func:`binding_release_available` against whatever name resolves, computed before the refusal
     chain runs.
     """

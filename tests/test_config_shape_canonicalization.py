@@ -57,9 +57,9 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     """What train() reads (run.config['stages']) is the configured schedule itself, with no
     second placement to reconcile against."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tests.tiny_trainer_fixtures import trainer_run
 
-    run = create_run(dict(FLAT_CONFIG), str(tmp_path), id="auto-run-5")
+    run = trainer_run(dict(FLAT_CONFIG), tmp_path, has_val_loader=True, id="auto-run-5")
     assert run.config["stages"] == FLAT_CONFIG["stages"]
     assert len(run.config["stages"]) == 2
     assert "training" not in run.config

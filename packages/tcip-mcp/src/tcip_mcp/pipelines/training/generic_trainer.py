@@ -23,8 +23,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_store import Key, StoreDescriptor, register_store, store, stored_numbers
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import stored_numbers
 
 from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
 from tcip_mcp.pipelines.model_contract import TCIPModel
@@ -118,13 +117,9 @@ def loader_worker_init(worker_id: int, seed: int | None = None,
 
 
 def seeded_loader_kwargs(seed: int | None, num_workers: int | None = None) -> dict:
-    """DataLoader kwargs wiring :func:`loader_worker_init` as the one ``worker_init_fn`` (every
-    run, seeded or not, so spawned workers get the platform GDAL cache budget, scaled by
-    ``num_workers`` when given) plus a seeded ``generator`` when ``seed`` is set, the same
-    value ``set_seed`` uses, making shuffling and worker randomness reproducible. An unseeded
-    run gets no generator: it stays unseeded end to end rather than silently becoming
-    reproducible only in its loader.
-    """
+    """DataLoader kwargs wiring :func:`loader_worker_init` as the ``worker_init_fn`` (scaled by
+    ``num_workers`` when given), plus a ``generator`` seeded with ``seed`` when one is given, none
+    otherwise."""
     kwargs: dict = {
         "worker_init_fn": functools.partial(
             loader_worker_init, seed=None if seed is None else int(seed), num_workers=num_workers),
@@ -237,42 +232,22 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
     return size
 
 
-RUN_CHECKPOINT_STORE = "run_checkpoint"
-register_store(
-    StoreDescriptor(
-        name=RUN_CHECKPOINT_STORE,
-        kind="blob",
-        key_fields=("name",),
-        frozen=True,
-        locator=RootedFileLocator(suffix=".pt"),
-        path_readable=True,
-    )
-)
-"""A run's checkpoints, keyed by the run's own output directory and the checkpoint's name.
+def checkpoint_path(run_dir: Path | str, name: str) -> Path:
+    """One checkpoint of the run whose directory is ``run_dir``: ``<run_dir>/<name>.pt``, ``name``
+    being ``model_best``, ``model_final``, an epoch checkpoint or a bespoke loop's own tag. A name
+    that is not one file name refuses with ``BadKey`` (``experiments.run_name``)."""
+    from tcip_mcp.experiments import run_name
 
-Path-readable because a checkpoint is handed on as a path, not as bytes: ``torch.load``, the
-model registry's sha256 of the real file, and the GUI's inference tab all take one.
-"""
+    return Path(run_dir) / f"{run_name(name)}.pt"
 
 
-def checkpoint_key(output_dir: Path | str, name: str) -> Key:
-    """One checkpoint of the run that writes into ``output_dir``.
+def write_checkpoint(payload: dict, path: Path) -> Path:
+    """Publish one checkpoint at ``path`` once it is whole (``experiments.publish_once``) and
+    return it. A name already written refuses with ``FileExistsError``."""
+    from tcip_mcp.experiments import publish_once
 
-    ``name`` is the checkpoint's own name without its extension: ``model_best``,
-    ``model_final``, an epoch checkpoint, or a bespoke loop's own tag.
-    """
-    return Key(RUN_CHECKPOINT_STORE, str(Path(output_dir).resolve()), (name,))
-
-
-def write_checkpoint(payload: dict, key: Key) -> Path:
-    """Write one checkpoint's bytes and return where they landed.
-
-    The stream becomes the checkpoint only on a clean exit, so a failed save leaves the previous
-    checkpoint in place and no reader observes a half-written file.
-    """
-    with store.write_blob(key) as handle:
-        torch.save(payload, handle)
-    return store.blob_path(key)
+    publish_once(path, lambda handle: torch.save(payload, handle))
+    return path
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
@@ -292,7 +267,7 @@ _RESUME_KEYS = (
 
 
 def _save_checkpoint(
-    key: Key, *, model, optimizer, scheduler, scaler, config: dict,
+    path: Path, *, model, optimizer, scheduler, scaler, config: dict,
     stage_idx: int, stage_epoch: int, run: "TrainRun",
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
@@ -315,7 +290,7 @@ def _save_checkpoint(
     write_checkpoint(stamp_model_ref({
         **{k: state[k] for k in _RESUME_KEYS}, "config": config, "seed": seed,
         "metrics": _checkpoint_metrics(metrics),
-    }), key)
+    }), path)
 
 
 # ====================================================================
@@ -421,16 +396,15 @@ def resolve_selection_metric(
     return resolved
 
 
-def config_selection_metric(config: dict, *, has_val_loader: bool = True) -> str:
-    """:func:`resolve_selection_metric` for a run config: its task
+def resolve_objective(config: dict, *, has_val_loader: bool) -> dict:
+    """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its task
     (:func:`~tcip_mcp.pipelines.model_build.run_task`) and its ``evaluation`` block's ``trait``
-    and ``selection_metric``."""
-    from tcip_mcp.pipelines.model_build import run_task
-
+    and ``selection_metric``, and ``higher_is_better``, that metric's declared direction."""
     eval_cfg = config.get("evaluation") or {}
-    return resolve_selection_metric(run_task(config), eval_cfg.get("trait"),
-                                    eval_cfg.get("selection_metric"),
-                                    has_val_loader=has_val_loader)
+    metric = resolve_selection_metric(run_task(config), eval_cfg.get("trait"),
+                                      eval_cfg.get("selection_metric"),
+                                      has_val_loader=has_val_loader)
+    return {"selection_metric": metric, "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric]}
 
 
 def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
@@ -565,11 +539,13 @@ def train(
     - ``checkpoint_every_n_epochs`` (int, default 5), periodic resumable checkpoints.
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
-    - ``evaluation`` (``{trait, selection_metric, conf_threshold, iou_threshold, iou_type,
-      max_dets, score_weights}``, all optional). ``trait`` and ``selection_metric`` drive
-      ``resolve_selection_metric``; the rest pass through to ``_validate``/``evaluate``.
+    - ``evaluation`` (``{trait, conf_threshold, iou_threshold, iou_type, max_dets,
+      score_weights}``, all optional), passed through to ``_validate``/``evaluate``.
 
-    Every key sits at the top level of the config.
+    Every key sits at the top level of the config. Best-model selection and early stopping read
+    ``run.objective``, the metric and direction the run's launch resolved. The best epoch's
+    weights are held until the run ends and written once as ``model_best.pt`` beside
+    ``model_final.pt``; a diverged run writes neither.
     """
     config = run.config
     run.status = "running"
@@ -629,15 +605,15 @@ def train(
         prev_trainable = None     # trainable param count of the previous stage
         eval_cfg = config.get("evaluation") or {}
         trait = eval_cfg.get("trait")
-        selection_metric = config_selection_metric(config, has_val_loader=val_loader is not None)
-        run.best_metric_name = selection_metric
+        selection_metric = run.objective["selection_metric"]
+        higher_is_better = run.objective["higher_is_better"]
         # The losing-side sentinel for this run's own direction: any real value beats it.
-        higher_is_better = HIGHER_IS_BETTER_BY_METRIC[selection_metric]
         losing_side = float("-inf") if higher_is_better else float("inf")
         run.best_metric = losing_side
         es_best = losing_side
 
         global_step = 0
+        best_payload: dict | None = None
         stopped_early = False
         diverged = False
         # Consecutive full training passes with zero finite batch losses; reset at every stage
@@ -885,22 +861,14 @@ def train(
                     f"{val_loss:.4f}" if _is_scalar_metric(val_loss) else val_loss, current_lr,
                     f" {extra_val_metrics}" if extra_val_metrics else "")
 
-                # Best model checkpoint, selected by the selection objective.
                 if _improves(sel, run.best_metric, higher_is_better=higher_is_better):
                     run.best_metric = sel
-                    try:
-                        write_checkpoint(stamp_model_ref({
-                            STATE_DICT_KEY: model.state_dict(),
-                            "config": config,
-                            "metrics": _checkpoint_metrics(epoch_metrics),
-                            "stage": stage_idx, "epoch": run.current_epoch,
-                        }), checkpoint_key(out_dir, "model_best"))
-                    except PermissionError:
-                        # Windows: a concurrent reader can hold model_best.pt open past the
-                        # replace retries; keep the previous best rather than failing the run.
-                        logger.warning(
-                            "model_best.pt held open by a reader; keeping previous best "
-                            "(epoch %d not persisted).", run.current_epoch)
+                    best_payload = {
+                        STATE_DICT_KEY: {k: v.detach().cpu().clone()
+                                         for k, v in model.state_dict().items()},
+                        "metrics": _checkpoint_metrics(epoch_metrics),
+                        "stage": stage_idx, "epoch": run.current_epoch,
+                    }
 
                 # Remember this stage's best optimizer state for the handoff.
                 if _improves(sel, stage_best, higher_is_better=higher_is_better):
@@ -909,7 +877,7 @@ def train(
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
                     _save_checkpoint(
-                        checkpoint_key(out_dir, f"checkpoint_epoch_{run.current_epoch}"),
+                        checkpoint_path(out_dir, f"checkpoint_epoch_{run.current_epoch}"),
                         model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
                         config=config, stage_idx=stage_idx, stage_epoch=epoch + 1, run=run,
                         es_best=es_best, es_counter=es_counter, global_step=global_step,
@@ -936,15 +904,19 @@ def train(
             if diverged or run.should_cancel():
                 break  # stop before starting the next stage
 
-        # Final checkpoint: saved on a normal completion or a cancellation; skipped for a
-        # diverged run (run.error is the record) and for a raised exception (caught below).
+        # Saved on a normal completion or a cancellation; skipped for a diverged run (run.error
+        # is the record) and for a raised exception (caught below).
         if not diverged:
+            if best_payload is not None:
+                run.saved["model_best"] = write_checkpoint(
+                    stamp_model_ref({**best_payload, "config": config}),
+                    checkpoint_path(out_dir, "model_best"))
             last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
-            write_checkpoint(stamp_model_ref({
+            run.saved["model_final"] = write_checkpoint(stamp_model_ref({
                 STATE_DICT_KEY: model.state_dict(),
                 "config": config,
                 "metrics": _checkpoint_metrics(last_epoch_metrics),
-            }), checkpoint_key(out_dir, "model_final"))
+            }), checkpoint_path(out_dir, "model_final"))
 
         if diverged:
             logger.info("Training run %s stopped: %s", run.id, run.error)

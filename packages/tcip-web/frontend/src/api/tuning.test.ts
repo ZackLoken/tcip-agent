@@ -3,9 +3,8 @@ import { describe, expect, it } from "vitest";
 import { sweepDrawsOf } from "@/api/tuning";
 
 describe("sweepDrawsOf", () => {
-  it("narrows a full result into groups, the best block, and the draw count", () => {
+  it("narrows a full outcome into groups and the best block", () => {
     const result = {
-      split_draws: 2,
       best_value_spread: { mean: 1.5, std: 0.1, min: 1.4, max: 1.6, seeds_complete: [1, 2] },
       split_sensitivity: [
         {
@@ -29,7 +28,6 @@ describe("sweepDrawsOf", () => {
     const draws = sweepDrawsOf(result);
 
     expect(draws).not.toBeNull();
-    expect(draws?.splitDraws).toBe(2);
     expect(draws?.best).toEqual({
       mean: 1.5,
       std: 0.1,
@@ -58,7 +56,7 @@ describe("sweepDrawsOf", () => {
     ]);
   });
 
-  it("is null for a result carrying no split_sensitivity array", () => {
+  it("is null for an outcome carrying no split_sensitivity array", () => {
     expect(sweepDrawsOf({ best_params: {} })).toBeNull();
     expect(sweepDrawsOf({ split_sensitivity: "not an array" })).toBeNull();
     expect(sweepDrawsOf(null)).toBeNull();
@@ -68,8 +66,6 @@ describe("sweepDrawsOf", () => {
   it("narrows a malformed block to null cells rather than dropping the group", () => {
     const result = {
       best_value_spread: null,
-      best_value_reason:
-        "no eligible point: every drawn point had an errored or never-answered draw",
       split_sensitivity: [
         { point: null, block: { mean: "not a number", seeds: "not an array" }, eligible: "yes" },
         { point: { k: 1 } },
@@ -80,10 +76,6 @@ describe("sweepDrawsOf", () => {
 
     expect(draws).not.toBeNull();
     expect(draws?.best).toBeNull();
-    expect(draws?.splitDraws).toBeNull();
-    expect(draws?.bestReason).toBe(
-      "no eligible point: every drawn point had an errored or never-answered draw",
-    );
     expect(draws?.groups).toEqual([
       {
         point: null,

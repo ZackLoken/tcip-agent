@@ -534,13 +534,10 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
 ):
     """A count delivery whose trait states no count refuses before its inference pass runs, and
     returns the refusal alone, never numbers."""
-    import tcip_mcp.model_registry as registry
     import tcip_mcp.tools.inference_tools as itools
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    monkeypatch.setattr(registry, "load_registered_checkpoint", lambda path: registry.VerifiedCheckpoint(
-        path=str(path), sha256="0" * 64, payload={}, entries=(), producer=None))
+    ckpt = foreign_checkpoint(tmp_path)
     ran: list[bool] = []
 
     def inference(*args, **kwargs) -> dict:
@@ -552,7 +549,7 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
 
     monkeypatch.setattr(itools, "_run_inference_verified", inference)
 
-    res = itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
+    res = itools.deliver_per_image_counts(ckpt, str(tmp_path), str(tmp_path / "o.csv"),
                                           trait=fx.COUNT_TRAIT)
 
     assert ran == []

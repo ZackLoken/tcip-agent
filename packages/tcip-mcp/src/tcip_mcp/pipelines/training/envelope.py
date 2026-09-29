@@ -6,13 +6,14 @@ the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artif
 ``should_cancel`` / ``tb`` / ``set_final_weights`` / ``report_objective``).
 
 When no ``training_source`` is set, ``ctx.default_train()`` runs ``generic_trainer.train()``.
-``dispatch_train_body`` is the dispatch-then-derive-final-weights step; an HPO trial runs it with
-``experiment_id=None``, isolated from provenance/registration.
+Every sink writes into the run's own directory, ``run.output_dir``, and refuses a run whose final
+status is written (``experiments.require_open``).
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ from typing import Any
 from tcip_store import stored_number
 
 logger = logging.getLogger(__name__)
+
+ARTIFACTS_DIR = "artifacts"
+"""The run-directory subdirectory a bespoke loop's recorded artifacts are copied into."""
 
 
 @dataclass
@@ -36,16 +40,19 @@ class TrainContext:
     train_loader: Any
     val_loader: Any | None = None
     resume_from: str = ""
-    experiment_id: str | None = None  # None means no record; nothing reads run.id as this instead
-    epoch_hook: Any = None        # (epoch, metrics) -> None; the stock trainer's per-epoch signal
-    trial_report: Any = None      # (value: float) -> None; the raw HPO reporter, None outside HPO
-    final_weights: str | None = None  # the shippable checkpoint path, see set_final_weights
+    epoch_hook: Any = None        # (epoch, metrics) -> None, fired for every metrics row
+    _epoch: int = 0
     _tb: Any = None
 
     # ---- config / reproducibility ----
     @property
     def config(self) -> dict:
         return self.run.config
+
+    @property
+    def run_dir(self) -> Path:
+        """The run's own directory."""
+        return Path(self.run.output_dir)
 
     @property
     def task(self) -> str:
@@ -155,17 +162,6 @@ class TrainContext:
 
         return build_augmentation(cfg)
 
-    def auto_train_val(self, task: str | None = None, data_cfg: dict | None = None,
-                       transforms: Any = None) -> Any:
-        """``(train_ds, val_ds)``, the seam a bespoke ``train(ctx)`` body writes against; the
-        recorded partition ``auto_train_val`` also resolves is not returned here.
-        """
-        from tcip_mcp.pipelines.data.split_construction import auto_train_val
-
-        train_ds, val_ds, _label_digests = auto_train_val(
-            task or self.task, data_cfg or self.config.get("data", {}), transforms)
-        return train_ds, val_ds
-
     def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.components.losses import compute_class_weights
 
@@ -184,7 +180,7 @@ class TrainContext:
     def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
                            enforce_monotonic: bool = True) -> int:
         """Apply a stage's progressive-unfreeze policy (+ the monotonic guard) and return the new
-        trainable-param count, the identical primitive the default trainer uses per stage."""
+        trainable-param count."""
         from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
         return apply_stage_freeze(model, freeze_to, prev_trainable=prev_trainable,
@@ -230,7 +226,7 @@ class TrainContext:
         """
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-        kwargs.setdefault("experiment_id", self.experiment_id)
+        kwargs.setdefault("experiment_id", self.run.id)
         return resolve_operating_point(trait_name, **kwargs)
 
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
@@ -245,50 +241,38 @@ class TrainContext:
 
     # ---- envelope-owned sinks ----
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
-        """Route one epoch's metrics to the log that owns them, and fire ``epoch_hook`` if attached
-        (an HPO trial's per-epoch pruning signal; independent of ``experiment_id``).
-
-        A run tracked as an experiment logs through ``experiments.log_metrics``, which owns that
-        record's members and holds the terminal-state lock. An HPO trial has no experiment record,
-        and its rows belong to the trial directory.
-
-        ``epoch_hook`` is fired with the metrics the body produced, not the stored form: a diverged
-        loss keeps comparing as the worst one.
+        """Append one epoch's metrics to the run's ``metrics.jsonl`` in their stored form, stamped
+        with ``epoch`` and the instant, after firing ``epoch_hook`` if attached with the metrics
+        the body produced, so a diverged loss keeps comparing as the worst one. A row JSON cannot
+        hold raises, naming the field.
         """
-        if self.epoch_hook is not None:
-            self.epoch_hook(epoch, metrics)
+        from tcip_mcp.experiments import METRICS_FILE, append_row, now_iso, require_open
         from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
 
-        stored = _checkpoint_metrics(metrics)
-        try:
-            if self.experiment_id is None:
-                from tcip_store import append
+        require_open(self.run_dir)
+        self._epoch = epoch
+        if self.epoch_hook is not None:
+            self.epoch_hook(epoch, metrics)
+        append_row(self.run_dir / METRICS_FILE,
+                   {"epoch": epoch, "timestamp": now_iso(), **_checkpoint_metrics(metrics)})
 
-                from tcip_mcp.tools.training_tools import trial_metrics_key_for_dir
+    def set_final_weights(self, tag: str) -> None:
+        """Declare the checkpoint this body saved under ``tag`` (:meth:`save_checkpoint`) the
+        run's deliverable. Unset, the run's ``model_best`` or else ``model_final`` is the one
+        declared once the body returns. Refuses (``ValueError``) a tag this body saved nothing
+        under."""
+        from tcip_mcp.experiments import require_open
 
-                append(trial_metrics_key_for_dir(self.run.output_dir),
-                       {"epoch": epoch, **stored})
-                return
-            from tcip_mcp.experiments import log_metrics
-
-            log_metrics(self.experiment_id, epoch, stored)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Metric log failed (%s epoch %s): %s",
-                           self.experiment_id or self.run.id, epoch, exc)
-
-    def set_final_weights(self, path: str) -> None:
-        """Declare ``path`` the shippable checkpoint for this run. Unset, the run's
-        ``model_best.pt`` or ``model_final.pt`` is the one declared once the body returns."""
-        self.final_weights = path
+        require_open(self.run_dir)
+        if tag not in self.run.saved:
+            raise ValueError(f"run {self.run.id} saved no checkpoint under {tag!r}.")
+        self.run.deliverable = self.run.saved[tag]
 
     def report_objective(self, value: float) -> None:
-        """Report a raw scalar to the active HPO trial's pruning scheduler; a no-op outside HPO.
-        The per-epoch hook reads only the stock trainer's metric keys
-        (``selection``/``val_objective``/``val_loss``), so a body whose metrics use other names
-        reports its trial progress here, in the direction the sweep's resolved selection metric
-        declares better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``)."""
-        if self.trial_report is not None:
-            self.trial_report(float(value))
+        """Record ``value`` as a metrics row stamping it the ``selection`` under the run's
+        objective, at the last epoch logged (:meth:`_epoch_sink`)."""
+        self._epoch_sink(self._epoch, {"selection": float(value),
+                                       "selection_metric": self.run.objective["selection_metric"]})
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
         """Custom-loop metric sink: the run's own metrics log plus TensorBoard."""
@@ -300,28 +284,17 @@ class TrainContext:
             self.tb.flush()
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Save ``state`` atomically under ``tag``, stamped with ``kind`` and this run's
-        ``config``; returns the path written.
+        """Write ``state`` once under ``tag``, stamped with ``kind`` and this run's ``config``,
+        record it in ``run.saved``, and return the path written. A tag already written refuses
+        with ``FileExistsError``. A ``metrics`` key in ``state`` is the deliverable's metrics,
+        sourced ``training_source``.
 
-        ``tag="model_best"`` or ``"model_final"`` becomes the run's registered deliverable once the
-        body returns. Any other tag, including the default, ``"checkpoint"``, is saved and stamped
-        but not registered unless its path is passed to ``ctx.set_final_weights``.
-
-        A ``metrics`` key in ``state`` becomes the registered entry's ``metrics``, with
-        ``metrics_source="training_source"``: the platform wrote it into the artifact but never
-        measured it. Registering by ``metrics_source`` this way ranks only on request
-        (``rank_registered_models(..., include_unverified=True)``).
-
-        Refuses (``ValueError``) a ``state`` carrying a ``schema_version`` key (the platform's own
-        checkpoint-version field) or a ``config`` key (the checkpoint's ``config`` is always this
-        run's launch config, the one record of its scope, task and model source).
+        Refuses (``ValueError``) a ``state`` carrying a ``config`` key: the checkpoint's
+        ``config`` is always this run's own.
         """
-        if "schema_version" in state:
-            raise ValueError(
-                f"ctx.save_checkpoint: state carries a 'schema_version' key "
-                f"({state['schema_version']!r}), reserved for this platform's own checkpoint "
-                "version field; name a bespoke loop's own field something else."
-            )
+        from tcip_mcp.experiments import require_open
+
+        require_open(self.run_dir)
         if "config" in state:
             raise ValueError(
                 "ctx.save_checkpoint: state carries a 'config' key, reserved for this run's own "
@@ -329,33 +302,26 @@ class TrainContext:
                 "name a bespoke loop's own field something else."
             )
         from tcip_mcp.pipelines.model_build import stamp_model_ref
-        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, write_checkpoint
+        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path, write_checkpoint
 
-        payload = dict(state)
-        payload["config"] = self.config
-        stamp_model_ref(payload, experiment_id=self.experiment_id)
-        path = write_checkpoint(payload, checkpoint_key(self.run.output_dir, tag))
-        return str(path)
+        payload = stamp_model_ref({**state, "config": self.config})
+        self.run.saved[tag] = write_checkpoint(payload, checkpoint_path(self.run_dir, tag))
+        return str(self.run.saved[tag])
 
     def record_artifact(self, name: str, path: str) -> None:
-        """Record a named artifact against this run; a failure is logged rather than raised. The
-        reserved name ``"model_weights"`` is routed to :meth:`set_final_weights` instead.
+        """Copy the file at ``path`` into the run's ``artifacts/`` directory under ``name``,
+        refusing (``FileExistsError``) a name already recorded and (``BadKey``) one that is not a
+        single file name.
         """
-        if name == "model_weights":
-            logger.warning(
-                "record_artifact(%r/'model_weights', %s) routed to set_final_weights: that "
-                "name is the run's deliverable, and only completing the run records it.",
-                self.experiment_id, path)
-            self.set_final_weights(str(path))
-            return
-        if self.experiment_id is None:
-            return
-        try:
-            from tcip_mcp.experiments import record_artifact
+        from tcip_mcp.experiments import require_open, run_name
 
-            record_artifact(self.experiment_id, name, str(path))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("record_artifact failed (%s/%s): %s", self.experiment_id, name, exc)
+        require_open(self.run_dir)
+
+        destination = self.run_dir / ARTIFACTS_DIR / run_name(name)
+        destination.parent.mkdir(exist_ok=True)
+        if destination.exists():
+            raise FileExistsError(f"artifact {name!r} is already recorded for run {self.run.id}")
+        shutil.copyfile(path, destination)
 
     def should_cancel(self) -> bool:
         return self.run.should_cancel()
@@ -366,90 +332,46 @@ class TrainContext:
             try:
                 from torch.utils.tensorboard import SummaryWriter
 
-                self._tb = SummaryWriter(log_dir=str(Path(self.run.output_dir) / "tensorboard"))
+                self._tb = SummaryWriter(log_dir=str(self.run_dir / "tensorboard"))
             except Exception:  # noqa: BLE001
                 self._tb = None
         return self._tb
 
 
-def _snapshot_run_provenance(ctx: TrainContext) -> None:
-    """Copy the run's environment, and a bespoke run's source files, into its experiment dir; a
-    failure is logged, not raised.
-
-    ``env.json`` records the library versions, seed and model kind for every run. For a bespoke
-    ``model_source`` / ``training_source`` run, the per-file source snapshot is added by
-    ``snapshot_model_source``."""
-    if ctx.experiment_id is None:
-        return
-    try:
-        from tcip_store import store
-
-        from tcip_mcp.experiments import env_key, experiment_dir, experiment_exists
-        from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
-        from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-
-        kind = KIND_TCIP_MODULE
-        env = {"env": capture_env(), "model_kind": kind, "resumed_from": ctx.resume_from or None}
-        if experiment_exists(ctx.experiment_id):
-            store.replace(env_key(ctx.experiment_id), env)
-            # Bespoke run: copy the agent's model/training source (+ sha256) so it is reproducible
-            # from an importable builder, not exec. No-op for the composed default path.
-            snapshot_model_source(ctx.config, experiment_dir(ctx.experiment_id))
-    except Exception:  # noqa: BLE001
-        # A dropped provenance snapshot is a real gap in the model+env link, surface it, don't
-        # bury it at debug (matches audit.py's own "a dropped audit line" stance).
-        logger.warning("run provenance snapshot skipped", exc_info=True)
-
-
 def dispatch_train_body(ctx: TrainContext) -> None:
     """Run the training body, an agent's ``training_source`` if set, else ``ctx.default_train()``,
-    then resolve ``ctx.final_weights`` for either path from the
-    ``model_best.pt``/``model_final.pt`` convention when the body set none.
+    then declare the checkpoint the body saved under ``model_best``, else ``model_final``
+    (``run.saved``), the deliverable when the body declared none.
     """
     run = ctx.run
+    from tcip_mcp.experiments import FINAL_STATES
     from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+
     training_source = run.config.get(TRAINING_SOURCE_KEY)
     if training_source:
         from tcip_mcp.pipelines.model_build import _import_dotted
 
         agent_train = _import_dotted(training_source)
         agent_train(ctx)  # the agent's custom loop drives training through ctx
-        from tcip_mcp.experiments import _RECORDED_AS_DONE
-
-        if run.status not in _RECORDED_AS_DONE:
-            # A custom loop that never set a terminal status is treated as completed
-            # (it returned without canceling or raising).
+        if run.status not in FINAL_STATES:
+            # A custom loop that never set a final status returned without canceling or raising.
             run.status = "canceled" if run.should_cancel() else "completed"
     else:
         ctx.default_train()  # the default trainer
 
-    if ctx.final_weights is None:
-        from tcip_store import blob_path
-
-        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key
-
-        best = blob_path(checkpoint_key(run.output_dir, "model_best"))
-        final = blob_path(checkpoint_key(run.output_dir, "model_final"))
-        if best.is_file():
-            ctx.set_final_weights(str(best))
-        elif final.is_file():
-            ctx.set_final_weights(str(final))
+    if run.deliverable is None:
+        run.deliverable = run.saved.get("model_best") or run.saved.get("model_final")
 
 
 def run_training_envelope(ctx: TrainContext) -> None:
-    """Run a training body inside the audited integrity envelope (background-thread entry).
-
-    In order: snapshot source/env → open an audit event around the body → dispatch via
-    ``dispatch_train_body`` → re-snapshot source/env → close status → register model + lineage + record artifact → close the audit
-    event. Steps other than the dispatch happen regardless of what the training code does or omits.
+    """Run a training body inside the audited envelope: open a ``training_run`` audit event,
+    dispatch the body (:func:`dispatch_train_body`), write the run's final status once
+    (:func:`_finalize_run`), and close the audit event, whatever the body did or omitted.
     """
     from tcip_mcp.audit import record_event
 
     run = ctx.run
-    exp_id = ctx.experiment_id
-    audit_args = {"experiment_id": exp_id, "task": ctx.task}
-
-    _snapshot_run_provenance(ctx)
+    audit_args = {"experiment_id": run.id, "task": ctx.task}
 
     record_event("training_run", audit_args, status="running")
     t0 = time.monotonic()
@@ -461,90 +383,37 @@ def run_training_envelope(ctx: TrainContext) -> None:
         run.error = run.error or str(exc)
         logger.exception("Training body failed for %s: %s", run.id, exc)
 
-    _snapshot_run_provenance(ctx)
     try:
         _finalize_run(ctx)
     finally:
-        # Runs even if _finalize_run re-raises: run.status is already reconciled by then.
         record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
                      status=run.status or "failed",
                      duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
-def _reconcile_on_refusal(run: Any, result: dict[str, Any]) -> bool:
-    """True when ``result`` is a refusal carrying the record's own state (a not-found result
-    carries none): reconciles ``run.status``/``run.error`` to it, so the closing audit event
-    reports the state the record actually holds rather than the one the child believed."""
-    if "error" not in result or "state" not in result:
-        return False
-    run.status = result["state"]
-    run.error = result["error"]
-    return True
-
-
 def _finalize_run(ctx: TrainContext) -> None:
-    """Close status + register the model + record its weights artifact (the completion wiring).
-
-    A refusal comes back as its dict, which :func:`_reconcile_on_refusal` reads. A registration
-    that committed and could not write its own line propagates.
+    """Write the run's final status once (``experiments.write_final_status``), which closes every
+    sink of its context: the state the body ended in, the error behind a failure, and for a
+    completed run its deliverable (``run.deliverable``), named inside the run's directory with the
+    sha256 the verified checkpoint reader admitted (``model_registry.admitted_digest``). A run the
+    wall clock stopped ends ``failed`` naming it; a completed run with no deliverable, or one that
+    cannot be read or that the verified reader refuses, ends ``failed`` naming why.
     """
-    run = ctx.run
-    exp_id = ctx.experiment_id
-    if exp_id is None:
-        return
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_mcp.experiments import (
-        complete_run,
-        register_model_from_experiment,
-        update_status,
-    )
+    from tcip_mcp.experiments import write_final_status
+    from tcip_mcp.model_registry import admitted_digest
 
-    try:
-        if run.status == "completed" and ctx.final_weights is not None:
-            result = complete_run(exp_id, ctx.final_weights)
-            if "error" in result:
-                if "state" in result:
-                    # completed is the last durable write of a run: a refusal here means the
-                    # record was already terminal (a wall-clock watchdog race to failed first).
-                    _reconcile_on_refusal(run, result)
-                    logger.warning("Run %s: completion refused (%s); weights at %s stay on "
-                                   "disk, unregistered.", run.id, result["error"],
-                                   ctx.final_weights)
-                else:
-                    # final_weights could not be read: mark failed, as the phantom-deliverable
-                    # case below does, rather than completing with an unrecorded digest.
-                    logger.warning(
-                        "Run %s: completion refused (%s); marking failed instead of completing "
-                        "with an unrecorded digest.", run.id, result["error"])
-                    run.status = "failed"
-                    run.error = run.error or result["error"]
-                    _reconcile_on_refusal(run, update_status(exp_id, "failed"))
-            else:
-                try:
-                    reg_result = register_model_from_experiment(exp_id, ctx.final_weights)
-                except AuditEntryNotWritten:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Run %s: model registration failed for weights at %s: %s",
-                                   run.id, ctx.final_weights, exc)
-                else:
-                    if "error" in reg_result:
-                        logger.warning("Run %s: model registration refused for weights at %s: %s",
-                                       run.id, ctx.final_weights, reg_result["error"])
-        elif run.status == "completed":
-            # No discoverable weights (no model_best.pt/model_final.pt, ctx.set_final_weights()
-            # never called): a phantom deliverable, refuse rather than register a nonexistent path.
-            logger.warning(
-                "Run %s completed but produced no discoverable weights (no model_best.pt/"
-                "model_final.pt and ctx.set_final_weights() was never called), marking failed "
-                "instead of registering a nonexistent path.", run.id)
-            run.status = "failed"
-            run.error = run.error or "training completed but produced no final weights file"
-            _reconcile_on_refusal(run, update_status(exp_id, "failed"))
-        else:
-            _reconcile_on_refusal(
-                run, update_status(exp_id, run.status or "failed", error=run.error or None))
-    except AuditEntryNotWritten:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Experiment completion wiring failed for %s: %s", exp_id, exc)
+    run = ctx.run
+    if run.wall_clock_exceeded and run.status != "failed":
+        run.status, run.error = "failed", "exceeded max_wall_clock_seconds"
+    checkpoint = None
+    if run.status == "completed" and run.deliverable is None:
+        run.status = "failed"
+        run.error = "training completed but saved no final weights"
+    elif run.status == "completed":
+        try:
+            checkpoint = {"path": run.deliverable.name,
+                          "sha256": admitted_digest(run.deliverable)}
+        except (OSError, ValueError) as exc:
+            run.status, run.error = "failed", f"final weights could not be admitted: {exc}"
+    write_final_status(ctx.run_dir, run.status or "failed", run.error or None,
+                       checkpoint=checkpoint)

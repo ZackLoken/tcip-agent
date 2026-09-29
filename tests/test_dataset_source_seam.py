@@ -243,17 +243,15 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
 
 
 def test_snapshot_records_dataset_builder(tmp_path: Path):
-    import tcip_store as ts
-    from tcip_mcp.pipelines.model_build import snapshot_manifest_key, snapshot_model_source
+    from tcip_mcp.pipelines.model_build import SNAPSHOT_DIR, snapshot_model_source
 
     config = {"data": {"dataset_source": DATASET_SOURCE}}
     manifest = snapshot_model_source(config, tmp_path)
     assert manifest is not None
     assert manifest["dataset_builder"] == "tests.test_dataset_source_seam:build_bespoke_ds"
-    assert any(e["src"] == __file__ and len(e["sha256"]) == 64
-               for e in manifest["files"])
-    saved = ts.read(snapshot_manifest_key(tmp_path))
-    assert saved["dataset_builder"] == manifest["dataset_builder"]
+    [entry] = [e for e in manifest["files"] if e["src"] == __file__]
+    assert len(entry["sha256"]) == 64
+    assert (tmp_path / SNAPSHOT_DIR / entry["file"]).read_bytes() == Path(__file__).read_bytes()
 
 
 def test_dataset_source_key_has_one_home():

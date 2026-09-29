@@ -478,15 +478,13 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     tmp_path: Path, monkeypatch,
 ):
     """project_roots reaches every layout a project's own records name it under, not only the
-    registered dataset roots: an experiment's own recorded run output directory, the selection
-    a run bound to (its split.json's selection_binding.selection_dir), and a prediction bucket
-    under a registered dataset's own predictions/ tree."""
+    registered dataset roots: each run directory, the selection a run bound to (its resolved
+    partition's selection.selection_dir), and a prediction bucket under a registered dataset's
+    own predictions/ tree."""
     from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
 
     from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp import experiments
     from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
 
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"
@@ -494,22 +492,11 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     dataset.mkdir()
     _make_dataset(dataset)
     register_dataset(str(dataset), crop="currant", project_root=str(project))
-
-    # The producers below resolve every member key against the pinned platform root.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-
-    experiments.create_experiment("exp-1", {"model_source": {}})
-    run_dir = tmp_path / "runs" / "exp-1"
-    run_dir.mkdir(parents=True)
-    experiments.stamp_run_identity("exp-1", str(run_dir), launched_by={"launcher": "process"})
 
     split_dir = tmp_path / "splits" / "frozen-exp-1"
     split_dir.mkdir(parents=True)
-    persist_run_partition(
-        "exp-1",
-        {"labels_dir": "", "split": {"resolved_group_by": "stem", "resolved_seed": 0,
-                                     "selection_binding": {"selection_dir": str(split_dir)}}},
-    )
+    run_dir = _run_bound_to(split_dir)
 
     bucket = prediction_dir(dataset, "modelA", "2-11-26")
     bucket.mkdir(parents=True)
@@ -521,114 +508,71 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     assert (str(bucket.absolute()), PREDICTION_BUCKET) in roots
 
 
-def test_project_roots_names_the_hpo_root_and_its_sweeps(tmp_path: Path):
-    """project_roots names the project's own HPO root, the fixed convention
-    training_tools.hpo_root resolves to, and every sweep directory found under it, the same
-    directory training_tools.sweep_dir names a study's own sweep at."""
-    from tcip_store.layout_claims import HPO_ROOT, SWEEP
+def _run_bound_to(selection_dir: Path) -> Path:
+    """A run directory under the pinned root whose launch record's partition is bound to a
+    selection ``draw_splits`` drew into ``selection_dir`` (over a dataset beside it), resolved
+    and opened by the launcher's own producer and writer."""
+    from tests._verified_checkpoint_fixtures import opened_run
+    from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
 
-    from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp.tools import training_tools
-
-    project = tmp_path / "project"
-    project.mkdir()
-
-    hpo_dir = training_tools.hpo_root(root=project)
-    sweep = training_tools.sweep_dir("study-1", root=project)
-    sweep.mkdir(parents=True)
-
-    roots = project_roots(project)
-
-    assert (str(hpo_dir), HPO_ROOT) in roots
-    assert (str(sweep), SWEEP) in roots
-
-
-def test_project_roots_names_a_curated_artifact_and_a_lineage_prediction_bucket(
-    tmp_path: Path, monkeypatch,
-):
-    """project_roots names a curated-dataset artifact recorded through record_artifact, the way
-    feedback_tools.py's materialize_review_dataset records one, and a prediction bucket an
-    inference run recorded through update_lineage, for a bucket written outside any registered
-    dataset's own tree."""
-    from tcip_store.layout_claims import CURATED, PREDICTION_BUCKET
-
-    from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp import experiments
-
-    project = tmp_path / "project"
-    project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-
-    experiments.create_experiment("exp-artifacts", {"model_source": {}})
-
-    curated_dir = tmp_path / "curated"
-    curated_dir.mkdir()
-    experiments.record_artifact("exp-artifacts", "curated_dataset", str(curated_dir))
-
-    lineage_bucket = tmp_path / "external_predictions" / "run1"
-    lineage_bucket.mkdir(parents=True)
-    experiments.update_lineage("exp-artifacts", predictions=str(lineage_bucket))
-
-    roots = project_roots(project)
-
-    assert (str(curated_dir.absolute()), CURATED) in roots
-    assert (str(lineage_bucket.absolute()), PREDICTION_BUCKET) in roots
+    _draw(_two_subject_two_date_dataset(selection_dir.parent / f"{selection_dir.name}-ds"),
+          selection_dir)
+    return opened_run(None, {"model_source": {"task": "detection"},
+                             "data": {"split": {"selection_dir": str(selection_dir)}}})
 
 
 def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_root(
     tmp_path: Path, monkeypatch,
 ):
-    """A directory recorded as a curated-dataset artifact that is also registered as a project
-    dataset keeps both layouts: _add is keyed on the (path, layout) pair, not the path alone, so
-    the dataset-registry add is not silently dropped because the artifact add already claimed
-    that path."""
-    from tcip_store.layout_claims import CURATED, ROOT
+    """A directory a run bound to as its selection that is also registered as a project dataset
+    keeps both layouts: _add is keyed on the (path, layout) pair, not the path alone, so the
+    dataset-registry add is not silently dropped because the selection add already claimed that
+    path."""
+    from tcip_store.layout_claims import ROOT, SPLITS
 
     from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp import experiments
 
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-
-    experiments.create_experiment("exp-shared", {"model_source": {}})
 
     shared = tmp_path / "shared"
     shared.mkdir()
     _make_dataset(shared)
-    experiments.record_artifact("exp-shared", "curated_dataset", str(shared))
+    _run_bound_to(shared)
     register_dataset(str(shared), crop="currant", project_root=str(project))
 
     roots = project_roots(project)
 
-    assert (str(shared.absolute()), CURATED) in roots
+    assert (str(shared.absolute()), SPLITS) in roots
     assert (str(shared.absolute()), ROOT) in roots
 
 
-def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
+def test_project_roots_skips_a_bound_selection_that_no_longer_exists(
     tmp_path: Path, monkeypatch,
 ):
-    """A run's own status.json can still name an output directory that has since been moved or
+    """A run's resolved record can still name a selection directory that has since been moved or
     deleted; project_roots skips it rather than handing ``tcip adopt-store`` a path to recreate
     from nothing."""
-    from tcip_store.layout_claims import RUN
+    from tcip_store.layout_claims import SPLITS
 
     from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp import experiments
 
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
-    experiments.create_experiment("exp-stale", {"model_source": {}})
-    run_dir = tmp_path / "runs" / "exp-stale"
-    run_dir.mkdir(parents=True)
-    experiments.stamp_run_identity("exp-stale", str(run_dir), launched_by={"launcher": "process"})
-    run_dir.rmdir()
+    import shutil
+
+    split_dir = tmp_path / "splits" / "gone"
+    split_dir.mkdir(parents=True)
+    _run_bound_to(split_dir)
+    tcip_store.close_connections()  # the selection's own store lets go of its file
+    shutil.rmtree(split_dir)
 
     roots = project_roots(project)
 
-    assert not any(layout == RUN for _, layout in roots)
+    assert not any(layout == SPLITS for _, layout in roots)
 
 
 def test_external_dataset_paths_names_an_external_registry_entry(tmp_path: Path):
@@ -694,36 +638,16 @@ def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path)
 def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_models(
     tmp_path: Path, monkeypatch,
 ):
-    """A checkpoint registered through ``register_model_from_experiment`` sits wherever
-    ``launch_training`` actually wrote it, ``.tcip/experiments/<experiment_id>/model_final.pt``
-    under the platform's own default ``output_dir``, not under ``.tcip/models/``.
+    """A completed run's checkpoint sits in its own run directory,
+    ``.tcip/experiments/<experiment_id>/model_final.pt``, not under ``.tcip/models/``.
     ``include_models=True`` must bundle it there too, or a breeder who trusts the flag gets an
     archive with no model in it at all."""
-    from tcip_mcp.experiments import (
-        complete_run,
-        create_experiment,
-        experiment_dir,
-        register_model_from_experiment,
-        update_status,
-    )
+    from tests._verified_checkpoint_fixtures import finished_run
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-
-    exp_id = "exp_ckpt_bundle"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    ckpt_dir = experiment_dir(exp_id)
-    # The file backend materializes the experiment directory with the record; the database
-    # backend does not, so tolerate either.
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    weights = ckpt_dir / "model_final.pt"
-    weights.write_bytes(b"the real weights this run produced")
-    completed = complete_run(exp_id, str(weights))
-    assert "error" not in completed, completed
-    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
-    assert "error" not in registered, registered
+    finished_run(None, experiment_id="exp_ckpt_bundle")
 
     result = archive_project(str(src), str(tmp_path / "export.zip"), include_models=True)
     assert "error" not in result
@@ -740,31 +664,18 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
 def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     tmp_path: Path, monkeypatch,
 ):
-    """archive_project(include_models=True) bundles a run's registered checkpoint from wherever
-    it actually sits; the staged tree's own registry still names the exporting project's absolute
-    path, which does not resolve under staging, so import_project must still recognize and admit
-    the checkpoint by its own shape rather than refusing its sibling door's own archive."""
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
-        update_status,
-    )
+    """archive_project(include_models=True) bundles a completed run's checkpoint from its run
+    directory, and import_project admits it: the restored run's final status still names it,
+    and the registry the restored project reads lists it."""
+    from tcip_mcp.experiments import experiment_dir, observe
+    from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import finished_run
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-
     exp_id = "exp_roundtrip"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    ckpt_dir = experiment_dir(exp_id)
-    # The file backend materializes the experiment directory; the database backend does not.
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    weights = ckpt_dir / "model_final.pt"
-    weights.write_bytes(b"the real weights this run produced")
-    completed = complete_run(exp_id, str(weights))
-    assert "error" not in completed, completed
-    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
-    assert "error" not in registered, registered
+    finished_run(None, experiment_id=exp_id)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -774,40 +685,37 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     imported = import_project(str(zip_path), str(dest))
 
     assert "error" not in imported, imported
-    assert (dest / ".tcip" / "experiments" / exp_id / "model_final.pt").is_file()
+    restored = observe(experiment_dir(exp_id, root=dest)).checkpoint
+    assert restored is not None and Path(restored["path"]).is_file()
+    assert exp_id in {m["name"] for m in ModelRegistry(str(dest)).list_models()}
+
+
+def _internal_foreign_checkpoint(src: Path) -> Path:
+    """A foreign checkpoint registered from inside the project's own tree."""
+    from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    weights = src / ".tcip" / "models" / "internal.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_file(weights, "weights registered from inside the project")
+    ModelRegistry(str(src)).register_model("internal", str(weights), {})
+    return weights
 
 
 def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     tmp_path: Path, monkeypatch,
 ):
-    """A run's own checkpoint, registered under the project's own tree, comes back from an
-    archive/import round trip with nothing to disclose: the writer already spelled it relative
-    to the registry's scope root, so the moved tree's registry still resolves under it. The
-    stored entry itself stays relative; the resolved response is absolute; weights load by
-    digest either way, since
-    loading never reads the stored path."""
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
-        update_status,
-    )
+    """A checkpoint registered under the project's own tree comes back from an archive/import
+    round trip with nothing to disclose: the writer already spelled it relative to the
+    registry's scope root, so the moved tree's registry still resolves under it. The stored
+    entry itself stays relative; the resolved response is absolute; weights load by digest
+    either way, since loading never reads the stored path."""
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-
-    exp_id = "exp_disclosure"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    ckpt_dir = experiment_dir(exp_id)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    weights = ckpt_dir / "model_final.pt"
-    weights.write_bytes(b"the real weights this run produced")
-    completed = complete_run(exp_id, str(weights))
-    assert "error" not in completed, completed
-    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
-    assert "error" not in registered, registered
-    assert Path(registered["checkpoint"]).is_absolute()
+    _internal_foreign_checkpoint(src)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -829,7 +737,8 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     entries = read_registry_index(dest)
     assert entries[0]["checkpoint_path"] == stored
 
-    resolved = ModelRegistry(str(dest)).get_model(entries[0]["name"])["checkpoint_path"]
+    (resolved,) = [m["checkpoint_path"] for m in ModelRegistry(str(dest)).list_models()
+                   if m["name"] == entries[0]["name"]]
     assert Path(resolved).is_absolute()
     assert Path(resolved).is_file()
 
@@ -842,27 +751,12 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     staging conform's no-match fallback must never write the entry's own staging directory's
     absolute path over it, which would misfile an internal-but-absent entry as designed-external
     and leave a path into a directory the door is about to delete permanently in the registry."""
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
-        update_status,
-    )
     from tcip_mcp.model_registry import read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-
-    exp_id = "exp_no_checkpoint"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    ckpt_dir = experiment_dir(exp_id)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    weights = ckpt_dir / "model_final.pt"
-    weights.write_bytes(b"weights the archive will legitimately drop")
-    completed = complete_run(exp_id, str(weights))
-    assert "error" not in completed, completed
-    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
-    assert "error" not in registered, registered
+    _internal_foreign_checkpoint(src)
 
     stored_before = read_registry_index(src)[0]["checkpoint_path"]
     assert not Path(stored_before).is_absolute(), stored_before
@@ -889,21 +783,20 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     ``checkpoint_paths_unresolved``, which names only an entry expected to resolve under the
     tree that does not."""
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     internal_dir = src / ".tcip" / "models"
     internal_dir.mkdir(parents=True, exist_ok=True)
-    internal_ckpt = internal_dir / "internal.pt"
-    internal_ckpt.write_bytes(b"internal weights")
+    internal_ckpt = checkpoint_file(internal_dir / "internal.pt", "internal weights")
     external_dir = tmp_path / "elsewhere"
     external_dir.mkdir()
-    external_ckpt = external_dir / "external.pt"
-    external_ckpt.write_bytes(b"external weights")
+    external_ckpt = checkpoint_file(external_dir / "external.pt", "external weights")
 
     reg = ModelRegistry(str(src))
-    reg.register_model("m_internal", str(internal_ckpt), {}, metrics_source=None)
-    reg.register_model("m_external", str(external_ckpt), {}, metrics_source=None)
+    reg.register_model("m_internal", str(internal_ckpt), {})
+    reg.register_model("m_external", str(external_ckpt), {})
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -925,12 +818,12 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     in the bundle once, not as a duplicate zip member neither door's own accounting predicts."""
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.bundle import account_for
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
-    ckpt = src / ".tcip" / "models" / "m.pt"
-    ckpt.write_bytes(b"weights")
-    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
+    ckpt = checkpoint_file(src / ".tcip" / "models" / "m.pt", "weights")
+    ModelRegistry(str(src)).register_model("m", str(ckpt), {})
 
     accounting = account_for(src)
     blob_names = [os.path.normcase(str(p)) for p in accounting.blobs]
@@ -950,18 +843,15 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
 def test_archive_project_carries_a_registered_checkpoint_inside_model_src_when_models_excluded(
     tmp_path: Path,
 ):
-    """A bespoke run's model_src/ snapshot travels regardless of include_models. A checkpoint that
-    happens to sit inside that snapshot, and is also registered, must classify as model_src, not
-    as a checkpoint blob include_models=False is entitled to drop."""
-    from tcip_mcp.model_registry import ModelRegistry
-
+    """A bespoke run's model_src/ snapshot travels regardless of include_models. A weights file
+    that happens to sit inside that snapshot is a run file, not a checkpoint blob
+    include_models=False is entitled to drop."""
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
     model_src.mkdir(parents=True)
     ckpt = model_src / "weights.pt"
     ckpt.write_bytes(b"snapshot-bundled weights")
-    ModelRegistry(str(src)).register_model("snap", str(ckpt), {}, metrics_source=None)
 
     result = archive_project(str(src), str(tmp_path / "export.zip"), include_models=False)
     assert "error" not in result, result

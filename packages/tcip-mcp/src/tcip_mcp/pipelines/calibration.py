@@ -99,7 +99,8 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
 
     ``selection_dir`` restricts the calibration universe to the ``calibration`` samples of a
     selection whose label documents live under ``labels_dir``, re-admitted under ``p.scope``. A
-    checkpoint bound to a different selection is refused by name, and so is
+    checkpoint whose producing run (``experiment_id``) bound a different selection is refused by
+    name, and so is
     ``group_by``/``group_key_map`` passed beside a selection. Without a selection,
     ``group_by`` defaults to ``splits.DEFAULT_GROUP_BY``. The identity (``dh``, the lock, the
     evidence's ``split_identity_hash``) is ``dataset_hash(labels_dir, stems=universe)`` under a
@@ -129,18 +130,17 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
     policy_conflict = selection_policy_conflict(selection_dir, group_by, group_key_map)
     if policy_conflict:
         raise ValueError(policy_conflict)
-    from tcip_mcp.pipelines.data.split_construction import bound_selection_dir
+    if selection_dir is not None and experiment_id is not None:
+        from tcip_mcp.experiments import run_resolution
 
-    _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    _checkpoint_selection_dir = bound_selection_dir(_data_cfg.get("split") or {})
-    if (selection_dir is not None and _checkpoint_selection_dir is not None
-            and not same_directory(_checkpoint_selection_dir, selection_dir)):
-        raise ValueError(
-            f"this checkpoint is bound to the selection at {_checkpoint_selection_dir!r}, not the "
-            f"{selection_dir!r} this calibration names: calibrating a bound checkpoint "
-            "under a different selection would check its selection disjointness against a side "
-            "the checkpoint was never trained or chosen with."
-        )
+        binding = run_resolution(experiment_id)["partition"]["selection"]
+        if binding is not None and not same_directory(binding["selection_dir"], selection_dir):
+            raise ValueError(
+                f"this checkpoint is bound to the selection at {binding['selection_dir']!r}, not "
+                f"the {selection_dir!r} this calibration names: calibrating a bound checkpoint "
+                "under a different selection would check its selection disjointness against a "
+                "side the checkpoint was never trained or chosen with."
+            )
     excluded = None
     selection_sha256 = None
     if selection_dir is not None:

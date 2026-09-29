@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from tcip_store.errors import BadKey
-
-if TYPE_CHECKING:
-    from tcip_store import Key
 
 from tcip_web.paths import assert_project_root_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
@@ -20,18 +17,6 @@ from tcip_web.routes._body_common import EmptyBodyPayload
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
-
-
-def _metrics_key(project_root: str, experiment_id: str) -> "Key":
-    """The metrics log of the experiment named ``experiment_id``, under ``project_root``.
-
-    An id no record could ever carry (a path separator, an empty or dot name) raises ``BadKey``;
-    an id that merely names no record yet (a record still stamped before the run starts) still
-    resolves a key, since nothing here needs the record to already exist.
-    """
-    from tcip_mcp.experiments import metrics_key
-
-    return metrics_key(experiment_id, root=project_root)
 
 
 @router.get("/configs")
@@ -44,10 +29,9 @@ def list_configs_route() -> dict:
 
 @router.get("/configs/{experiment_id}/splits")
 def list_split_choices_route(experiment_id: str) -> dict:
-    """Every choice this config's own "Data" control offers a relaunch: its stored data
-    section as recorded, and every selection directory this project's own bound runs or the
-    dataset's own splits directory hold, compatibility-checked as the launch itself would
-    check them."""
+    """Every choice this config's own "Data" control offers a relaunch: the data section its
+    launch stated, and every selection directory this project's own bound runs or the dataset's
+    own splits directory hold, compatibility-checked as the launch itself would check them."""
     from tcip_mcp.tools.training_tools import list_split_choices
 
     result = list_split_choices(experiment_id)
@@ -63,33 +47,30 @@ class RelaunchConfigPayload(BaseModel):
 
 @router.post("/runs")
 def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
-    """Start a run from a config already recorded in this project: no config, param space or path
-    is ever submitted by the browser. A pristine config launches as its own first run; a run's
-    config launches as a new experiment id with the picked one as parent.
+    """Start a new run from the config a run of this project was launched with, as a fresh run id
+    with the picked one as parent: no config, param space or path is ever submitted by the
+    browser.
 
-    An optional ``selection_dir`` names a partition the browser picked instead of the snapshot's
-    own "As recorded" data section: checked against this same config's own
+    An optional ``selection_dir`` names a partition the browser picked instead of the launch's own
+    "As recorded" data section: checked against this same config's own
     :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing (an enabled offer or 409)
-    through ``tcip_store.canonical_path``, so a symlinked or
-    differently cased spelling of an offered directory is admitted. The launch config then carries
-    ``data.split`` replaced wholesale by ``{"selection_dir": chosen}``; ``auto_train_val`` clears
-    the previous binding's own stamps on its way to a fresh one.
+    through ``tcip_store.canonical_path``, so a symlinked or differently cased spelling of an
+    offered directory is admitted. The launch config then carries ``data.split`` replaced
+    wholesale by ``{"selection_dir": chosen}``.
 
-    The launch is wrapped in ``declare_launcher("gui")``, so the run's status record stamps
+    The launch is wrapped in ``declare_launcher("gui")``, so the run's ``run.json`` records
     ``launched_by: {"launcher": "gui"}``, whatever client posted here.
     """
-    from tcip_mcp.experiments import config_key, read_member
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
         candidate_config_with_selection, declare_launcher, launch_training, list_split_choices,
+        stated_config,
     )
     from tcip_store import canonical_path
 
-    config = read_member(config_key(payload.experiment_id), None)
-    if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
+    config = stated_config(payload.experiment_id)
+    if config is None:
         raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
 
-    config = {**config, "experiment_id": payload.experiment_id}
     if payload.selection_dir:
         choices = list_split_choices(payload.experiment_id)
         enabled = {canonical_path(s["selection_dir"])
@@ -102,7 +83,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
         config = candidate_config_with_selection(config, payload.selection_dir)
     try:
         with declare_launcher("gui"):
-            result = launch_training(config)
+            result = launch_training(config, parent_experiment=payload.experiment_id)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
     if result.get("error"):
@@ -112,12 +93,10 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
 
 @router.get("/runs")
 def list_runs_route() -> dict:
-    """Every training run the platform can currently account for: this process's live runs merged
-    with every launched run's own record on disk, HPO trials excluded.
-    """
+    """Every training run directory of the project (``training_tools._all_training_runs``)."""
     from tcip_mcp.tools.training_tools import _all_training_runs
 
-    return {"runs": _all_training_runs(read_progress=True)}
+    return {"runs": _all_training_runs()}
 
 
 @router.get("/runs/{experiment_id}")
@@ -181,7 +160,7 @@ class ExperimentComparePayload(BaseModel):
 
 @router.post("/compare")
 def compare_runs_route(payload: ExperimentComparePayload) -> dict:
-    from tcip_mcp.tools.experiment_tools import compare_experiments
+    from tcip_mcp.experiments import compare_experiments
 
     return compare_experiments(payload.experiment_ids)
 
@@ -197,20 +176,20 @@ class CompareBestPayload(BaseModel):
 def compare_best_route(payload: CompareBestPayload) -> dict:
     """Rank the marked comparison's own registered checkpoints by one metric.
 
-    Narrowed to the marked experiments. A project with no registry answers 404; a registry
-    that will not decode or is not the entries mapping answers 409 naming why. The tool's own
-    error dicts map to 422 with the whole dict as ``detail``. The answer is projected to name,
-    experiment id, stamped metrics, source, the direction used and its source, and the
-    exclusions.
+    Narrowed to the marked experiments. A project with no registered checkpoint
+    (``model_registry.registered_entries``) answers 404; a registry index that will not decode or
+    is not the entries mapping answers 409 naming why. The tool's own error dicts map to 422 with
+    the whole dict as ``detail``. The answer is projected to name, experiment id, stamped
+    metrics, source, the direction used and its source, and the exclusions.
     """
     from tcip_store.errors import DecodeError, SchemaVersionRefused
 
-    from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
+    from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
     from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     try:
-        entries = read_registry_index(platform_state_root())
+        entries = registered_entries(platform_state_root())
     except (DecodeError, RegistryVersionRefused, SchemaVersionRefused) as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if not entries:
@@ -256,8 +235,8 @@ class TrainingMetricFrame(BaseModel):
 
 
 class TrainingStatusFrame(BaseModel):
-    """The terminal frame: ``status`` carries ``monitor_training``'s report whole for a
-    run this process can still identify, ``error`` is set instead when it cannot."""
+    """The terminal frame: ``status`` carries the run's ``experiments.run_summary`` row for a run
+    this process can still identify, ``error`` is set instead when it cannot."""
 
     type: Literal["status"]
     experiment_id: str
@@ -268,55 +247,44 @@ class TrainingStatusFrame(BaseModel):
 async def _stream_metrics(
     ws: WebSocket, project_root: str, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
-    """Push every row of an experiment's metrics log to the browser as it is appended.
+    """Push every row of a run's ``metrics.jsonl`` to the browser as it is appended.
 
-    The cursor is the log's own resume token, so each tick reads only what was appended since the
-    last one and an entry still being written is replayed once it is complete. The key is resolved
-    once, not re-resolved per tick. Both reads run off the event loop.
+    Each tick observes the run once (``experiments.observe``) and reads its log from a byte-offset
+    cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
+    a row still being written is replayed once it is complete. Rows are read after the
+    observation, so a run the observation found in a terminal state has every row sent before its
+    one status frame (``experiments.run_summary`` over the rows sent), which ends the stream. An id naming no run
+    directory under ``project_root`` ends the stream with one status frame naming it, and one that
+    is not a single directory name raises ``BadKey``. Every read runs off the event loop.
     """
-    from tcip_store import read_log
+    from tcip_mcp.experiments import (
+        TERMINAL_STATES, find_observation, observe, read_rows, run_name, run_summary,
+    )
 
-    key = _metrics_key(project_root, experiment_id)
-    cursor: str | None = None
+    observation = await asyncio.to_thread(find_observation, run_name(experiment_id),
+                                          root=project_root)
+    if observation is None:
+        await ws.send_json(TrainingStatusFrame(
+            type="status", experiment_id=experiment_id, status=None,
+            error=f"Run not found: {experiment_id}").model_dump())
+        return
+    cursor = 0
+    sent: list[dict] = []
 
     while True:
-        page = await asyncio.to_thread(read_log, key, after=cursor)
-        cursor = page.cursor
-        rows = [dict(row) for row in page.records]
+        rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)
         for row in rows:
             frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
             await ws.send_json(frame.model_dump())
-
-        # Has the run finished (or gone away)? ``error`` with no ``status`` key => unknown run;
-        # a canceled run never reaches completed/failed, so either case ends the stream.
-        try:
-            from tcip_mcp.tools.training_tools import monitor_training
-            from tcip_web import jobstore
-
-            status = monitor_training(experiment_id)
-            if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
-                # A row can land between the read above and this terminal observation; drain
-                # it now so the status frame never precedes the row it terminates on.
-                final_page = await asyncio.to_thread(read_log, key, after=cursor)
-                cursor = final_page.cursor
-                for row in (dict(r) for r in final_page.records):
-                    frame = TrainingMetricFrame(type="metric", experiment_id=experiment_id, row=row)
-                    await ws.send_json(frame.model_dump())
-                if "status" in status:
-                    status_frame = TrainingStatusFrame(
-                        type="status", experiment_id=experiment_id, status=status, error=None
-                    )
-                else:
-                    status_frame = TrainingStatusFrame(
-                        type="status", experiment_id=experiment_id, status=None,
-                        error=status.get("error"),
-                    )
-                await ws.send_json(status_frame.model_dump())
-                break
-        except Exception:
-            logger.exception("monitor_training failed in stream")
-
+        sent += rows
+        if observation.state in TERMINAL_STATES:
+            status = await asyncio.to_thread(run_summary, observation, sent)
+            await ws.send_json(TrainingStatusFrame(
+                type="status", experiment_id=experiment_id, status=status,
+                error=None).model_dump())
+            break
         await asyncio.sleep(poll_seconds)
+        observation = await asyncio.to_thread(observe, observation.directory)
 
 
 @router.websocket("/runs/{experiment_id}/stream")

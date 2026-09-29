@@ -27,18 +27,8 @@ ROOT = "root"
 STATE = "state"
 """A root's ``.tcip/state`` directory, the root the review shards and per-trait records hang off."""
 
-EXPERIMENTS = "experiments"
-"""A root's ``.tcip/experiments`` directory, the one root every experiment's members share."""
-
 WORKSPACE = "workspace"
 """The workspace directory holding the project folders and the active-project marker."""
-
-HPO_ROOT = "hpo_root"
-"""A root's ``.tcip/hpo`` directory, holding one study result and one manifest per sweep."""
-
-SWEEP = "sweep"
-"""One HPO sweep's directory under the hpo root, holding a directory per trial: the tuning sense
-of "sweep", distinct from the ``confidence_sweep`` store's calibration-curve claim below."""
 
 SPLITS = "splits"
 """A selection's output directory: the one document a draw writes its whole partition as."""
@@ -47,7 +37,7 @@ CURATED = "curated"
 """A curated dataset's output directory."""
 
 RUN = "run"
-"""A training or evaluation run's output directory."""
+"""A run's own directory, where an evaluation of its checkpoint writes its results."""
 
 PREDICTION_BUCKET = "prediction_bucket"
 """One prediction bucket directory, where a run's operating-point stamps sit beside its output."""
@@ -64,10 +54,7 @@ twelve-hex-digit prefix of the record digest it archived; it never matches plain
 LAYOUTS = (
     ROOT,
     STATE,
-    EXPERIMENTS,
     WORKSPACE,
-    HPO_ROOT,
-    SWEEP,
     SPLITS,
     CURATED,
     RUN,
@@ -273,14 +260,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "canvas_open_binding": Claim(
         WORKSPACE, (_named(".tcip", "state", name="canvas_open_binding", suffix=".json"),)
     ),
-    "job_registry": Claim(
-        ROOT,
-        (
-            _named(".tcip", "state", name="inference_jobs", suffix=".json"),
-            _named(".tcip", "state", name="review_priority_jobs", suffix=".json"),
-            _named(".tcip", "state", name="hpo_sweeps", suffix=".json"),
-        ),
-    ),
     "proposal_staging": Claim(
         ROOT,
         (
@@ -297,8 +276,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "learning_capture": Claim(ROOT, (_named(".tcip", name="learning_capture", suffix=".jsonl"),)),
     "friction_reports": Claim(ROOT, (_rooted(".tcip", "reports", suffix=".json"),)),
     "retrospectives": Claim(ROOT, (_rooted(".tcip", "retrospectives", suffix=".md"),)),
-    # The calibration-curve sense of "sweep", frozen in the store name and this on-disk prefix;
-    # unrelated to the HPO_ROOT/SWEEP tuning claim above.
     "confidence_sweep": Claim(
         ROOT,
         (
@@ -345,49 +322,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "delivery_events": Claim(
         STATE, ((Constant("delivery_events"), Patterned(ANY, tail=".json")),)
     ),
-    "experiment_config": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("config"), tail=".json")),)
-    ),
-    "experiment_status": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("status"), tail=".json")),)
-    ),
-    "experiment_lineage": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("lineage"), tail=".json")),)
-    ),
-    "experiment_artifacts": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("artifacts"), tail=".json")),)
-    ),
-    "experiment_env": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("env"), tail=".json")),)
-    ),
-    "experiment_split": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("split"), tail=".json")),)
-    ),
-    "experiment_metrics": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("metrics"), tail=".jsonl")),)
-    ),
-    "experiment_validations": Claim(
-        EXPERIMENTS, ((Patterned(ANY), Patterned(literal("validations"), tail=".jsonl")),)
-    ),
-    "model_snapshot_manifest": Claim(
-        EXPERIMENTS,
-        ((Patterned(ANY), Constant("model_src"), Patterned(literal("manifest"), tail=".json")),),
-    ),
     "workspace_active_project": Claim(WORKSPACE, ((Patterned(literal(".active")),),)),
-    "hpo_study_result": Claim(HPO_ROOT, (_rooted(suffix=".json"),)),
-    "hpo_sweep_manifest": Claim(
-        HPO_ROOT, ((Patterned(ANY), Patterned(literal("manifest"), tail=".json")),)
-    ),
-    "hpo_trial_config": Claim(
-        SWEEP, ((Patterned(ANY), Patterned(literal("resolved_config"), tail=".json")),)
-    ),
-    "hpo_trial_metrics": Claim(
-        SWEEP, ((Patterned(ANY), Patterned(literal("metrics"), tail=".jsonl")),)
-    ),
     "selection": Claim(SPLITS, (_named(name="selection", suffix=".json"),)),
     "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
-    "evaluation_results": Claim(RUN, (_named(name="test_results", suffix=".json"),)),
-    "run_launch_config": Claim(RUN, (_named(name="launch_config", suffix=".json"),)),
     "operating_point_sidecar": Claim(
         PREDICTION_BUCKET, (_named(name="operating_point", suffix=".json"),)
     ),
@@ -620,8 +557,6 @@ __all__ = [
     "ClaimedFile",
     "Claimant",
     "Constant",
-    "EXPERIMENTS",
-    "HPO_ROOT",
     "LAYOUTS",
     "NAME_SEGMENT",
     "PLATFORM_CLAIMS",
@@ -632,7 +567,6 @@ __all__ = [
     "RUN",
     "SPLITS",
     "STATE",
-    "SWEEP",
     "Segment",
     "Template",
     "WORKSPACE",

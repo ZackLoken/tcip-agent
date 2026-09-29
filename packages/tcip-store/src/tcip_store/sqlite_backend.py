@@ -74,6 +74,7 @@ from tcip_store.model import (
     canonical_path,
 )
 from tcip_store.registry import claim_generation, get_descriptor
+from tcip_store.store import Txn
 
 SCHEMA_VERSION = 1
 """What ``pragma user_version`` carries. This is the backend's own table shape, not the
@@ -330,7 +331,8 @@ class SqliteBackend:
     def capabilities(self) -> Capabilities:
         """What this backend guarantees on the platform it is running on.
 
-        ``multi_key_atomic_commit`` is true: a transaction's staged writes are one SQL commit.
+        ``multi_key_atomic_commit`` is true: a record transaction's staged writes are one SQL
+        commit. A blob transaction publishes files through the composed file backend's apply.
         ``cross_machine_exclusion`` is false: SQLite locking is unreliable on network filesystems
         and WAL needs shared memory it cannot get there. ``durable_replace`` answers for records
         and blobs at once, and is false on Windows, where a blob's rename directory entry cannot be
@@ -777,8 +779,12 @@ class SqliteBackend:
     @contextmanager
     def transaction(
         self, keys: Sequence[Key], *, timeout_s: float | None = None
-    ) -> Generator["_SqliteTxn"]:
+    ) -> Generator[Txn]:
         named = tuple(keys)
+        if get_descriptor(named[0].store).kind == "blob":
+            with self._files.transaction(named, timeout_s=timeout_s) as files_txn:
+                yield files_txn
+            return
         with self._write(named, timeout_s=timeout_s) as conn:
             txn = _SqliteTxn(self, conn, named)
             yield txn
