@@ -15,17 +15,15 @@ from pathlib import Path
 
 
 def _fixture_config(tmp_path: Path) -> Path:
-    """A structurally valid config: a real, importable builder (never called, since no --smoke
-    is passed here), real, empty images/labels directories, and the subject the admission over a
-    per-image label tree is scoped by."""
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
+    """A valid config: a builder the operator's own process imports (never called, since no
+    --smoke is passed here) over two labeled frames of the subject its scope names
+    (``_verified_checkpoint_fixtures.detection_images``)."""
+    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+
     config = {
         "model_source": {"builder": "tcip_mcp.pipelines.model_build:build_model",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": {**detection_images(tmp_path / "data", SCOPED_DATA["scope"]), **SCOPED_DATA},
     }
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")

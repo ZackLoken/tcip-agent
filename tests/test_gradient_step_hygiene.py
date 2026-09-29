@@ -17,10 +17,10 @@ from torch.utils.data import DataLoader
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
-from tcip_mcp.pipelines.training.run_registry import create_run
 from tests.tiny_trainer_fixtures import (
     ConstantImageDataset,
     build_data_scaled_gradient_model,
+    trainer_run,
 )
 
 BUILDER = "tests.tiny_trainer_fixtures:build_data_scaled_gradient_model"
@@ -105,7 +105,7 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypa
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = create_run(_config(), str(tmp_path / "out"), id="auto-run-34")
+    run = trainer_run(_config(), tmp_path / "out", has_val_loader=False, id="auto-run-34")
     run = train(run, loader)
 
     assert run.status == "completed", run.error
@@ -121,7 +121,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     models: list = []
     _capture_model(monkeypatch, models)
 
-    run = create_run(_config(), str(tmp_path / "out"), id="auto-run-35")
+    run = trainer_run(_config(), tmp_path / "out", has_val_loader=False, id="auto-run-35")
     run = train(run, loader)
 
     assert run.status == "completed", run.error
@@ -142,7 +142,8 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
 
     steps: list = []
     _record_step_gradients(monkeypatch, steps)
-    run = create_run(_config(accumulation=2), str(tmp_path / "out"), id="auto-run-36")
+    run = trainer_run(_config(accumulation=2), tmp_path / "out", has_val_loader=False,
+                      id="auto-run-36")
     run = train(run, loader)
 
     assert run.status == "completed", run.error

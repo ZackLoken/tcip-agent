@@ -600,36 +600,18 @@ def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
     return {path: ground_truth_digest(Path(path)) for path in dict.fromkeys(paths)}
 
 
-def members_moved_since(
-    ground_truth: Mapping[str, str], at_run: Mapping[str, str], members: list[str],
-) -> list[str]:
-    """Which of ``members`` no longer digest to what ``at_run`` recorded for them.
-
-    ``ground_truth`` is the record's own per-member path, the file the run actually read
-    (``split.json``'s ``label_digests.ground_truth``), so the digest is recomputed over that same
-    file. A member whose file is gone digests as empty bytes, so it reads as moved.
-
-    A member ``at_run`` does not name is not compared. A member ``at_run`` names and
-    ``ground_truth`` does not refuses.
-    """
-    named = sorted(set(members) & set(at_run))
-    unnamed = [member for member in named if member not in ground_truth]
-    if unnamed:
-        raise ValueError(
-            f"the record digests {len(unnamed)} member(s) ({unnamed[:5]}) but names no path for "
-            "them, so which file those digests were taken over is not on record and no comparison "
-            "here can be vouched for."
-        )
-    digest_of = ground_truth_digests(ground_truth[member] for member in named)
-    return [member for member in named
-            if digest_of[ground_truth[member]] != at_run[member]]
-
-
+def moved_since_run(samples: Iterable[Any], at_run: Mapping[str, str]) -> list[str]:
+    """The members among ``samples`` whose ground truth no longer digests to what ``at_run`` (a
+    run's resolved partition's ``ground_truth_digests``, keyed by path) recorded, sorted. A file
+    that is gone digests as empty bytes, so it reads as moved."""
+    samples = list(samples)
+    now = ground_truth_digests(s.ground_truth for s in samples)
+    return sorted({s.member for s in samples if now[s.ground_truth] != at_run[s.ground_truth]})
 
 
 def selection_digest(selection: Any) -> str:
-    """The digest a selection earns: sha256 over the document it is written as (``split.json``'s
-    ``selection_binding.selection_sha256``).
+    """The digest a selection earns: sha256 over the document it is written as, the one a bound
+    run's partition records as its ``selection["selection_sha256"]``.
     """
     from tcip_mcp.pipelines.data.selection import selection_document
 
@@ -679,12 +661,8 @@ _SIDECAR_STORES: dict[str, str] = {
     ).name
     for document in (filename[: -len(".json")] for filename in sorted(_SIDECAR_FILENAMES))
 }
-"""One store per measurement dimension, never one store holding every dimension's fields: the
-dimensions are structurally independent (a physical scale is a fact about the imagery, a classifier
-stamp is about a state call, the count operating point is about a threshold), and a single document
-is exactly what would let a generic writer conflate them. The document names come from
-:data:`tcip_annotation.json_io.SIDECAR_FILENAMES`, the one declared set, rather than a second
-enumeration of them here."""
+"""One store per measurement dimension's stamp, keyed by document name, one per name in
+:data:`tcip_annotation.json_io.SIDECAR_FILENAMES`."""
 
 
 def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:
@@ -1411,8 +1389,7 @@ def open_validation(
 
 
 _CALIBRATION_EXPERIMENT_DERIVATION: dict[str | None, str] = {
-    None: "a claim earned at a delivery door for predictions no run in this platform's "
-         "experiment record produced",
+    None: "a claim earned at a delivery door for predictions no run of this project produced",
     "resolve_scale": "a physical-scale claim earned against a breeder-supplied reference, not "
                      "predictions any run produced",
 }
@@ -1478,10 +1455,13 @@ def seal_validation(
 
     The second phase. It takes the content identity of every bucket the claim covers from the files
     on disk at this moment, takes the claim itself from the stamp body about to be published,
-    appends the row, and returns that stamp body with ``validated_by`` (the record's experiment and
-    digest) merged in. The caller writes the returned body last.
+    appends the row to the ``validations.jsonl`` of the run that produced the checkpoint, or of a
+    fresh calibration run opened for a checkpoint no run produced
+    (``experiments.open_calibration_run``) and finished with the append's outcome, and returns
+    that stamp body with ``validated_by`` (the run's id and the row's digest) merged in. The
+    caller writes the returned body last.
 
-    There is no transaction across the experiment store and the bucket: a crash before this call
+    There is no transaction across the run directory and the bucket: a crash before this call
     leaves prediction files with no stamp, which floors; a crash after it leaves a record no stamp
     names, which is inert. Only a stamp that names a row a reader can find and recompute delivers.
 
@@ -1497,7 +1477,9 @@ def seal_validation(
     bucket floors it. ``images_dir`` is required for a ``resolve_scale`` draft, and unused
     otherwise.
     """
-    from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
+    from tcip_mcp.experiments import (
+        append_validation, experiment_dir, open_calibration_run, write_final_status,
+    )
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     if draft.token not in _OPEN_DRAFTS:
@@ -1560,12 +1542,6 @@ def seal_validation(
     if draft.document == "operating_point":
         _require_calibrated_regime(claim, draft.result)
 
-    experiment_id = draft.producing_experiment_id or ensure_calibration_experiment(
-        document=draft.document, checkpoint_sha256=draft.checkpoint_sha256,
-        reference_identity=draft.reference_identity, trait=draft.trait,
-        config={"derived_from": _CALIBRATION_EXPERIMENT_DERIVATION.get(
-            draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None])},
-    )
     body = {
         "document": draft.document,
         "trait": draft.trait,
@@ -1580,11 +1556,27 @@ def seal_validation(
         "train_disjointness": resolver_train_disjointness(draft.result, draft.document),
         "selection_disjointness": resolver_selection_disjointness(draft.result, draft.document),
     }
-    appended = _append_validation(experiment_id, body)
-    if "error" in appended:
-        raise ValueError(f"the {draft.document} claim was not recorded: {appended['error']}")
-    return {**stamp_body, "validated_by": {"experiment_id": experiment_id,
-                                           "record_digest": appended["record_digest"]}}
+    if draft.producing_experiment_id:
+        run_dir = experiment_dir(draft.producing_experiment_id)
+        try:
+            digest = append_validation(run_dir, body)
+        except ValueError as exc:
+            raise ValueError(f"the {draft.document} claim was not recorded: {exc}") from exc
+    else:
+        run_dir = open_calibration_run({
+            "document": draft.document, "checkpoint_sha256": draft.checkpoint_sha256,
+            "reference_identity": draft.reference_identity, "trait": draft.trait,
+            "derived_from": _CALIBRATION_EXPERIMENT_DERIVATION.get(
+                draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None]),
+        })
+        try:
+            digest = append_validation(run_dir, body)
+        except Exception as exc:
+            write_final_status(run_dir, "failed", f"the claim was not recorded: {exc}")
+            raise ValueError(f"the {draft.document} claim was not recorded: {exc}") from exc
+        write_final_status(run_dir, "completed", None)
+    return {**stamp_body, "validated_by": {"experiment_id": run_dir.name,
+                                           "record_digest": digest}}
 
 
 @dataclass(frozen=True)
@@ -1679,7 +1671,7 @@ def verify_stamp_binding(
     reconcilers read is hashed once. There is no cache beyond it: recomputation is what detects a
     replacement whose size and timestamp were restored.
     """
-    from tcip_mcp.experiments import experiment_exists, experiments_scope, find_validation
+    from tcip_mcp.experiments import experiments_dir, find_observation, find_validation
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     param_key, validation_kind = _DOCUMENT_PARAM[document]
@@ -1704,21 +1696,21 @@ def verify_stamp_binding(
     experiment_id = pointer["experiment_id"]
     record_digest = pointer["record_digest"]
 
-    if not experiment_exists(experiment_id):
+    observation = find_observation(experiment_id)
+    if observation is None:
         return floored(
-            f"{document}.json at {bucket!r} names experiment {experiment_id!r}, which the experiment "
-            f"store at {experiments_scope()} does not hold. Earn the claim through the calibration "
-            "door for this document, which creates the record it names.",
+            f"{document}.json at {bucket!r} names run {experiment_id!r}, which {experiments_dir()} "
+            "does not hold. Earn the claim through the calibration door for this document, which "
+            "creates the record it names.",
             experiment_id=experiment_id, record_digest=record_digest,
         )
 
-    row = find_validation(experiment_id, record_digest)
+    row = find_validation(observation, record_digest)
     if row is None:
         return floored(
-            f"{document}.json at {bucket!r} names record {record_digest!r} in experiment "
-            f"{experiment_id!r}, and no row in that experiment's validations hashes to it (searched "
-            f"the experiment store at {experiments_scope()}). Re-earn the claim through the "
-            "calibration door for this document.",
+            f"{document}.json at {bucket!r} names record {record_digest!r} in run "
+            f"{experiment_id!r}, and no row of {observation.directory} validations hashes to it. "
+            "Re-earn the claim through the calibration door for this document.",
             experiment_id=experiment_id, record_digest=record_digest,
         )
 
@@ -1907,21 +1899,6 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
     )
 
 
-def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
-    """The checkpoint identity this experiment record answers for, or ``None`` when it records
-    none: read from the run's own lineage, and only for a record whose status is ``completed``
-    (``complete_run`` writes the digest and the terminal status together).
-    """
-    from tcip_mcp.experiments import lineage_key, read_member, status_key
-
-    status = read_member(status_key(experiment_id), {})
-    if not isinstance(status, dict) or status.get("state") != "completed":
-        return None
-    lineage = read_member(lineage_key(experiment_id), {})
-    weights_sha256 = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
-    return str(weights_sha256) if weights_sha256 else None
-
-
 def corroborated_producer(
     checkpoint_sha256: str | None, experiment_id: str | None
 ) -> tuple[str | None, str | None]:
@@ -1929,19 +1906,21 @@ def corroborated_producer(
     confirms of them.
 
     Validity and producer identity rest on different evidence, so an honestly unvalidated bucket
-    keeps the identity it really has. A stamp naming no experiment stands on its checkpoint hash
-    alone, which came from resolving the checkpoint and not from any validation claim. A stamp
-    naming an experiment is emitted only when that experiment exists and the checkpoint it recorded
+    keeps the identity it really has. A stamp naming no run stands on its checkpoint hash alone,
+    which came from resolving the checkpoint and not from any validation claim. A stamp naming a
+    run is emitted only when that run exists and the checkpoint its completed final status names
     is the one the stamp names, absence equal to absence; otherwise the delivery says the producer
     is unknown rather than repeating names nothing answers for.
     """
     if not experiment_id:
         return checkpoint_sha256, None
-    from tcip_mcp.experiments import experiment_exists
+    from tcip_mcp.experiments import find_observation
 
-    if not experiment_exists(experiment_id):
+    observation = find_observation(experiment_id)
+    if observation is None:
         return None, None
-    if experiment_recorded_checkpoint(experiment_id) != checkpoint_sha256:
+    checkpoint = observation.checkpoint
+    if (checkpoint["sha256"] if checkpoint is not None else None) != checkpoint_sha256:
         return None, None
     return checkpoint_sha256, experiment_id
 

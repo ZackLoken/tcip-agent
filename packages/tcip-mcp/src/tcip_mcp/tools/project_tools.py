@@ -878,10 +878,7 @@ def import_project(bundle_path: str, destination: str) -> dict:
     state); the staging tree this run made is removed whether the run refused, raised, or
     succeeded.
 
-    Before accounting for the extracted tree, every model registry entry's ``checkpoint_path`` is
-    respelled relative to the staging tree
-    (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`). A registry that is not the
-    entries mapping refuses the whole import before anything is moved.
+    A registry that is not the entries mapping refuses the whole import before anything is moved.
 
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
@@ -953,7 +950,7 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     from tcip_store.errors import StoreError
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
-    from tcip_mcp.model_registry import RegistryVersionRefused, conform_registry_paths_on_disk
+    from tcip_mcp.model_registry import RegistryVersionRefused
     from tcip_mcp.tools.bundle import (
         AnchorMisplaced, account_for, blob_home, external_registered_checkpoints,
         unresolved_registered_checkpoints,
@@ -963,11 +960,6 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
         files_extracted = _stage_bundle(bp, staging)
     except (ValueError, zipfile.BadZipFile) as exc:
         return {"error": f"{bp} is not a readable bundle: {exc}"}
-
-    try:
-        conform_registry_paths_on_disk(staging)
-    except RegistryVersionRefused as exc:
-        return {"error": f"the extracted registry index could not be conformed: {exc}"}
 
     try:
         accounting = account_for(staging)

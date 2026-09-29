@@ -89,7 +89,7 @@ def test_the_gui_worker_and_the_mcp_pass_prepare_the_same_run(tmp_path, monkeypa
     from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
     images_dir = _two_images(tmp_path / "images")
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
     real_publish = itools.publish_bucket
@@ -125,7 +125,7 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
 
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
 
@@ -162,34 +162,24 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
         assert read_operating_point_sidecar(bucket) is None
 
 
-@pytest.mark.parametrize("refusal", ["frozen_lineage_pointer", "count_claim_gate"])
 def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_written(
-    tmp_path, monkeypatch, refusal,
+    tmp_path, monkeypatch,
 ):
-    """Every gate the publisher runs before its first write refuses a GUI run as it refuses the
-    MCP door's: the same reason, no document, no stamp, no line."""
+    """A gate the publisher runs before its first write refuses a GUI run as it refuses the MCP
+    door's: the same reason, no document, no stamp, no line."""
     pytest.importorskip("fastapi")
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
-    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
+    from tcip_mcp.dataset_layout import image_dir
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
-    exp_id = "exp-published-once"
-    create_experiment(exp_id, {"model_source": {"builder": "x:y", "task": "detection"}})
-    update_status(exp_id, "running")
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path,
-                                 stamp={"experiment_id": exp_id})
-    if refusal == "frozen_lineage_pointer":
-        update_lineage(exp_id, predictions=str(prediction_dir(dataset, "first", DATE)))
-        update_status(exp_id, "completed")
-    else:
-        # A raw GUI pass earns no claim, so this gate's refusal is stood in for at the gate itself.
-        monkeypatch.setattr(itools, "_draft_count_claim", lambda result, **kw: (
-            None, {"error": "the count claim for trait 'leaf count' was not earned: stand-in"}))
+    ckpt = registered_checkpoint(tmp_path)
+    # A raw GUI pass earns no claim, so this gate's refusal is stood in for at the gate itself.
+    monkeypatch.setattr(itools, "_draft_count_claim", lambda result, **kw: (
+        None, {"error": "the count claim for trait 'leaf count' was not earned: stand-in"}))
 
     job = _launch_through_the_route(dataset, ckpt, "run")
     bucket = Path(job.output_dir)
@@ -197,7 +187,6 @@ def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_writt
 
     assert job.status == "failed"
     assert job.error == mcp["error"]
-    assert (exp_id in job.error) == (refusal == "frozen_lineage_pointer")
     assert _documents(bucket) == []
     assert read_operating_point_sidecar(bucket) is None
     assert _dataset_rows(dataset) == []
@@ -220,7 +209,7 @@ def test_a_canceled_gui_pass_publishes_what_it_wrote_through_the_one_publisher(
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
     out = prediction_dir(dataset, "run", DATE)
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     job = _job("canceled-after-one", images_dir, out, ckpt, tmp_path)
 
     class CancelAfterFirstImage(_FakePredictor):
@@ -252,7 +241,7 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
 
     images_dir = _two_images(tmp_path / "images")
     out_dir = tmp_path / "out"
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, filename="m.pt")
+    ckpt = registered_checkpoint(tmp_path)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
@@ -280,27 +269,25 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     from tcip_mcp.pipelines.resolution import sidecar_key
     sidecar = ts.read(sidecar_key(out_dir))
     assert sidecar["operating_point"]["conf"]["value"] == pytest.approx(0.25)
-    assert sidecar["checkpoint"] == "m"
+    assert sidecar["checkpoint"] == Path(ckpt).stem
     assert sidecar["checkpoint_sha256"] and sidecar["produced_at"]
     assert sidecar["images_dir"] == str(images_dir)
     assert sidecar["validated"] is False
     assert sidecar["image_filenames"] == {"a": "a.jpg", "b": "b.jpg"}
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
-                                 "error", "warning", "audit_warning", "dropped_nonpositive_boxes",
-                                 "platform_root"}
+                                 "error", "warning", "audit_warning", "dropped_nonpositive_boxes"}
     assert [Path(p).stem for p in written] == ["a", "b"]
 
 
 def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, monkeypatch):
     """The GUI worker publishes through the MCP door's own publisher: each run leaves the stamp's
-    line and the publication's line and nothing else in its dataset's log, and each links the
-    bucket into its run's lineage."""
+    line and the publication's line and nothing else in its dataset's log, and each bucket's
+    stamp names the run that produced its checkpoint."""
     pytest.importorskip("fastapi")
     import tcip_store as ts
 
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.experiments import create_experiment, get_experiment_lineage, update_status
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -311,11 +298,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, m
     dataset = tmp_path / "orchard"
     rows: dict[str, list[dict]] = {}
     for door in ("gui", "mcp"):
-        exp_id = f"exp-{door}"
-        create_experiment(exp_id, {"model_source": {"builder": "x:y", "task": "detection"}})
-        update_status(exp_id, "running")
-        ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name=f"model-{door}",
-                                     filename=f"{door}.pt", stamp={"experiment_id": exp_id})
+        ckpt = registered_checkpoint(tmp_path)
         out = dataset / "predictions" / door / "2025-06-01"
         before = len(ts.read_log(audit_log_key(dataset)).records)
         if door == "gui":
@@ -324,12 +307,10 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, m
             result = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
             assert "error" not in result, result
         rows[door] = ts.read_log(audit_log_key(dataset)).records[before:]
-        assert get_experiment_lineage(exp_id)["lineage"]["predictions"] == str(out)
+        assert read_operating_point_sidecar(out)["experiment_id"] == Path(ckpt).parent.name
 
     def shape(records: list[dict]) -> list[tuple]:
-        return [(r["tool"], sorted(r["arguments"]), r["arguments"].get("lineage_linked"))
-                for r in records]
+        return [(r["tool"], sorted(r["arguments"])) for r in records]
 
     assert shape(rows["gui"]) == shape(rows["mcp"])
-    assert shape(rows["gui"])[-1] == (
-        "prediction_bucket_published", ["lineage_linked", "predictions_dir"], True)
+    assert shape(rows["gui"])[-1] == ("prediction_bucket_published", ["predictions_dir"])

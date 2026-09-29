@@ -112,43 +112,21 @@ def _run_config(selection_dir: Path) -> dict:
     }
 
 
-def _train_on(selection_dir: Path, out_dir: Path, project_root: Path, experiment_id: str) -> str:
-    """Train the tiny detector over the selection's train side and register the checkpoint.
+def _train_on(selection_dir: Path, project_root: Path, experiment_id: str) -> str:
+    """Train the tiny detector over the selection's train side through the child's own entry,
+    whose completion registers the checkpoint; the checkpoint's path.
 
-    Leaves what the rest of the chain binds to: a run record carrying the selection binding and
-    the partition it trained on, and a registered checkpoint with an identity of its own.
+    Leaves what the rest of the chain binds to: a run whose launch record carries the partition it
+    trained on and the selection it bound, and a completed checkpoint with an identity of its own.
     """
-    from torch.utils.data import DataLoader
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import worker_run
 
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.model_tools import register_model
-
-    config = _run_config(selection_dir)
-    # The draw resolves the scope off the selection and records it on the config the run then
-    # keeps, so the checkpoint is stamped with the vocabulary it was actually trained for.
-    data_cfg = config["data"]
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-
-    create_experiment(experiment_id, config)
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
-
-    collate = task_collate("detection")
-    loader = DataLoader(train_ds, batch_size=2, collate_fn=collate)
-    val_loader = DataLoader(val_ds, batch_size=2, collate_fn=collate)
-    run = create_run(config, str(out_dir), id=experiment_id)
-    completed = train(run, loader, val_loader=val_loader)
-    assert completed.status == "completed", completed.status
-
-    checkpoint = out_dir / "model_best.pt"
-    assert checkpoint.is_file(), sorted(p.name for p in out_dir.iterdir())
-    registered = register_model(name="chain-detector", checkpoint_path=str(checkpoint),
-                                config={}, project_path=str(project_root))
-    assert "error" not in registered, registered
-    return str(checkpoint)
+    observation = observe(worker_run(project_root, _run_config(selection_dir),
+                                     experiment_id=experiment_id))
+    checkpoint = observation.checkpoint
+    assert checkpoint is not None, observation.final
+    return checkpoint["path"]
 
 
 class Chain:
@@ -189,7 +167,7 @@ def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "ch
     images_dir, labels_dir = _synthetic_capture(root)
     selection_dir = tmp_path / "selection"
     _draw_reference_selection(root, selection_dir)
-    checkpoint_path = _train_on(selection_dir, tmp_path / "run", tmp_path, experiment_id)
+    checkpoint_path = _train_on(selection_dir, tmp_path, experiment_id)
 
     fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
@@ -201,7 +179,6 @@ def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "ch
         trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(labels_dir),
         selection_dir=str(selection_dir),
-        experiment_id=experiment_id,
     )
     assert "error" not in published, published
     assert published["validated"] is True, published.get("shippable_issues")
@@ -253,7 +230,7 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     selection_dir = tmp_path / "selection"
     _draw_reference_selection(root, selection_dir)
 
-    checkpoint_path = _train_on(selection_dir, tmp_path / "run", tmp_path, "exp-chain-train")
+    checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-train")
 
     checkpoint = load_registered_checkpoint(checkpoint_path, project_path=str(tmp_path))
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
@@ -278,7 +255,7 @@ def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_pa
     images_dir, labels_dir = _synthetic_capture(root)
     selection_dir = tmp_path / "selection"
     _draw_reference_selection(root, selection_dir)
-    checkpoint_path = _train_on(selection_dir, tmp_path / "run", tmp_path, "exp-chain-publish")
+    checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-publish")
 
     fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
@@ -290,13 +267,22 @@ def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_pa
         trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(labels_dir),
         selection_dir=str(selection_dir),
-        experiment_id="exp-chain-publish",
     )
 
     assert "error" not in published, published
     assert (published.get("gate_evidence_summary") or {}).get("failures") == []
     assert published.get("shippable_issues") == []
     assert published["validated"] is True
+
+    # The record is filed in the run that produced the checkpoint, no other run directory.
+    from tcip_mcp.experiments import find_validation, list_experiments, observe
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    pointer = read_operating_point_sidecar(bucket)["validated_by"]
+    assert pointer["experiment_id"] == "exp-chain-publish"
+    run_dir = Path(checkpoint_path).parent
+    assert find_validation(observe(run_dir), pointer["record_digest"]) is not None
+    assert [e["experiment_id"] for e in list_experiments()] == ["exp-chain-publish"]
 
 
 # -- the three detectors -------------------------------------------------------
@@ -425,7 +411,6 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
         trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(chain.labels_dir),
         selection_dir=str(chain.selection_dir),
-        experiment_id="exp-chain-republish",
         overwrite=True,
     )
 

@@ -152,7 +152,7 @@ _ESCAPES_THE_STAGING = (
 )
 
 _LOGS_ARE_NOT_TRANSACTIONAL = (
-    "close the transaction first. A transaction holds records, so a log key cannot be named "
+    "close the transaction first. A transaction holds records or blobs, so a log key cannot be named "
     "in one, and an append inside a transaction would join it on a database backend and roll "
     "back with the body, while append returns only once the entry has survived"
 )
@@ -256,9 +256,15 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
     Every named key hangs off one root, compared through ``canonical_path`` so two spellings of one
     directory are one root; keys from two roots raise ``TransactionMisuse`` naming them.
 
-    On a file backend this does not promise all-or-nothing application across more than one key: a
-    crash during the apply can leave a prefix of the named key order on disk, each record
-    individually intact and decodable. ``capabilities().multi_key_atomic_commit`` says which.
+    The keys are all records or all blobs; a mixed set raises ``TransactionMisuse``. A blob key's
+    ``txn.read`` answers its bytes and ``txn.write`` stages its whole bytes, so a body that reads
+    every blob it names, finds one present and raises, has written none of them.
+
+    A failure during the apply puts every key it touched back as it was, while that put-back
+    itself succeeds. A crash
+    during the apply of a blob transaction, or of any transaction on a file backend, can leave a
+    prefix of the named key order on disk, each entry individually intact and decodable;
+    ``capabilities().multi_key_atomic_commit`` says whether a record transaction is safe from it.
 
     Raises ``StoreBusy`` naming the contended key if the locks are not acquired in time.
     """
@@ -270,8 +276,16 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
             "a thread holds at most one transaction: name every key in one "
             "transaction(a, b) instead of nesting"
         )
-    for key in keys:
-        validate_key(key, expect_kind="record", operation="transaction")
+    kinds = {
+        validate_key(key, expect_kind=("record", "blob"), operation="transaction").kind
+        for key in keys
+    }
+    if len(kinds) > 1:
+        raise TransactionMisuse(
+            "a transaction's keys are all records or all blobs: a database backend keeps blobs "
+            "as files, so one commit cannot cover both. Take the records in one transaction and "
+            "the blobs in another"
+        )
     roots: dict[str, str] = {}
     for key in keys:
         roots.setdefault(canonical_path(key.root), key.root)

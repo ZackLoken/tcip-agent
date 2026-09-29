@@ -22,25 +22,13 @@ CLASSIFIED = ClassScope(SUBJECT, ATTRIBUTE, ID_MAP)
 DETECTOR = ClassScope(SUBJECT, None, {SUBJECT: 0})
 
 
-def _stub_checkpoint(monkeypatch, scope: ClassScope) -> None:
-    """Every registered-checkpoint load answers a checkpoint recording ``scope``."""
+def _checkpoint(tmp_path: Path, scope: ClassScope) -> str:
+    """A registered checkpoint whose completing run recorded ``scope``."""
     from dataclasses import asdict
 
-    import tcip_mcp.model_registry as model_registry_mod
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    data = {"num_channels": 3, "scope": asdict(scope)}
-
-    def _stub(path, *a, **kw):
-        return stub_verified_checkpoint(str(path), config_data=data)
-
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
-
-
-def _ckpt(tmp_path) -> str:
-    p = tmp_path / "m.pt"
-    p.write_bytes(b"stub")
-    return str(p)
+    return foreign_checkpoint(tmp_path, data={"num_channels": 3, "scope": asdict(scope)})
 
 
 class _ClassifiedPredictor:
@@ -82,13 +70,13 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
-    _stub_checkpoint(monkeypatch, CLASSIFIED)
+    checkpoint = _checkpoint(tmp_path, CLASSIFIED)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _ClassifiedPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(_ckpt(tmp_path), str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(checkpoint, str(images_dir), output_dir=str(out), tile=False)
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())
@@ -110,13 +98,13 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
-    _stub_checkpoint(monkeypatch, DETECTOR)
+    checkpoint = _checkpoint(tmp_path, DETECTOR)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _DetectorPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(_ckpt(tmp_path), str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(checkpoint, str(images_dir), output_dir=str(out), tile=False)
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())

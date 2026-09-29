@@ -453,18 +453,15 @@ class TestSharedWebStateDeclarations:
             assert ts.get_descriptor(store).declared_in == web_client.__name__
 
     def test_the_web_only_stores_are_declared_where_the_catalog_reaches_them(self) -> None:
-        """The three stores only the web package reads are declared beside the shared ones, so
-        the catalog names them without importing the web package, and each web-side reader
-        addresses the same declaration rather than one of its own."""
+        """The stores only the web package reads are declared beside the shared ones, so the
+        catalog names them without importing the web package, and each web-side reader addresses
+        the same declaration rather than one of its own."""
         import tcip_store as ts
         from tcip_mcp import web_client
-        from tcip_web import jobstore
         from tcip_web.routes import sessions
 
-        assert jobstore.job_registry_key is web_client.job_registry_key
         assert sessions.annotation_stats_key is web_client.annotation_stats_key
-        for store in (web_client.LEARNING_CAPTURE_STORE, web_client.JOB_REGISTRY_STORE,
-                      web_client.ANNOTATION_STATS_STORE):
+        for store in (web_client.LEARNING_CAPTURE_STORE, web_client.ANNOTATION_STATS_STORE):
             assert ts.get_descriptor(store).declared_in == web_client.__name__
 
 
@@ -488,8 +485,8 @@ class TestTrainingToolOutputSchema:
         from PIL import Image
         from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
+        from tcip_mcp.experiments import experiment_dir, find_run
         from tcip_mcp.pipelines.training import tensorboard_manager
-        from tcip_mcp.pipelines.training.run_registry import get_run
         from tcip_mcp.tools import training_tools
 
         images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -527,13 +524,12 @@ class TestTrainingToolOutputSchema:
             "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu",
         }
-        res = training_tools.launch_training(cfg, str(tmp_path / "runs"))
+        res = training_tools.launch_training(cfg)
 
         assert "error" not in res, res
         assert res["status"] == "launched"
-        registered = get_run(res["experiment_id"])
-        assert registered is not None, f"no run registered under {res['experiment_id']!r}"
-        assert Path(res["output_dir"]) == tmp_path / "runs" / res["experiment_id"]
+        assert find_run(res["experiment_id"]) == Path(res["output_dir"])
+        assert Path(res["output_dir"]) == experiment_dir(res["experiment_id"])
         assert res["pid"] == _NoChild.pid
 
     def test_monitor_training_answers_for_the_run_it_was_asked_about(
@@ -543,21 +539,21 @@ class TestTrainingToolOutputSchema:
         progress, so a caller tracking several runs at once can tell the answers apart. An
         identifier that names no run is refused rather than answered for some other run.
         """
-        from tcip_mcp.pipelines.training.run_registry import create_run
         from tcip_mcp.tools import training_tools
+        from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-        early = create_run({"seed": 11}, str(tmp_path / "early"), id="event-run-early")
-        early.status, early.current_epoch, early.best_metric = "running", 1, 0.81
-        late = create_run({"seed": 12}, str(tmp_path / "late"), id="event-run-late")
-        late.status, late.current_epoch, late.best_metric = "completed", 9, 0.07
+        config = detection_config(tmp_path / "data")
+        early = opened_run(tmp_path, config, experiment_id="event-run-early")
+        log_epoch(early, 1, {"loss": 0.81})
+        late = opened_run(tmp_path, config, experiment_id="event-run-late")
+        log_epoch(late, 9, {"loss": 0.07})
 
-        status = training_tools.monitor_training(late.id)
-        assert status["experiment_id"] == late.id
-        assert status["experiment_id"] != early.id
-        assert status["status"] == "completed"
+        status = training_tools.monitor_training(late.name)
+        assert status["experiment_id"] == late.name
+        assert status["status"] == "running"
         assert status["epoch"] == 9
-        assert status["best_metric"] == 0.07
-        assert status["output_dir"] == str(tmp_path / "late")
+        assert status["output_dir"] == str(late)
+        assert training_tools.monitor_training(early.name)["epoch"] == 1
 
         assert "error" in training_tools.monitor_training("run_that_was_never_created")
 
@@ -577,8 +573,7 @@ class TestInferenceToolOutputSchema:
 
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
         ckpt = registered_checkpoint(
-            tmp_path, project_root=tmp_path, name="blob", filename="detector.pt",
-            model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
+            tmp_path, model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
                           "task": "detection"})
         res = run_inference(ckpt, images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
                             dry_run=True, tile=True,
@@ -606,10 +601,9 @@ class TestInferenceToolOutputSchema:
         that pairs a file to the wrong image, or drops the image that found nothing, does not read
         as correct.
         """
-        import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tests._binding_fixtures import calibrated_run_fields, run_result
-        from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+        from tests._verified_checkpoint_fixtures import project_checkpoint
 
         def _boxes(n: int) -> list[list[float]]:
             return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
@@ -620,14 +614,11 @@ class TestInferenceToolOutputSchema:
              "scores": [0.9] * n, "labels": [1] * n, "count": n}
             for stem, n in counts.items()
         ]
-        ckpt = tmp_path / "m.pt"
-        ckpt.write_bytes(b"x")
+        ckpt = project_checkpoint(tmp_path)
         sha = "0f1e2d3c4b5a"
         monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
             results=results,
             **calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256=sha)))
-        monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                            lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
         out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
         res = itools.run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
@@ -649,21 +640,17 @@ class TestInferenceToolOutputSchema:
         names the count measured for each image and the run's own narrowed conf reference,
         distinct from the CSV-facing column, which floors false with nothing on disk behind it.
         """
-        import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
         from tests._binding_fixtures import run_result
-        from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+        from tests._verified_checkpoint_fixtures import project_checkpoint
 
         counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
-        ckpt = tmp_path / "m.pt"
-        ckpt.write_bytes(b"x")
+        ckpt = project_checkpoint(tmp_path)
         monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
             {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
             [{"image": name, "count": n, "scores": [0.9] * n} for name, n in counts.items()],
             validated=True, conf_source="calibration"))
-        monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                            lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
         from tests import _trait_fixtures as fx
 

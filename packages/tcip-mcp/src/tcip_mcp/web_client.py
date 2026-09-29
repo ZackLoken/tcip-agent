@@ -191,53 +191,10 @@ def learning_capture_key(root: str | Path) -> Key:
     return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
 
 
-_REGISTRY_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""One registry document per job kind, one per platform root."""
-
-INFERENCE_JOBS = "inference_jobs"
-REVIEW_PRIORITY_JOBS = "review_priority_jobs"
-HPO_SWEEPS = "hpo_sweeps"
-
-JOB_REGISTRY_DOCUMENTS: tuple[str, ...] = (INFERENCE_JOBS, REVIEW_PRIORITY_JOBS, HPO_SWEEPS)
-"""Every document name a job registry persists under ``.tcip/state/<name>.json``.
-
-The one spelling of each name: routes/inference.py, routes/review.py and routes/tuning.py each
-hold their own registry constant from here rather than typing the string again. tcip-store
-cannot import tcip-mcp, so the ``job_registry`` claim in ``tcip_store.layout_claims`` cannot
-enumerate this tuple itself; a test asserts every name here matches one of that claim's own
-templates, holding the agreement from this side.
-"""
-
-JOB_REGISTRY_STORE = "job_registry"
-register_store(
-    StoreDescriptor(
-        name=JOB_REGISTRY_STORE,
-        kind="record",
-        key_fields=("registry",),
-        frozen=True,
-        cannot_carry_field="a top-level JSON array of entries, with no object to hold the field; "
-                            "a future bump wraps this into {schema_version, entries}",
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_REGISTRY_DOC,
-    )
-)
-
-
 def current_root() -> str:
     """This process's platform-state root, resolved: the value a job's own ``platform_root``
-    field carries and :func:`job_registry_key`'s default group."""
+    field carries."""
     return str(platform_state_root().resolve())
-
-
-def job_registry_key(name: str, *, root: str | Path | None = None) -> Key:
-    """One job registry's persisted summaries, under ``root`` (default: :func:`current_root`).
-
-    ``last_writer_wins``: one root's own group of a registry is written whole from the live jobs
-        that carry it.
-    """
-    resolved = str(Path(root).resolve()) if root is not None else current_root()
-    return Key(JOB_REGISTRY_STORE, resolved, (name,))
 
 
 ANNOTATION_STATS_STORE = "annotation_stats"

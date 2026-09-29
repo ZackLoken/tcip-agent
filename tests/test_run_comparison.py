@@ -1,7 +1,7 @@
 """Backend coverage for side-by-side run comparison: compare_experiments' task, subject,
-status_error, split and registry columns, a model builder reported only where the record names
-one, an honest same_dataset_fingerprint over an error column, the experiment_ids filter on
-best-model ranking, and the /api/training/compare/best route.
+status_error, split and registry columns, an honest same_dataset_fingerprint over an error
+column, the experiment_ids filter on best-model ranking, and the /api/training/compare/best
+route.
 """
 
 from __future__ import annotations
@@ -17,354 +17,194 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-# ── same_dataset_fingerprint: an error column must never be silently dropped ────────────────
+@pytest.fixture(autouse=True)
+def _platform(tmp_path, monkeypatch):
+    """Pin the platform state root at this test's tmp dir, where its runs land."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
 
-def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_path, monkeypatch):
-    """Before this change, an error entry was filtered out of the fingerprint judgment entirely:
-    two matching, readable fingerprints beside one missing experiment compared as
-    same_dataset_fingerprint=True, silently assuming the unreadable third run shared the data.
-    """
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
+def _opened(experiment_id: str, *, data_dir=None, split: dict | None = None):
+    """A detector run, over two frames of its own (or those under ``data_dir``) and stating
+    ``split``, resolved and opened by the launcher's own producer and writer."""
+    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
 
-    create_experiment("e1", {}, dataset_fingerprint="v1:aaaa")
-    create_experiment("e2", {}, dataset_fingerprint="v1:aaaa")
+    config = detection_config(data_dir or fixture_data_dir(None, experiment_id),
+                              model_source={"builder": "m:f", "task": "detection"})
+    if split is not None:
+        config["data"]["split"] = split
+    return opened_run(None, config, experiment_id=experiment_id)
 
-    result = compare_experiments(["e1", "e2", "missing"], stale_seconds=600.0)
+
+def _bound(experiment_id: str, tmp_path, **split):
+    """A run bound to a selection ``draw_splits`` drew at seed 7, its ``data.split`` beside the
+    binding being ``split``."""
+    from tests._verified_checkpoint_fixtures import opened_run
+    from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
+
+    selection_dir = tmp_path / "splits" / "2024-01-01"
+    if not selection_dir.exists():
+        _draw(_two_subject_two_date_dataset(tmp_path / "bound-ds"), selection_dir, seed=7)
+    return opened_run(None, {"model_source": {"builder": "m:f", "task": "detection"},
+                             "data": {"split": {"selection_dir": str(selection_dir), **split}}},
+                      experiment_id=experiment_id), selection_dir
+
+
+def _compared(*experiment_ids: str) -> list[dict]:
+    from tcip_mcp.experiments import compare_experiments
+
+    return compare_experiments(list(experiment_ids))["experiments"]
+
+
+def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_path):
+    """An error entry is never dropped from the fingerprint judgment: two matching fingerprints
+    beside one missing run do not compare as the same data."""
+    from tcip_mcp.experiments import compare_experiments
+    from tests._verified_checkpoint_fixtures import opened_run
+    from tests.test_dataset_identity_recording import _config, _make_dataset
+
+    shared = _config(*_make_dataset(tmp_path / "shared"))
+    opened_run(None, shared, experiment_id="e1")
+    opened_run(None, shared, experiment_id="e2")
+    assert compare_experiments(["e1", "e2"])["same_dataset_fingerprint"] is True
+
+    result = compare_experiments(["e1", "e2", "missing"])
     assert any("error" in c for c in result["experiments"])
     assert result["same_dataset_fingerprint"] is None
 
 
-# ── model: None, never a fabricated "unknown" ────────────────────────────────────────────────
+def test_compare_experiments_reports_task_and_subject_from_the_runs_records():
+    """A rail must admit valid work: the task read off the launch record, the subject off the
+    data section the run resolved."""
+    _opened("exp-task-subject")
+
+    (c,) = _compared("exp-task-subject")
+    assert (c["task"], c["subject"]) == ("detection", "bud")
 
 
-def test_compare_experiments_reports_model_none_not_unknown_for_a_configless_run(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
+def test_registry_lists_the_checkpoint_this_run_completed():
+    """Admits valid work, through the platform's own producer: a completed run's own checkpoint
+    shows up in its own registry column, reduced to name/metrics/metrics_source/completion
+    time; a run with no completed checkpoint lists none."""
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    create_experiment("exp-no-builder", {"model_source": {"task": "detection"}})
+    finished_run(None, experiment_id="exp-registered", metrics={"val_map50": 0.5})
+    _opened("exp-unfinished")
 
-    result = compare_experiments(["exp-no-builder"], stale_seconds=600.0)
-    c = result["experiments"][0]
-    assert c["model"] is None
-    assert c["model"] != "unknown"
-
-
-def test_compare_experiments_reports_task_and_subject_from_config(tmp_path, monkeypatch):
-    """A rail must admit valid work: task/subject read alongside the builder, from the same
-    config read compare_experiments already performs."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    create_experiment("exp-task-subject", {
-        "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"scope": {"subject": "bud"}},
-    })
-
-    c = compare_experiments(["exp-task-subject"], stale_seconds=600.0)["experiments"][0]
-    assert c["task"] == "detection"
-    assert c["subject"] == "bud"
+    registered, unfinished = _compared("exp-registered", "exp-unfinished")
+    assert [e["name"] for e in registered["registry"]] == ["exp-registered"]
+    assert registered["registry"][0]["metrics"] == {"val_map50": 0.5}
+    assert registered["registry"][0]["metrics_source"] == "training_source"
+    assert "registered_at" in registered["registry"][0]
+    assert unfinished["registry"] == []
 
 
-# ── registry: absent (with a reason), never silently empty, on an unreadable index ──────────
+def test_split_reports_a_bound_selection_directory(tmp_path):
+    _run_dir, selection_dir = _bound("exp-bound-split", tmp_path)
 
-
-def test_registry_is_absent_with_a_reason_when_the_index_will_not_decode(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    import tcip_mcp.model_registry as model_registry
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-    from tcip_mcp.model_registry import RegistryVersionRefused
-
-    create_experiment("exp-registry-corrupt", {"model_source": {"builder": "m:f", "task": "detection"}})
-
-    def _boom(project_path):
-        raise RegistryVersionRefused("simulated unreadable registry index")
-
-    monkeypatch.setattr(model_registry, "read_registry_index", _boom)
-
-    c = compare_experiments(["exp-registry-corrupt"], stale_seconds=600.0)["experiments"][0]
-    assert "registry" not in c
-    assert "registry unreadable" in c["registry_error"]
-
-
-def test_registry_lists_only_entries_this_experiment_produced(tmp_path, monkeypatch):
-    """Admits valid work, through the platform's own producer (register_model_from_experiment):
-    a completed run's own registered checkpoint shows up in its own registry column, reduced to
-    name/metrics/metrics_source/registration time."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import (
-        compare_experiments, complete_run, create_experiment, register_model_from_experiment,
-    )
-
-    create_experiment("exp-registered", {"model_source": {"builder": "m:f", "task": "detection"}}, data_source="imgs")
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"weights")
-    assert "error" not in complete_run("exp-registered", str(ckpt))
-    reg = register_model_from_experiment("exp-registered", str(ckpt))
-    assert "error" not in reg
-
-    c = compare_experiments(["exp-registered"], stale_seconds=600.0)["experiments"][0]
-    assert [e["name"] for e in c["registry"]] == ["exp-registered"]
-    assert c["registry"][0]["metrics_source"] is None  # a checkpoint with no metrics dict
-    assert "registered_at" in c["registry"][0]
-
-
-# ── split: bound and drawn, through persist_run_partition (the one writer) ────────────────
-
-
-def test_split_reports_a_bound_selection_directory(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
-
-    create_experiment("exp-bound-split", {"model_source": {"builder": "m:f", "task": "detection"}})
-    data_cfg = {"split": {
-        "selection_binding": {"selection_dir": "splits/2024-01-01", "selection_sha256": "s",
-                              "redraw": False},
-        "resolved_seed": 7, "resolved_group_by": "stem",
-    }}
-    persist_run_partition("exp-bound-split", data_cfg)
-
-    c = compare_experiments(["exp-bound-split"], stale_seconds=600.0)["experiments"][0]
+    (c,) = _compared("exp-bound-split")
     assert c["split"] == {
-        "case": "bound", "selection_dir": "splits/2024-01-01", "seed": 7, "redraw": False,
+        "case": "bound", "selection_dir": str(selection_dir), "seed": 7, "redraw": False,
     }
 
 
-def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path, monkeypatch):
-    """A run bound to a manifest and one that redrew inside that same manifest at the same seed
-    must never compare as the same data."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
+    """A run bound to a selection and one that redrew inside that same selection must never
+    compare as the same data."""
+    _bound("exp-bound-plain", tmp_path)
+    _bound("exp-bound-redrawn", tmp_path, redraw_within_selection=True, seed=7)
 
-    create_experiment("exp-bound-plain", {"model_source": {"builder": "m:f", "task": "detection"}})
-    persist_run_partition("exp-bound-plain", {"split": {
-        "selection_binding": {"selection_dir": "splits/2024-01-01", "selection_sha256": "s",
-                              "redraw": False},
-        "resolved_seed": 7, "resolved_group_by": "stem",
-    }})
-
-    create_experiment("exp-bound-redrawn", {"model_source": {"builder": "m:f", "task": "detection"}})
-    persist_run_partition("exp-bound-redrawn", {"split": {
-        "selection_binding": {
-            "selection_dir": "splits/2024-01-01", "selection_sha256": "s", "redraw": True,
-        },
-        "resolved_seed": 7, "resolved_group_by": "stem",
-    }})
-
-    c = compare_experiments(["exp-bound-plain", "exp-bound-redrawn"], stale_seconds=600.0)["experiments"]
-    plain, redrawn = c[0]["split"], c[1]["split"]
+    plain, redrawn = (c["split"] for c in _compared("exp-bound-plain", "exp-bound-redrawn"))
     assert plain != redrawn
-    assert plain["redraw"] is False
-    assert redrawn["redraw"] is True
+    assert (plain["redraw"], redrawn["redraw"]) == (False, True)
 
 
-def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-    from tcip_mcp.pipelines.data.split_construction import persist_run_partition
+def test_split_reports_a_drawn_seed_with_no_binding():
+    _opened("exp-drawn-split", split={"seed": 99})
 
-    create_experiment("exp-drawn-split", {"model_source": {"builder": "m:f", "task": "detection"}})
-    persist_run_partition("exp-drawn-split", {"split": {"resolved_seed": 99, "resolved_group_by": "stem"}})
-
-    c = compare_experiments(["exp-drawn-split"], stale_seconds=600.0)["experiments"][0]
+    (c,) = _compared("exp-drawn-split")
     assert c["split"] == {"case": "drawn", "seed": 99}
 
 
-def test_split_reports_no_record_for_a_run_that_never_wrote_one(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment
-
-    create_experiment("exp-no-split", {"model_source": {"builder": "m:f", "task": "detection"}})
-
-    c = compare_experiments(["exp-no-split"], stale_seconds=600.0)["experiments"][0]
-    assert c["split"] == {"case": "none"}
-
-
-# ── status_error: a diverged run names its reason, through the divergence fixture ──────────
-
-
-def test_status_error_names_a_diverged_run_reason(tmp_path, monkeypatch):
+def test_status_error_names_a_diverged_run_reason(tmp_path):
     """Admits valid work through the platform's own producer: run_training_envelope over the
-    divergence fixture's always-diverged builder writes status.json's own error field, which
-    compare_experiments now surfaces as status_error."""
-    monkeypatch.chdir(tmp_path)
-    from torch.utils.data import DataLoader
+    divergence fixture's always-diverged builder writes the final status's own error, which
+    compare_experiments surfaces as status_error; a run with no final status carries none."""
+    from tcip_mcp.experiments import observe
+    from tests.test_lifecycle_wiring import _stock_run
 
-    from tcip_mcp.experiments import compare_experiments, create_experiment, read_member, status_key, update_status
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tests.tiny_trainer_fixtures import ConstantImageDataset
+    run_dir = _stock_run(
+        tmp_path, {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model"}, 3,
+        "exp-diverged-cmp")
+    assert "2 consecutive full training passes" in observe(run_dir).final["error"]
+    _opened("exp-healthy-cmp")
 
-    train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
-    collate = task_collate("regression")
-    train_loader = DataLoader(train_ds, batch_size=2, collate_fn=collate)
-
-    config = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model",
-                         "task": "regression"},
-        "data": {"num_channels": 1, "scope": {}},
-        "device": "cpu", "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 3}],
-        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
-        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
-    create_experiment("exp-diverged-cmp", config, data_source="imgs")
-    update_status("exp-diverged-cmp", "running")
-    run = create_run(config, str(tmp_path / "out"), id="exp-diverged-cmp")
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=None,
-                       experiment_id="exp-diverged-cmp")
-    run_training_envelope(ctx)
-
-    status = read_member(status_key("exp-diverged-cmp"), {})
-    assert "2 consecutive full training passes" in status.get("error", "")
-
-    c = compare_experiments(["exp-diverged-cmp"], stale_seconds=600.0)["experiments"][0]
-    assert "2 consecutive full training passes" in c["status_error"]
+    diverged, healthy = _compared("exp-diverged-cmp", "exp-healthy-cmp")
+    assert "2 consecutive full training passes" in diverged["status_error"]
+    assert healthy["status_error"] is None
 
 
-def test_status_error_is_none_for_a_run_that_never_failed(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import compare_experiments, create_experiment, update_status
+def _register(experiment_id: str, metric_value: float, *, metric: str = "val_map50") -> None:
+    """A run completed through the platform's own producer, its checkpoint carrying ``metric``."""
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    create_experiment("exp-healthy-cmp", {"model_source": {"builder": "m:f", "task": "detection"}})
-    update_status("exp-healthy-cmp", "running")
-
-    c = compare_experiments(["exp-healthy-cmp"], stale_seconds=600.0)["experiments"][0]
-    assert c["status_error"] is None
+    finished_run(None, experiment_id=experiment_id, metrics={metric: metric_value})
 
 
-# A run's id is always its experiment id now, so to_dict and _all_training_runs' merge have no
-# second, later-resolved id left to reconcile against a disk overlay.
-
-
-# ── experiment_ids filter: rank_registered_models / ModelRegistry.best_model ────────────────────
-
-
-def _register(tmp_path, experiment_id: str, metric_value: float, *, metric: str = "val_map50"):
-    """Admits valid work through the platform's own producer: a completed run's own checkpoint,
-    registered via register_model_from_experiment."""
-    import torch
-
-    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
-
-    create_experiment(experiment_id, {"model_source": {"builder": "m:f", "task": "detection"}}, data_source="imgs")
-    ckpt = tmp_path / f"{experiment_id}.pt"
-    torch.save({"model_state_dict": {}, "metrics": {metric: metric_value}}, ckpt)
-    assert "error" not in complete_run(experiment_id, str(ckpt))
-    result = register_model_from_experiment(experiment_id, str(ckpt))
-    assert "error" not in result
-    return result
-
-
-def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path, monkeypatch):
-    """Before this change, experiment_ids narrowed nothing: available_metrics (and every other
-    derivation) was built from the whole registry regardless of the marked set."""
-    monkeypatch.chdir(tmp_path)
+def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path):
+    """experiment_ids narrows every derivation, available_metrics included, to the marked set."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    _register(tmp_path, "exp-marked", 0.7, metric="val_map50")
-    _register(tmp_path, "exp-other", 0.9, metric="val_loss")
+    _register("exp-marked", 0.7, metric="val_map50")
+    _register("exp-other", 0.9, metric="val_loss")
 
     res = rank_registered_models(str(tmp_path), experiment_ids=["exp-marked"])
-    metric_names = {m["metric"] for m in res["available_metrics"]}
-    assert metric_names == {"val_map50"}
-    assert "val_loss" not in metric_names
+    assert {m["metric"] for m in res["available_metrics"]} == {"val_map50"}
 
 
-def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path, monkeypatch):
-    """Admits valid work: the filter selects within a marked set through entries
-    register_model_from_experiment wrote on real completed runs."""
-    monkeypatch.chdir(tmp_path)
+def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path):
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    _register(tmp_path, "exp-low", 0.5)
-    _register(tmp_path, "exp-high", 0.9)
+    _register("exp-low", 0.5)
+    _register("exp-high", 0.9)
 
-    res = rank_registered_models(str(tmp_path), metric="val_map50", experiment_ids=["exp-low"])
-    assert res["name"] == "exp-low"
-    assert res["experiment_id"] == "exp-low"
+    res = rank_registered_models(str(tmp_path), metric="val_map50", include_unverified=True,
+                                 experiment_ids=["exp-low"])
+    assert (res["name"], res["experiment_id"]) == ("exp-low", "exp-low")
 
 
 def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
-    tmp_path, monkeypatch,
+    tmp_path,
 ):
-    """The registry is not empty (exp-other registered a checkpoint); the filter just names no
-    marked experiment in it. That is a distinct fact from an empty registry and needs its own
-    text: "No models registered" would mislead a breeder into thinking nothing was ever
-    trained, when the real gap is which experiments were marked."""
-    monkeypatch.chdir(tmp_path)
+    """The registry is not empty; the filter just names no marked experiment in it. That is a
+    distinct fact from an empty registry and needs its own text."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    _register(tmp_path, "exp-other", 0.7)
+    _register("exp-other", 0.7)
 
     res = rank_registered_models(str(tmp_path), metric="val_map50", experiment_ids=["exp-marked"])
     assert res["error"] == "none of the marked experiments registered a checkpoint"
 
 
-def test_best_model_experiment_ids_filter_excludes_a_better_unmarked_entry(tmp_path):
-    """Admits valid work through the platform's own producer: _register_entry is the one write
-    both register_model and register_model_from_experiment route through, and is the only path
-    that can bind an entry's experiment_id at all."""
-    from tcip_mcp.model_registry import ModelRegistry, _register_entry
-
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    _register_entry(str(tmp_path), name="a", checkpoint_path=str(ckpt), config={},
-                    metrics={"val_map50": 0.5}, tags=[], kind=None, metrics_source="trainer",
-                    experiment_id="exp-a")
-    _register_entry(str(tmp_path), name="b", checkpoint_path=str(ckpt), config={},
-                    metrics={"val_map50": 0.9}, tags=[], kind=None, metrics_source="trainer",
-                    experiment_id="exp-b")
-
-    reg = ModelRegistry(str(tmp_path))
-    best = reg.best_model("val_map50", higher_is_better=True, experiment_ids=["exp-a"])
-    assert best["name"] == "a"
-
-
-# ── /api/training/compare/best route: 404, 422, 409 mappings, the projected answer ─────────
-
-
-def test_compare_best_route_404s_with_no_registry(client: TestClient, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+def test_compare_best_route_404s_with_no_registered_checkpoint(client: TestClient, tmp_path):
+    """A project with no completed run and no foreign registration answers 404, and the asking
+    creates no registry directory."""
     resp = client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 404
     assert resp.json()["detail"] == "no model registry in this project"
-
-
-def test_compare_best_route_404_leaves_the_registry_directory_uncreated(
-    client: TestClient, tmp_path, monkeypatch,
-):
-    """The route reads the index through read_registry_index before rank_registered_models's own
-    ModelRegistry construction ever runs, so a project with no registry never gets one just for
-    asking whether it has one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    resp = client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
-    })
-    assert resp.status_code == 404
     assert not (tmp_path / ".tcip" / "models").exists()
 
 
-def test_compare_best_route_409s_when_the_index_will_not_decode(
-    client: TestClient, tmp_path, monkeypatch,
-):
+def test_compare_best_route_409s_when_the_index_will_not_decode(client: TestClient, monkeypatch):
     """A corrupt or version-refused index is not a project with no models: the route answers
     409, not the 404 an absent index answers."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_mcp.model_registry as model_registry
     from tcip_mcp.model_registry import RegistryVersionRefused
 
     def _boom(project_path):
         raise RegistryVersionRefused("simulated unreadable registry index")
 
-    # compare_best_route imports read_registry_index locally on each call, so patching the
-    # defining module (not the route module, which never binds the name at import time) reaches it.
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
 
     resp = client.post("/api/training/compare/best", json={
@@ -374,51 +214,8 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
     assert "registry unreadable" in resp.json()["detail"]
 
 
-def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_two(
-    client: TestClient, tmp_path, monkeypatch,
-):
-    """A dev-era index stamped schema_version 2 refuses through the seam's own ceiling check
-    (SchemaVersionRefused), a sibling of RegistryVersionRefused under StoreError rather than a
-    subclass of it: the route's except tuple must catch StoreError itself, not only
-    RegistryVersionRefused/DecodeError, or this refusal escapes uncaught."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import os
-    import sqlite3
-
-    import tcip_store as ts
-    from tcip_mcp.model_registry import registry_index_key
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    _register(tmp_path, "exp-a", 0.7)
-    key = registry_index_key(str(tmp_path))
-    body = ts.read(key)
-    encoded = ts.get_descriptor(key.store).codec.encode({**body, "schema_version": 2})
-    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
-    if name == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(encoded)
-    else:
-        from tcip_store.sqlite_backend import database_path, encode_parts
-
-        conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-        try:
-            conn.execute(
-                "update records set value = ? where store = ? and parts = ?",
-                (encoded, key.store, encode_parts(key.parts)),
-            )
-        finally:
-            conn.close()
-
-    resp = client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
-    })
-    assert resp.status_code == 409
-    assert "above the 1 this reader knows" in resp.json()["detail"]
-
-
-def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    _register(tmp_path, "exp-a", 0.7)
+def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient):
+    _register("exp-a", 0.7)
 
     resp = client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-a"], "metric": "val_map99",
@@ -429,14 +226,8 @@ def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_
     assert detail["needs_direction"] is True
 
 
-def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
-    client: TestClient, tmp_path, monkeypatch,
-):
-    """rank_registered_models's own distinct text for an experiment_ids filter that empties a
-    non-empty listing, not the generic "No models registered" a project with an empty registry
-    would carry."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    _register(tmp_path, "exp-other", 0.7)
+def test_compare_best_route_422s_when_the_marked_set_registered_nothing(client: TestClient):
+    _register("exp-other", 0.7)
 
     resp = client.post("/api/training/compare/best", json={
         "experiment_ids": ["exp-marked"], "metric": "val_map50",
@@ -445,23 +236,18 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
     assert resp.json()["detail"]["error"] == "none of the marked experiments registered a checkpoint"
 
 
-def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    _register(tmp_path, "exp-a", 0.7)
+def test_compare_best_route_projects_the_answer(client: TestClient):
+    _register("exp-a", 0.7)
 
     resp = client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
+        "experiment_ids": ["exp-a"], "metric": "val_map50", "include_unverified": True,
     })
     assert resp.status_code == 200
-    body = resp.json()
-    assert body == {
+    assert resp.json() == {
         "name": "exp-a", "experiment_id": "exp-a", "metrics": {"val_map50": 0.7},
-        "metrics_source": "trainer", "higher_is_better": True, "direction_source": "declared",
-        "excluded_unverified": [],
+        "metrics_source": "training_source", "higher_is_better": True,
+        "direction_source": "declared", "excluded_unverified": [],
     }
-
-
-# ── NOT_FINITE_SUFFIX: a drift guard between the two definitions the wire format sits between ──
 
 
 def test_not_finite_suffix_matches_the_frontends_own_constant():
@@ -485,9 +271,7 @@ def test_not_finite_suffix_matches_the_frontends_own_constant():
 
 def test_val_metric_prefix_matches_the_frontends_own_constant():
     """The same drift guard as above, for the other constant this file shares with the
-    frontend: a run row's best-value label and RunComparison's direction lookup both strip
-    this prefix before looking a bare metric name up, and nothing on the wire enforces that
-    the two definitions agree."""
+    frontend."""
     import re
     from pathlib import Path
 

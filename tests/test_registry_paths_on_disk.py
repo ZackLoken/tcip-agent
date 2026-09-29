@@ -1,98 +1,31 @@
-"""``tcip_mcp.model_registry.conform_registry_paths_on_disk``: the model registry's only
-conform, called by ``import_project`` against a staging tree's loose files before accounting for
-it. The four cases below exercise the on-disk function directly, plus the real archive and
-import round trip that is the door's only production caller.
+"""The model registry's paths across an archive and import: an in-project checkpoint's entry is
+stored relative to its project root, so the restored project's registry names the restored file.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
-from tcip_mcp.model_registry import (
-    RegistryVersionRefused,
-    conform_registry_paths_on_disk,
-    registry_index_path,
-)
-
-
-def _entry(name: str, checkpoint_path: str, sha256: str, size: int, **overrides) -> dict:
-    base = {
-        "name": name, "checkpoint_path": checkpoint_path, "kind": None, "sha256": sha256,
-        "file_size_bytes": size, "registered_at": "2026-01-01T00:00:00+00:00",
-        "config": {}, "metrics": {}, "metrics_source": None, "tags": [], "experiment_id": None,
-    }
-    base.update(overrides)
-    return base
-
-
-def test_on_disk_conform_respells_directly_against_the_extracted_files(tmp_path: Path):
-    """Exercised directly against loose files on disk rather than through the storage seam: a
-    stored path that resolves under root with a matching digest respells relative.
-    """
-    import hashlib
-
-    root = tmp_path / "proj"
-    ckpt_dir = root / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
-    content = b"on-disk conform weights"
-    ckpt = ckpt_dir / "m.pt"
-    ckpt.write_bytes(content)
-    digest = hashlib.sha256(content).hexdigest()
-    index_path = registry_index_path(root)
-    index_path.write_text(json.dumps({"entries": [_entry("m", str(ckpt), digest, len(content))]}))
-
-    lines = conform_registry_paths_on_disk(root)
-
-    assert any("respelled" in ln for ln in lines)
-    raw = json.loads(index_path.read_text())
-    assert raw["entries"][0]["checkpoint_path"] == ".tcip/models/m.pt"
-
-
-def test_on_disk_conform_over_an_absent_registry_answers_nothing(tmp_path: Path):
-    root = tmp_path / "proj"
-    root.mkdir()
-
-    assert conform_registry_paths_on_disk(root) == []
-
-
-def test_on_disk_conform_refuses_a_registry_that_will_not_decode(tmp_path: Path):
-    root = tmp_path / "proj"
-    index_path = registry_index_path(root)
-    index_path.parent.mkdir(parents=True)
-    index_path.write_bytes(b"not json at all")
-
-    with pytest.raises(RegistryVersionRefused):
-        conform_registry_paths_on_disk(root)
-
-
-def test_archive_then_import_lands_a_registry_already_conformed(tmp_path: Path, monkeypatch):
-    """The door's only production caller, end to end: ``import_project`` runs the on-disk conform
-    against the staging tree before accounting for it, so a registry the real archive/import
-    round trip produces is already wrapped and correctly spelled, with nothing left for a second
-    conform pass to do.
-    """
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
-        update_status,
-    )
+def test_archive_then_import_lands_a_registry_naming_the_restored_files(
+    tmp_path: Path, monkeypatch,
+):
+    """The real archive and import round trip: a foreign entry stays relative and the restored
+    run's own entry names the checkpoint under the destination."""
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
+    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.project_tools import archive_project, import_project, initialize_project
+    from tests._verified_checkpoint_fixtures import checkpoint_file, finished_run
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-    create_experiment("exp1", {"model_source": {"builder": "x:y"}})
-    update_status("exp1", "running")
-    ckpt_dir = experiment_dir("exp1")
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    weights = ckpt_dir / "model_final.pt"
-    weights.write_bytes(b"a real run's own weights")
-    assert "error" not in complete_run("exp1", str(weights))
-    assert "error" not in register_model_from_experiment(
-        "exp1", str(weights), project_path=str(src))
+    finished_run(None, experiment_id="exp1")
+    foreign = src / ".tcip" / "models" / "foreign.pt"
+    foreign.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_file(foreign, "a foreign checkpoint's own weights")
+    register_model(name="foreign", checkpoint_path=str(foreign), config={},
+                   project_path=str(src))
 
     zip_path = tmp_path / "export.zip"
     assert "error" not in archive_project(str(src), str(zip_path), include_models=True)
@@ -101,6 +34,10 @@ def test_archive_then_import_lands_a_registry_already_conformed(tmp_path: Path, 
     assert "error" not in imported, imported
 
     entries = read_registry_index(dest)
-    assert len(entries) == 1
+    assert [e["name"] for e in entries] == ["foreign"]
     assert not Path(entries[0]["checkpoint_path"]).is_absolute()
-    assert ModelRegistry(str(dest)).get_model("exp1") is not None
+    listed = {m["name"]: m for m in ModelRegistry(str(dest)).list_models()}
+    assert "foreign" in listed
+    run_entry = listed["exp1"]
+    assert Path(run_entry["checkpoint_path"]).is_file()
+    assert Path(run_entry["checkpoint_path"]).is_relative_to(dest)

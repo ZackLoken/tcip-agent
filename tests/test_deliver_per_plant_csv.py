@@ -17,14 +17,6 @@ torch = pytest.importorskip("torch")
 
 
 @pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
-    """This module drives a stubbed predictor, not a real registered checkpoint."""
-    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
-
-    admit_any_checkpoint(monkeypatch, file_digest=True)
-
-
-@pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
     """The delivery below ships under a trait whose meaning is confirmed for the aggregate kind
     the writer records under an ``operating_point`` measurement document."""
@@ -51,13 +43,6 @@ class _FakePredictor:
                 "count": n,
             })
         return results
-
-
-def _ckpt(tmp_path) -> str:
-    p = tmp_path / "m.pt"
-    if not p.exists():
-        p.write_bytes(b"stub")
-    return str(p)
 
 
 def _image_counts(pred_dir: Path, stems: list[str]) -> dict[str, int]:
@@ -143,7 +128,9 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
     from tcip_mcp.tools.inference_tools import run_inference
 
-    ckpt = _ckpt(tmp_path)
+    from tests._verified_checkpoint_fixtures import project_checkpoint
+
+    ckpt = project_checkpoint(tmp_path)
     pred_dir = dataset_root / "predictions" / "run" / date
     ran = run_inference(ckpt, str(images_root / date), output_dir=str(pred_dir),
                         conf_threshold=0.0, tile=False)

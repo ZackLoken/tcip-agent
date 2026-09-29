@@ -12,10 +12,9 @@ from pathlib import Path
 
 from PIL import Image
 
-import tcip_store as ts
 from tcip_annotation.json_io import write_annotations
 from tcip_mcp.dataset_layout import prediction_dir
-from tcip_mcp.experiments import create_experiment, validations_key
+from tcip_mcp.experiments import append_validation
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tcip_mcp.prediction_buckets import bucket_content_digest
@@ -112,16 +111,18 @@ def test_a_cleared_bucket_in_the_tree_is_not_reported(tmp_path, monkeypatch):
 def test_a_validation_row_sealed_over_a_mixed_bucket_is_reported_with_its_digest_state(
     tmp_path, monkeypatch,
 ):
-    """The row is appended through the storage seam in the shape seal_validation writes
-    (experiments._VALIDATION_FIELDS): seal_validation is the one producer, and running the
+    """The row is appended through the run's own validations writer in the shape seal_validation
+    writes (experiments._VALIDATION_FIELDS): seal_validation is the one producer, and running the
     count gate over a synthetic bucket to earn a real row is not what this census checks."""
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+
     project = _project(tmp_path, monkeypatch)
     mixed = _bucket(project, "baseline", ["a", "b"])
     _stamp(mixed, ["b"])
-    created = create_experiment("exp-census", {"model_source": {"builder": "x:y"}})
-    assert "error" not in created, created
+    run_dir = opened_run(project, detection_config(tmp_path / "run-data"),
+                         experiment_id="exp-census")
     sealed = bucket_content_digest(mixed)
-    ts.append(validations_key("exp-census", root=project), {
+    append_validation(run_dir, {
         "document": "operating_point",
         "trait": "bud_count",
         "claim": {"operating_point": {"conf": {"value": 0.25, "validated_against": "holdout"}}},

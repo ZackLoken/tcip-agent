@@ -455,7 +455,7 @@ class _OneDetectionStub(_CalStub):
 def _run_with_bundle(tmp_path, monkeypatch, calibration):
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint, run_inference_verified
 
     bundle, inputs = calibration
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
@@ -467,7 +467,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     image = tmp_path / "capture.png"
     _save_png(image)
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
     return run_inference_verified(
         str(ckpt), images_dir=str(tmp_path), device="cpu", tile=False,
         trait="bud_opening", calibration_labels_dir=str(tmp_path))

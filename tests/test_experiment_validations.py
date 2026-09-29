@@ -1,15 +1,15 @@
-"""The experiment record's validation member: what it takes, what it refuses, what reads back.
+"""A run's validations: what the file takes, what it refuses, what reads back.
 
-A validation is a claim earned against evidence and filed on the experiment it was earned on.
-The member is append-only, so a re-validation is a second row rather than a rewrite; every
-field of a row is required, since a defaulted provenance field is a claim nobody made; and it
-is the one member a finished run still accepts, because a validation is a statement made about
-a run after it ended.
+A validation is a claim earned against evidence and filed in the run it was earned on, its
+``validations.jsonl``. The file is append-only, so a re-validation is a second row rather than a
+rewrite; every field of a row is required, since a defaulted provenance field is a claim nobody
+made; and a finished run still takes one, because a validation is a statement made about a run
+after it ended. A calibration of a checkpoint no run of the project produced files its claims in a
+run directory it opens for itself.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,8 +21,6 @@ REFERENCE_IDENTITY = {
     "holdout_dataset_hash": "3ab9c7d15e0f2846",
     "split_identity": "d41d8cd98f00b204",
 }
-
-TRAINING_CONFIG = {"model_source": {"builder": "my_models:bud_det"}}
 
 
 def _real_selection_disjointness() -> dict[str, Any]:
@@ -59,223 +57,151 @@ def _row(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _rows_on_disk(root: Path, experiment_id: str) -> list[dict[str, Any]]:
-    from tcip_mcp.experiments import validations_key
+def _run(experiment_id: str):
+    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
 
-    return list(ts.read_log(validations_key(experiment_id, root=root)).records)
+    return opened_run(None, detection_config(fixture_data_dir(None, experiment_id)),
+                      experiment_id=experiment_id)
+
+
+def _validations(run_dir) -> list[dict[str, Any]]:
+    from tcip_mcp.experiments import VALIDATIONS_FILE, read_rows
+
+    return read_rows(run_dir / VALIDATIONS_FILE)[0]
 
 
 def test_a_second_validation_of_one_claim_appends_rather_than_replacing(tmp_path):
-    from tcip_mcp.experiments import (
-        _append_validation, create_experiment, get_experiment, read_validations,
-    )
+    from tcip_mcp.experiments import append_validation, get_experiment
 
-    experiment_id = "exp-021-currant-bud-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
+    run_dir = _run("exp-021-currant-bud-det")
 
-    first = _append_validation(experiment_id, _row())
-    second = _append_validation(experiment_id, _row(recorded_at="2026-03-11T09:30:00+00:00"))
+    first = append_validation(run_dir, _row())
+    second = append_validation(run_dir, _row(recorded_at="2026-03-11T09:30:00+00:00"))
 
-    assert "error" not in first and "error" not in second
-    assert first["record_digest"] != second["record_digest"]
-    rows = read_validations(experiment_id)
+    assert first != second
+    rows = _validations(run_dir)
     assert [row["recorded_at"] for row in rows] == [
         "2026-03-04T12:00:00+00:00", "2026-03-11T09:30:00+00:00",
     ]
-    assert _rows_on_disk(tmp_path, experiment_id) == rows
-    assert get_experiment(experiment_id)["validations"] == rows
+    assert get_experiment(run_dir.name)["validations"] == rows
 
 
-def test_a_validation_of_an_experiment_that_does_not_exist_is_refused(tmp_path):
-    """The record is filed on a run, so there is no filing it against an id nothing named."""
-    from tcip_mcp.experiments import _append_validation, create_experiment, read_validations
+def test_a_validation_filed_in_a_directory_holding_no_run_is_refused(tmp_path):
+    """The record is filed in a run, so there is no filing it where no launch record exists."""
+    from tcip_mcp.experiments import append_validation, experiment_dir
 
-    experiment_id = "exp-022-chestnut-burr-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
+    run_dir = _run("exp-022-chestnut-burr-det")
+    typo = experiment_dir("exp-022-chestnut-burr-det-typo")
 
-    refused = _append_validation("exp-022-chestnut-burr-det-typo", _row())
-    assert "error" in refused
-    assert "exp-022-chestnut-burr-det-typo" in refused["error"]
-    assert read_validations("exp-022-chestnut-burr-det-typo") == []
+    with pytest.raises(ValueError, match="exp-022-chestnut-burr-det-typo"):
+        append_validation(typo, _row())
+    assert not typo.exists()
 
-    assert "error" not in _append_validation(experiment_id, _row())
-    assert len(read_validations(experiment_id)) == 1
+    append_validation(run_dir, _row())
+    assert len(_validations(run_dir)) == 1
 
 
 def test_a_row_missing_a_required_field_is_refused_and_names_it(tmp_path):
-    from tcip_mcp.experiments import _append_validation, create_experiment, read_validations
+    from tcip_mcp.experiments import append_validation
 
-    experiment_id = "exp-023-currant-cluster-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
+    run_dir = _run("exp-023-currant-cluster-det")
 
     incomplete = _row()
     del incomplete["reference_identity"]
-    refused = _append_validation(experiment_id, incomplete)
+    with pytest.raises(ValueError, match="reference_identity"):
+        append_validation(run_dir, incomplete)
+    assert _validations(run_dir) == []
 
-    assert "error" in refused
-    assert "reference_identity" in refused["error"]
-    assert read_validations(experiment_id) == []
-
-    assert "error" not in _append_validation(experiment_id, _row())
-    assert read_validations(experiment_id) == [_row()]
+    append_validation(run_dir, _row())
+    assert _validations(run_dir) == [_row()]
 
 
-def test_a_completed_run_takes_a_validation_while_its_metrics_and_state_stay_frozen(tmp_path):
-    """The exemption is the member's own meaning: freezing it would make it unwritable in
-    every case it exists for, since a run is validated after it finishes."""
-    from tcip_mcp.experiments import (
-        _append_validation, create_experiment, log_metrics, read_validations, update_status,
-    )
+def test_a_completed_run_takes_a_validation(tmp_path):
+    """A run is validated after it finishes, so its final status never closes its validations."""
+    from tcip_mcp.experiments import append_validation, observe
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    experiment_id = "exp-024-elderberry-umbel-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
-    update_status(experiment_id, "running")
-    log_metrics(experiment_id, 4, {"val_map50": 0.61})
-    update_status(experiment_id, "completed")
+    run_dir = finished_run(None, experiment_id="exp-024-elderberry-umbel-det")
+    assert observe(run_dir).state == "completed"
 
-    appended = _append_validation(experiment_id, _row())
+    append_validation(run_dir, _row())
 
-    assert "error" not in appended
-    assert read_validations(experiment_id) == [_row()]
-
-    refused_epoch = log_metrics(experiment_id, 5, {"val_map50": 0.99})
-    assert "error" in refused_epoch
-    refused_reopen = update_status(experiment_id, "running")
-    assert "error" in refused_reopen and refused_reopen["state"] == "completed"
+    assert _validations(run_dir) == [_row()]
 
 
 def test_a_row_is_found_by_its_recomputed_identity_and_an_unknown_one_finds_nothing(tmp_path):
-    from tcip_mcp.experiments import (
-        _append_validation, create_experiment, find_validation, validation_digest,
-    )
+    from tcip_mcp.experiments import append_validation, find_validation, observe, validation_digest
 
-    experiment_id = "exp-025-persimmon-fruit-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
-    _append_validation(experiment_id, _row(trait="fruit_ripe_date"))
-    digest = _append_validation(experiment_id, _row())["record_digest"]
+    run_dir = _run("exp-025-persimmon-fruit-det")
+    append_validation(run_dir, _row(trait="fruit_ripe_date"))
+    digest = append_validation(run_dir, _row())
 
-    found = find_validation(experiment_id, digest)
+    found = find_validation(observe(run_dir), digest)
 
     assert found == _row()
     assert validation_digest(found) == digest
-    assert find_validation(experiment_id, "0" * 16) is None
+    assert find_validation(observe(run_dir), "0" * 16) is None
 
 
-def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
-    from tcip_mcp.experiments import (
-        _append_validation, config_key, ensure_calibration_experiment, list_experiments,
-    )
+def _calibration(reference_identity=REFERENCE_IDENTITY, *, derived_from: str = "first"):
+    from tcip_mcp.experiments import open_calibration_run
 
-    first = ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "calibrated on the March holdout"},
-    )
-    again = ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "a second door, same content"},
-    )
-
-    assert again == first
-    assert [e["experiment_id"] for e in list_experiments()] == [first]
-
-    config = ts.read(config_key(first))
-    assert config["reference_identity"] == REFERENCE_IDENTITY
-    assert config["trait"] == "bud_50per_date"
-    assert config["notes"] == "calibrated on the March holdout"
-    assert "error" not in _append_validation(first, _row(document="classifier_operating_point"))
+    return open_calibration_run({
+        "document": "classifier_operating_point", "checkpoint_sha256": None,
+        "reference_identity": reference_identity, "trait": "bud_50per_date",
+        "derived_from": derived_from})
 
 
-def test_a_calibration_against_a_different_reference_is_a_different_experiment(tmp_path):
-    from tcip_mcp.experiments import ensure_calibration_experiment, list_experiments
+def test_every_calibration_opens_a_run_of_its_own_recording_what_it_calibrated(tmp_path):
+    from tcip_mcp.experiments import RUN_FILE, append_validation, list_experiments, read_record
 
-    on_march = ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "calibrated on the March holdout"},
-    )
-    on_april = ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity={**REFERENCE_IDENTITY, "holdout_dataset_hash": "5c0e7a2b48d1f963"},
-        trait="bud_50per_date", config={"notes": "calibrated on the April holdout"},
-    )
+    first = _calibration()
+    again = _calibration(derived_from="a second door, same content")
 
-    assert on_april != on_march
-    assert sorted(e["experiment_id"] for e in list_experiments()) == sorted([on_march, on_april])
+    assert again != first
+    assert sorted(e["experiment_id"] for e in list_experiments()) == sorted(
+        [first.name, again.name])
+    calibrated = read_record(first / RUN_FILE)["calibrated"]
+    assert calibrated["reference_identity"] == REFERENCE_IDENTITY
+    assert calibrated["trait"] == "bud_50per_date"
+    assert calibrated["derived_from"] == "first"
+    append_validation(first, _row(document="classifier_operating_point"))
 
-
-def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
-    """The identity fields are written from the content the id came from, so a caller's own
-    spelling of one could disagree with the id itself."""
-    from tcip_mcp.experiments import config_key, ensure_calibration_experiment, list_experiments
-
-    with pytest.raises(ValueError) as refused:
-        ensure_calibration_experiment(
-            document="ordinal_operating_point", checkpoint_sha256="0" * 64,
-            reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-            config={"trait": "something_else", "notes": "free text"},
-        )
-    assert "trait" in str(refused.value)
-    assert list_experiments() == []
-
-    experiment_id = ensure_calibration_experiment(
-        document="ordinal_operating_point", checkpoint_sha256="0" * 64,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "free text", "operator_note": "run from the ordinal door"},
-    )
-    config = ts.read(config_key(experiment_id))
-    assert config["trait"] == "bud_50per_date"
-    assert config["operator_note"] == "run from the ordinal door"
 
 def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_row(tmp_path):
-    """The record both mutate is a platform-scoped experiment member, so the rows land in the
-    platform log where a reviewer enumerating validations looks first."""
+    """Both acts land in the platform log where a reviewer enumerating validations looks first,
+    one row per act."""
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.experiments import (
-        _append_validation, create_experiment, ensure_calibration_experiment,
-    )
+    from tcip_mcp.experiments import append_validation
 
-    experiment_id = "exp-026-black-locust-raceme-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
-    digest = _append_validation(experiment_id, _row())["record_digest"]
-
-    calibration_id = ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "first calibration"},
-    )
-    ensure_calibration_experiment(
-        document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-        config={"notes": "repeat resolves, creates nothing"},
-    )
+    digest = append_validation(_run("exp-026-black-locust-raceme-det"), _row())
+    calibrations = [_calibration(), _calibration(derived_from="a second calibration")]
 
     rows = ts.read_log(audit_log_key(tmp_path)).records
     appended = [r for r in rows if r.get("tool") == "experiment_validation_recorded"]
     assert [r["arguments"]["record_digest"] for r in appended] == [digest]
     created = [r for r in rows if r.get("tool") == "calibration_experiment_created"]
-    assert [r["arguments"]["experiment_id"] for r in created] == [calibration_id]
+    assert [r["arguments"]["experiment_id"] for r in created] == [c.name for c in calibrations]
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
     """The producer-fed round trip: a row earned through open_validation/seal_validation (the
-    platform's own two-phase writer, not _append_validation directly) carries no schema_version
-    field and reads back unchanged."""
+    platform's own two-phase writer) for a checkpoint no run produced lands in the calibration
+    run directory the claim names, which reads completed with that checkpoint's sha256 on its
+    launch record, and reads back under the digest the stamp carries."""
     pytest.importorskip("torch")
     from tests._dense_op_fixtures import dense_records
 
-    from tcip_mcp.experiments import read_validations, validation_digest
+    from tcip_mcp.experiments import experiment_dir, observe, validation_digest
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, seal_validation,
     )
 
-    # producing_experiment_id=None (foreign checkpoint) skips train-disjointness; seal_validation
-    # mints the calibration experiment the row lands on.
+    sha256 = "ab" * 32
     common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
-                 fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
+                  fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
     cal = dense_records(id_prefix="c", **common)
     hold = dense_records(id_prefix="h", shift=5.0, **common)
     labels_dir = tmp_path / "annotations" / "2026-03-04"
@@ -286,35 +212,36 @@ def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "H", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01, "slicing": None}},
-        trait="bud_opening", checkpoint_sha256="0" * 64, producing_experiment_id=None,
+        trait="bud_opening", checkpoint_sha256=sha256, producing_experiment_id=None,
         reference_inputs={"dataset_root": str(tmp_path), "label_dirs": {"calibration": labels_dir}},
     )
     stamp = operating_point_stamp(
         draft.result.to_provenance()["operating_point"], slicing=None, validated=True,
         validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
-        trait="bud_opening", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
+        trait="bud_opening", dataset_hash="H", checkpoint="best", checkpoint_sha256=sha256,
         experiment_id=None, images_dir=None, raster_path=None,
         produced_at="2026-03-04T12:00:00+00:00", scope=ClassScope(subject="bud"),
     )
     stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
-    experiment_id = stamped["validated_by"]["experiment_id"]
-    digest = stamped["validated_by"]["record_digest"]
+    run_dir = experiment_dir(stamped["validated_by"]["experiment_id"])
 
-    rows = read_validations(experiment_id)
+    rows = _validations(run_dir)
+    assert run_dir.name.startswith("calibration_")
+    calibration = observe(run_dir)
+    assert calibration.state == "completed"
+    assert calibration.record["calibrated"]["checkpoint_sha256"] == sha256
     assert len(rows) == 1
-    assert "schema_version" not in rows[0]
-    assert validation_digest(rows[0]) == digest
+    assert validation_digest(rows[0]) == stamped["validated_by"]["record_digest"]
 
 
 def test_append_validation_raises_when_its_audit_line_cannot_be_written(tmp_path, monkeypatch):
     """The row is already on disk by the time the audit line is attempted, so a failed append
     must not be swallowed: the caller is told through AuditEntryNotWritten, not a log line."""
     import tcip_mcp.audit as audit_module
-    from tcip_mcp.experiments import _append_validation, create_experiment, read_validations
+    from tcip_mcp.experiments import append_validation
 
-    experiment_id = "exp-029-quince-second-vintage-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
+    run_dir = _run("exp-029-quince-second-vintage-det")
 
     def _refuse(*args, **kwargs):
         raise RuntimeError("the audit log could not be appended to")
@@ -322,19 +249,17 @@ def test_append_validation_raises_when_its_audit_line_cannot_be_written(tmp_path
     monkeypatch.setattr(audit_module, "append", _refuse)
 
     with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
-        _append_validation(experiment_id, _row())
+        append_validation(run_dir, _row())
 
     assert caught.value.tool == "experiment_validation_recorded"
-    assert read_validations(experiment_id) == [_row()]
+    assert _validations(run_dir) == [_row()]
 
 
-def test_ensure_calibration_experiment_raises_when_its_audit_line_cannot_be_written(
-    tmp_path, monkeypatch,
-):
-    """The experiment record is already created by the time the audit line is attempted, so a
-    failed append must not be swallowed the same way."""
+def test_a_calibration_run_raises_when_its_audit_line_cannot_be_written(tmp_path, monkeypatch):
+    """The directory is already created by the time the audit line is attempted, so a failed
+    append must not be swallowed the same way."""
     import tcip_mcp.audit as audit_module
-    from tcip_mcp.experiments import config_key, ensure_calibration_experiment, list_experiments
+    from tcip_mcp.experiments import list_experiments
 
     def _refuse(*args, **kwargs):
         raise RuntimeError("the audit log could not be appended to")
@@ -342,38 +267,7 @@ def test_ensure_calibration_experiment_raises_when_its_audit_line_cannot_be_writ
     monkeypatch.setattr(audit_module, "append", _refuse)
 
     with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
-        ensure_calibration_experiment(
-            document="classifier_operating_point", checkpoint_sha256=None,
-            reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
-            config={"notes": "refused append"},
-        )
+        _calibration()
 
     assert caught.value.tool == "calibration_experiment_created"
-    listing = list_experiments()
-    assert len(listing) == 1
-    config = ts.read(config_key(listing[0]["experiment_id"]))
-    assert config["trait"] == "bud_50per_date"
-
-
-def test_read_validations_admits_a_row_with_no_schema_version_beside_one_stamped_one(tmp_path):
-    """Lazy absence: a row carrying no schema_version key (what every real producer writes today)
-    reads as the frozen version 1, and a row explicitly stamped 1 reads identically, the store's
-    ceiling either way."""
-    from tcip_mcp.experiments import (
-        create_experiment, read_validations, validation_digest, validations_key,
-    )
-
-    experiment_id = "exp-028-quince-old-vintage-det"
-    create_experiment(experiment_id, TRAINING_CONFIG)
-    bare_row = _row()
-    stamped_row = _row(schema_version=1)
-    # Digest taken at write time and the row relocated by it beside its sibling, so the proof is
-    # identification in a mixed-shape log, not dict self-equality.
-    digest_at_write = validation_digest(bare_row)
-    ts.append(validations_key(experiment_id), bare_row)
-    ts.append(validations_key(experiment_id), stamped_row)
-
-    rows = read_validations(experiment_id)
-    assert bare_row in rows and len(rows) == 2
-    matched = [r for r in rows if validation_digest(r) == digest_at_write]
-    assert matched == [bare_row]
+    assert len(list_experiments()) == 1

@@ -6,8 +6,8 @@ Proves the whole CV-scientist vision at once:
     derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from the GT
     size distribution (not torchvision defaults), and every norm layer is GroupNorm (no BatchNorm);
   * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint, audit
-    bracket, and source/env provenance recorded by the envelope (``kind=KIND_TCIP_MODULE`` with a
-    source+env snapshot present) and the model registered on completion;
+    bracket and checkpoint recorded by the envelope (``kind=KIND_TCIP_MODULE``), the source and
+    environment in the launch record, and the model registered by completing;
   * the module actually learns (``overfit_check``), and build -> resolve_operating_point -> predict
     close the measurement loop.
 """
@@ -55,7 +55,7 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
 
 
 def test_bespoke_detector_end_to_end(tmp_path: Path):
-    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, observe, read_record, read_rows
     from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from dataclasses import asdict
@@ -64,9 +64,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.model_contract import overfit_check
     from tcip_mcp.pipelines.operating_point import records_over_loader, resolve_operating_point
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
 
     # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
     images_dir = tmp_path / "images"
@@ -84,7 +82,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         gt_wh.append((w, h))
 
     dataset = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
-    train_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     # 2. Bespoke model_source + custom training_source, run through the audited envelope.
@@ -95,22 +92,18 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
             "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
             "task": "detection", "source_files": [src_file],
         },
-        # What a run over this data records: the band count and the admitted class space.
-        "data": {"num_channels": 3, "scope": asdict(dataset.scope)},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "num_channels": 3, "scope": asdict(dataset.scope)},
         "training_source": "tests.bespoke_models:train_bespoke",
         "device": "cpu", "epochs": 2, "seed": 0,
     }
-    out = tmp_path / "out"
-    create_experiment("expBespoke", config, data_source=str(images_dir))
-    update_status("expBespoke", "running")
-    run = create_run(config, str(out), id="auto-run-1")
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       experiment_id="expBespoke")
+    from tests._verified_checkpoint_fixtures import worker_run
 
-    run_training_envelope(ctx)
+    out = worker_run(tmp_path, config, experiment_id="expBespoke")
 
     # ---- the custom loop completed through the envelope ----
-    assert run.status == "completed", run.error
+    final = observe(out).final
+    assert final is not None and final["state"] == "completed", final
     ckpt = out / "model_best.pt"
     assert ckpt.is_file()
 
@@ -135,35 +128,26 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert best["kind"] == KIND_TCIP_MODULE
     assert best["config"]["model_source"]["builder"].endswith(":build_bespoke_detector")
 
-    import tcip_store as ts
-    from tcip_mcp.experiments import env_key
-    from tcip_mcp.pipelines.model_build import snapshot_manifest_key
-
-    exp_dir = tmp_path / ".tcip" / "experiments" / "expBespoke"
-    env = ts.read(env_key("expBespoke"))
-    assert env["model_kind"] == KIND_TCIP_MODULE and env["env"]["torch"]
-    manifest = ts.read(snapshot_manifest_key(exp_dir))
+    launch = read_record(out / RUN_FILE)
+    assert launch["environment"]["torch"]
+    manifest = launch["source"]
     assert manifest["training_source"] == "tests.bespoke_models:train_bespoke"
     assert any(e["src"] == src_file and len(e["sha256"]) == 64
                for e in manifest["files"])                  # source snapshotted with sha256
-    assert (exp_dir / "model_src" / next(
+    assert (out / "model_src" / next(
         e["file"] for e in manifest["files"] if e["src"] == src_file)).is_file()
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
-    # The loop's rows land on the experiment's own metrics log, not beside the weights in a
-    # separately-computed output dir.
-    from tcip_mcp.experiments import read_metrics
-
-    assert not (out / "metrics.jsonl").exists()
-    metric_rows = read_metrics("expBespoke")
+    metric_rows = read_rows(out / METRICS_FILE)[0]
     assert metric_rows and all("train_loss" in r for r in metric_rows)
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]  # opened + closed around the body
     assert events[-1]["arguments"]["experiment_id"] == "expBespoke"
 
     # ---- completion registered the bespoke model into the immutable registry ----
-    entry = ModelRegistry(str(tmp_path)).get_model("expBespoke")
-    assert entry is not None and entry["kind"] == KIND_TCIP_MODULE
+    [entry] = [m for m in ModelRegistry(str(tmp_path)).list_models()
+               if m["experiment_id"] == "expBespoke"]
+    assert entry["kind"] == KIND_TCIP_MODULE
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
     # ---- the module actually learns; resolve_operating_point + predict close the measurement loop ----

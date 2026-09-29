@@ -63,9 +63,8 @@ class _GNBackboneFPN(nn.Module):
 
 
 class BespokeGNDetector(nn.Module):
-    """Wraps the torchvision Faster R-CNN as ``.detector`` (so the platform's eval / operating-point
-    utilities that look for ``.detector`` work), with the same forward contract as the composed
-    ``DetectionModel``: loss dict in train mode, ``list[dict]`` predictions in eval mode."""
+    """The torchvision Faster R-CNN held as ``.detector``: a loss dict in train mode, ``list[dict]``
+    predictions in eval mode."""
 
     def __init__(self, detector: nn.Module) -> None:
         super().__init__()
@@ -80,11 +79,8 @@ class BespokeGNDetector(nn.Module):
 
 
 def gt_anchor_sizes(gt_boxes_wh) -> tuple[int, ...]:
-    """Anchor scales from the GT object-size distribution (p10/p50/p90 of sqrt(area)).
-
-    Derived from the data in hand, not torchvision's fixed (32,64,128,256,512): the anchors cover
-    the sizes objects actually take in this dataset.
-    """
+    """Anchor scales from the GT object-size distribution (p10/p50/p90 of sqrt(area)), ``(32,)``
+    for no positive box."""
     import numpy as np
 
     scales = [float(np.sqrt(w * h)) for (w, h) in gt_boxes_wh if w > 0 and h > 0]
@@ -126,8 +122,9 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
 # ---------------------------------------------------------------------------
 
 def train_bespoke(ctx) -> None:
-    """A from-scratch training loop composing the envelope's craft utilities (``build_optimizer`` / ``build_scheduler`` /
-    ``evaluate``) and records every metric and checkpoint through the ctx sinks.
+    """A from-scratch training loop composing the envelope's craft utilities (``build_optimizer`` /
+    ``build_scheduler`` / ``evaluate``) that records every metric and checkpoint through the ctx
+    sinks, its best epoch's weights saved once as ``model_best`` when the loop ends.
     """
     ctx.set_seed()
     device = ctx.device
@@ -138,6 +135,7 @@ def train_bespoke(ctx) -> None:
     scheduler = ctx.build_scheduler(optimizer, {"scheduler": {"type": "cosine"}}, epochs)
 
     best = float("inf")
+    best_state = None
     for epoch in range(1, epochs + 1):
         if ctx.should_cancel():
             break
@@ -169,14 +167,29 @@ def train_bespoke(ctx) -> None:
         if sel < best:
             best = sel
             ctx.run.best_metric = best
-            ctx.save_checkpoint(   # envelope sink -> stamped (kind/model_source/config) + atomic
-                {"model_state_dict": model.state_dict(), "metrics": {**metrics, "epoch": epoch}},
-                "model_best")
+            best_state = {"model_state_dict": {k: v.detach().cpu().clone()
+                                               for k, v in model.state_dict().items()},
+                          "metrics": {**metrics, "epoch": epoch}}
 
     ctx.run.current_epoch = epochs
-    # Guarantee a final checkpoint exists even if val never improved.
+    if best_state is not None:
+        ctx.save_checkpoint(best_state, "model_best")
     ctx.save_checkpoint(
         {"model_state_dict": model.state_dict(), "metrics": {"epoch": epochs}}, "model_final")
+
+
+def save_built_weights(ctx) -> None:
+    """A training body that takes no step: logs each of the config's ``fixture_rows`` (an
+    ``epoch`` plus its metrics) through the run's own metrics log, then saves the model its config
+    builds, as built under the run's own seed, as the run's final weights, carrying the config's
+    ``fixture_metrics`` as the checkpoint's metrics when it states any."""
+    for row in ctx.config.get("fixture_rows") or []:
+        ctx.log_metrics(row["epoch"], {k: v for k, v in row.items() if k != "epoch"})
+    ctx.set_seed()
+    state = {"model_state_dict": ctx.build_model().state_dict()}
+    if ctx.config.get("fixture_metrics"):
+        state["metrics"] = dict(ctx.config["fixture_metrics"])
+    ctx.save_checkpoint(state, "model_final")
 
 
 # ---------------------------------------------------------------------------

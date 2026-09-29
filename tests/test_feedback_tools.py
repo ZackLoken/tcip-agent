@@ -1,4 +1,4 @@
-"""Review->retrain MCP tools (materialize + queue + lineage + registration)."""
+"""Review->retrain MCP tools: materialize, the review queue and triage."""
 
 from __future__ import annotations
 
@@ -108,78 +108,18 @@ def test_materialize_refuses_an_empty_stated_store_rather_than_the_dataset_s_own
     assert "positive" not in r
 
 
-def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
-    import tcip_store as ts
-    import tcip_mcp.experiments as experiments
-    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
-    experiments.create_experiment("exp1", {"x": 1})
+def test_materialize_review_dataset_writes_no_run(tmp_path, monkeypatch):
+    """A curated dataset is data, not a run: materializing one writes its own output and opens
+    no run directory."""
+    from tcip_mcp.experiments import run_dirs
 
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     dataset_root, src = _setup(tmp_path)
-    out = tmp_path / "out"
-    r = materialize_review_dataset(str(dataset_root), str(src), str(out), experiment_id="exp1")
-    assert r["experiment_id"] == "exp1"
+    r = materialize_review_dataset(str(dataset_root), str(src), str(tmp_path / "out"))
 
-    lineage = ts.read(experiments.lineage_key("exp1"))
-    assert lineage["data_source"] == str(dataset_root)
-    assert lineage["review_session"]["dataset_root"] == str(dataset_root)
-    assert lineage["review_session"]["review_state_dir"] == str(project_state_dir(dataset_root))
-    artifacts = ts.read(experiments.artifacts_key("exp1"))
-    assert artifacts["curated_dataset"]["path"] == str(out)
-
-
-def test_lineage_records_a_stated_store_beside_the_dataset_it_curates(tmp_path, monkeypatch):
-    """Both facts are recorded: which dataset the review was of, and where its shards were read."""
-    import tcip_store as ts
-    import tcip_mcp.experiments as experiments
-    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
-
-    dataset_root = tmp_path / "dataset"
-    dataset_root.mkdir()
-    bucket_dir = str((tmp_path / "predictions" / "detector" / "2026-03-04").resolve())
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=bucket_dir)
-    src = _source_images(tmp_path / "src")
-
-    materialize_review_dataset(
-        str(dataset_root), str(src), str(tmp_path / "out"),
-        experiment_id="ext1", review_state_dir=str(external))
-
-    lineage = ts.read(experiments.lineage_key("ext1"))
-    assert lineage["data_source"] == str(dataset_root)
-    assert lineage["review_session"]["dataset_root"] == str(dataset_root)
-    assert lineage["review_session"]["review_state_dir"] == str(external)
-
-
-def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
-    import tcip_store as ts
-    import tcip_mcp.experiments as experiments
-    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
-
-    dataset_root, src = _setup(tmp_path)
-    r = materialize_review_dataset(str(dataset_root), str(src), str(tmp_path / "out"), experiment_id="new1")
-    assert r["experiment_id"] == "new1"
-    lineage = ts.read(experiments.lineage_key("new1"))
-    assert "review_session" in lineage
-
-
-def test_a_second_curation_against_a_completed_experiment_refuses_before_writing(tmp_path, monkeypatch):
-    """A pointer is checked before its write, not after: a second curation against an experiment
-    whose curated_dataset pointer is already populated and terminal refuses by name, with no
-    directory written for it to orphan."""
-    import tcip_mcp.experiments as experiments
-    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
-    experiments.create_experiment("exp2", {"x": 1})
-    experiments.update_status("exp2", "running")
-
-    dataset_root, src = _setup(tmp_path)
-    out1 = tmp_path / "out1"
-    r1 = materialize_review_dataset(str(dataset_root), str(src), str(out1), experiment_id="exp2")
-    assert "error" not in r1
-    experiments.update_status("exp2", "completed")
-
-    out2 = tmp_path / "out2"
-    r2 = materialize_review_dataset(str(dataset_root), str(src), str(out2), experiment_id="exp2")
-    assert "error" in r2
-    assert not out2.exists()
+    assert "error" not in r, r
+    assert "experiment_id" not in r
+    assert run_dirs() == []
 
 
 def test_materialize_invalid_inputs_error(tmp_path):
@@ -207,7 +147,7 @@ def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_pa
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     dataset_root, images = _setup(tmp_path)
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt, images_dir=str(images), dataset_root=str(dataset_root),
@@ -262,7 +202,7 @@ def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch
     import tcip_mcp.pipelines.inference.predictor as predmod
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
@@ -286,7 +226,7 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
@@ -314,7 +254,7 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     for pred in predictions:
@@ -410,23 +350,21 @@ def _bespoke_checkpoint_payload() -> dict:
     return {"config": config, "model_state_dict": model.state_dict()}
 
 
-def _registered_checkpoint_from_experiment(tmp_path: Path, experiment_id: str) -> str:
-    """A real checkpoint completed and registered against ``experiment_id`` (``complete_run`` then
-    ``register_model_from_experiment``, experiment-mode registration), so
-    ``checkpoint.producer`` resolves to it the way a real trained run's own registration would;
-    never a hand-built registry entry."""
-    import torch
+def _bound_checkpoint(manifest_dir: Path, experiment_id: str) -> tuple[Path, str]:
+    """A run bound to the selection at ``manifest_dir``, run through the child's own entry (its
+    data resolved and recorded, its body saving the model its config builds), so its completed
+    checkpoint's producer is that bound run. Returns ``(run directory, checkpoint path)``."""
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, worker_run
 
-    from tcip_mcp.experiments import complete_run, register_model_from_experiment
-
-    ckpt_path = tmp_path / f"{experiment_id}.pt"
-    torch.save(_bespoke_checkpoint_payload(), str(ckpt_path))
-    completed = complete_run(experiment_id, str(ckpt_path))
-    assert "error" not in completed, completed
-    registered = register_model_from_experiment(
-        experiment_id, str(ckpt_path), project_path=str(tmp_path))
-    assert "error" not in registered, registered
-    return str(ckpt_path)
+    run_dir = worker_run(None, {
+        "model_source": dict(BUILT_DETECTOR),
+        "training_source": "tests.bespoke_models:save_built_weights",
+        "data": {"split": {"selection_dir": str(manifest_dir)}},
+    }, experiment_id=experiment_id)
+    checkpoint = observe(run_dir).checkpoint
+    assert checkpoint is not None
+    return run_dir, checkpoint["path"]
 
 
 def _stub_scorer(monkeypatch) -> None:
@@ -446,7 +384,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
     """A checkpoint whose run was bound to a selection marks each ranked candidate against that
     selection's own calibration samples under the queue's images directory."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
@@ -458,9 +396,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
     }
     assert calibration_stems  # the fixture's own three-way ratio gives this date some
 
-    experiment_id = "exp-pq-marks"
-    _bind_run(root, manifest_dir, experiment_id, date=date)
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-pq-marks")
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
@@ -471,7 +407,42 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
     for entry in r["queue"]:
         stem = Path(entry["image"]).stem
         assert entry["calibration_member"] == (stem in calibration_stems), entry
-    assert "marks_unresolved" not in r
+
+
+def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selection_changed(
+    tmp_path, monkeypatch,
+):
+    """The marks are the calibration samples the producing run's own partition froze: a selection
+    rewritten after the run, its calibration side moved to train, changes none of them."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.selection import selection_document, selection_key
+    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    drawn = _draw(root, manifest_dir)
+    date = DATES[0]
+    calibration_stems = {Path(s.source).stem for s in drawn.on("calibration")
+                         if Path(s.source).parent.name == date}
+    assert calibration_stems
+
+    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-pq-frozen")
+
+    document = selection_document(drawn)
+    for sample in document["samples"]:
+        if sample["side"] == "calibration":
+            sample["side"] = "train"
+    ts.replace(selection_key(manifest_dir), document)
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
+        project_path=str(tmp_path))
+    assert "error" not in r, r
+    marked = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
+    assert marked == calibration_stems
+
 
 def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tmp_path):
     """Both scorers read a candidate at the width the checkpoint reads at: a one-channel model
@@ -482,7 +453,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(
-        tmp_path, project_root=tmp_path,
+        tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
                       "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
                                          "image_std": [0.2]},
@@ -501,12 +472,12 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
     assert all(isinstance(entry["score"], float) for entry in r["queue"])
 
 
-def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path, monkeypatch):
-    """A checkpoint with no registry-recorded producer has nothing bound to check against: no
-    ``calibration_member`` on any entry, and no ``marks_unresolved`` guessing at a reason."""
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypatch):
+    """A checkpoint no run of the project produced has nothing bound to check against: no
+    ``calibration_member`` on any entry."""
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
@@ -517,43 +488,6 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path
     assert "error" not in r, r
     assert r["queue"], r
     assert all("calibration_member" not in entry for entry in r["queue"])
-    assert "marks_unresolved" not in r
-
-
-def test_prioritize_review_queue_marks_unresolved_when_the_manifest_cannot_be_read(
-    tmp_path, monkeypatch,
-):
-    """A bound run whose named selection can no longer be read serves the queue with no marks and
-    a stated ``marks_unresolved`` reason, never a guess at membership."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_store as ts
-    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
-    from tcip_mcp.pipelines.data.selection import selection_document, selection_key
-
-    root = _dataset(tmp_path / "data")
-    manifest_dir = tmp_path / "manifest"
-    drawn = _draw(root, manifest_dir)
-    date = DATES[0]
-
-    experiment_id = "exp-pq-unresolved"
-    _bind_run(root, manifest_dir, experiment_id, date=date)
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
-
-    # Corrupted the same way read_selection's own refusal rail is tested: a required per-sample
-    # key stripped, the record rewritten through the store, never a file deleted.
-    document = selection_document(drawn)
-    document["samples"][0].pop("ground_truth")
-    ts.replace(selection_key(manifest_dir), document)
-    _stub_scorer(monkeypatch)
-
-    r = prioritize_review_queue(
-        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
-        project_path=str(tmp_path))
-    assert "error" not in r, r
-    assert r["queue"], r
-    assert all("calibration_member" not in entry for entry in r["queue"])
-    assert "marks_unresolved" in r
-    assert str(manifest_dir) in r["marks_unresolved"]
 
 
 # -- rail: calibration marks are decided by each sample's own recorded source ------------------
@@ -614,22 +548,6 @@ def _draw_flat(root: Path, out: Path, *, seed: int = 2):
     return read_selection(out)
 
 
-def _bind_dataset_run(
-    root: Path, manifest_dir: Path, experiment_id: str, *, date: str, images_dir: Path,
-) -> None:
-    """A run bound to ``manifest_dir`` for ``date``, its own admission drawn against
-    ``images_dir``: the same sequence :func:`_registered_checkpoint_from_experiment`'s callers
-    use for the canonical dated layout, parameterized over which directory this date's images
-    actually live in."""
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
-
-    data_cfg = {"split": {"selection_dir": str(manifest_dir)}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
-
-
 def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_path, monkeypatch):
     """A dataset whose labels are bucketed by date but whose images live in the flat images/ root
     (no images/<date>/ bucket) still marks its calibration side correctly: each sample's own
@@ -646,9 +564,7 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
     }
     assert calibration_stems  # the fixture's own three-way ratio gives this date some
 
-    experiment_id = "exp-pq-flat"
-    _bind_dataset_run(root, manifest_dir, experiment_id, date=date, images_dir=root / "images")
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-pq-flat")
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
@@ -656,7 +572,6 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
         project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
-    assert "marks_unresolved" not in r
     marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
     assert marked_true == calibration_stems
 
@@ -682,10 +597,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     leaked = other_stems - bound_stems
     assert leaked  # a stem calibration-only under the other date; the case that must not leak
 
-    experiment_id = "exp-pq-two-dates"
-    _bind_dataset_run(
-        root, manifest_dir, experiment_id, date=flat_date, images_dir=root / "images")
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-pq-two-dates")
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
@@ -693,42 +605,9 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
         project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
-    assert "marks_unresolved" not in r
     marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
     assert marked_true == bound_stems
     assert not (marked_true & leaked)
-
-
-
-def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolved_naming_it(
-    tmp_path, monkeypatch,
-):
-    """A bound run whose own split.json will not decode must not read as an unbound run: the
-    corruption is named under marks_unresolved rather than folded onto silence."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tests._record_damage_fixtures import damage_record
-    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
-    from tcip_mcp.experiments import split_key
-
-    root = _dataset(tmp_path / "data")
-    manifest_dir = tmp_path / "manifest"
-    _draw(root, manifest_dir)
-    date = DATES[0]
-
-    experiment_id = "exp-pq-corrupt-split"
-    _bind_run(root, manifest_dir, experiment_id, date=date)
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
-    damage_record(split_key(experiment_id, root=str(tmp_path)), b"{not json at all")
-    _stub_scorer(monkeypatch)
-
-    r = prioritize_review_queue(
-        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
-        project_path=str(tmp_path))
-    assert "error" not in r, r
-    assert r["queue"], r
-    assert all("calibration_member" not in entry for entry in r["queue"])
-    assert "marks_unresolved" in r
-    assert "could not be read" in r["marks_unresolved"]
 
 
 def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():

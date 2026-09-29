@@ -20,7 +20,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     an MCP tool that resolves the registry itself."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    return registered_checkpoint(tmp_path, project_root=tmp_path, model_source={
+    return registered_checkpoint(tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}, "task": "detection"})
 
@@ -176,7 +176,7 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     recorded_id_map = {"closed": 0, "open": 1}
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt_path = registered_checkpoint(
-        tmp_path, project_root=tmp_path,
+        tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
                       "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                       "task": "detection"},

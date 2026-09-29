@@ -3,8 +3,8 @@
 
 Read-only. For each project root given, every live prediction bucket the project's own records
 name (``store_catalog.project_roots``, the same enumeration ``tcip adopt-store`` and ``tcip
-export-store`` walk: the buckets under each registered dataset's ``predictions/`` tree and
-each experiment's lineage bucket) is checked two ways; a bucket already moved into the cleared
+export-store`` walk: the buckets under each registered dataset's ``predictions/`` tree) is
+checked two ways; a bucket already moved into the cleared
 archive (``predictions/.cleared/``, populated only by ``clear_prediction_bucket``) is skipped,
 since a cleared bucket holds one run's own documents and stamp, never a later run's overwrite.
 A stamp whose ``image_filenames``
@@ -120,7 +120,7 @@ def census_bucket(bucket: Path) -> BucketCensus:
 def census_project(project_root: Path) -> ProjectCensus:
     """Every bucket and every validation row the project's own records name, judged."""
     from tcip_mcp import dataset_layout
-    from tcip_mcp.experiments import experiment_ids_with_status, read_validations
+    from tcip_mcp.experiments import VALIDATIONS_FILE, read_rows, run_dirs
     from tcip_mcp.prediction_buckets import bucket_content_digest
     from tcip_mcp.store_catalog import project_roots
 
@@ -151,9 +151,10 @@ def census_project(project_root: Path) -> ProjectCensus:
         result.unregistered_tree = bool(own) and not own & registered
 
     mixed_by_path = {b.bucket.resolve(): b for b in result.mixed}
-    for experiment_id in experiment_ids_with_status(project_root):
+    for run_dir in run_dirs(project_root):
+        experiment_id = run_dir.name
         try:
-            rows = read_validations(experiment_id, root=project_root)
+            rows = read_rows(run_dir / VALIDATIONS_FILE)[0]
         except StoreError as exc:
             result.read_errors.append(f"{experiment_id} validations: {exc}")
             continue

@@ -18,8 +18,11 @@ from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
-from tcip_mcp.pipelines.training.run_registry import create_run
-from tests.tiny_trainer_fixtures import ConstantImageDataset
+from tests.tiny_trainer_fixtures import (
+    ConstantImageDataset,
+    trainer_run,
+    write_regression_dataset,
+)
 
 BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
 
@@ -72,17 +75,23 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     models: list = []
     _capture_model(monkeypatch, models)
 
-    from tcip_mcp.experiments import create_experiment, read_metrics
+    from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, read_record, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tests._verified_checkpoint_fixtures import opened_run
 
-    out_dir = tmp_path / "out"
-    config = _config(out_dir, epochs=1, early_stopping={"enabled": False})
-    create_experiment("exp-holdout", config)
-    run = create_run(config, str(out_dir), id="auto-run-75")
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
+    config = _config(tmp_path, epochs=1, early_stopping={"enabled": False})
+    config["data"] = {**config["data"], "images_dir": str(images_dir),
+                      "labels_dir": str(csv_path)}
+    out_dir = opened_run(tmp_path, config)
+    record = read_record(out_dir / RUN_FILE)
+    run = TrainRun(id=out_dir.name, config=record["config"],
+                   objective=record["resolved"]["objective"], output_dir=str(out_dir))
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
-    # to the experiment's own record.
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       experiment_id="exp-holdout")
+    # to the run's own metrics log.
+    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
     run = ctx.default_train()
 
     assert run.status == "completed", run.error
@@ -103,7 +112,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     # A regression run selects by val_loss, so the checkpoint objective is the holdout number too.
     assert run.best_metric == pytest.approx(on_holdout["loss"], abs=1e-6)
 
-    persisted = read_metrics("exp-holdout")
+    persisted = read_rows(out_dir / METRICS_FILE)[0]
     assert len(persisted) == 1
     assert persisted[0]["val_loss"] == pytest.approx(on_holdout["loss"], abs=1e-6)
 
@@ -118,7 +127,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     out_dir = tmp_path / "out"
     config = _config(out_dir, epochs=4,
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
-    run = create_run(config, str(out_dir), id="auto-run-76")
+    run = trainer_run(config, out_dir, has_val_loader=True, id="auto-run-76")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error

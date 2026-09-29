@@ -21,6 +21,7 @@ def _cfg(images_dir, labels_dir, *, builder_kwargs, image_stats_sampling=None):
         "model_source": model_source,
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}},
+        "evaluation": {"selection_metric": "loss"},
     }
 
 
@@ -98,7 +99,7 @@ def test_preflight_admits_a_sampling_record_naming_images_inside_images_dir(tmp_
 
     r = preflight_config(cfg)
     assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
-    assert r["image_stats_containment"] == "checked"
+    assert r.get("image_stats_containment") == "checked", r
 
 
 def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):

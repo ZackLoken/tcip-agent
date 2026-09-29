@@ -28,27 +28,22 @@ class BlockCalibrationRefused(ValueError):
     """
 
 
-def _reserved_spatial_regions(split: dict) -> dict | None:
-    """The reserved calibration/test regions of a spatial-strip split, or ``None``.
-
-    ``None`` when the manifest is not a spatial-strip split at all, or when it reserved no
-    calibration or no test region.
-    """
-    if split.get("group_by") != "spatial_strip":
-        return None
-    spatial = split.get("spatial") or {}
-    if not spatial.get("calibration_region") or not spatial.get("test_region"):
+def _reserved_spatial_regions(resolved: dict) -> dict | None:
+    """The spatial manifest of a run's resolution (``data.split.spatial_manifest``) when it
+    reserved a calibration and a test region, else ``None``: a run that drew no within-image
+    spatial split, or one that reserved no calibration or no test region."""
+    spatial = resolved["data"]["split"].get("spatial_manifest")
+    if not spatial or not spatial["calibration_region"] or not spatial["test_region"]:
         return None
     return spatial
 
 
 def reserved_calibration_region_available(experiment_id: str) -> bool:
-    """Whether ``experiment_id``'s split is a spatial-strip split with a non-empty reserved
-    calibration region.
-    """
-    from tcip_mcp.experiments import read_run_partition
+    """Whether ``experiment_id``'s run (``experiments.run_resolution``) reserved a calibration
+    region in a within-image spatial split (:func:`_reserved_spatial_regions`)."""
+    from tcip_mcp.experiments import run_resolution
 
-    return _reserved_spatial_regions(read_run_partition(experiment_id)) is not None
+    return _reserved_spatial_regions(run_resolution(experiment_id)) is not None
 
 
 def _band_rects(
@@ -180,44 +175,36 @@ def resolve_block_calibration_records(
     ``experiment_id`` unresolved (``None``, or given but not found) refuses outright.
 
     The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a real
-    planting-grid pitch over the GT-object-spacing fallback when the training experiment's own
-    ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves at
-    least two georeferenced plants and the training raster's own pixel size is resolvable
+    planting-grid pitch over the GT-object-spacing fallback when the training run's resolved data
+    section (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves at least two
+    georeferenced plants and the training raster's own pixel size is resolvable
     (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source always
     falls back to GT-spacing.
 
-    ``p``'s tile edge is refused, naming both, when it differs from the run partition's own
+    ``p``'s tile edge is refused, naming both, when it differs from the spatial manifest's own
     ``tile_size``. An unstated merge threshold on ``p`` is resolved from the calibration bands'
     own GT before any band is predicted (:func:`~tcip_mcp.pipelines.calibration.resolve_pass_merge`),
     so the bands are merged at the threshold the export runs at.
     """
-    from tcip_store import store
-
-    from tcip_mcp.experiments import config_key, read_run_partition
+    from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     if experiment_id is None:
         raise BlockCalibrationRefused(
-            "block calibration refused: this checkpoint's training experiment_id could not be "
-            "resolved (no stamped experiment_id, and the registry entries naming this checkpoint "
-            "bind no run: register it in experiment mode to bind one); block calibration validates "
-            "against one specific mosaic's own reserved regions and has no meaning without "
-            "knowing which training run's split produced them."
+            "block calibration refused: no run of this project produced this checkpoint (no "
+            "completed run's final status names it); block calibration validates against one "
+            "specific mosaic's own reserved regions and has no meaning without knowing which "
+            "training run's split produced them."
         )
 
-    split = read_run_partition(experiment_id)
-    if split.get("group_by") != "spatial_strip":
-        raise BlockCalibrationRefused(
-            f"block calibration refused: experiment {experiment_id!r} has no spatial-strip split "
-            "manifest (split.json's group_by != 'spatial_strip'); block calibration only applies "
-            "to a single-mosaic training run with a reserved calibration region."
-        )
-    spatial = _reserved_spatial_regions(split)
+    resolved = run_resolution(experiment_id)
+    spatial = _reserved_spatial_regions(resolved)
     if spatial is None:
         raise BlockCalibrationRefused(
-            f"block calibration refused: experiment {experiment_id!r}'s spatial split reserved no "
-            "calibration region (train it with data.split.reserve_calibration_fraction set) or no "
-            "test region."
+            f"block calibration refused: run {experiment_id!r} resolved no within-image spatial "
+            "split with a reserved calibration and test region (train it with "
+            "data.split.reserve_calibration_fraction set); block calibration only applies to a "
+            "single-mosaic training run with a reserved calibration region."
         )
     cal_region = spatial["calibration_region"]
     test_region = spatial["test_region"]
@@ -228,13 +215,12 @@ def resolve_block_calibration_records(
             "no stem to resolve the training mosaic's own image/label files from."
         )
 
-    config = store.read(config_key(experiment_id), default={})
-    data_cfg = (config.get("data") if isinstance(config, dict) else None) or {}
+    data_cfg = resolved["data"]
     labels_dir, images_dir = data_cfg.get("labels_dir"), data_cfg.get("images_dir")
     if not labels_dir or not images_dir:
         raise BlockCalibrationRefused(
-            f"block calibration refused: experiment {experiment_id!r}'s config.json carries no "
-            "data.labels_dir/data.images_dir to resolve the training mosaic's own files from."
+            f"block calibration refused: run {experiment_id!r}'s resolved data section carries "
+            "no data.labels_dir/data.images_dir to resolve the training mosaic's own files from."
         )
     scope = p.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
     subject = cast(str, scope.subject)

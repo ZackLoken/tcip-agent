@@ -1,4 +1,4 @@
-"""Training-run cancellation (cancel_run / cancel_training; graceful stop)."""
+"""Training-run cancellation (cancel_training; graceful stop)."""
 
 import pytest
 from tests._producer_fixtures import run_over  # noqa: E402
@@ -6,17 +6,24 @@ from tests._producer_fixtures import run_over  # noqa: E402
 torch = pytest.importorskip("torch")
 
 
-def test_cancel_run_helper_and_tool():
-    from tcip_mcp.pipelines.training.run_registry import cancel_run, create_run
+def test_cancel_training_reaches_the_runs_own_poll(tmp_path, monkeypatch):
+    """A cancel requested by id is the one record the run's own poll reads; an id naming no run
+    refuses."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
     from tcip_mcp.tools.training_tools import cancel_training
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    run = create_run({"model_source": {"builder": "x:y"}}, "out", id="cancel-run-1")
-    assert cancel_run(run.id) is True
-    assert run.cancel_event.is_set()
-    assert cancel_run("no-such-run") is False
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    run_dir = opened_run(None, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
+    record = read_record(run_dir / RUN_FILE)
+    run = TrainRun(id=run_dir.name, config=record["config"],
+                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+    assert not run.should_cancel()
 
     res = cancel_training(run.id)
     assert res["cancel_requested"] is True and res["experiment_id"] == run.id
+    assert run.should_cancel()
     assert "error" in cancel_training("missing-run")
 
 
@@ -27,7 +34,8 @@ def test_cancel_before_training_yields_canceled(tmp_path):
 
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.experiments import request_cancel
+    from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -46,8 +54,9 @@ def test_cancel_before_training_yields_canceled(tmp_path):
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
         "mixed_precision": False, "early_stopping": {"enabled": False},
     }
-    run = create_run(cfg, str(tmp_path / "out"), id="cancel-run-2")
-    run.cancel_event.set()  # request cancellation before any epoch runs
+    run = trainer_run(cfg, tmp_path / "out", has_val_loader=False, id="cancel-run-2")
+    (tmp_path / "out").mkdir()
+    request_cancel(tmp_path / "out")  # request cancellation before any epoch runs
     run = train(run, loader)
 
     assert run.status == "canceled"

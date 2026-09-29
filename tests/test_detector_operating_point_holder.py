@@ -96,10 +96,10 @@ def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    return registered_checkpoint(
-        tmp_path, project_root=tmp_path, name=builder,
+    return foreign_checkpoint(
+        tmp_path, name=builder,
         model_source={"builder": f"tests.bespoke_models:{builder}", "task": "detection"},
         data={"tiling": {"enabled": False}, "num_channels": 3,
               "scope": {"subject": "bud", "id_map": {"bud": 0}}})

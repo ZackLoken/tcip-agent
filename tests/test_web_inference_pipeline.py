@@ -1,16 +1,17 @@
 """The web inference job runs through the tcip pipeline GenericPredictor, the only detector
 code path; there is no separate ultralytics+SAHI-specific one."""
 
+from pathlib import Path
+
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module drives a stubbed predictor; some assertions check the
-    checkpoint file's own digest."""
-    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
+def _checkpoint(**kwargs) -> Path:
+    """A registered checkpoint under the pinned platform root, completed by a real run
+    (``kwargs`` are its own)."""
+    from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    admit_any_checkpoint(monkeypatch, file_digest=True)
+    return Path(project_checkpoint(**kwargs))
 
 
 def test_write_predictions_json_roundtrip_and_negative(tmp_path):
@@ -55,8 +56,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
 
     captured = {}
 
@@ -98,7 +98,8 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert obj["subject"] == "bud"                   # decoded through the checkpoint's recorded map
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
-    assert obj["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
+    digest = hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]
+    assert obj["created_by"] == f"model:{ckpt.stem}@{digest}"
 
 
 def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
@@ -107,23 +108,15 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     pytest.importorskip("fastapi")
     from PIL import Image
 
-    import tcip_mcp.model_registry as model_registry_mod
     from tcip_web.routes.inference import InferenceJob, _worker
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     classified = {"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
                                                "id_map": {"closed": 0, "open": 1}}}
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: stub_verified_checkpoint(
-                            str(path), config_data=classified))
-
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint(data=classified)
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -173,8 +166,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
 
     captured = {}
 
@@ -226,8 +218,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
     captured = {}
 
     class FakeNativeFramePredictor:
@@ -276,8 +267,7 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -365,8 +355,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
 
     class FakePredictor:
         train_tile_size = 640
@@ -409,8 +398,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.jpg")
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.png")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = _checkpoint()
 
     job = InferenceJob(
         job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),

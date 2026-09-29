@@ -214,7 +214,6 @@ from tcip_mcp.store_catalog import bootstrapped_stores
 stores = bootstrapped_stores()
 assert "tcip_web" not in sys.modules, sorted(sys.modules)
 assert "learning_capture" in stores, stores
-assert "job_registry" in stores, stores
 assert "annotation_stats" in stores, stores
 print(tcip_mcp.__file__)
 """
@@ -271,8 +270,8 @@ def test_the_catalog_registers_every_store_the_claim_table_speaks_for():
 
 def test_the_catalog_reaches_every_web_owned_store_without_importing_tcip_web():
     """A caller that only needs the catalog (``export-store``, ``adopt-store``, this test
-    suite) must not pull the web package in as a side effect: the three stores the web package
-    owns register through :mod:`tcip_mcp.web_client`, which the catalog already imports.
+    suite) must not pull the web package in as a side effect: the stores the web package owns
+    register through :mod:`tcip_mcp.web_client`, which the catalog already imports.
 
     The child prints the ``tcip_mcp`` it imported, and the assertion holds it to this
     repository's own package, so a run whose environment resolves an installed copy elsewhere

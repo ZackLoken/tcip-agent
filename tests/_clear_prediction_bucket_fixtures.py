@@ -1,6 +1,6 @@
 """Shared fixtures for ``clear_prediction_bucket`` tests: a canonical bucket published through
-``run_inference`` with a fake predictor, its experiment carried to a terminal state, and review
-state recorded against it through ``ReviewEngine``.
+``run_inference`` with a fake predictor over a completed run's checkpoint, and review state
+recorded against it through ``ReviewEngine``.
 """
 
 from __future__ import annotations
@@ -11,8 +11,6 @@ from typing import Any
 import pytest
 
 torch = pytest.importorskip("torch")
-
-from tests._verified_checkpoint_fixtures import admit_any_checkpoint  # noqa: E402
 
 
 def assert_source_stamps_absent(bucket: Path) -> None:
@@ -31,13 +29,8 @@ def assert_source_stamps_absent(bucket: Path) -> None:
 def stub_predictor(monkeypatch, *, boxes: tuple[tuple[float, float, float, float], ...] = (
     (10.0, 10.0, 30.0, 30.0),
 ), scores: tuple[float, ...] | None = None) -> None:
-    """A ``GenericPredictor`` stand-in that predicts a fixed set of boxes per image, the same
-    shape ``tests/test_run_inference_bucket_handling.py``'s own fake predictor uses.
-
-    ``scores`` names each box's own confidence, one per entry of ``boxes``; omitted, every box
-    scores 0.9. Lets a caller pin a prediction's score against an earned admission rule's own
-    conf, above or below it, rather than trust an unstated default to land on either side.
-    """
+    """A ``GenericPredictor`` stand-in that predicts a fixed set of boxes per image, ``scores``
+    naming each box's own confidence, one per entry of ``boxes`` (0.9 each when omitted)."""
     box_scores = list(scores) if scores is not None else [0.9] * len(boxes)
     assert len(box_scores) == len(boxes), "scores must name one confidence per box"
 
@@ -82,43 +75,37 @@ def build_published_bucket(
     model: str = "m",
     date: str | None = "2026-03-02",
     stems: tuple[str, ...] = ("img",),
-    state: str = "completed",
     boxes: tuple[tuple[float, float, float, float], ...] = ((10.0, 10.0, 30.0, 30.0),),
     scores: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
-    """Publish a canonical bucket through ``run_inference`` with a fake predictor, carry
-    ``experiment_id`` through ``create_experiment``/``update_status`` to ``state`` (``None``
-    leaves it ``running``), and return the pieces a ``clear_prediction_bucket`` test needs:
-    ``dataset_root``, ``bucket``, ``images_dir``, ``checkpoint``, ``experiment_id``, ``result``
-    (``run_inference``'s own response). ``boxes``/``scores`` thread through to
-    :func:`stub_predictor`, so a caller can pin a prediction's score against an earned rule.
+    """Publish a canonical bucket through ``run_inference`` with a fake predictor over the
+    checkpoint the run ``experiment_id`` completed (completed once, then reused), and return the
+    pieces a ``clear_prediction_bucket`` test needs: ``dataset_root``, ``bucket``, ``images_dir``,
+    ``checkpoint``, ``experiment_id``, ``result`` (``run_inference``'s own response).
+    ``boxes``/``scores`` thread through to :func:`stub_predictor`, so a caller can pin a
+    prediction's score against an earned rule.
     """
     from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.experiments import experiment_dir, find_run, observe
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import finished_run
 
     stub_predictor(monkeypatch, boxes=boxes, scores=scores)
-    admit_any_checkpoint(monkeypatch, file_digest=True)
 
     root = dataset_root if dataset_root is not None else (tmp_path / "ds")
     images_dir = tmp_path / f"{experiment_id}_images"
     for stem in stems:
         write_image(images_dir / f"{stem}.png")
 
-    ckpt = tmp_path / f"{experiment_id}.pt"
-    if not ckpt.exists():
-        ckpt.write_bytes(b"stub")
-
-    create_experiment(experiment_id, {"model_source": {"builder": "x:y"}})
-    update_status(experiment_id, "running")
+    if find_run(experiment_id) is None:
+        finished_run(None, experiment_id=experiment_id)
+    checkpoint = observe(experiment_dir(experiment_id)).checkpoint
+    assert checkpoint is not None
+    ckpt = Path(checkpoint["path"])
 
     bucket = prediction_dir(root, model, date)
-    result = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False,
-                           experiment_id=experiment_id)
+    result = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
     assert "error" not in result, result
-
-    if state is not None and state != "running":
-        update_status(experiment_id, state)
 
     return {"dataset_root": root, "bucket": bucket, "images_dir": images_dir,
             "checkpoint": ckpt, "experiment_id": experiment_id, "result": result}

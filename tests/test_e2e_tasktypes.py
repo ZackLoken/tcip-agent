@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
@@ -74,6 +74,12 @@ def _train_config(model_source: dict, data: dict) -> dict:
     }
 
 
+def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):
+    """A run of :func:`_train_config` writing into ``tmp_path / "out"``, with no val loader."""
+    return trainer_run(_train_config(model_source, data), tmp_path / "out",
+                       has_val_loader=False, id=run_id)
+
+
 def _assert_trained(run, output_dir: Path) -> None:
     assert run.status == "completed", getattr(run, "error", run.status)
     assert run.current_epoch == 1
@@ -106,7 +112,7 @@ def test_detection_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = _model_source("build_bespoke_detection", min_size=IMG, max_size=IMG * 2)
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-15")
+    run = _run(model_source, data, tmp_path, "auto-run-15")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -134,7 +140,7 @@ def test_instance_seg_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("instance_seg"))
 
     model_source = _model_source("build_bespoke_instance_seg", min_size=IMG, max_size=IMG * 2)
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-16")
+    run = _run(model_source, data, tmp_path, "auto-run-16")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -156,12 +162,11 @@ def test_semantic_seg_e2e(tmp_path: Path):
         m[IMG // 4 : IMG // 2, IMG // 4 : IMG // 2] = 1  # a foreground block
         Image.fromarray(m, mode="L").save(masks_dir / f"img{i}.png")
 
-    dataset, data = run_over("semantic_seg", str(images_dir), str(masks_dir),
-                             stated={"num_classes": 2})
+    dataset, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
     model_source = _model_source("build_bespoke_semantic_seg")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-17")
+    run = _run(model_source, data, tmp_path, "auto-run-17")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -182,11 +187,11 @@ def test_ordinal_e2e(tmp_path: Path):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
+    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
     model_source = _model_source("build_bespoke_ordinal")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-18")
+    run = _run(model_source, data, tmp_path, "auto-run-18")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -208,14 +213,15 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
 
     loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-19")
+    run = _run(model_source, data, tmp_path, "auto-run-19")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
 
-def test_ordinal_num_ranks_mismatch_raises(tmp_path: Path):
-    """A caller-configured num_ranks too small for the CSV's real ranks must raise, not train
-    the excess ranks as silent duplicates of the top rank."""
+def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
+    """A caller-configured num_ranks raises: the rank count is the CSV's own, so a stated one
+    (here too small, which would train the excess ranks as silent duplicates of the top rank)
+    is refused rather than compared."""
     images_dir = tmp_path / "images"
     rows = []
     for rank in range(7):
@@ -243,8 +249,8 @@ def test_classification_derives_num_classes_from_data(tmp_path: Path):
     assert data["num_classes"] == 4 and data.get("num_ranks") is None
 
 
-def test_classification_num_classes_mismatch_raises(tmp_path: Path):
-    """A caller-configured num_classes too small for the CSV's real labels must raise."""
+def test_classification_num_classes_stated_raises(tmp_path: Path):
+    """A caller-configured num_classes raises: the class count is the CSV's own."""
     images_dir = tmp_path / "images"
     rows = []
     for label in range(4):
@@ -270,7 +276,7 @@ def test_regression_e2e(tmp_path: Path):
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
     model_source = _model_source("build_bespoke_regressor")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-20")
+    run = _run(model_source, data, tmp_path, "auto-run-20")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -291,10 +297,10 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "ranks.csv"
     _write_csv(csv_path, rows, ("stem", "rank"))
 
-    dataset, data = run_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 3})
+    dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-21")
+    run = _run(model_source, data, tmp_path, "auto-run-21")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 
@@ -326,7 +332,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     dataset, data = run_over("regression", str(images_dir), str(csv_path))
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
-    run = create_run(_train_config(model_source, data), str(tmp_path / "out"), id="auto-run-22")
+    run = _run(model_source, data, tmp_path, "auto-run-22")
     run = train(run, loader, val_loader=None)
     _assert_trained(run, tmp_path / "out")
 

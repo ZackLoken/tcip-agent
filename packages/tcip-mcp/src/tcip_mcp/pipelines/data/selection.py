@@ -320,7 +320,8 @@ def selection_path(selection_dir: str | Path) -> Path:
     return Path(key.root, *relative.parts)
 
 
-def _sample_document(sample: Sample) -> dict[str, Any]:
+def sample_document(sample: Sample) -> dict[str, Any]:
+    """The JSON shape one sample is recorded as, the one :func:`read_sample` reads back."""
     doc: dict[str, Any] = {
         "member": sample.member, "source": sample.source, "ground_truth": sample.ground_truth,
         "group": sample.group, "side": sample.side,
@@ -339,12 +340,57 @@ def _sample_document(sample: Sample) -> dict[str, Any]:
 def selection_document(selection: Selection) -> dict[str, Any]:
     """The JSON shape a selection is written as, the one :func:`as_selection` reads back."""
     return {
-        "samples": [_sample_document(s) for s in selection.samples],
+        "samples": [sample_document(s) for s in selection.samples],
         "scope": asdict(selection.scope),
         "seed": selection.seed,
         "group_by": selection.group_by,
         "dataset_fingerprint": selection.dataset_fingerprint,
     }
+
+
+def read_sample(raw: Any, position: int, where: str) -> Sample:
+    """One recorded sample document read back as a :class:`Sample`, refusing by name (naming
+    ``position`` in the record at ``where``) a non-mapping, a sample missing
+    ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, a
+    malformed ``rect``, and a sample whose ground truth is its own label document and which names
+    no ``confirmation_bucket``."""
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping.")
+    missing = [k for k in ("member", "source", "ground_truth", "group", "side") if not raw.get(k)]
+    if missing:
+        raise ValueError(
+            f"sample {position} of the record at {where} carries no {missing}: every sample names "
+            "its own member, source, ground truth, group key and side.")
+    side = str(raw["side"])
+    if side not in SIDES:
+        raise ValueError(
+            f"sample {position} of the record at {where} is on side {side!r}, which is none of "
+            f"{list(SIDES)}.")
+    rect_raw = raw.get("rect")
+    rect: tuple[int, int, int, int] | None = None
+    if rect_raw is not None:
+        if not isinstance(rect_raw, (list, tuple)) or len(rect_raw) != 4:
+            raise ValueError(
+                f"sample {position} of the record at {where} carries rect {rect_raw!r}, not a "
+                "half-open pixel rect (x0, y0, x1, y1).")
+        x0, y0, x1, y1 = (int(v) for v in rect_raw)
+        rect = (x0, y0, x1, y1)
+    row_key = raw.get("row_key")
+    bucket = raw.get("confirmation_bucket")
+    sample = Sample(
+        member=str(raw["member"]), source=str(raw["source"]), ground_truth=str(raw["ground_truth"]),
+        group=str(raw["group"]), side=side,
+        confirmation_bucket=str(bucket) if bucket else None, rect=rect,
+        row_key=str(row_key) if row_key is not None else None,
+        ground_truth_digest=raw.get("ground_truth_digest"),
+    )
+    if sample.confirmation_bucket is None and sample.shape == DOCUMENT:
+        raise ValueError(
+            f"sample {position} of the record at {where} names its own label document and no "
+            "confirmation_bucket: that admission reads a human confirmation store, so the bucket "
+            "it read is part of the sample. Draw it again.")
+    return sample
 
 
 def as_selection(document: Any, *, where: str) -> Selection:
@@ -370,47 +416,7 @@ def as_selection(document: Any, *, where: str) -> Selection:
             f"the selection at {where} lists no samples: a selection is its sample list, so an "
             "empty one binds nothing. Draw it again over the current data."
         )
-    samples: list[Sample] = []
-    for position, raw in enumerate(raw_samples):
-        if not isinstance(raw, dict):
-            raise ValueError(
-                f"sample {position} of the selection at {where} is a "
-                f"{type(raw).__name__}, not a mapping.")
-        missing = [k for k in ("member", "source", "ground_truth", "group", "side")
-                   if not raw.get(k)]
-        if missing:
-            raise ValueError(
-                f"sample {position} of the selection at {where} carries no {missing}: every "
-                "sample names its own member, source, ground truth, group key and side.")
-        side = str(raw["side"])
-        if side not in SIDES:
-            raise ValueError(
-                f"sample {position} of the selection at {where} is on side {side!r}, which is "
-                f"none of {list(SIDES)}.")
-        rect_raw = raw.get("rect")
-        rect: tuple[int, int, int, int] | None = None
-        if rect_raw is not None:
-            if not isinstance(rect_raw, (list, tuple)) or len(rect_raw) != 4:
-                raise ValueError(
-                    f"sample {position} of the selection at {where} carries rect {rect_raw!r}, "
-                    "not a half-open pixel rect (x0, y0, x1, y1).")
-            x0, y0, x1, y1 = (int(v) for v in rect_raw)
-            rect = (x0, y0, x1, y1)
-        row_key = raw.get("row_key")
-        bucket = raw.get("confirmation_bucket")
-        sample = Sample(
-            member=str(raw["member"]), source=str(raw["source"]), ground_truth=str(raw["ground_truth"]),
-            group=str(raw["group"]), side=side,
-            confirmation_bucket=str(bucket) if bucket else None, rect=rect,
-            row_key=str(row_key) if row_key is not None else None,
-            ground_truth_digest=raw.get("ground_truth_digest"),
-        )
-        if sample.confirmation_bucket is None and sample.shape == DOCUMENT:
-            raise ValueError(
-                f"sample {position} of the selection at {where} names its own label document "
-                "and no confirmation_bucket: that admission reads a human confirmation store, so "
-                "the bucket it read is part of the sample. Draw the selection again.")
-        samples.append(sample)
+    samples = [read_sample(raw, position, where) for position, raw in enumerate(raw_samples)]
     refuse_crossing_sides(samples)
     scope = ClassScope.of(document).admitted_for(samples[0].shape, f"the selection at {where}")
     return Selection(

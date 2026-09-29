@@ -237,16 +237,12 @@ def test_resolve_operating_point_content_shared_holdout_is_false():
 
 
 def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     labels_dir = str(tmp_path / "labels")
-    tcip_store.replace(split_key("exp1"), {
-        "members": {labels_dir: {"train": ["a_0_0", "a_0_1"], "val": []}},
-        "group_by": "tile_prefix"})
+    _persist_run_split("exp1", tmp_path, date=None, train=["a_0_0", "a_0_1"], val=[],
+                       group_by="tile_prefix", labels_dir=labels_dir)
 
     # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
     cal = [{"width": 400, "height": 400, "image_id": "a_0_2", "gt": [_ann(100, 100)],
@@ -261,35 +257,26 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
     assert conf.gate_evidence["train_disjointness"]["leaked_groups"] == ["a"]
 
 
-def test_resolve_operating_point_train_disjointness_unresolvable_when_split_missing(tmp_path, monkeypatch):
+def test_resolve_operating_point_refuses_an_experiment_id_naming_no_run(tmp_path, monkeypatch):
+    """A stated experiment_id naming no run directory refuses by name, unlike the
+    experiment_id=None case (a foreign checkpoint), which no run's partition answers for."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
-    # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = good_cal_holdout()
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
+    with pytest.raises(ValueError, match="does-not-exist"):
+        resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
-    conf = b.get("conf")
-    assert conf.validated_against == "false"
-    assert conf.gate_evidence["train_disjointness"] == {"checked": False, "unresolvable": True,
-                                                 "leaked_groups": [], "leaked_stems": [],
-                                                 "group_check": None}
-    assert "train_disjointness_unresolvable" in conf.gate_evidence["failures"]
 
 
 def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     labels_dir = str(tmp_path / "labels")
-    tcip_store.replace(split_key("exp2"), {
-        "members": {labels_dir: {"train": ["z_0_0", "z_0_1"], "val": []}},
-        "group_by": "tile_prefix"})
+    _persist_run_split("exp2", tmp_path, date=None, train=["z_0_0", "z_0_1"], val=[],
+                       group_by="tile_prefix", labels_dir=labels_dir)
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
     cal, hold = good_cal_holdout()
@@ -310,16 +297,11 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
 def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monkeypatch):
     """cal_rects/hold_rects default to None: a caller that passes neither gets the lexical
     spatial_strip check, never the geometric one."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_rects_noop"), {
-        "spatial": {"train_identities": ["mosaic::strip_x_1"], "val_identities": []},
-        "group_by": "spatial_strip",
-    })
+    _persist_run_split("exp_rects_noop", tmp_path, date=None, train=["mosaic::strip_x_1"],
+                       val=[], group_by="spatial_strip")
     cal, hold = good_cal_holdout()
 
     omitted = resolve_operating_point("bud_opening", slicing=None, dataset_hash="h1",
@@ -340,20 +322,14 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
     them into the geometric containment check instead of the lexical same-source one, catching a
     leak the lexical check alone would miss (a rect whose own source name isn't a training stem
     at all, but whose geometry spills into the persisted train region)."""
-    import tcip_store
-
-    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    tcip_store.replace(split_key("exp_rects_geo"), {
-        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
-        "spatial": {
-            "train_region": [[0, 0, 500, 1000]],
-            "val_region": [[500, 0, 750, 1000]],
-            "test_region": [[750, 0, 1000, 1000]],
-        },
-    })
+    _persist_run_split("exp_rects_geo", tmp_path, date=None, train=["mosaic::strip_x_1"],
+                       val=[], group_by="spatial_strip", spatial={
+                           "train_region": [[0, 0, 500, 1000]],
+                           "val_region": [[500, 0, 750, 1000]],
+                           "test_region": [[750, 0, 1000, 1000]]})
     cal, hold = good_cal_holdout()
     cal_id = cal[0]["image_id"]
 
@@ -370,34 +346,36 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
 # --- Selection-disjointness: a checkpoint's own held-out (val) side, not its train side -----
 
 def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
-                       group_by=None, selection_dir=None, labels_dir=None):
-    """A real ``split.json`` for one producing run, written through the platform's own
-    ``persist_run_partition``, never composed by hand: ``train``/``val`` are bare stems under
-    ``date``, ``group_by`` an already-resolved policy (``"spatial_strip"``/``"stem"``/a named
-    strategy), and ``selection_dir`` (when given) records the run as bound to that selection.
+                       group_by=None, selection_dir=None, labels_dir=None, spatial=None):
+    """One producing run whose resolution names a chosen partition: a real run the launcher's
+    own producer and writer opened, what its launch record says it resolved then set past that
+    writer to a partition built by the platform's own ``_partition_record``: ``train``/``val``
+    are bare stems under ``date``, ``group_by`` an already-resolved policy
+    (``"spatial_strip"``/``"stem"``/a named strategy), and ``selection_dir`` (when given) records
+    the run as bound to that selection.
 
-    The per-scope ``members`` block is built by :func:`_recorded_partition`, the producer every
-    run's own record is written from, over samples naming that directory, so these records have
-    the shape a run written under the current tree has. A ``spatial_strip`` run records its own
-    region identities and no member block, the way the within-image route does.
+    A ``spatial_strip`` run records its own region identities (plus any ``spatial`` regions) in
+    its resolved data section's ``spatial_manifest``, the way the within-image route does.
     """
-    from tcip_mcp.dataset_layout import status_bucket
-    from tcip_mcp.experiments import create_experiment, experiment_exists
-    from tcip_mcp.pipelines.data.selection import Sample
-    from tcip_mcp.pipelines.data.split_construction import _recorded_partition, persist_run_partition
-    from tcip_mcp.pipelines.data.splits import member_identity, recorded_group_key_fn
+    from tcip_store import RECORD_JSON
 
-    if not experiment_exists(experiment_id):
-        create_experiment(experiment_id, {})
-    split_cfg: dict = {"resolved_seed": 0, "resolved_group_by": group_by or "stem"}
+    from tcip_mcp.dataset_layout import status_bucket
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.split_construction import _partition_record
+    from tcip_mcp.pipelines.data.splits import member_identity, recorded_group_key_fn
+    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
+
+    run_dir = opened_run(None, detection_config(fixture_data_dir(None, experiment_id)),
+                         experiment_id=experiment_id)
+    split_cfg: dict = {}
     if group_by == "spatial_strip":
         split_cfg["spatial_manifest"] = {"train_identities": list(train),
-                                         "val_identities": list(val)}
-    if selection_dir is not None:
-        split_cfg["selection_binding"] = {
-            "selection_dir": selection_dir, "selection_sha256": None, "redraw": False}
-    here = Path(labels_dir) if labels_dir is not None else tmp_path / "annotations" / date
-    data_cfg = {"labels_dir": str(here), "split": split_cfg}
+                                         "val_identities": list(val), **(spatial or {})}
+    selection = (None if selection_dir is None else
+                 {"selection_dir": selection_dir, "selection_sha256": None, "redraw": False})
+    annotations = tmp_path / "annotations" / date if date is not None else tmp_path / "annotations"
+    here = Path(labels_dir) if labels_dir is not None else annotations
     group_of = (recorded_group_key_fn(group_by, date=date)
                 if group_by in ("tile_prefix", "stem")
                 else (lambda stem: member_identity(date, stem)))
@@ -409,11 +387,12 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
                       ground_truth=str(here / f"{stem}.json"), group=group_of(stem),
                       side=side, confirmation_bucket=status_bucket("bud", date))
 
-    train_samples = [_sample(stem, "train") for stem in train]
-    val_samples = [_sample(stem, "val") for stem in val]
-    partition = (None if group_by == "spatial_strip" else _recorded_partition(
-        train_samples, val_samples, train_samples + val_samples))
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
+    samples = [_sample(stem, "train") for stem in train] + [_sample(stem, "val") for stem in val]
+    record = read_record(run_dir / RUN_FILE)
+    record["resolved"]["data"].update(labels_dir=str(here), split=split_cfg)
+    record["resolved"]["partition"] = _partition_record(
+        samples, seed=0, group_by=group_by or "stem", selection=selection)
+    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
 
 
 def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(
@@ -822,7 +801,7 @@ def test_classification_metrics_per_class_and_bias():
     gt = torch.tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])    # 6 closed, 4 open
     pred = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 1, 1])  # classifier predicts 6 as open
     m = classification_metrics(pred, gt, num_classes=2)
-    assert m["per_class"][1]["support"] == 4
+    assert m["per_class"]["1"]["support"] == 4
     # over-predicting the open class inflates the open fraction: bias (6-4)/4 = +0.5
-    assert m["count_bias"][1] == pytest.approx(0.5)
+    assert m["count_bias"]["1"] == pytest.approx(0.5)
     assert "accuracy" in m and "f1" in m  # existing keys preserved (additive)

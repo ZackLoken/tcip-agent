@@ -26,7 +26,7 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 
 def build_probe_net(*, num_classes: int = 2, in_chans: int = 3):
@@ -314,7 +314,9 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     trained = build_model(config, recorded_model_dims(config))
     assert _param_shapes(trained)["head.weight"] == (7, 6, 1, 1)  # the recorded count took effect
 
-    ctx = TrainContext(run=create_run(dict(config), str(tmp_path / "out"), id="auto-run-40"),
+    (tmp_path / "out").mkdir()
+    ctx = TrainContext(run=trainer_run(dict(config), tmp_path / "out", has_val_loader=True,
+                                       id="auto-run-40"),
                        train_loader=None)
     path = ctx.save_checkpoint({"model_state_dict": trained.state_dict()}, "model_best")
 

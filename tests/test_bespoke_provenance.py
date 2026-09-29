@@ -1,9 +1,9 @@
-"""Code+env provenance for a bespoke (model_source) run.
+"""Code provenance for a bespoke (model_source) run.
 
-Locks: snapshot_model_source (copy source files + sha256 + env + seed), KIND_TCIP_MODULE stamping,
-the _kind_from_ckpt structural fallback, build_predictor rebuilding a bespoke model from its
-importable builder (no exec) + predicting, and register_model_from_experiment round-tripping the
-bespoke kind.
+Locks: snapshot_model_source (copy source files + sha256), KIND_TCIP_MODULE stamping, the
+_kind_from_ckpt structural fallback, build_predictor rebuilding a bespoke model from its importable
+builder (no exec) + predicting, and a completed run's registry entry round-tripping the bespoke
+kind.
 """
 
 from __future__ import annotations
@@ -24,14 +24,10 @@ from tcip_mcp.pipelines.inference.predictor import (  # noqa: E402
 )
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
-    snapshot_file_key,
-    snapshot_manifest_key,
     snapshot_model_source,
     stamp_model_ref,
 )
 from tests import bespoke_models  # noqa: E402
-
-import tcip_store as ts  # noqa: E402
 
 
 def _model_source() -> dict:
@@ -49,7 +45,7 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 
 
 # --------------------------------------------------------------------------
-# snapshot_model_source: source files + sha256 + env
+# snapshot_model_source: source files + sha256
 # --------------------------------------------------------------------------
 
 def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
@@ -58,12 +54,11 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     manifest = snapshot_model_source({"model_source": _model_source(), "seed": 123}, exp_dir)
 
     assert manifest is not None
-    assert ts.exists(snapshot_manifest_key(exp_dir))
     expected_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
-    assert (exp_dir / "model_src" / entry["file"]).is_file()  # content-addressed destination
+    stored = (exp_dir / "model_src" / entry["file"]).read_bytes()  # content-addressed destination
+    assert hashlib.sha256(stored).hexdigest() == expected_sha
     assert manifest["builder"].endswith(":build_bespoke_detector")
-    assert manifest["env"]["torch"]
     assert "seed" not in manifest
     assert manifest["missing"] == []
     assert manifest["snapshot_errors"] == []
@@ -145,34 +140,6 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
         dst = exp_dir / "model_src" / e["file"]
         assert dst.is_file()
         assert hashlib.sha256(dst.read_bytes()).hexdigest() == e["sha256"]  # not clobbered
-
-
-def test_every_snapshotted_file_reads_back_through_the_store_with_the_manifests_digest(tmp_path):
-    """The writer is snapshot_model_source, which put_blobs each source file under
-    snapshot_file_key(exp_dir, sha256[:8], filename). The reader is tcip_store.read_blob_versioned
-    on that same key: this store exposes no bare read_blob, and open_blob is for a blob too large
-    to hold in memory, which a test fixture is not. For every entry the manifest records, the
-    bytes read back through the key must equal the source file's own bytes, and hashlib.sha256 of
-    those bytes must equal the entry's own sha256: a manifest whose digest nobody re-derived from
-    the stored blob is a document only its writer's test has seen."""
-    exp_dir = tmp_path / "exp"
-    exp_dir.mkdir()
-    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
-    a_dir.mkdir()
-    b_dir.mkdir()
-    (a_dir / "model.py").write_text("# builder A")
-    (b_dir / "model.py").write_text("# builder B, different content")
-
-    src = {"builder": "tests.bespoke_models:build_bespoke_detector",
-          "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
-    manifest = snapshot_model_source({"model_source": src}, exp_dir)
-
-    assert manifest["files"]
-    for entry in manifest["files"]:
-        content, filename = entry["file"].split("/", 1)
-        stored = ts.read_blob_versioned(snapshot_file_key(exp_dir, content, filename)).value
-        assert stored == Path(entry["src"]).read_bytes()
-        assert hashlib.sha256(stored).hexdigest() == entry["sha256"]
 
 
 # --------------------------------------------------------------------------
@@ -269,28 +236,19 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# register_model_from_experiment round-trips the bespoke kind
+# a completed run's registry entry round-trips the bespoke kind
 # --------------------------------------------------------------------------
 
 def test_register_round_trips_bespoke_kind(tmp_path):
-    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    src = _model_source()
-    model = build_model({"model_source": src}, _DIMS)
-    ckpt = tmp_path / "model_best.pt"
-    payload = stamp_model_ref(
-        {"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
-         "config": {"model_source": src, "data": _DATA}})
-    torch.save(payload, ckpt)
+    finished_run(tmp_path, experiment_id="expB", model_source=_model_source(), data=_DATA,
+                 metrics={"val_loss": 0.3, "epoch": 1})
 
-    create_experiment("expB", {"model_source": src}, data_source="imgs")
-    assert "error" not in complete_run("expB", str(ckpt))
-    result = register_model_from_experiment("expB", str(ckpt))
-    assert result["metrics"]["val_loss"] == pytest.approx(0.3)
-
-    entry = ModelRegistry(str(tmp_path)).get_model("expB")
-    assert entry is not None
-    assert entry["kind"] == KIND_TCIP_MODULE   # round-tripped from the stamped checkpoint
+    [entry] = [m for m in ModelRegistry(str(tmp_path)).list_models()
+               if m["experiment_id"] == "expB"]
+    assert entry["metrics"]["val_loss"] == pytest.approx(0.3)
+    assert entry["kind"] == KIND_TCIP_MODULE   # read from the stamped checkpoint's payload
     assert entry["sha256"] and len(entry["sha256"]) == 64
     assert entry["experiment_id"] == "expB"

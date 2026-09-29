@@ -1,15 +1,16 @@
 """Dispatch, terminal state, and deliverable selection around a bespoke ``train(ctx)`` body.
 
-The envelope decides the run's terminal state and its deliverable from what the body actually
-did, never from the fact that a ``.pt`` exists: a canceled body, a body that recorded its own
-failure, and a body that raised all leave a checkpoint on disk and none of them may register a
-model. When the run is genuinely complete, an explicit ``set_final_weights`` outranks the
-filename convention and the convention itself prefers the best checkpoint over the last one.
-Provenance is re-snapshotted after the body ran, so ``env.json`` carries the real outcome.
+The envelope decides the run's final status and its deliverable from what the body actually did,
+never from the fact that a ``.pt`` exists: a canceled body, a body that recorded its own failure,
+a body that raised and a body past its wall clock all leave a checkpoint on disk and none of them
+may complete with one. When the run is genuinely complete, an explicit ``set_final_weights``
+outranks the convention, and the convention itself prefers the best checkpoint the body saved
+over the last one.
 """
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -19,9 +20,9 @@ import tcip_store as ts
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
-from tcip_mcp.experiments import status_key  # noqa: E402
+from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
+from tests._verified_checkpoint_fixtures import completed_checkpoint as _completed  # noqa: E402
 
 
 def _audit_statuses(root, tool="training_run"):
@@ -29,27 +30,22 @@ def _audit_statuses(root, tool="training_run"):
     return [e["status"] for e in events if e.get("tool") == tool]
 
 
-def _experiment_state(root, experiment_id):
-    return ts.read(status_key(experiment_id, root=root))["state"]
+def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[TrainContext, Path]:
+    """Run the body ``body_name`` of this module through the envelope, over a run directory the
+    launcher's own writer opened."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-
-def _start(tmp_path, experiment_id, body_name):
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.training.run_registry import draw_seed_if_unset
-
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:{body_name}",
-        "device": "cpu",
-    }
-    create_experiment(experiment_id, config, data_source="imgs")
-    update_status(experiment_id, "running")
-    draw_seed_if_unset(config)
-    run = create_run(config, str(tmp_path / "out"), id="auto-run-26")
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id=experiment_id)
+    run_dir = opened_run(tmp_path, detection_config(
+        tmp_path / "data", training_source=f"{__name__}:{body_name}", device="cpu"))
+    record = read_record(run_dir / RUN_FILE)
+    run = TrainRun(id=run_dir.name, config=record["config"],
+                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+    run.deadline = deadline
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None)
     run_training_envelope(ctx)
-    return ctx
+    return ctx, run_dir
 
 
 def _train_saves_best_then_final(ctx):
@@ -59,69 +55,86 @@ def _train_saves_best_then_final(ctx):
 
 
 def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    ctx = _start(tmp_path, "expBest", "_train_saves_best_then_final")
+    ctx, run_dir = _start(tmp_path, "_train_saves_best_then_final")
 
     assert ctx.run.status == "completed"
-    assert ctx.final_weights.endswith("model_best.pt")
-    entry = ModelRegistry(str(tmp_path)).get_model("expBest")
-    assert entry is not None
-    assert entry["checkpoint_path"].endswith("model_best.pt")
-    assert entry["metrics"]["val_loss"] == 0.2
-    assert entry["metrics"]["epoch"] == 4
+    assert ctx.run.deliverable == ctx.run.saved["model_best"]
+    checkpoint = _completed(run_dir)
+    assert checkpoint is not None
+    assert checkpoint["path"].endswith("model_best.pt")
+    assert checkpoint["metrics"]["val_loss"] == 0.2
+    assert checkpoint["metrics"]["epoch"] == 4
 
 
 def _train_declares_its_own_deliverable(ctx):
     """A loop whose shippable weights live under a tag outside the model_best/model_final pair."""
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.8, "epoch": 9}}, "model_best")
-    path = ctx.save_checkpoint(
+    ctx.save_checkpoint(
         {"model_state_dict": {}, "metrics": {"val_loss": 0.2, "epoch": 4}}, "ema_weights")
-    ctx.set_final_weights(path)
+    ctx.set_final_weights("ema_weights")
 
 
 def test_an_explicit_deliverable_outranks_the_filename_convention(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    ctx = _start(tmp_path, "expExplicit", "_train_declares_its_own_deliverable")
+    ctx, run_dir = _start(tmp_path, "_train_declares_its_own_deliverable")
 
     assert ctx.run.status == "completed"
-    assert ctx.final_weights.endswith("ema_weights.pt")
-    entry = ModelRegistry(str(tmp_path)).get_model("expExplicit")
-    assert entry is not None
-    assert entry["checkpoint_path"].endswith("ema_weights.pt")
-    assert entry["metrics"]["val_loss"] == 0.2
+    assert ctx.run.deliverable == ctx.run.saved["ema_weights"]
+    checkpoint = _completed(run_dir)
+    assert checkpoint is not None
+    assert checkpoint["path"].endswith("ema_weights.pt")
+    assert checkpoint["metrics"]["val_loss"] == 0.2
 
 
-def test_registered_metrics_source_is_training_source_for_a_bespoke_loop(tmp_path):
-    """``save_checkpoint``'s own contract (envelope.py): a ``metrics`` key in the saved state
-    becomes the registered entry's metrics with ``metrics_source='training_source'``, since the
-    platform wrote what the loop chose into the artifact and never measured it itself."""
-    from tcip_mcp.model_registry import ModelRegistry
+def test_completed_metrics_source_is_training_source_for_a_bespoke_loop(tmp_path):
+    """``save_checkpoint``'s own contract: a ``metrics`` key in the saved state becomes the
+    completed checkpoint's metrics with ``metrics_source='training_source'``, since the platform
+    wrote what the loop chose into the artifact and never measured it itself."""
+    _, run_dir = _start(tmp_path, "_train_saves_best_then_final")
 
-    _start(tmp_path, "expTrainingSource", "_train_saves_best_then_final")
+    checkpoint = _completed(run_dir)
+    assert checkpoint is not None
+    assert checkpoint["metrics_source"] == "training_source"
+    assert checkpoint["metrics"]["val_loss"] == 0.2
 
-    entry = ModelRegistry(str(tmp_path)).get_model("expTrainingSource")
-    assert entry is not None
-    assert entry["metrics_source"] == "training_source"
-    assert entry["metrics"]["val_loss"] == 0.2
+
+class _OutsideTheContract:
+    """A value ``torch.load(weights_only=True)`` refuses to unpickle."""
+
+
+def _train_leaves_an_undecodable_deliverable(ctx):
+    """A loop whose declared deliverable holds state the verified reader refuses to unpickle."""
+    ctx.save_checkpoint({"model_state_dict": {}, "extra": _OutsideTheContract()}, "model_best")
+    ctx.set_final_weights("model_best")
+
+
+def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(tmp_path):
+    """Completion names only a checkpoint the verified reader admits: a declared deliverable
+    whose payload it refuses ends the run failed, and its final status names no checkpoint."""
+    ctx, run_dir = _start(tmp_path, "_train_leaves_an_undecodable_deliverable")
+
+    final = observe(run_dir).final
+    assert ctx.run.status == "failed"
+    assert final["state"] == "failed" and final["error"]
+    assert final["checkpoint"] is None
+    assert _completed(run_dir) is None
+    assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
 def _train_stops_on_cancel(ctx):
     """A loop that checkpoints, then honors a cancellation request and returns."""
+    from tcip_mcp.experiments import request_cancel
+
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_final")
-    ctx.run.cancel_event.set()
+    request_cancel(ctx.run_dir)
 
 
-def test_a_canceled_run_registers_no_model_despite_its_checkpoint(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    ctx = _start(tmp_path, "expCanceled", "_train_stops_on_cancel")
+def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(tmp_path):
+    ctx, run_dir = _start(tmp_path, "_train_stops_on_cancel")
 
     assert ctx.run.status == "canceled"
-    assert (tmp_path / "out" / "model_final.pt").is_file()
-    assert ModelRegistry(str(tmp_path)).get_model("expCanceled") is None
-    assert _experiment_state(tmp_path, "expCanceled") == "canceled"
+    assert (run_dir / "model_final.pt").is_file()
+    assert observe(run_dir).final["state"] == "canceled"
+    assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "canceled"]
 
 
@@ -133,94 +146,47 @@ def _train_records_its_own_failure(ctx):
 
 
 def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    ctx = _start(tmp_path, "expSelfFailed", "_train_records_its_own_failure")
+    ctx, run_dir = _start(tmp_path, "_train_records_its_own_failure")
 
     assert ctx.run.status == "failed"
-    assert ctx.run.error == "loss diverged at stage 2"
-    assert (tmp_path / "out" / "model_best.pt").is_file()
-    assert ModelRegistry(str(tmp_path)).get_model("expSelfFailed") is None
-    assert _experiment_state(tmp_path, "expSelfFailed") == "failed"
+    final = observe(run_dir).final
+    assert (final["state"], final["error"]) == ("failed", "loss diverged at stage 2")
+    assert (run_dir / "model_best.pt").is_file()
+    assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
 def _train_raises_after_checkpointing(ctx):
     """A loop that declares its best checkpoint as it improves, then dies partway through."""
-    path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_best")
-    ctx.set_final_weights(path)
+    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_best")
+    ctx.set_final_weights("model_best")
     raise RuntimeError("device ran out of memory mid-epoch")
 
 
-def test_a_raised_failure_closes_the_run_failed_and_registers_nothing(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    ctx = _start(tmp_path, "expRaised", "_train_raises_after_checkpointing")
+def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(tmp_path):
+    ctx, run_dir = _start(tmp_path, "_train_raises_after_checkpointing")
 
     assert ctx.run.status == "failed"
-    assert "out of memory" in ctx.run.error
-    assert (tmp_path / "out" / "model_best.pt").is_file()
-    assert ModelRegistry(str(tmp_path)).get_model("expRaised") is None
-    assert _experiment_state(tmp_path, "expRaised") == "failed"
+    assert "out of memory" in observe(run_dir).final["error"]
+    assert (run_dir / "model_best.pt").is_file()
+    assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
-def _train_races_the_wall_clock_watchdog(ctx):
-    """A loop that finishes normally in-process while a separate watchdog thread has already
-    marked the stored record failed, the one reachable complete_run refusal: the record was
-    already terminal by the time the child reached its own finalize step."""
-    from tcip_mcp.experiments import update_status
-
-    path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.3}}, "model_best")
-    ctx.set_final_weights(path)
-    update_status(ctx.experiment_id, "failed", error="killed by the wall-clock watcher")
+def _train_finishes_past_the_wall_clock(ctx):
+    """A loop that finishes normally and declares its weights after its deadline passed."""
+    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.3}}, "model_best")
+    ctx.set_final_weights("model_best")
 
 
-def test_a_wall_clock_failed_record_reached_by_finalize_run_registers_nothing(tmp_path):
-    """A run whose stored record turned terminal out from under it stays failed with no pointer
-    and no registry entry: the closing wiring reconciles run.status to what the record actually
-    holds, so the closing audit event agrees with the record rather than contradicting it."""
-    from tcip_mcp.experiments import artifacts_key
-    from tcip_mcp.model_registry import ModelRegistry
+def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(tmp_path):
+    """The wall clock is the run's own fact: a body that returned normally past its deadline
+    ends failed naming the limit, and its weights are never the completed checkpoint."""
+    ctx, run_dir = _start(tmp_path, "_train_finishes_past_the_wall_clock",
+                          deadline=time.time() - 1)
 
-    ctx = _start(tmp_path, "expWallClock", "_train_races_the_wall_clock_watchdog")
-
-    assert ctx.run.status == "failed"  # reconciled to what the record holds, not the body's belief
-    assert "failed (terminal)" in ctx.run.error
-    assert ctx.final_weights.endswith("model_best.pt")
-    assert Path(ctx.final_weights).is_file()
-    assert ModelRegistry(str(tmp_path)).get_model("expWallClock") is None
-    assert _experiment_state(tmp_path, "expWallClock") == "failed"
-    assert "model_weights" not in ts.read(artifacts_key("expWallClock"))
+    assert ctx.run.status == "failed"
+    assert observe(run_dir).final["error"] == "exceeded max_wall_clock_seconds"
+    assert (run_dir / "model_best.pt").is_file()
+    assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
-
-
-def test_a_wall_clock_refusal_needs_no_audit_line_to_reconcile(tmp_path, monkeypatch):
-    """A refusal writes no line, so a refused audit log changes nothing about it: complete_run
-    returns its refusal dict, _finalize_run reconciles run.status from it, and
-    run_training_envelope's closing event still fires."""
-    from tcip_mcp.audit import AuditEntryNotWritten
-    from tcip_mcp.experiments import create_experiment, update_status
-
-    experiment_id = "expWallClockUnaudited"
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:_train_races_the_wall_clock_watchdog",
-        "device": "cpu",
-    }
-    create_experiment(experiment_id, config, data_source="imgs")
-    update_status(experiment_id, "running")
-    run = create_run(config, str(tmp_path / "out"), id="auto-run-27")
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id=experiment_id)
-
-    def _boom(tool, *a, **k):
-        raise AuditEntryNotWritten(tool, OSError("simulated audit append failure"))
-
-    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
-
-    run_training_envelope(ctx)
-
-    assert ctx.run.status == "failed"  # reconciled to what the record holds despite the raise
-    assert _experiment_state(tmp_path, experiment_id) == "failed"
-    assert _audit_statuses(tmp_path) == ["running", "failed"]  # the closing event still fired

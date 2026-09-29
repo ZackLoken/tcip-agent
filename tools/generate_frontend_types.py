@@ -21,8 +21,8 @@ property set) refuses by name.
 ``tcip_mcp.web_client.TAB_NAMES`` and ``PLATFORM_PANEL_EVENTS``, each of ``web_client``'s own
 named ``PANEL_EVENT_*`` constants, ``routes/images.py``'s ``IMAGE_ERROR_HEADER`` and
 ``OVERVIEWS_REQUIRED``, ``tcip_mcp.dataset_layout.LABEL_SUFFIX`` (the suffix every per-image
-record is named with), and ``tcip_web.jobstore.TERMINAL_STATUSES`` are projected alongside the
-models as runtime constants, and ``tcip_web.jobstore.JobStatus`` as a bare union type, none of
+record is named with), and ``tcip_mcp.experiments.TERMINAL_STATES`` are projected alongside the
+models as runtime constants, and ``tcip_web.jobstore.JOB_STATES`` as a bare union type, none of
 them schema-derived.
 
 Run it after changing a declared model; it rewrites the module in place.
@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import get_args
 
 from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
@@ -48,7 +47,7 @@ HEADER = """/**
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.traits,
  * tcip_web.state.GuiVocabulary), plus a handful of
  * runtime constants (routes/images.py, tcip_mcp.web_client, tcip_mcp.dataset_layout,
- * tcip_web.jobstore). Do not edit by
+ * tcip_mcp.experiments, tcip_web.jobstore). Do not edit by
  * hand.
  */
 
@@ -148,16 +147,16 @@ def platform_panel_event_constants() -> list[tuple[str, str]]:
             if name.startswith("PANEL_EVENT_") and isinstance(value, str)]
 
 
-def terminal_statuses() -> tuple[str, ...]:
-    from tcip_web.jobstore import TERMINAL_STATUSES
+def terminal_states() -> tuple[str, ...]:
+    from tcip_mcp.experiments import TERMINAL_STATES
 
-    return tuple(sorted(TERMINAL_STATUSES))
+    return tuple(sorted(TERMINAL_STATES))
 
 
 def job_status_members() -> tuple[str, ...]:
-    from tcip_web.jobstore import JobStatus
+    from tcip_web.jobstore import JOB_STATES
 
-    return get_args(JobStatus)
+    return JOB_STATES
 
 
 def _ts_type(schema: dict, where: str) -> str:
@@ -238,8 +237,8 @@ def render() -> str:
         panel_event_names
         + f"\nexport const PLATFORM_PANEL_EVENTS = [{panel_events}] as const;\n\n"
     )
-    terminal = ", ".join(json.dumps(t) for t in terminal_statuses())
-    terminal_const = f"export const TERMINAL_STATUSES = [{terminal}] as const;\n\n"
+    terminal = ", ".join(json.dumps(t) for t in terminal_states())
+    terminal_const = f"export const TERMINAL_STATES = [{terminal}] as const;\n\n"
     job_status = " | ".join(json.dumps(t) for t in job_status_members())
     job_status_alias = f"export type JobStatus = {job_status};\n\n"
     return (HEADER + constant + header_const + overviews_const + suffix_const + tab_names_const

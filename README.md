@@ -143,9 +143,8 @@ later run to a partition an earlier run already drew, not for drawing the first 
 
 | Tool | Purpose |
 |------|---------|
-| `create_experiment(experiment_id, config)` | Registers a new experiment to track a training run's config, metrics, artifacts, and lineage before it starts. |
-| `launch_training(config)` | Launches training in an isolated subprocess from an agent-written `model_source` builder; the Training tab's config picker drives the same launch from the GUI side. |
-| `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and writes `test_results.json`. |
+| `launch_training(config)` | Launches training in an isolated subprocess from an agent-written `model_source` builder, into a new run directory it writes the launch record of first; the Training tab's config picker drives the same launch from the GUI side. |
+| `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and returns the result, writing nothing. |
 
 Before any number can ship, its confidence operating point needs validating against held-out
 ground truth: `tcip calibrate-operating-point` runs one model pass over a disjoint
@@ -168,7 +167,7 @@ only a Results tab delivering route can, through the breeder's own acknowledged 
 ## Conventions
 
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), the one label document shape the platform writes and reads (mask rasters and tables are the other ground truth a run can read); an external dataset-level COCO is converted into it by `import_coco`.
-- Experiments: one record per run holding config, metrics, artifacts and lineage, with the run's own files (weights, TensorBoard events, the source snapshot) under `.tcip/experiments/<id>/` beside it.
+- Experiments: one directory per run, `.tcip/experiments/<id>/`, holding its launch record (`run.json`, with the data, partition and objective the launcher resolved), its metrics log, its final status, and its own files (weights, TensorBoard events, the source snapshot); nothing in it is rewritten once written, and a relaunch is a new directory.
 - Audit log: every mutating MCP tool leaves exactly one line per act, either the `@audited` decorator's entry for the call or the event its library records with facts the decorator cannot carry, and a call returning its error leaves none, while a call that raises leaves its exception line. Lines go into the append-only log under the root each call's scope names, written out at `.tcip/audit.jsonl` by the file backend and by `tcip export-store`. An entry that cannot be appended after its mutation raises.
 - Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
 - Crop traits: controlled vocabulary defined in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`.

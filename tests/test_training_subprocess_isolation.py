@@ -4,8 +4,6 @@ specific concurrency/isolation gap rather than re-testing the whole subprocess p
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -109,102 +107,42 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_no_map(tmp_pat
     assert ClassScope.of(data_cfg).id_map is None
 
 
-def test_mirror_data_section_writes_the_resolved_section_into_the_durable_config(tmp_path,
+def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(tmp_path,
                                                                                  monkeypatch):
-    import tcip_store as ts
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
-
-    create_experiment("exp1", {"model_source": {"builder": "x:y"},
-                               "data": {"images_dir": "img", "split": {"seed": 3}}})
-    scope = ClassScope("bud", "opening", {"closed": 0, "open": 1})
-    data_cfg = {"images_dir": "img", "split": {"seed": 3, "resolved_group_by": "stem"},
-                "scope": asdict(scope)}
-
-    _mirror_data_section("exp1", data_cfg)
-
-    cfg = ts.read(config_key("exp1"))
-    assert ClassScope.of(cfg["data"]) == scope
-    assert cfg["data"]["split"] == {"seed": 3}  # an unbound run's resolved block stays out
-    assert cfg["model_source"] == {"builder": "x:y"}  # untouched sibling key
-
-
-def test_mirror_data_section_writes_nothing_with_no_experiment_record(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
-
-    _mirror_data_section("no_such_exp", {"scope": {"subject": "bud"}})
-
-
-def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
-    """A spatial or auto-split run's own resolved ``data.split`` block (member identities that
-    stay out of the durable config) must not qualify, only a manifest-bound run's block does."""
-    from tcip_mcp.pipelines.training.subprocess_worker import _is_selection_bound_split
-
-    assert _is_selection_bound_split({"selection_binding": {"date": "2-11-26"}}) is True
-    assert _is_selection_bound_split(
-        {"resolved_group_by": "spatial_strip", "spatial_manifest": {}}) is False
-    assert _is_selection_bound_split({"resolved_group_by": "tile_prefix"}) is False
-    assert _is_selection_bound_split({}) is False
-    assert _is_selection_bound_split(None) is False
-
-
-def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_path, monkeypatch):
-    """Only a manifest-bound run's resolved split block is mirrored into the durable experiment
-    record; a spatial run's own per-region member identities stay with its checkpoints."""
-    import tcip_store as ts
-
-    import tcip_mcp.tools.training_tools as ttools
-    from tcip_mcp.experiments import config_key, create_experiment
+    """The launcher resolves a run once and writes what it resolved (data section, partition,
+    objective) into its launch record; the child builds its context from that record alone,
+    resolving nothing again and writing nothing beside it."""
+    from tcip_mcp.experiments import RUN_FILE, observe, read_record
     from tcip_mcp.pipelines.data import split_construction as sc
-    from tcip_mcp.pipelines.training import generic_trainer
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    out = tmp_path / "run"
-    out.mkdir()
-    config = {"model_source": {"builder": "x:y", "task": "detection"},
-              "data": {"images_dir": "img", "split": {"group_by": "spatial_strip"}}}
-    create_experiment("exp1", config)
-    ts.replace(ttools.launch_config_key(out), config)
-
-    def stub_auto_train_val(task, data_cfg, transforms):
-        data_cfg["split"].update({
-            "resolved_group_by": "spatial_strip",
-            "spatial_manifest": {"regions": {"r0": ["a"], "r1": ["b"]}},
-        })
-        return None, None, None
-
-    class StopAfterMirror(Exception):
-        pass
-
-    def stop(*args, **kwargs):
-        raise StopAfterMirror
-
-    monkeypatch.setattr(sc, "auto_train_val", stub_auto_train_val)
-    monkeypatch.setattr(generic_trainer, "stamp_effective_data_geometry", lambda *a, **k: None)
-    monkeypatch.setattr(generic_trainer, "run_loaders", stop)
     from tcip_mcp.pipelines.training import subprocess_worker as worker
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run, partition_side
 
-    with pytest.raises(StopAfterMirror):
-        worker.run("exp1", str(out), "")
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    launch_bytes = (run_dir / RUN_FILE).read_bytes()
+    resolved = read_record(run_dir / RUN_FILE)["resolved"]
+    assert set(resolved) == {"data", "partition", "objective"}
+    files_before = sorted(p.name for p in run_dir.iterdir())
 
-    assert "spatial_manifest" not in ts.read(config_key("exp1"))["data"].get("split", {})
+    def resolves_again(*args, **kwargs):
+        raise AssertionError("the child resolved its run again")
+
+    monkeypatch.setattr(sc, "auto_train_val", resolves_again)
+    monkeypatch.setattr(sc, "resolve_run", resolves_again)
+
+    ctx = worker.prepare_run_context(observe(run_dir))
+
+    assert ctx.run.objective == resolved["objective"]
+    assert ctx.run.config["data"] == resolved["data"]
+    train_ds = ctx.train_loader.dataset
+    assert sorted({train_ds.member_of(key) for key in train_ds.stems}) == partition_side(
+        resolved["partition"], "train")
+    assert (run_dir / RUN_FILE).read_bytes() == launch_bytes
+    assert sorted(p.name for p in run_dir.iterdir()) == files_before
 
 
-def test_create_run_registers_under_the_given_id():
-    from tcip_mcp.pipelines.training.run_registry import create_run, get_run
-
-    run = create_run({"model_source": {"builder": "x:y"}}, "out", id="run_fixed_id")
-    assert run.id == "run_fixed_id"
-    assert get_run("run_fixed_id") is run
-
-
-def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeypatch):
-    """The child must receive experiment_id as an explicit --experiment-id CLI arg resolved by the
-    parent (including the fresh-id conflict branch), never inferred from launch_config.json
-    (which is written before that resolution is known in the fresh-id branch). Mocks
+def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypatch):
+    """The child is told only its run directory, whose ``run.json`` the parent wrote before
+    spawning it; a second launch naming the same id refuses before anything spawns. Mocks
     subprocess.Popen to capture argv without spawning a real child; preflight_config's smoke check
     still runs for real in this process, so a real (tiny) bespoke model/dataset is needed."""
     pytest.importorskip("torchvision")
@@ -214,7 +152,7 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
     from tcip_mcp.tools import training_tools
 
     monkeypatch.setattr(
@@ -235,9 +173,10 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    Image.new("RGB", (32, 32)).save(images_dir / "img0.png")
-    json_io.write_annotations(str(labels_dir / "img0.json"),
-                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    for i in range(2):
+        Image.new("RGB", (32, 32), color=(10 * i, 0, 0)).save(images_dir / f"img{i}.png")
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
     def _cfg(experiment_id: str) -> dict:
         return {
@@ -251,54 +190,39 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
             "experiment_id": experiment_id,
         }
 
-    def _argv_experiment_id(argv: list[str]) -> str:
-        return argv[argv.index("--experiment-id") + 1]
+    def children() -> list[list[str]]:
+        return [argv for argv in captured_argv if "--run-dir" in argv]
 
-    # Fresh-creation branch: --experiment-id is the plain resolved id.
-    res1 = training_tools.launch_training(_cfg("exp_fresh"), str(tmp_path / "out1"))
-    assert _argv_experiment_id(captured_argv[-1]) == "exp_fresh" == res1["experiment_id"]
+    res = training_tools.launch_training(_cfg("exp_fresh"))
+    run_dir = experiment_dir("exp_fresh")
+    assert res["experiment_id"] == "exp_fresh"
+    assert children()[-1][-2:] == ["--run-dir", str(run_dir)]
+    assert read_record(run_dir / RUN_FILE)["config"]["data"]["images_dir"] == str(images_dir)
 
-    # fresh-id conflict branch: pre-populate "exp_reused" with real recorded history so
-    # _ensure_experiment mints a fresh "exp_reused_<minted>" id instead of reusing it.
-    create_experiment("exp_reused", {"a": 1})
-    update_status("exp_reused", "running")
-    log_metrics("exp_reused", 1, {"loss": 0.1})
-
-    res2 = training_tools.launch_training(_cfg("exp_reused"), str(tmp_path / "out2"))
-    fresh_id = res2["experiment_id"]
-    assert fresh_id.startswith("exp_reused_") and fresh_id != "exp_reused"
-    argv2_experiment_id = _argv_experiment_id(captured_argv[-1])
-    # The CLI arg is the parent's resolved value, never read back from launch_config.json.
-    assert argv2_experiment_id == fresh_id
+    again = training_tools.launch_training(_cfg("exp_fresh"))
+    assert "already exists" in again["error"]
+    assert len(children()) == 1
 
 
-# ── should_cancel() / the sentinel file ────────────────────────────
+# ── should_cancel() / the cancellation record ──────────────────────
 
 
-def test_cancel_sentinel_written_and_polled(tmp_path):
-    from tcip_mcp.pipelines.training.run_registry import cancel_run, create_run
-
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path), id="run_sentinel")
-    run.pid = 12345  # subprocess-delegated
-    assert run.should_cancel() is False
-
-    assert cancel_run("run_sentinel") is True
-    assert (tmp_path / ".cancel_requested").is_file()
-    assert run.should_cancel() is True
-
-
-def test_ctx_should_cancel_and_dispatch_classification_honor_sentinel(tmp_path):
-    """envelope.py's own two cancel_event.is_set() reads bypass the sentinel-aware
-    should_cancel(). A bespoke train(ctx) that calls ctx.should_cancel() (the taught pattern) must
-    see a sentinel-only cancellation, and dispatch_train_body must classify the resulting run as
-    'canceled', not 'completed'."""
+def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tmp_path):
+    """A bespoke train(ctx) that calls ctx.should_cancel() (the taught pattern) sees a
+    cancellation requested through the run directory's own record, and dispatch_train_body
+    classifies the resulting run as 'canceled', not 'completed'."""
+    from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    run = create_run({"training_source": "tests.test_training_subprocess_isolation:_bespoke_loop"}, str(tmp_path), id="run_ctx_cancel")
-    (tmp_path / ".cancel_requested").touch()  # no cancel_event set anywhere, sentinel only
+    run = TrainRun(id="run_ctx_cancel",
+                   config={"training_source":
+                           "tests.test_training_subprocess_isolation:_bespoke_loop"},
+                   objective={"selection_metric": "loss", "higher_is_better": False},
+                   output_dir=str(tmp_path))
+    request_cancel(tmp_path)
 
-    ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
+    ctx = TrainContext(run=run, train_loader=None)
     assert ctx.should_cancel() is True
 
     dispatch_train_body(ctx)
@@ -310,264 +234,118 @@ def _bespoke_loop(ctx) -> None:
     ctx.should_cancel(), the exact taught pattern this test is pinning."""
     if ctx.should_cancel():
         return
-    raise AssertionError("should_cancel() did not see the sentinel-only cancellation")
+    raise AssertionError("should_cancel() did not see the requested cancellation")
 
 
-# ── cancel_run's disk fallback ──────────────────────────────────
+# ── run_summary ─────────────
 
 
-def test_cancel_run_falls_back_to_disk_when_not_in_local_registry(tmp_path, monkeypatch):
-    """A run this process never held in _RUNS (launched by a different process) can still be
-    canceled, provided its experiment identity was stamped: otherwise cancellation silently
-    writes to a guessed path nobody polls; this confirms the real path instead."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity
-    from tcip_mcp.pipelines.training.run_registry import cancel_run
+def test_run_summary_reads_the_run_directory(tmp_path):
+    """A live run's summary names the objective its launch recorded and carries no best while
+    no row stamps a ``selection``."""
+    from tcip_mcp.experiments import observe, read_rows, run_summary
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    real_output_dir = tmp_path / "real_run_dir"
-    real_output_dir.mkdir()
-    create_experiment("exp_cross_proc", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_cross_proc", str(real_output_dir), launched_by={"launcher": "process"})
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    log_epoch(run_dir, 3, {"loss": 0.1})
 
-    assert cancel_run("exp_cross_proc") is True
-    assert (real_output_dir / ".cancel_requested").is_file()
-
-
-def test_cancel_run_unknown_run_refuses_honestly(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.run_registry import cancel_run
-
-    assert cancel_run("no-such-run-anywhere") is False
-
-
-def test_ensure_experiment_pristine_reuse_stamps_identity(tmp_path, monkeypatch):
-    """The pristine pre-created-experiment reuse branch (a real, tested workflow,
-    test_ensure_experiment_attaches_to_precreated) must stamp output_dir too, not only the
-    fresh-creation branch, so a run launched against a pre-named experiment is discoverable by
-    its own id from a different process."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, read_member, status_key
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    create_experiment("precreated", {"a": 1})  # agent pre-creates before any run exists
-    eid, out_dir = _ensure_experiment("precreated", {"a": 1}, None, resume_from="",
-                                      output_base=str(tmp_path / "out"),
-                                      launched_by={"launcher": "process"})
-    assert eid == "precreated"
-
-    status = read_member(status_key("precreated"), {})
-    assert status["output_dir"] == out_dir
-
-
-# ── reconstruct_run_status ─────────────
-
-
-def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
-    """A row with no stamped ``selection_metric`` (a bespoke loop that never called through
-    ``generic_trainer.train()``) carries no best: the best is derived from the trainer's own
-    stamped rows, never fabricated from a metric name this log never recorded."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity
-
-    create_experiment("exp_disk", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_disk", "out_dir", launched_by={"launcher": "process"})
-    log_metrics("exp_disk", 3, {"loss": 0.1})
-
-    result = reconstruct_run_status("exp_disk", stale_seconds=600.0)
-    assert result is not None
+    observation = observe(run_dir)
+    result = run_summary(observation, read_rows(observation.metrics_log)[0])
     assert result["status"] == "running"
     assert result["current_epoch"] == 3
-    assert result["output_dir"] == "out_dir"
+    assert result["output_dir"] == str(run_dir)
     assert result["best_metric"] is None
-    assert result["best_metric_name"] is None
+    assert result["best_metric_name"] == (
+        observation.record["resolved"]["objective"]["selection_metric"])
 
 
-def test_reconstruct_run_status_derives_best_from_stamped_rows(tmp_path, monkeypatch):
-    """A row shaped the way ``generic_trainer.train()`` actually writes it (``selection`` +
-    ``selection_metric``) does carry a name and a best, read back rather than re-derived from
-    config."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity
+@pytest.mark.parametrize("higher_is_better, best", [(True, 0.7), (False, 0.5)],
+                         ids=["higher-is-better", "lower-is-better"])
+def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
+        tmp_path, higher_is_better, best):
+    """The live summary's best is folded in the direction the run's launch record states, never
+    one the summary looks up from the metric's name: the same rows give the highest under a
+    higher-is-better objective and the lowest under a lower-is-better one."""
+    from tcip_mcp.experiments import RUN_FILE, observe, read_rows, run_summary
+    from tcip_store import RECORD_JSON
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    create_experiment("exp_stamped", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_stamped", "out_dir", launched_by={"launcher": "process"})
-    log_metrics("exp_stamped", 1, {"selection": 0.5, "selection_metric": "map50"})
-    log_metrics("exp_stamped", 2, {"selection": 0.7, "selection_metric": "map50"})
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    record = RECORD_JSON.decode((run_dir / RUN_FILE).read_bytes())
+    record["resolved"]["objective"] = {"selection_metric": "map50",
+                                       "higher_is_better": higher_is_better}
+    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
+    log_epoch(run_dir, 1, {"selection": 0.5, "selection_metric": "map50"})
+    log_epoch(run_dir, 2, {"selection": 0.7, "selection_metric": "map50"})
+    log_epoch(run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"})
 
-    result = reconstruct_run_status("exp_stamped", stale_seconds=600.0)
-    assert result is not None
-    assert result["best_metric_name"] == "map50"
-    assert result["best_metric"] == 0.7
-
-
-def test_best_selection_from_log_withholds_on_no_name_or_undeclared_direction():
-    from tcip_mcp.experiments import best_selection_from_log
-
-    # No row stamps a selection metric at all.
-    assert best_selection_from_log([{"epoch": 1, "loss": 0.1}]) == (None, None)
-
-    # A stamped name with no declared ranking direction is never guessed at.
-    assert best_selection_from_log(
-        [{"epoch": 1, "selection": 0.1, "selection_metric": "not_a_real_metric"}],
-    ) == (None, None)
+    observation = observe(run_dir)
+    result = run_summary(observation, read_rows(observation.metrics_log)[0])
+    assert (result["best_metric_name"], result["best_metric"]) == ("map50", best)
 
 
-def test_best_selection_from_log_ranks_in_the_metrics_declared_direction():
-    from tcip_mcp.experiments import best_selection_from_log
+def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
+    """A run past its deadline stops at its next cancel poll and its own final status names the
+    wall clock; no second writer is involved."""
+    from tcip_mcp.experiments import observe, run_summary
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    # loss: lower is better.
-    name, best = best_selection_from_log([
-        {"epoch": 1, "selection": 0.9, "selection_metric": "loss"},
-        {"epoch": 2, "selection": 0.4, "selection_metric": "loss"},
-        {"epoch": 3, "selection": 0.6, "selection_metric": "loss"},
-    ])
-    assert (name, best) == ("loss", 0.4)
+    run_dir = finished_run(
+        tmp_path, training_source="tests.test_training_subprocess_isolation:_bespoke_loop",
+        wall_clock_passed=True)
 
-    # map50: higher is better.
-    name, best = best_selection_from_log([
-        {"epoch": 1, "selection": 0.4, "selection_metric": "map50"},
-        {"epoch": 2, "selection": 0.9, "selection_metric": "map50"},
-        {"epoch": 3, "selection": 0.6, "selection_metric": "map50"},
-    ])
-    assert (name, best) == ("map50", 0.9)
-
-    # A non-finite row is skipped rather than winning the comparison.
-    name, best = best_selection_from_log([
-        {"epoch": 1, "selection": 0.5, "selection_metric": "loss"},
-        {"epoch": 2, "selection": float("nan"), "selection_metric": "loss"},
-    ])
-    assert (name, best) == ("loss", 0.5)
-
-
-def test_reconstruct_run_status_surfaces_error(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
-
-    create_experiment("exp_err", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_err", "out_dir", launched_by={"launcher": "process"})
-    update_status("exp_err", "failed", error="exceeded max_wall_clock_seconds (10)")
-
-    result = reconstruct_run_status("exp_err", stale_seconds=600.0)
+    result = run_summary(observe(run_dir), [])
     assert result["status"] == "failed"
-    assert result["error"] == "exceeded max_wall_clock_seconds (10)"
+    assert result["error"] == "exceeded max_wall_clock_seconds"
 
 
-def test_reconstruct_run_status_reports_canceled_not_running_or_interrupted(tmp_path, monkeypatch):
-    """reconstruct_run_status must not re-derive a "canceled" run's state from heartbeat
-    freshness: experiments.py's _TERMINAL_STATES ({"completed", "failed"}) deliberately excludes
-    "canceled" so a canceled run's record stays reopenable/resumable, but that set exists for a
-    different purpose (the update_status mutation lock). Treating "canceled" as non-terminal
-    here would report a gracefully canceled run as "running", then permanently "interrupted" once
-    its heartbeat goes stale."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, reconstruct_run_status, stamp_run_identity, update_status
+def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypatch):
+    """A final status is the answer once written: a canceled run never reads running or
+    interrupted, however stale its heartbeat."""
+    from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    create_experiment("exp_canceled", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("exp_canceled", "out_dir", launched_by={"launcher": "process"})
-    update_status("exp_canceled", "canceled")  # stamps a fresh heartbeat, same as any update_status call
+    canceled = finished_run(
+        tmp_path, training_source="tests.test_training_subprocess_isolation:_bespoke_loop",
+        cancel_requested=True)
 
-    result = reconstruct_run_status("exp_canceled", stale_seconds=600.0)
-    assert result["status"] == "canceled"
-
-    # And it must not flip to "interrupted" once the heartbeat goes stale: a canceled run is
-    # already a known, final outcome, not a liveness question.
-    result_stale = reconstruct_run_status("exp_canceled", stale_seconds=-1)  # heartbeat always "stale"
-    assert result_stale["status"] == "canceled"
+    assert experiments.observe(canceled).state == "canceled"
+    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
+    assert experiments.observe(canceled).state == "canceled"
 
 
-def test_update_status_error_is_keyword_only_and_backward_compatible(tmp_path, monkeypatch):
-    """update_status's error param must be keyword-only so every existing 2-positional-arg call
-    site keeps working unchanged, while the wall-clock watcher can still pass error= on failure."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, get_experiment, update_status
-
-    create_experiment("exp_compat", {"a": 1})
-    assert update_status("exp_compat", "running") == {"experiment_id": "exp_compat", "state": "running"}
-    update_status("exp_compat", "failed", error="boom")
-    status = get_experiment("exp_compat")["status"]
-    assert status["error"] == "boom"
+# ── monitor_training / list_experiments(launched_only=True) read the directory ─────
 
 
-# ── monitor_training / list_experiments(launched_only=True) disk fallback ─────
-
-
-def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity
-    from tcip_mcp.pipelines.training.run_registry import create_run
+def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import monitor_training
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    run = create_run({"model_source": {"builder": "x:y"}}, "out_dir", id="run_delegated")
-    run.pid = 999  # subprocess-delegated, in-memory fields below are now stale by design
-
-    create_experiment("run_delegated", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_delegated", "out_dir", launched_by={"launcher": "process"})
-    log_metrics("run_delegated", 7, {"loss": 0.2})
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"),
+                         experiment_id="run_delegated")
+    log_epoch(run_dir, 7, {"loss": 0.2})
 
     result = monitor_training("run_delegated")
-    assert result["epoch"] == 7  # not the stale in-memory 0
+    assert result["epoch"] == 7
     assert result["status"] == "running"
 
 
-def test_launched_runs_view_lists_a_launched_experiment_this_process_never_held(tmp_path, monkeypatch):
-    """A run another process launched (never in this process's _RUNS at all, not merely
-    pid-bearing) still lists, reconstructed straight from its own disk record."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, update_status
+def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
+    """A run any process launched lists, read straight from its own directory, carrying the
+    directory's last epoch and last sign of life."""
     from tcip_mcp.tools.experiment_tools import list_experiments
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    create_experiment("exp-no-stamp", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    update_status("exp-no-stamp", "running")
+    run_dir = opened_run(tmp_path, detection_config(
+        tmp_path / "data", model_source={"builder": "my_models:chestnut_burr_det",
+                                         "task": "detection"}),
+        experiment_id="exp-no-stamp")
+    log_epoch(run_dir, 9, {"loss": 0.1})
 
     by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
-    assert "exp-no-stamp" in by_id
-    assert by_id["exp-no-stamp"]["external"] is True
-
-
-def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
-    """A pid-bearing in-memory entry (subprocess-delegated) takes the disk overlay for its
-    status/current_epoch/heartbeat: its own in-memory copy is a stale launch-time placeholder
-    once the child starts mutating its own separate copy on disk. The status/current_epoch
-    overlay is pre-existing coverage; the new assertions this test adds are external=False,
-    unlike a run this process never held at all, and heartbeat, the one liveness signal a
-    record with no persisted process id can offer."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.experiment_tools import list_experiments
-
-    run = create_run({"model_source": {"builder": "my_models:burr_det"}}, "out_dir", id="run_pid_overlay")
-    run.pid = 4242
-
-    create_experiment("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}})
-    stamp_run_identity("run_pid_overlay", "out_dir", launched_by={"launcher": "process"})
-    log_metrics("run_pid_overlay", 9, {"loss": 0.1})
-
-    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
-    assert by_id["run_pid_overlay"]["status"] == "running"
-    assert by_id["run_pid_overlay"]["current_epoch"] == 9
-    assert by_id["run_pid_overlay"]["external"] is False
-    # log_metrics touches the disk record's own heartbeat; the overlay carries it through.
-    assert by_id["run_pid_overlay"]["heartbeat"] is not None
-
-
-def test_launched_runs_view_leaves_in_process_runs_untouched(tmp_path, monkeypatch):
-    """A run with no pid (every existing synchronous test) is reported from the live in-memory
-    record exactly as before. The disk overlay must never touch it."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.experiment_tools import list_experiments
-
-    run = create_run({"model_source": {"builder": "x:y"}}, "out_dir", id="run_in_process_untouched")
-    run.status = "running"
-    run.current_epoch = 5
-
-    runs = list_experiments(launched_only=True)["runs"]
-    entry = next(r for r in runs if r["experiment_id"] == run.id)
-    assert entry["status"] == "running"
-    assert entry["current_epoch"] == 5
+    assert by_id["exp-no-stamp"]["status"] == "running"
+    assert by_id["exp-no-stamp"]["current_epoch"] == 9
+    assert by_id["exp-no-stamp"]["heartbeat"] is not None
 
 
 # ── GPU device pinning ───────────────────────────────────────────────────
@@ -634,101 +412,27 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
 # ── wall-clock timeout ──────────────────────────────────────────────
 
 
-def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_late(monkeypatch):
+    """A child that has not stopped itself one heartbeat window past its wall clock is hung: the
+    watcher terminates it and writes nothing, so its directory reads interrupted."""
     import subprocess
     import sys
     import time
 
-    from tcip_mcp.experiments import create_experiment, status_key, update_status
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import _watch_wall_clock
-    from tcip_store import DecodeError, read
 
-    create_experiment("exp_timeout", {"model_source": {"builder": "x:y"}})
-    update_status("exp_timeout", "running")
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path), id="run_timeout")
-
+    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 0.2)
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
-        _watch_wall_clock(proc, run, "exp_timeout", 0.2, root=tmp_path)
+        _watch_wall_clock(proc, 0.2)
         deadline = time.monotonic() + 10
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)
         assert proc.poll() is not None, "watcher did not terminate the hung process"
-        assert run.status == "failed"
-
-        # The failure reason must land through the real status channel, not only the
-        # in-memory mark monitor_training ignores for a pid-bearing run. Polls the record
-        # itself, tolerating a read that lands mid-write, since a Windows AV/indexer can
-        # transiently hold the file.
-        status: dict = {}
-        for _ in range(50):
-            try:
-                status = read(status_key("exp_timeout"), default={})
-            except DecodeError:
-                status = {}
-            if status.get("error"):
-                break
-            time.sleep(0.1)
-        assert "max_wall_clock_seconds" in status.get("error", "")
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-
-
-def test_max_wall_clock_seconds_writes_to_the_launch_root_after_an_adopt(tmp_path, monkeypatch):
-    """The watchdog's write belongs to the project the run launched under, not wherever this
-    process's platform root has since moved to: a repin between the launch and the timeout
-    must not drop the failure or leave the launch project's record stuck at ``running``."""
-    monkeypatch.chdir(tmp_path)
-    import subprocess
-    import sys
-    import time
-
-    from tcip_mcp import workspace
-    from tcip_mcp.experiments import create_experiment, status_key, update_status
-    from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.training_tools import _watch_wall_clock
-    from tcip_store import DecodeError, read
-
-    launch_root = tmp_path
-    create_experiment("exp_timeout_other_root", {"model_source": {"builder": "x:y"}})
-    update_status("exp_timeout_other_root", "running")
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path), id="run_timeout_other_root")
-
-    other_proj = workspace.project_path("chestnut_burr_other")
-    (other_proj / ".tcip").mkdir(parents=True)
-
-    proc = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    try:
-        _watch_wall_clock(proc, run, "exp_timeout_other_root", 0.2, root=launch_root)
-        workspace.activate_project("chestnut_burr_other")  # repins this process elsewhere
-
-        deadline = time.monotonic() + 10
-        while proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        assert proc.poll() is not None, "watcher did not terminate the hung process"
-        assert run.status == "failed"
-
-        status: dict = {}
-        for _ in range(50):
-            try:
-                status = read(status_key("exp_timeout_other_root", root=launch_root), default={})
-            except DecodeError:
-                status = {}
-            if status.get("error"):
-                break
-            time.sleep(0.1)
-        assert status.get("state") == "failed"
-        assert "max_wall_clock_seconds" in status.get("error", "")
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -780,46 +484,17 @@ def test_inspect_compute_resources_reports_gpu_free_memory(monkeypatch):
     assert result["gpus"] == [{"index": 0, "free_bytes": 1_000, "total_bytes": 4_000}]
 
 
-def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_path, monkeypatch):
-    """active_training_runs must count from the disk-aware _all_training_runs() (the internal
-    function list_experiments(launched_only=True) and inspect_compute_resources() both build
-    on), not the raw
-    in-memory run_registry.list_runs(): a subprocess-delegated run's parent-side
-    TrainRun.status never leaves its create_run-time "created" default once the child starts
-    mutating its own separate copy, so the raw call always reports 0 for it. This is the common
-    case for a subprocess-launched run, not an edge case, and it's the exact number the tool
-    exists to give the agent before it decides whether to launch another concurrent run."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity
-    from tcip_mcp.pipelines.training.run_registry import create_run
+def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
+    """A run whose directory is fresh counts as active, whichever process launched it: the
+    directory alone is enough."""
     from tcip_mcp.tools.training_tools import inspect_compute_resources
-
-    # _RUNS is a process-global registry other tests in this session also populate. Compare a
-    # delta, not an absolute count, so this test doesn't depend on being run in isolation.
-    baseline = inspect_compute_resources()["active_training_runs"]
-
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path), id="run_active")
-    run.pid = 555  # subprocess-delegated, mirrors what launch_training does after Popen
-    assert run.status == "created"  # the parent-side placeholder never advances
-
-    create_experiment("run_active", {"model_source": {"builder": "x:y"}})
-    stamp_run_identity("run_active", str(tmp_path), launched_by={"launcher": "process"})
-
-    assert inspect_compute_resources()["active_training_runs"] == baseline + 1
-
-
-def test_inspect_compute_resources_counts_a_run_another_process_recorded(tmp_path, monkeypatch):
-    """A run this process never held in memory at all, one another process launched and is
-    still updating on disk with a fresh heartbeat, still counts: the disk record alone, with no
-    in-memory _RUNS entry, is enough."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.tools.training_tools import inspect_compute_resources
+    from tests._verified_checkpoint_fixtures import opened_run
 
     baseline = inspect_compute_resources()["active_training_runs"]
 
-    create_experiment("run_other_process", {"model_source": {"builder": "x:y"}})
-    update_status("run_other_process", "running")  # fresh heartbeat, no in-memory entry anywhere
+    from tests._verified_checkpoint_fixtures import detection_config
+
+    opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="run_other_process")
 
     assert inspect_compute_resources()["active_training_runs"] == baseline + 1
 
@@ -864,16 +539,18 @@ def test_default_trial_resources_no_gpu(monkeypatch):
 @pytest.mark.ray_cluster
 def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     """A real, lightweight Ray sweep (matching test_imbalance_aug_hpo.py's own established
-    pattern for this function: a pure-math objective, no training) still finds the minimum when
-    an explicit resources_per_trial is supplied, proving it's accepted end to end rather than only
-    unit-testing the derivation helper in isolation."""
+    pattern for this function: a pure-math objective, no training) runs to its end with an
+    explicit resources_per_trial, its log directory under the caller's storage_path, proving it's
+    accepted end to end rather than only unit-testing the derivation helper in isolation."""
+    from pathlib import Path
+
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     def obj(config, report):
         report((config["x"] - 2.0) ** 2)
 
-    result = tune_search(
+    logdir = tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         metric="objective", mode="min", num_samples=4,
@@ -881,8 +558,8 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
         storage_path=str(tmp_path), seed=0
     )
-    assert result["n_trials"] == 4
-    assert result["best_value"] is not None
+    assert Path(logdir).is_dir()
+    assert Path(logdir).is_relative_to(tmp_path)
 
 
 @pytest.mark.ray_cluster
@@ -903,7 +580,7 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
     def obj(config, report):
         report((config["x"] - 2.0) ** 2)
 
-    result = tune_search(
+    logdir = tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         metric="objective", mode="min", num_samples=2,
@@ -911,9 +588,9 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
         storage_path=str(tmp_path / "sweep_store"), seed=0
     )
-    assert result["n_trials"] == 2
-    assert result["best_value"] is not None
-    assert (tmp_path / "sweep_store").is_dir()
+    from pathlib import Path
+
+    assert Path(logdir).is_relative_to(tmp_path / "sweep_store")
     assert os.environ["TUNE_RESULT_DIR"] == machine_scratch
     assert os.environ["RAY_AIR_LOCAL_CACHE_DIR"] == machine_scratch
 

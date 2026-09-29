@@ -262,35 +262,6 @@ def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkey
     assert project_paths.root_binding().root.resolve() == proj.resolve()
 
 
-def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch):
-    import tcip_store
-
-    from tcip_mcp.web_client import current_root
-    from tcip_web.routes import inference
-
-    ws = tmp_path / "ws"
-    proj = ws / "elderberry_cyme_bloom"
-    (proj / ".tcip").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    project_paths.restore_binding(None)
-    tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
-
-    seen_roots = []
-    real_rehydrate = inference.rehydrate_for_current_root
-
-    def _record_then_rehydrate():
-        seen_roots.append(current_root())
-        real_rehydrate()
-
-    monkeypatch.setattr(inference, "rehydrate_for_current_root", _record_then_rehydrate)
-
-    with TestClient(app, base_url="http://127.0.0.1"):
-        pass
-
-    assert seen_roots == [str(proj.resolve())]
-
-
 async def _largest_loop_gap(coro):
     """Run ``coro`` alongside a ticker that measures the largest gap, in seconds, between
     consecutive event-loop turns while it is in flight.

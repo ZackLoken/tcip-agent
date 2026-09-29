@@ -148,13 +148,14 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
 
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tests.tiny_trainer_fixtures import trainer_run
 
     loader_ds = _detection_loader(tmp_path / "ds")
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
     collate = task_collate("detection")
     RecordingDetector.handed.clear()
-    run = create_run(_train_config(tmp_path), str(tmp_path / "run"), id="crowd-run")
+    run = trainer_run(_train_config(tmp_path), tmp_path / "run", has_val_loader=True,
+                      id="crowd-run")
     completed = train(run, DataLoader(loader_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate))
 

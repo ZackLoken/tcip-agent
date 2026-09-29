@@ -32,13 +32,7 @@ from tcip_mcp.pipelines.resolution import (
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE, read_trait
 from tests import _trait_fixtures as fx
 from tests._binding_fixtures import run_result, write_bound_sidecar, write_prediction
-from tests._verified_checkpoint_fixtures import admit_any_checkpoint, dummy_checkpoint
-
-
-@pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module exercises the gate logic downstream of a checkpoint load."""
-    admit_any_checkpoint(monkeypatch)
+from tests._verified_checkpoint_fixtures import foreign_checkpoint, project_checkpoint
 
 
 @pytest.fixture(autouse=True)
@@ -727,7 +721,7 @@ def test_deliver_per_image_counts_refuses_unvalidated_run(tmp_path, monkeypatch)
                           validated=False, conf_source="default")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -748,9 +742,9 @@ def test_deliver_per_image_counts_takes_no_acknowledgment_for_the_delivery(tmp_p
     out_csv = tmp_path / "o.csv"
     with pytest.raises(TypeError):
         itools.deliver_per_image_counts(  # type: ignore[call-arg]
-            dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+            project_checkpoint(tmp_path), str(tmp_path), str(out_csv),
             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert not out_csv.exists()
@@ -783,7 +777,7 @@ def test_deliver_per_image_counts_refuses_fabricated_tile_size_even_with_validat
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -812,7 +806,7 @@ def test_deliver_per_image_counts_publishes_via_staging_but_the_csv_itself_still
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket), allow_unvalidated_staging=True)
     assert "error" in r
@@ -837,7 +831,7 @@ def test_deliver_per_image_counts_ships_when_tile_size_has_a_real_basis(tmp_path
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, trait=fx.COUNT_TRAIT, postprocess="nms", tile_size=224, tile_size_source="derived"))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" not in r, r
@@ -856,7 +850,7 @@ def test_deliver_per_image_counts_never_gates_tile_size_when_untiled(tmp_path, m
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT))
     r = itools.deliver_per_image_counts(
-        dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+        project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(tmp_path),
         predictions_dir=str(tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"))
     assert "error" not in r, r
@@ -875,7 +869,7 @@ def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_cs
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT))
-    refused = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    refused = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
     assert "predictions_dir" in refused["error"]
@@ -962,7 +956,7 @@ def test_run_inference_refuses_fabricated_tile_size_even_with_validated_conf(tmp
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out))
+    r = itools.run_inference(project_checkpoint(tmp_path), str(tmp_path), output_dir=str(out))
     assert "error" in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert not out.exists()
@@ -979,7 +973,7 @@ def test_run_inference_ships_when_tile_size_has_a_real_basis(
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, postprocess="nms", tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
+    r = itools.run_inference(project_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
@@ -1000,7 +994,7 @@ def test_run_inference_never_gates_tile_size_when_untiled(
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(tmp_path))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
+    r = itools.run_inference(project_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True
@@ -1017,7 +1011,7 @@ def test_run_inference_staging_escape_writes_and_floors_the_sidecar_stamp(tmp_pa
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.run_inference(dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out),
+    r = itools.run_inference(project_checkpoint(tmp_path), str(tmp_path), output_dir=str(out),
                              allow_unvalidated_staging=True)
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
@@ -1036,35 +1030,16 @@ def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monk
     predict_batch is monkeypatched to raise if called at all, so this proves the skip, not just
     that no bucket got written."""
     import numpy as np
-    import torch
     from PIL import Image
 
-    import tcip_mcp.model_registry as model_registry_mod
-    from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.inference import generic_predictor as gp_mod
-    from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools import inference_tools as itools
 
     def _never_called(*a, **kw):
         raise AssertionError("predict_batch must not run: the pass should have refused first")
 
     monkeypatch.setattr(gp_mod.GenericPredictor, "predict_batch", _never_called)
-
-    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
-                    "builder_kwargs": {"min_size": 64, "max_size": 128},
-                    "task": "detection"}
-    config = {"model_source": model_source,
-              "data": {"num_channels": 3, "scope": {"subject": fx.COUNT_SUBJECT,
-                                                    "id_map": {fx.COUNT_SUBJECT: 0}}},
-              "augmentation": {}}
-    model = build_model(config, recorded_model_dims(config))
-    ckpt = tmp_path / "m.pt"
-    torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
-    payload = torch.load(str(ckpt), weights_only=False)
-    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
-                        lambda path, *a, **kw: VerifiedCheckpoint(
-                            path=str(path), sha256="stub-sha256", payload=payload, entries=(),
-                            producer=None))
+    ckpt = foreign_checkpoint(tmp_path)
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -1072,7 +1047,7 @@ def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monk
     Image.fromarray(arr).save(images_dir / "a.png")
 
     out = tmp_path / "preds"
-    r = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), conf_threshold=0.0,
+    r = itools.run_inference(ckpt, str(images_dir), output_dir=str(out), conf_threshold=0.0,
                              tile=True)
     assert "error" in r
     assert not out.exists()
@@ -1097,8 +1072,7 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
 
     class FakePredictor:
         task = "detection"
@@ -1118,7 +1092,7 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
 
     out_dir = tmp_path / "out"
     job = InferenceJob(
-        job_id="gate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        job_id="gate", checkpoint_path=ckpt, images_dir=str(images_dir),
         output_dir=str(out_dir), tile=tile, conf=0.25, cross_tile_nms=0.7, tile_size=tile_size,
     )
     _worker(job)
@@ -1910,7 +1884,7 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
         tmp_path, trait=fx.COUNT_TRAIT))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
 

@@ -459,28 +459,32 @@ def test_available_search_algs_lists_natives_and_installed_backends():
 
 @pytest.mark.ray_cluster
 def test_tune_search_warm_start_and_optimizes(tmp_path):
-    """End-to-end Ray Tune: a real sweep finds the minimum, honors warm_start, and reports
-    each trial. Uses a pure-math objective so no training is needed."""
+    """End-to-end Ray Tune: a real sweep runs every trial and evaluates the warm-start point.
+    Uses a pure-math objective, each trial writing the point it trained, so no training is
+    needed."""
     pytest.importorskip("ray")
+    import json
+    import uuid
+
+    seen = tmp_path / "seen"
+    seen.mkdir()
 
     def obj(config, report):
+        (seen / f"{uuid.uuid4().hex}.json").write_text(json.dumps(config["x"]), encoding="utf-8")
         report((config["x"] - 2.0) ** 2)
 
     from tcip_mcp.pipelines.training.hpo import tune_search
-    result = tune_search(
+    tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         metric="objective", mode="min", num_samples=6,
         search_alg="random", scheduler="none",
         warm_start=True, baseline_params={"x": 2.0},
-        storage_path=str(tmp_path), seed=0
+        storage_path=str(tmp_path / "hpo"), seed=0
     )
-    assert result["warm_start"] is True
-    assert result["n_trials"] == 6
-    assert result["search_alg"] == "random" and result["scheduler"] == "none"
-    # The x=2.0 warm-start point is the exact minimum (objective 0.0).
-    assert result["best_value"] == pytest.approx(0.0, abs=1e-9)
-    assert result["best_params"]["x"] == pytest.approx(2.0)
+    points = [json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()]
+    assert len(points) == 6
+    assert 2.0 in points  # the warm-start point, the exact minimum, was trained
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():

@@ -1,20 +1,11 @@
-"""Review -> retrain feedback MCP tools.
-
-``materialize_review_dataset`` turns human review verdicts into a curated detection training set
-(with experiment lineage); ``prioritize_review_queue`` ranks un-reviewed images by
-active-learning informativeness for the next review batch; ``triage_predictions`` partitions a
-checkpoint's own predictions by confidence, optionally auto-accepting the most confident ones as
-ground truth.
-
-All three are scoped by the dataset root the review was recorded against, which is what derives
-the verdict store they read. A review whose verdicts live outside that dataset states its store
-instead, and the store it read is reported rather than folded into the derived one.
+"""Review -> retrain feedback MCP tools: ``materialize_review_dataset``,
+``prioritize_review_queue`` and ``triage_predictions``, each reading the verdict store of the
+dataset root the review was recorded against, or the store the caller states instead.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 
 from tcip_mcp.server import mcp
@@ -62,54 +53,25 @@ def _load_or_refuse(checkpoint_path: str, project_path: str):
         return None, {"error": str(exc)}
 
 
-def _resolve_calibration_ids(
-    checkpoint, images_dir: Path, *, project_path: str | None = None,
-) -> tuple[set[str] | None, str | None]:
-    """The bound run's calibration-side member stems whose own image sits in ``images_dir``, or the
-    reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
-
-    ``calibration_stems`` is ``None`` with ``marks_unresolved`` also ``None`` for an unbound run:
-    no registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment recorded
-    but never bound to a selection (its ``split.json`` carries no ``selection_binding``). A bound
-    run's own split record that cannot be read, or whose named selection can no longer be read,
-    gets ``calibration_stems=None`` with ``marks_unresolved`` naming why.
-
-    A calibration sample whose recorded source sits in ``images_dir`` is one of this queue's
-    candidates; a sample from another directory the selection also spans is not.
+def _calibration_stems(checkpoint, images_dir: Path) -> set[str] | None:
+    """The calibration-side member stems the producing run of ``checkpoint`` froze in its
+    partition (``experiments.run_resolution``) whose own image sits in ``images_dir``, or ``None``
+    for a checkpoint no run of this project produced (``checkpoint.experiment_id``) and for a run
+    that bound no selection. A calibration sample from another directory the selection also spans
+    is not one of this queue's candidates.
     """
-    experiment_id = checkpoint.producer
-    if not experiment_id:
-        return None, None
-    from tcip_mcp.project_paths import platform_state_root
-
-    root = project_path or str(platform_state_root())
-    from tcip_mcp.experiments import read_run_partition_checked
-
-    split, decode_error = read_run_partition_checked(experiment_id, root=root)
-    if decode_error is not None:
-        return None, (
-            f"this run's split record could not be read to mark the queue's calibration-side "
-            f"candidates: {decode_error}"
-        )
-    from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.pipelines.data.split_construction import bound_selection_dir
-
-    selection_dir = bound_selection_dir(split)
-    if selection_dir is None:
-        return None, None
-
-    try:
-        selection = read_selection(selection_dir)
-    except ValueError as exc:
-        return None, (
-            f"this run is bound to the selection at {selection_dir!r}, but it could not be read "
-            f"to mark the queue's calibration-side candidates: {exc}"
-        )
+    if checkpoint.experiment_id is None:
+        return None
+    from tcip_mcp.experiments import run_resolution
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
 
-    return {stem_of(s.source) for s in selection.on("calibration")
-            if same_directory(Path(s.source).parent, images_dir)}, None
+    partition = run_resolution(checkpoint.experiment_id)["partition"]
+    if partition["selection"] is None:
+        return None
+    return {stem_of(s.source) for s in partition_samples(partition)
+            if s.side == "calibration" and same_directory(Path(s.source).parent, images_dir)}
 
 
 def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
@@ -142,7 +104,6 @@ def materialize_review_dataset(
     dataset_root: str,
     source_images_dir: str,
     output_dir: str,
-    experiment_id: str = "",
     include_hard_negatives: bool = True,
     only_completed: bool = False,
     copy_files: bool = True,
@@ -154,8 +115,8 @@ def materialize_review_dataset(
 
     Accepted/edited GT boxes become positive name-based labels; rejected-only images become
     empty-label hard negatives (keyed under ``subject``, derived from the verdicts when omitted).
-    When ``experiment_id`` is given, records the review session as experiment lineage. Output is
-    the platform's ``images/`` + ``annotations/`` dataset layout.
+    Output is the platform's ``images/`` + ``annotations/`` dataset layout, with its
+    ``curated_manifest.json`` naming the review session it was built from and its source.
 
     The reviewed bucket's scope comes from ``resolution.input_scope``: a stamped bucket's own,
     refusing a ``subject`` stated beside it. Under a classified scope every positive is written
@@ -168,13 +129,10 @@ def materialize_review_dataset(
 
     Args:
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
-            store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``),
-            and it is what the experiment lineage records as the reviewed dataset.
+            store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``).
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source). A relative path
             resolves against the platform state root, never the server process's cwd.
-        experiment_id: Optional run record (``tcip_mcp.experiments``) to record the review-session
-            lineage on.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
@@ -199,20 +157,6 @@ def materialize_review_dataset(
         return {"error": f"no review state (review/ shards) in {store_dir}"}
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
-
-    if experiment_id:
-        # Checked before the curated directory is written: a blob write cannot join the record's
-        # own transaction, so this is the one chance to refuse before anything lands on disk.
-        from tcip_mcp.experiments import pointer_frozen
-
-        frozen = pointer_frozen(experiment_id, "artifacts", "curated_dataset", output_dir)
-        if frozen is not None:
-            return {"error": frozen}
-        # review_session's own value (the counts below) is unknown this early, so no value here
-        # can equal a repeat's; a presence check for a record already populated on this field alone.
-        frozen = pointer_frozen(experiment_id, "lineage", "review_session", None)
-        if frozen is not None:
-            return {"error": frozen}
 
     from tcip_annotation.review_engine import NO_BUCKET, ReviewEngine
     engine = ReviewEngine(str(store_dir))
@@ -262,30 +206,6 @@ def materialize_review_dataset(
         if review_state_dir
         else f"verdict shards read from this dataset's own store at {store_dir}"
     )
-
-    if experiment_id:
-        from tcip_mcp.experiments import (
-            create_experiment, get_experiment, update_lineage, record_artifact,
-        )
-        if "error" in get_experiment(experiment_id):
-            create_experiment(experiment_id, {"source": "review_feedback"}, data_source=dataset_root)
-        # Set data_source in both branches so lineage names the reviewed dataset even when the
-        # experiment pre-existed.
-        update_lineage(experiment_id, data_source=dataset_root, review_session={
-            "dataset_root": dataset_root,
-            "review_state_dir": str(store_dir),
-            "review_shards": str(state_path),
-            "n_positive": result["positive"],
-            "n_hard_negative": result["hard_negative"],
-            # Of the rejected-only images, the ones no verdict attributed, so they train as neither.
-            "n_unconfirmed_negative": result["unconfirmed_negative"],
-            "n_boxes": result["total_boxes"],
-            "manifest": result["manifest"],
-            "materialized_at": datetime.now(timezone.utc).isoformat(),
-        })
-        record_artifact(experiment_id, "curated_dataset", result["output_dir"])
-        result["experiment_id"] = experiment_id
-
     return result
 
 
@@ -361,13 +281,11 @@ def prioritize_review_queue(
 
     Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
 
-    When ``checkpoint_path`` names a registry entry produced by a run bound to a selection
-    (``selection_binding`` on that run's ``split.json``), each ``queue`` entry carries
-    ``calibration_member: bool``, matched against the selection's calibration samples whose own
-    source sits in ``images_dir``: reviewing that image edits a label inside the bound run's own
-    calibration universe. An unbound run carries no mark on any entry. A bound run whose own split
-    record, or whose named selection, can no longer be read carries no mark either, and the
-    response states why under ``marks_unresolved``.
+    When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
+    ``queue`` entry carries ``calibration_member: bool``, matched against the calibration samples
+    that run's partition froze whose own source sits in ``images_dir``: reviewing that image edits
+    a label inside the bound run's own calibration universe. An unbound run carries no mark on any
+    entry.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
@@ -423,8 +341,7 @@ def prioritize_review_queue(
     from tcip_mcp.pipelines.image_utils import BandGroupRef
 
     scored = scorer.score(sources, predictor)[:budget]
-    calibration_stems, marks_unresolved = _resolve_calibration_ids(
-        checkpoint, Path(images_dir), project_path=project_path or None)
+    calibration_stems = _calibration_stems(checkpoint, Path(images_dir))
     marks: Sequence[bool | None] = [None] * len(scored)
     if calibration_stems is not None:
         marks = _calibration_marks([p for p, _ in scored], calibration_stems)
@@ -443,8 +360,6 @@ def prioritize_review_queue(
         "selected_count": len(scored),
         "queue": queue,
     }
-    if marks_unresolved is not None:
-        result["marks_unresolved"] = marks_unresolved
     return result
 
 

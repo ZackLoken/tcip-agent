@@ -10,26 +10,13 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
-    """Every test in this module drives a stubbed predictor; some assertions check the
-    checkpoint file's own digest."""
-    from tests._verified_checkpoint_fixtures import admit_any_checkpoint
-
-    admit_any_checkpoint(monkeypatch, file_digest=True)
-
-
-def _ckpt(tmp_path, name: str = "ckpt.pt") -> str:
-    """A checkpoint path that exists on disk, for the not-found check every door now runs first."""
-    p = tmp_path / name
-    if not p.exists():
-        p.write_bytes(b"stub")
-    return str(p)
+from tests._verified_checkpoint_fixtures import project_checkpoint  # noqa: E402
 
 
 def test_run_inference_writes_json(tmp_path, monkeypatch):
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")  # only existence is checked
+    from pathlib import Path
+
+    ckpt = Path(project_checkpoint())
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
@@ -48,7 +35,8 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
+    ran = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
+    assert "error" not in ran, ran
     data = json.loads((out / "img.json").read_text())
     assert data["image"] == "img"
     assert (data["width"], data["height"]) == (100, 100)
@@ -61,7 +49,8 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
 
     import hashlib
 
-    assert anns[0]["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
+    digest = hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]
+    assert anns[0]["created_by"] == f"model:{ckpt.stem}@{digest}"
 
     # The stamp and the publication are each recorded once, by the library that made them; the
     # door writes no line.
@@ -71,11 +60,12 @@ def test_run_inference_writes_json(tmp_path, monkeypatch):
 
     rows = [r for key in dict.fromkeys((audit_log_key(), audit_log_key(tmp_path),
                                         audit_log_key(out)))
-            for r in ts.read_log(key).records]
+            for r in ts.read_log(key).records
+            if r["tool"] in ("stamp_written", "prediction_bucket_published")]
     assert [r["tool"] for r in rows] == ["stamp_written", "prediction_bucket_published"]
     assert rows[0]["arguments"]["pred_dir"] == str(out) and rows[0]["stamp"]["checkpoint_sha256"]
     # The publication names what the stamp does not, never a stamp fact over again.
-    assert set(rows[1]["arguments"]) == {"predictions_dir", "lineage_linked"}
+    assert set(rows[1]["arguments"]) == {"predictions_dir"}
     assert rows[1]["arguments"]["predictions_dir"] == str(out)
     assert rows[0]["stamp"]["image_filenames"] == {"img": "img.png"}
 
@@ -136,7 +126,7 @@ def test_run_inference_forwards_selection_dir_to_the_verified_pass(tmp_path, mon
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
 
     itools.run_inference(
-        _ckpt(tmp_path), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        project_checkpoint(), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
         calibration_labels_dir=str(tmp_path), selection_dir=str(tmp_path / "m"))
 
     assert captured.get("selection_dir") == str(tmp_path / "m")
@@ -149,7 +139,7 @@ def test_run_inference_refuses_selection_dir_with_raster_path(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
 
     result = run_inference(
-        _ckpt(tmp_path), output_dir=str(tmp_path / "out"),
+        project_checkpoint(), output_dir=str(tmp_path / "out"),
         raster_path=str(tmp_path / "mosaic.tif"), selection_dir=str(tmp_path / "m"))
 
     assert "error" in result and "selection_dir" in result["error"]
@@ -171,7 +161,7 @@ def test_deliver_per_image_counts_forwards_selection_dir_to_run_inference(tmp_pa
     fx.seed_confirmed_count(tmp_path)
 
     itools.deliver_per_image_counts(
-        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait=fx.COUNT_TRAIT,
+        project_checkpoint(), str(tmp_path), str(tmp_path / "out.csv"), trait=fx.COUNT_TRAIT,
         selection_dir=str(tmp_path / "m"))
 
     assert captured.get("selection_dir") == str(tmp_path / "m")
@@ -191,114 +181,6 @@ def _fake_predictor(monkeypatch):
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
 
-def test_a_second_image_regime_export_against_a_completed_experiment_refuses_before_writing(
-        tmp_path, monkeypatch):
-    """A pointer is checked before its write: a second images_dir export against an experiment
-    whose lineage.predictions is already populated and terminal refuses by name, before the
-    publisher writes a second bucket."""
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
-    _fake_predictor(monkeypatch)
-
-    from tcip_mcp.experiments import create_experiment, update_status
-    create_experiment("expImg", {"model_source": {"builder": "x:y", "task": "detection"}})
-    update_status("expImg", "running")
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    out1 = tmp_path / "out1"
-    r1 = run_inference(str(ckpt), str(images_dir), output_dir=str(out1), tile=False,
-                       experiment_id="expImg")
-    assert "error" not in r1, r1
-    update_status("expImg", "completed")
-
-    out2 = tmp_path / "out2"
-    r2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out2), tile=False,
-                       experiment_id="expImg")
-    assert "error" in r2
-    assert not out2.exists()
-
-
-def test_a_same_path_image_regime_export_against_a_completed_experiment_refuses_on_documents(
-        tmp_path, monkeypatch):
-    """The completed experiment's bucket already holds the first run's document: a second run
-    into the same path refuses on the document predicate at resolution, before the pointer's own
-    same-value conjunct is ever reached (a redirect or a suggestion has nowhere to go either,
-    since the pointer refuses any other path for a terminal experiment)."""
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
-    _fake_predictor(monkeypatch)
-
-    from tcip_mcp.experiments import create_experiment, update_status
-    create_experiment("expImgSame", {"model_source": {"builder": "x:y", "task": "detection"}})
-    update_status("expImgSame", "running")
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    out = tmp_path / "out"
-    r1 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False,
-                       experiment_id="expImgSame")
-    assert "error" not in r1, r1
-    update_status("expImgSame", "completed")
-
-    r2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False,
-                       experiment_id="expImgSame")
-    assert "error" in r2
-    assert r2["document_stem_count"] == 1
-
-
-def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_via_an_empty_first_pass(
-        tmp_path, monkeypatch):
-    """A rail must admit valid work: a first run whose images_dir enumerates to no image
-    publishes a stamp and no document and still records the lineage pointer; once the experiment
-    completes, a second run in place over the real images is admitted, by the document predicate
-    (the bucket holds no document yet) and by the pointer's own same-value conjunct (the recorded
-    path is unchanged)."""
-    from pathlib import Path
-
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-    from tcip_mcp.prediction_buckets import bucket_stems
-
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
-    empty_images_dir = tmp_path / "empty_images"
-    empty_images_dir.mkdir()
-    real_images_dir = tmp_path / "images"
-    real_images_dir.mkdir()
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(real_images_dir / "img.png")
-    _fake_predictor(monkeypatch)
-
-    from tcip_mcp.experiments import create_experiment, get_experiment_lineage, update_status
-    create_experiment("expImgEmptyFirst", {"model_source": {"builder": "x:y", "task": "detection"}})
-    update_status("expImgEmptyFirst", "running")
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    out = tmp_path / "out"
-    r1 = run_inference(str(ckpt), str(empty_images_dir), output_dir=str(out), tile=False,
-                       experiment_id="expImgEmptyFirst")
-    assert "error" not in r1, r1
-    assert r1["image_count"] == 0
-    assert not (out / "img.json").exists()
-    # The stamp-only boundary the document predicate rests on: a stamp with no document.
-    assert read_operating_point_sidecar(out) is not None
-    assert bucket_stems(out) == set()
-    assert get_experiment_lineage("expImgEmptyFirst")["lineage"]["predictions"] == str(out)
-    update_status("expImgEmptyFirst", "completed")
-
-    r2 = run_inference(str(ckpt), str(real_images_dir), output_dir=str(out), tile=False,
-                       experiment_id="expImgEmptyFirst")
-    assert "error" not in r2, r2
-    assert Path(r2["output_dir"]) == out
-    assert (out / "img.json").is_file()
-
-
 def test_a_run_over_an_empty_images_directory_admits_a_second_run_in_place(tmp_path, monkeypatch):
     """A run whose images_dir enumerates to no image publishes a stamp and no document, so a
     second, real run into the same output_dir is admitted: the document predicate's boundary is
@@ -308,8 +190,7 @@ def test_a_run_over_an_empty_images_directory_admits_a_second_run_in_place(tmp_p
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.prediction_buckets import bucket_stems
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
     empty_images_dir = tmp_path / "empty_images"
     empty_images_dir.mkdir()
     real_images_dir = tmp_path / "images"
@@ -369,8 +250,7 @@ def test_run_inference_redirects_a_bespoke_bucket_against_its_own_datasets_verdi
     engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
     _fake_predictor(monkeypatch)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
     from tcip_mcp.tools.inference_tools import run_inference
 
     # overwrite=True is refused with the verdict count and a suggested fresh bucket.
@@ -404,8 +284,7 @@ def test_run_inference_writes_a_bucket_under_no_dataset_root_and_says_the_guard_
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
 
     _fake_predictor(monkeypatch)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "scratch_preds"
@@ -455,8 +334,7 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
     engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
     _fake_predictor(monkeypatch)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
     return dataset_root, images_dir, out, ckpt
 
 
@@ -521,8 +399,7 @@ def test_overwrite_true_into_an_existing_empty_bucket_is_the_ordinary_write(
     out.mkdir(parents=True)
 
     _fake_predictor(monkeypatch)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = project_checkpoint()
     from tcip_mcp.tools.inference_tools import run_inference
 
     res = run_inference(str(ckpt), str(images_dir), output_dir=str(out), overwrite=True, tile=False)
@@ -554,7 +431,7 @@ def test_dry_run_previews_the_both_sources_refusal(tmp_path):
     raster_path.write_bytes(b"stub")
 
     result = run_inference(
-        _ckpt(tmp_path), images_dir=str(images_dir), raster_path=str(raster_path),
+        project_checkpoint(), images_dir=str(images_dir), raster_path=str(raster_path),
         output_dir=str(tmp_path / "out"), dry_run=True)
 
     assert "error" in result and "not both" in result["error"]
@@ -568,7 +445,7 @@ def test_dry_run_names_the_bucket_it_would_write_to_and_writes_nothing(tmp_path,
     _fake_predictor(monkeypatch)
     out = tmp_path / "out"
 
-    result = run_inference(_ckpt(tmp_path), output_dir=str(out), dry_run=True)
+    result = run_inference(project_checkpoint(), output_dir=str(out), dry_run=True)
 
     assert "error" not in result, result
     assert result["output_dir"] == str(out)
@@ -585,7 +462,7 @@ def test_resume_and_overwrite_together_refuse_by_name(tmp_path):
     raster_path.write_bytes(b"stub")
 
     result = run_inference(
-        _ckpt(tmp_path), raster_path=str(raster_path), output_dir=str(tmp_path / "out"),
+        project_checkpoint(), raster_path=str(raster_path), output_dir=str(tmp_path / "out"),
         resume=True, overwrite=True)
 
     assert "error" in result
@@ -641,7 +518,7 @@ def test_run_inference_refuses_a_second_publish_into_a_document_holding_bucket(
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
-    ckpt = _ckpt(tmp_path)
+    ckpt = project_checkpoint()
     r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
     assert "error" not in r1, r1
     assert checkpoint_calls["n"] == 1
@@ -684,7 +561,7 @@ def test_run_inference_no_dataset_root_pair_refuses_through_the_shared_resolver(
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
     _fake_predictor(monkeypatch)
-    ckpt = _ckpt(tmp_path)
+    ckpt = project_checkpoint()
 
     out = tmp_path / "scratch_preds"
     r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
@@ -718,7 +595,7 @@ def test_dry_run_previews_the_document_refusal(tmp_path, monkeypatch):
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
     out = prediction_dir(dataset_root, "baseline", "2026-01-01")
     _fake_predictor(monkeypatch)
-    ckpt = _ckpt(tmp_path)
+    ckpt = project_checkpoint()
 
     r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
     assert "error" not in r1, r1
@@ -742,7 +619,7 @@ def test_overwrite_true_still_refuses_a_document_holding_bucket_with_no_verdicts
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
     out = prediction_dir(dataset_root, "baseline", "2026-01-01")
     _fake_predictor(monkeypatch)
-    ckpt = _ckpt(tmp_path)
+    ckpt = project_checkpoint()
 
     r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
     assert "error" not in r1, r1

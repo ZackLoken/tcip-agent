@@ -44,24 +44,38 @@ def test_the_launch_route_is_not_registered(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def _opened(experiment_id: str, tmp_path: Path, builder: str = "my_models:chestnut_burr_det"):
+    """A detector run built by ``builder`` over two frames of its own under ``tmp_path``, opened
+    by the launcher's own producer and writer."""
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+
+    config = detection_config(tmp_path / f"{experiment_id}-data",
+                              model_source={"builder": builder, "task": "detection"})
+    return opened_run(None, config, experiment_id=experiment_id)
+
+
+def _calibration():
+    """A calibration run opened by its own writer."""
+    from tcip_mcp.experiments import open_calibration_run
+
+    return open_calibration_run({
+        "document": "operating_point", "checkpoint_sha256": None,
+        "reference_identity": {"calibration_dataset_hash": "h"}, "trait": "bud_50per_date",
+        "derived_from": "a calibration door"})
+
+
 def test_list_configs_route_reports_a_launchable_config(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment
     from tcip_web.routes.training import list_configs_route
 
-    create_experiment("exp-picker-1", {
-        "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"images_dir": "/data/images", "scope": {"subject": "bud"}},
-    })
+    _opened("exp-picker-1", tmp_path)
 
-    rows = list_configs_route()["configs"]
-    by_id = {r["experiment_id"]: r for r in rows}
-    assert by_id["exp-picker-1"]["builder"] == "my_models:chestnut_burr_det"
-    assert by_id["exp-picker-1"]["task"] == "detection"
-    assert by_id["exp-picker-1"]["subject"] == "bud"
-    assert by_id["exp-picker-1"]["state"] == "created"
-    assert by_id["exp-picker-1"]["parent_experiment"] is None
+    by_id = {r["experiment_id"]: r for r in list_configs_route()["configs"]}
+    row = by_id["exp-picker-1"]
+    assert (row["builder"], row["task"], row["subject"]) == (
+        "my_models:chestnut_burr_det", "detection", "bud")
+    assert row["state"] == "running"  # launched, its heartbeat still fresh
+    assert row["parent_experiment"] is None
 
 
 def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> None:
@@ -69,28 +83,21 @@ def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> No
     assert resp.status_code == 404
 
 
-def test_relaunch_route_404s_for_a_config_without_model_source(tmp_path, monkeypatch,
-                                                                client: TestClient) -> None:
-    monkeypatch.chdir(tmp_path)
+def test_relaunch_route_404s_for_a_calibration_run(tmp_path, monkeypatch,
+                                                   client: TestClient) -> None:
+    """A calibration run's launch record carries no config, so there is nothing to relaunch."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment
+    calibration = _calibration()
 
-    create_experiment("exp-not-training", {"source": "review_feedback"})
-
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-not-training"})
+    resp = client.post("/api/training/runs", json={"experiment_id": calibration.name})
     assert resp.status_code == 404
 
 
 def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
     tmp_path, monkeypatch, client: TestClient
 ) -> None:
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment
-
-    create_experiment("exp-refused", {
-        "model_source": {"builder": "not.a:module", "task": "detection"}, "data": {},
-    })
+    _opened("exp-refused", tmp_path, builder="not.a:module")
 
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-refused"})
     assert resp.status_code == 422
@@ -130,14 +137,20 @@ def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(
     assert msg["error"]
 
 
-def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_path: Path) -> None:
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+def _completed_run_with_rows(run_id: str) -> Path:
+    """A completed run (a terminal run ends the stream after one tick) whose body logged two
+    metrics rows through the envelope's own sink."""
+    from tests._verified_checkpoint_fixtures import finished_run
 
+    return finished_run(None, experiment_id=run_id,
+                        rows=[{"epoch": 1, "loss": 0.9}, {"epoch": 2, "loss": 0.4}])
+
+
+def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_path: Path,
+                                                       monkeypatch) -> None:
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     run_id = "exp-abc"
-    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    log_metrics(run_id, 1, {"loss": 0.9})
-    log_metrics(run_id, 2, {"loss": 0.4})
-    update_status(run_id, "completed")  # a terminal run ends the stream after one tick
+    _completed_run_with_rows(run_id)
 
     frames = []
     with client.websocket_connect(
@@ -157,34 +170,23 @@ def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_p
         assert "run_id" not in frame
 
 
-def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:
+def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(
+    tmp_path: Path, monkeypatch
+) -> None:
     """An entry still being appended is held back, never pushed half-formed.
 
     A row's bytes land on disk before its terminator does, so a stream that consumed the
     fragment would skip the completed row permanently. The stream reads through the log's own
-    cursor, which holds that fragment back until it is whole.
-
-    Bound to the file backend on purpose: a torn tail is bytes an appender left mid-write, an
-    on-disk file mechanic the fragment below fabricates directly; a database backend commits a
-    row whole or not at all and has no such state to defer.
+    byte cursor, which holds that fragment back until it is whole.
     """
     import asyncio
 
-    import tcip_store
-    from tcip_mcp.experiments import (
-        create_experiment, experiments_dir, log_metrics, update_status,
-    )
-    from tcip_store.file_backend import FileBackend
     from tcip_web.routes.training import _stream_metrics
 
-    tcip_store.bind(FileBackend())
-
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     run_id = "exp-streamed"
-    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    log_metrics(run_id, 1, {"loss": 0.9})
-    log_metrics(run_id, 2, {"loss": 0.4})
-    update_status(run_id, "completed")  # a terminal run ends the poll loop after one tick
-    with (experiments_dir() / run_id / "metrics.jsonl").open("ab") as f:
+    run_dir = _completed_run_with_rows(run_id)
+    with (run_dir / "metrics.jsonl").open("ab") as f:
         f.write(b'{"epoch": 3')
 
     sent: list[dict] = []
@@ -203,33 +205,28 @@ def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_pat
 def test_metrics_stream_reads_the_log_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The stream's read_log calls must never run on the event loop's own thread: a
-    file-backend read waits on a writer holding the log's key, and that wait running on the
-    loop would stall every request and socket the backend serves, not only this one."""
+    """The stream's log reads must never run on the event loop's own thread: a slow disk read
+    running on the loop would stall every request and socket the app serves, not only this
+    one."""
     import asyncio
     import threading
 
-    import tcip_store
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
-    from tcip_store.file_backend import FileBackend
+    from tcip_mcp import experiments
     from tcip_web.routes.training import _stream_metrics
 
-    tcip_store.bind(FileBackend())
-
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     run_id = "exp-off-loop"
-    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    log_metrics(run_id, 1, {"loss": 0.9})
-    update_status(run_id, "completed")
+    _completed_run_with_rows(run_id)
 
     main_thread = threading.current_thread()
     read_threads: list[threading.Thread] = []
-    real_read_log = tcip_store.read_log
+    real_read_rows = experiments.read_rows
 
-    def recording_read_log(*args: object, **kwargs: object) -> object:
+    def recording_read_rows(*args: object, **kwargs: object) -> object:
         read_threads.append(threading.current_thread())
-        return real_read_log(*args, **kwargs)
+        return real_read_rows(*args, **kwargs)
 
-    monkeypatch.setattr(tcip_store, "read_log", recording_read_log)
+    monkeypatch.setattr(experiments, "read_rows", recording_read_rows)
 
     class _Socket:
         async def send_json(self, payload: dict) -> None:
@@ -339,16 +336,11 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     data load, say) and whose output directory holds no event file: the refusal must say both
     that it produced no logs (so the tab offers no Try again) and what the recorded error was,
     not the plain error text a run with real logs would still get."""
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tests._verified_checkpoint_fixtures import finished_run
 
     run_id = "exp-fails-at-data-load"
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
-    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    stamp_run_identity(run_id, str(output_dir), launched_by={"launcher": "process"})
-    update_status(run_id, "failed", error="could not open the dataset's images_dir")
+    finished_run(None, experiment_id=run_id, training_source=f"{__name__}:_fails_at_data_load")
 
     resp = client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
     assert resp.status_code == 404
@@ -357,96 +349,38 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     assert detail["error"] == "could not open the dataset's images_dir"
 
 
-def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
-    """No live entry for either experiment (this process never held them in ``_RUNS``): the
-    route's own rows now come from ``_all_training_runs``'s unified disk enumeration with no
-    patch needed. A genuine training experiment left 'running' by a crash resurfaces as
-    'interrupted'; a review-feedback experiment (no model_source) is not a training run and is
-    excluded.
-    """
-    monkeypatch.chdir(tmp_path)
+def _fails_at_data_load(ctx) -> None:
+    """A training body that dies before its first epoch, the way a data-load failure does."""
+    raise RuntimeError("could not open the dataset's images_dir")
+
+
+def test_list_runs_reads_every_training_run_directory(tmp_path, monkeypatch) -> None:
+    """The route's rows come from the project's run directories: a run whose process stopped
+    touching its heartbeat reads interrupted, and a calibration run (no config) is not a
+    training run."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_store
-    from tcip_mcp.experiments import create_experiment, status_key, update_status
+    from tcip_mcp import experiments
     from tcip_web.routes import training
 
-    create_experiment("run_1", {"model_source": {"builder": "torchvision:fasterrcnn_resnet50_fpn"}})
-    # No heartbeat stamped, unlike update_status: this is the crash this test simulates.
-    with tcip_store.transaction(status_key("run_1")) as txn:
-        txn.write(status_key("run_1"), {"state": "running", "started": None, "ended": None})
+    _opened("run_1", tmp_path)
+    calibration = _calibration()
+    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
 
-    create_experiment("fb_1", {"source": "review_feedback"})
-    update_status("fb_1", "completed")
-
-    body = training.list_runs_route()
-    by_id = {r["experiment_id"]: r for r in body["runs"]}
-    assert by_id["run_1"]["status"] == "interrupted"  # dead process -> interrupted
-    assert by_id["run_1"]["external"] is True
-    assert "fb_1" not in by_id  # review-feedback experiment is not a training run
+    by_id = {r["experiment_id"]: r for r in training.list_runs_route()["runs"]}
+    assert by_id["run_1"]["status"] == "interrupted"
+    assert calibration.name not in by_id
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatch) -> None:
     """The route adds nothing of its own: its rows equal the tool's ``launched_only=True`` view,
     exactly, so the route holds no reconstruction of its own."""
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_web.routes.training import list_runs_route
 
-    create_experiment("exp-route-parity", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    update_status("exp-route-parity", "running")
+    _opened("exp-route-parity", tmp_path)
 
     assert list_runs_route()["runs"] == list_experiments(launched_only=True)["runs"]
-
-
-def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatch) -> None:
-    """A pre-created experiment (state 'created', no output_dir stamp, no metrics logged) never
-    launched and must not list as a run at all, interrupted or otherwise."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import create_experiment
-    from tcip_web.routes.training import list_runs_route
-
-    create_experiment("exp-never-launched", {"model_source": {"builder": "my_models:fcos_det"}})
-
-    by_id = {r["experiment_id"]: r for r in list_runs_route()["runs"]}
-    assert "exp-never-launched" not in by_id
-
-
-def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
-    tmp_path, monkeypatch, client: TestClient
-) -> None:
-    """Relaunching a pristine (never-launched) config reuses its own id: no fork."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
-    from tcip_mcp.experiments import create_experiment
-    from tests.tiny_trainer_fixtures import write_regression_dataset
-
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
-    cfg = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
-                         "task": "regression"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
-        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
-                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
-    }
-    create_experiment("exp-pristine-relaunch", cfg)
-
-    resp = client.post("/api/training/runs", json={"experiment_id": "exp-pristine-relaunch"})
-    assert resp.status_code == 200, resp.json()
-    _wait_terminal(resp.json()["experiment_id"])
-
-    from tcip_mcp.experiments import config_key, lineage_key, read_member
-
-    snapshot = read_member(config_key("exp-pristine-relaunch"))
-    assert snapshot["experiment_id"] == "exp-pristine-relaunch"
-    lineage = read_member(lineage_key("exp-pristine-relaunch"))
-    assert lineage["parent_experiment"] is None
 
 
 def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
@@ -454,14 +388,10 @@ def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
 ) -> None:
     """The route wraps its call in declare_launcher('gui'), so the run it starts through the
     browser-facing door reads back as launched by this app, not by a bare process. Mocks
-    subprocess.Popen so the assertion runs against the resolved status record without waiting
-    on a real child (test_relaunch_route_launches_a_pristine_config_as_its_own_first_run already
-    covers the real subprocess path)."""
+    subprocess.Popen so the assertion runs against the launch record without waiting on a real
+    child (test_relaunch_route_forks_a_run_s_config_and_names_the_parent covers the real
+    subprocess path)."""
     import subprocess
-
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -477,39 +407,26 @@ def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
 
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProc())
 
-    from tcip_mcp.experiments import create_experiment, read_member, status_key
+    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (32, 32)).save(images_dir / "img0.png")
-    json_io.write_annotations(str(labels_dir / "img0.json"),
-                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"min_size": 64, "max_size": 128},
-                         "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": "bud"}},
-        "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
-    }
-    create_experiment("exp-gui-relaunch", cfg)
+    opened_run(None, detection_config(
+        tmp_path / "gui-data", batch_size=1, stages=[{"freeze_to": -1, "epochs": 1}],
+        mixed_precision=False, device="cpu"), experiment_id="exp-gui-relaunch")
 
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch"})
     assert resp.status_code == 200, resp.json()
 
-    status = read_member(status_key(resp.json()["experiment_id"]))
-    assert status["launched_by"] == {"launcher": "gui"}
+    relaunched = read_record(experiment_dir(resp.json()["experiment_id"]) / RUN_FILE)
+    assert relaunched["launched_by"] == {"launcher": "gui"}
+    assert relaunched["parent_experiment"] == "exp-gui-relaunch"
 
 
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     tmp_path, monkeypatch, client: TestClient
 ) -> None:
-    """Relaunching a config that already has a run attached mints a fresh id, its own snapshot
-    naming itself and its lineage naming the picked config as parent."""
-    monkeypatch.chdir(tmp_path)
+    """Relaunching a run's config starts a new run directory through the real launcher and a
+    real child, its launch record replaying the picked run's config and naming it as parent."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
@@ -527,23 +444,23 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     }
     from tcip_mcp.tools.training_tools import launch_training
 
-    first = launch_training(dict(cfg), str(tmp_path / "out1"))
+    first = launch_training(dict(cfg))
     assert "error" not in first, first
     parent_id = first["experiment_id"]
-    _wait_terminal(parent_id)
+    assert _wait_terminal(parent_id)["status"] == "completed"
 
     resp = client.post("/api/training/runs", json={"experiment_id": parent_id})
     assert resp.status_code == 200, resp.json()
     forked_id = resp.json()["experiment_id"]
     assert forked_id != parent_id
-    _wait_terminal(forked_id)
+    assert _wait_terminal(forked_id)["status"] == "completed"
 
-    from tcip_mcp.experiments import config_key, lineage_key, read_member
+    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
-    snapshot = read_member(config_key(forked_id))
-    assert snapshot["experiment_id"] == forked_id
-    lineage = read_member(lineage_key(forked_id))
-    assert lineage["parent_experiment"] == parent_id
+    parent = read_record(experiment_dir(parent_id) / RUN_FILE)
+    forked = read_record(experiment_dir(forked_id) / RUN_FILE)
+    assert forked["parent_experiment"] == parent_id
+    assert forked["config"] == parent["config"]
 
 
 def test_list_runs_route_names_the_run_s_selection_metric(
@@ -572,7 +489,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    result = launch_training(cfg, str(tmp_path / "out"))
+    result = launch_training(cfg)
     assert "error" not in result, result
     _wait_terminal(result["experiment_id"])
 
@@ -586,15 +503,19 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     assert isinstance(row["best_metric"], (int, float)) and math.isfinite(row["best_metric"])
 
 
-def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
-    # HPO trial runs (origin='hpo_trial') must not leak into the Training-tab list.
-    from tcip_mcp.pipelines.training import run_registry as rr
+def test_list_runs_excludes_hpo_trials(tmp_path, monkeypatch) -> None:
+    """An HPO trial's run directory lives under its sweep, so the Training-tab list, which reads
+    the project's run directories, never carries one."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import sweeps_dir
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.tools.training_tools import open_run
+    from tcip_web.routes.training import list_runs_route
+    from tests._verified_checkpoint_fixtures import detection_config
 
-    monkeypatch.setattr(rr, "_RUNS", {})
-    rr.create_run({"model_source": {"builder": "x:y"}}, "out_a", id="run-a", origin="training")
-    rr.create_run({"model_source": {"builder": "x:y"}}, "out_b", id="run-b", origin="hpo_trial")
+    _opened("run-a", tmp_path)
+    config = detection_config(tmp_path / "trial-data")
+    open_run(sweeps_dir() / "hpo_study" / "trial_b", config, resolve_run(config).record,
+             launched_by={"launcher": "process"}, trial_params={"lr": 0.01})
 
-    default = {r["id"] for r in rr.list_runs()}
-    assert len(default) == 1  # only the standalone training run
-    assert all(rr._RUNS[rid].origin == "training" for rid in default)
-    assert len(rr.list_runs(include_hpo_trials=True)) == 2  # full set on request
+    assert [r["experiment_id"] for r in list_runs_route()["runs"]] == ["run-a"]

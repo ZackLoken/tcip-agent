@@ -1,14 +1,13 @@
-"""What a project bundle holds: the membership accounting ``archive_project``, ``import_project``
-and ``tcip_mcp.stray_state`` compose from.
+"""What a project bundle holds: every file of a project tree classified (:func:`account_for`).
 
 Roots are derived from the tree's own structure plus the anchored documents the platform's own
 writers place (``selection.json``, ``curated_manifest.json``); an anchor found somewhere the
 derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under or
 above another derived root) raises :class:`AnchorMisplaced` naming the file. One nesting is
 admitted: a splits root sitting under a curated root. Classification of one file is by precedence:
-bookkeeping first, then a record or log claimed by exactly one derived root's own layout (two
-derived roots claiming the same file raises :class:`CrossRootCollision`), then a recognized blob
-home, then everything else, unaccounted.
+bookkeeping first, then a record or log claimed by a derived root's own layout (a file two
+derived roots claim is a collision), then a recognized blob home, then everything else,
+unaccounted.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from pathlib import Path
 
 from tcip_store.adoption import AdoptionPlan, plan_root
 from tcip_store.file_backend import _is_bookkeeping
-from tcip_store.layout_claims import CURATED, EXPERIMENTS, HPO_ROOT, ROOT, RUN, SPLITS, STATE, SWEEP
+from tcip_store.layout_claims import CURATED, ROOT, RUN, SPLITS, STATE
 
 from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
 
@@ -29,10 +28,6 @@ CURATED_MANIFEST_NAME = "curated_manifest.json"
 
 class AnchorMisplaced(ValueError):
     """A split or curated manifest sits somewhere the derivation constraints exclude."""
-
-
-class CrossRootCollision(ValueError):
-    """A file is claimed by two different derived roots at once."""
 
 
 @dataclass(frozen=True)
@@ -106,19 +101,11 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     from tcip_mcp.dataset_layout import image_root as _image_root
     from tcip_mcp.project_paths import project_state_dir
 
-    root = Path(tree).resolve()
-    derived: list[DerivedRoot] = [DerivedRoot(root, ROOT)]
-    state, experiments, hpo = project_state_dir(root), root / ".tcip" / "experiments", root / ".tcip" / "hpo"
-    derived += [DerivedRoot(state, STATE), DerivedRoot(experiments, EXPERIMENTS), DerivedRoot(hpo, HPO_ROOT)]
+    from tcip_mcp.experiments import run_dirs
 
-    if experiments.is_dir():
-        for child in sorted(experiments.iterdir()):
-            if child.is_dir() and not _is_bookkeeping(child.name):
-                derived.append(DerivedRoot(child, RUN))
-    if hpo.is_dir():
-        for child in sorted(hpo.iterdir()):
-            if child.is_dir() and not _is_bookkeeping(child.name):
-                derived.append(DerivedRoot(child, SWEEP))
+    root = Path(tree).resolve()
+    derived: list[DerivedRoot] = [DerivedRoot(root, ROOT), DerivedRoot(project_state_dir(root), STATE)]
+    derived += [DerivedRoot(run_dir, RUN) for run_dir in run_dirs(root)]
 
     image_root, annotation_root = _image_root(root), _annotation_root(root)
     split_dirs = _anchored_dirs(root, SELECTION_NAME)
@@ -206,14 +193,21 @@ def external_registered_checkpoints(tree: Path) -> tuple[dict, ...]:
     return tuple(sorted(found, key=lambda d: d["checkpoint_path"]))
 
 
+def _run_homes(tree: Path) -> tuple[Path, Path]:
+    """The two directories run and sweep directories live in under ``tree``."""
+    from tcip_mcp.experiments import experiments_dir, sweeps_dir
+
+    return experiments_dir(tree), sweeps_dir(tree)
+
+
 def _blob_files(
     tree: Path, claimed: frozenset[str], registered_checkpoints: frozenset[Path],
 ) -> tuple[Path, ...]:
     """Every file under a recognized blob home that no record or log plan already adopts, each
     named once even when more than one recognized home would otherwise find the same file.
 
-    A ``.pt`` file anywhere under ``.tcip/experiments/`` is found by shape alone, in addition to a
-    registry-named path and the ``.tcip/models`` location.
+    Every file a run or sweep directory holds (under ``.tcip/experiments/`` or ``.tcip/hpo/``) is
+    found, in addition to a registry-named path and the ``.tcip/models`` location.
     """
     from tcip_mcp.dataset_layout import LABEL_SUFFIX
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
@@ -243,15 +237,10 @@ def _blob_files(
     _add(subjects_path(tree))
     _add(dataset_identity_path(tree))
 
-    experiments = tree / ".tcip" / "experiments"
-    if experiments.is_dir():
-        for run_dir in experiments.iterdir():
-            model_src = run_dir / "model_src"
-            if model_src.is_dir():
-                for f in model_src.rglob("*"):
-                    _add(f)
-        for f in experiments.rglob("*.pt"):
-            _add(f)
+    for runs in _run_homes(tree):
+        if runs.is_dir():
+            for f in runs.rglob("*"):
+                _add(f)
     models_dir = tree / ".tcip" / "models"
     if models_dir.is_dir():
         for f in models_dir.glob("*.pt"):
@@ -265,12 +254,12 @@ BLOB_IMAGERY = "imagery"
 BLOB_LABELS = "labels"
 BLOB_SUBJECT_REGISTRY = "subject_registry"
 BLOB_DATASET_IDENTITY = "dataset_identity"
-BLOB_MODEL_SRC = "model_src"
+BLOB_RUNS = "runs"
 BLOB_CHECKPOINTS = "checkpoints"
 BLOB_OTHER = "other"
 
 BLOB_HOMES = (
-    BLOB_IMAGERY, BLOB_LABELS, BLOB_SUBJECT_REGISTRY, BLOB_DATASET_IDENTITY, BLOB_MODEL_SRC,
+    BLOB_IMAGERY, BLOB_LABELS, BLOB_SUBJECT_REGISTRY, BLOB_DATASET_IDENTITY, BLOB_RUNS,
     BLOB_CHECKPOINTS, BLOB_OTHER,
 )
 """Every home a blob :func:`account_for` finds can belong to, in the same terms
@@ -286,16 +275,16 @@ def blob_home(
 
     ``registered_checkpoints`` (``BundleAccounting.registered_checkpoints``) names every checkpoint
     a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
-    blobs after the tree has moved. A ``.pt`` file under ``.tcip/experiments/`` is recognized as a
-    checkpoint by shape alone. Omitted, this still recognizes every checkpoint physically under
-    ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
-
-    A ``model_src`` snapshot is classified before either checkpoint clause is consulted, whatever
-    ``include_models`` says.
+    blobs after the tree has moved. A ``.pt`` file a run or sweep directory holds is recognized as
+    a checkpoint by shape alone when it sits in the run directory itself (beside its
+    ``run.json``), and every other file it holds, a source snapshot's included, is a run file.
+    Omitted, this still recognizes every checkpoint physically under ``.tcip/models`` or in a run
+    directory.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import dataset_identity_path, subjects_path
     from tcip_mcp.dataset_layout import image_root as _image_root
+    from tcip_mcp.experiments import RUN_FILE
 
     if path == subjects_path(tree):
         return BLOB_SUBJECT_REGISTRY
@@ -305,16 +294,11 @@ def blob_home(
         return BLOB_IMAGERY
     if _is_at_or_under(path, _annotation_root(tree)):
         return BLOB_LABELS
-    experiments = tree / ".tcip" / "experiments"
-    if _is_at_or_under(path, experiments):
-        rel = path.relative_to(experiments).parts
-        if len(rel) >= 2 and rel[1] == "model_src":
-            return BLOB_MODEL_SRC
-    if path.parent == tree / ".tcip" / "models" or path in registered_checkpoints:
+    in_run = any(_is_at_or_under(path, runs) for runs in _run_homes(tree))
+    if (path.parent == tree / ".tcip" / "models" or path in registered_checkpoints
+            or (in_run and path.suffix == ".pt" and (path.parent / RUN_FILE).is_file())):
         return BLOB_CHECKPOINTS
-    if _is_at_or_under(path, experiments) and path.suffix == ".pt":
-        return BLOB_CHECKPOINTS
-    return BLOB_OTHER
+    return BLOB_RUNS if in_run else BLOB_OTHER
 
 
 def _cross_root_collisions(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:
@@ -376,11 +360,10 @@ __all__ = [
     "BLOB_HOMES",
     "BLOB_IMAGERY",
     "BLOB_LABELS",
-    "BLOB_MODEL_SRC",
     "BLOB_OTHER",
+    "BLOB_RUNS",
     "BLOB_SUBJECT_REGISTRY",
     "BundleAccounting",
-    "CrossRootCollision",
     "DerivedRoot",
     "account_for",
     "blob_home",

@@ -88,21 +88,12 @@ def _rewrite_label(root: Path, date: str, stem: str, *, offset: float) -> None:
     assert "error" not in res, res
 
 
-def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]) -> dict | None:
-    """A run bound to the manifest at ``out``, for ``date``: the exact sequence
-    ``subprocess_worker.run`` follows (``auto_train_val`` then ``persist_run_partition``),
-    called directly so no real training subprocess is needed. Returns the run's own
-    recorded partition (``auto_train_val``'s third return value), never read back through
-    ``data_cfg``.
-    """
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]) -> Path:
+    """A run bound to the selection at ``out``, its data resolved and recorded by the launcher's
+    own producer, so no training body runs. Returns the run directory."""
+    from tests._verified_checkpoint_fixtures import resolved_run
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-    create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, data_cfg, partition=partition)
-    return partition
+    return resolved_run(None, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
 
 
 def _seal(
@@ -257,21 +248,25 @@ def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_
     cal_dir = tmp_path / "cal_only"
     cal_dir.mkdir()
     (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
+    scoped = [_sample("t1", tmp_path / "elsewhere" / "t1.json", "0" * 16, "train"),
+              _sample("v1", tmp_path / "elsewhere" / "v1.json", "1" * 16, "val"),
+              _sample("c1", cal_dir / "c1.json", ground_truth_digest(cal_dir / "c1.json"),
+                      "calibration")]
+    at_run = {s.ground_truth: s.ground_truth_digest for s in scoped}
 
-    at_run = {
-        "t1": "0" * 16, "v1": "1" * 16,
-        "c1": ground_truth_digest(cal_dir / "c1.json"),
-    }
-    paths = {"t1": str(tmp_path / "elsewhere" / "t1.json"),
-             "v1": str(tmp_path / "elsewhere" / "v1.json"),
-             "c1": str(cal_dir / "c1.json")}
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run),
-                           "ground_truth": paths}
-
-    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None, "m")
+    moved = _resolve_label_movement(scoped, at_run, {"c1"}, str(cal_dir), None, None)
 
     assert moved["labels_moved_run_to_now"] == []
     assert moved["calibration_labels_moved"] == []
+
+
+def _sample(member: str, ground_truth: Path, digest: str, side: str):
+    """One bound sample carrying the digest its ground truth had at draw time."""
+    from tcip_mcp.pipelines.data.selection import Sample
+
+    return Sample(member=member, source=str(ground_truth.with_suffix(".jpg")),
+                  ground_truth=str(ground_truth), group=member, side=side,
+                  confirmation_bucket=None, ground_truth_digest=digest)
 
 
 def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: Path) -> None:
@@ -282,13 +277,12 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
     cal_dir = tmp_path / "cal_only"
     cal_dir.mkdir()
     (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
+    stale = "stale-digest-not-matching-the-file-on-disk"
+    scoped = [_sample("t1", tmp_path / "elsewhere" / "t1.json", "0" * 16, "train"),
+              _sample("c1", cal_dir / "c1.json", stale, "calibration")]
+    at_run = {s.ground_truth: s.ground_truth_digest for s in scoped}
 
-    at_run = {"t1": "0" * 16, "c1": "stale-digest-not-matching-the-file-on-disk"}
-    paths = {"t1": str(tmp_path / "elsewhere" / "t1.json"), "c1": str(cal_dir / "c1.json")}
-    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run),
-                           "ground_truth": paths}
-
-    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None, "m")
+    moved = _resolve_label_movement(scoped, at_run, {"c1"}, str(cal_dir), None, None)
 
     assert moved["labels_moved_run_to_now"] == ["c1"]
     assert moved["calibration_labels_moved"] == ["c1"]
@@ -459,59 +453,29 @@ def test_a_redraw_between_run_and_calibration_is_named_beside_a_moved_label(
     assert stem in sd["labels_moved_draw_to_run"]
 
 
-def test_a_record_carrying_no_selection_digest_leaves_the_redraw_window_unsealed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A bound record that carries no digest of its own is no evidence either way: the redraw
-    window is left unsealed, the way the other windows are when the record holds nothing for
-    them. Comparing the calibration's own digest against nothing would report an unchanged
-    selection as redrawn."""
-    from tcip_store import store
-
-    from tcip_mcp.experiments import read_run_partition, split_key
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    root = _dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-    _bind_run(root, out, "exp_no_recorded_digest")
-
-    record = read_run_partition("exp_no_recorded_digest")
-    assert record["selection_binding"].pop("selection_sha256")
-    store.replace(split_key("exp_no_recorded_digest"), record)
-
-    sd, _shippable = _seal(root, out, "exp_no_recorded_digest", tmp_path,
-                           calibration_labels_dir=str(root / "annotations" / DATES[0]),
-                           selection_sha256=_manifest_sha256(out))
-
-    assert sd["selection_redrawn"] is None
-    assert sd["labels_moved_draw_to_run"] == []
-
-
 def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A run with no ``selection_binding`` at all (never went through the manifest branch of
-    ``auto_train_val``), calibrated under a caller-named manifest anyway: the four
+    """A run whose partition names no selection at all (never went through the manifest branch
+    of ``auto_train_val``), calibrated under a caller-named manifest anyway: the four
     label-movement keys are ``null`` with the reason, and the row still delivers."""
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    flat_cfg = {
+    resolved_run(None, {
         "images_dir": str(root / "images" / DATES[0]),
         "labels_dir": str(root / "annotations" / DATES[0]),
         "scope": {"subject": SUBJECT},
-    }
-    train_ds, val_ds, partition = auto_train_val("detection", flat_cfg, None)
+    }, experiment_id="exp_unbound")
     # A drawn run records a partition of its own; what it must not carry is a selection binding.
-    assert partition is not None
-    create_experiment("exp_unbound", {})
-    persist_run_partition("exp_unbound", flat_cfg, partition=partition)
+    partition = run_resolution("exp_unbound")["partition"]
+    assert partition["samples"]
+    assert partition["selection"] is None
 
     sd, shippable = _seal(root, out, "exp_unbound", tmp_path, real_stem_ids=False)
 
@@ -572,24 +536,22 @@ def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``resolution.selection_digest`` is the sha256 hex digest over ``RECORD_JSON.encode`` of the
-    selection's own document, and the run's ``split.json`` carries that value once in its binding
-    block for the selection it bound to."""
-    from tcip_mcp.experiments import read_run_partition
+    selection's own document, and the run's resolved partition carries that value once in its
+    binding block for the selection it bound to, never on a sample."""
+    from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.resolution import selection_digest
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
-    partition = _bind_run(root, out, "exp_selection_digest")
+    resolved = run_resolution(_bind_run(root, out, "exp_selection_digest").name)
 
     selection = _manifest(out)
     assert selection_digest(selection) == _manifest_sha256(out)
-
-    split = read_run_partition("exp_selection_digest")
-    assert split["selection_binding"]["selection_sha256"] == selection_digest(selection)
-    for block in (*split["members"].values(), *partition.values()):
-        assert "selection_sha256" not in block["label_digests"]
+    binding = resolved["partition"]["selection"]
+    assert binding["selection_sha256"] == selection_digest(selection)
+    assert not any("selection_sha256" in sample for sample in resolved["partition"]["samples"])
 
 
 def test_draw_splits_digests_each_document_once(
@@ -621,40 +583,25 @@ def test_draw_splits_digests_each_document_once(
     assert all(p.endswith(".json") for p in opened), opened
 
 
-# -- rail: the durable config carries no per-stem digests after a bound run --------------------
+# -- rail: the resolved data section carries no per-sample digests after a bound run -----------
 
 
-def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
+def test_the_partition_alone_carries_the_per_sample_digests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The per-sample digests and group keys ride only as ``auto_train_val``'s own third return
-    value: ``data_cfg["split"]`` (the block copied whole into the durable experiment config and
-    embedded in every checkpoint) never gains them, so neither does anything downstream that
-    merges it. The durable config's own read back below reads the one place
-    ``subprocess_worker.run`` mirrors it into, without a real training subprocess; a checkpoint's
-    embedded config and a trial's resolved config are not independently read back here."""
-    import tcip_store as ts
-
-    from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.pipelines.training.subprocess_worker import _mirror_data_section
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    """The per-sample digests and groups ride only in the run's resolved partition: the data
+    section recorded beside it (the one every checkpoint embeds) never gains them."""
+    from tcip_mcp.experiments import run_resolution
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    data_cfg = {"split": {"selection_dir": str(out)}}
-    _train_ds, _val_ds, partition = auto_train_val("detection", data_cfg, None)
+    resolved = run_resolution(_bind_run(root, out, "exp_split_config_readback").name)
 
-    assert partition and all(block["label_digests"] for block in partition.values())
-    for block in (data_cfg["split"], data_cfg["split"]["selection_binding"]):
-        assert "label_digests" not in block
-        assert "members" not in block
-
-    create_experiment("exp_split_config_readback", {})
-    _mirror_data_section("exp_split_config_readback", data_cfg)
-    durable = ts.read(config_key("exp_split_config_readback"))
-    for block in (durable["data"]["split"], durable["data"]["split"]["selection_binding"]):
-        assert "label_digests" not in block
-        assert "members" not in block
+    assert resolved["partition"]["samples"]
+    assert all(sample["ground_truth_digest"] for sample in resolved["partition"]["samples"])
+    for block in (resolved["data"]["split"], resolved["partition"]["selection"]):
+        assert "samples" not in block
+        assert "ground_truth_digests" not in block

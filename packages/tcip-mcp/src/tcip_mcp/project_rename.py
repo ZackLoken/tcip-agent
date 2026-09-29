@@ -10,8 +10,8 @@ line and deletes the marker with no rename of its own. :func:`withdraw_project_r
 pending marker with no rename, for a request whose destination name was taken before phase two ran;
 nothing reserves a destination name during the pending window.
 
-:func:`project_records_present` refuses a project that holds any experiment, plant mapping, plant
-registry, delivery event, persisted job or HPO sweep, since those stores can carry the project's
+:func:`project_records_present` refuses a project that holds any training run, plant mapping, plant
+registry, delivery event or HPO sweep, since those records can carry the project's
 own path absolutely and no door here re-points a record's own path. A dependent project's own
 dataset-registry entry is warned, never refused on and never re-pointed: before the request through
 the preview and after it through :func:`~tcip_mcp.project_removal.dependency_warnings`'s
@@ -43,9 +43,9 @@ _rename_startup_outcomes_lock = threading.Lock()
 
 
 def project_records_present(project: Path) -> list[str]:
-    """The names of ``project``'s own stores that hold any record, over the six stores whose
-    records can carry the project's own path absolutely: ``experiments``, ``plant_mapping``,
-    ``plant_registries``, ``delivery_events``, ``job_registry`` and ``hpo_sweep_manifest``. Returns
+    """The names of ``project``'s own records that exist, over the five whose content can carry the
+    project's own path absolutely: ``experiments`` (a run directory), ``plant_mapping``,
+    ``plant_registries``, ``delivery_events`` and ``hpo_sweeps`` (a sweep directory). Returns
     ``[]`` for a project that has not yet trained, mapped or delivered.
     """
     from tcip_mcp import experiments
@@ -54,11 +54,9 @@ def project_records_present(project: Path) -> list[str]:
     )
     from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE
     from tcip_mcp.project_paths import project_state_dir
-    from tcip_mcp.tools import training_tools
-    from tcip_mcp.web_client import JOB_REGISTRY_DOCUMENTS, job_registry_key
 
     present: list[str] = []
-    if experiments.experiment_ids_with_status(root=project):
+    if experiments.run_dirs(project):
         present.append("experiments")
 
     state_root = str(project_state_dir(Path(project).absolute()))
@@ -69,26 +67,9 @@ def project_records_present(project: Path) -> list[str]:
     if tcip_store.keys(DELIVERY_EVENTS_STORE, state_root):
         present.append("delivery_events")
 
-    if any(
-        tcip_store.read(job_registry_key(doc, root=project), default=[])
-        for doc in JOB_REGISTRY_DOCUMENTS
-    ):
-        present.append("job_registry")
-
-    hpo_root = training_tools.hpo_root(root=project)
-    if hpo_root.is_dir():
-        for sub in sorted(p for p in hpo_root.iterdir() if p.is_dir()):
-            try:
-                manifest = tcip_store.read(
-                    training_tools.sweep_manifest_key(sub.name, root=project), default=None,
-                )
-            except (tcip_store.StoreError, tcip_store.DecodeError,
-                    tcip_store.SchemaVersionRefused):
-                present.append("hpo_sweep_manifest")
-                break
-            if manifest is not None:
-                present.append("hpo_sweep_manifest")
-                break
+    sweeps = experiments.sweeps_dir(project)
+    if sweeps.is_dir() and any((d / experiments.SWEEP_FILE).is_file() for d in sweeps.iterdir()):
+        present.append("hpo_sweeps")
     return present
 
 
@@ -97,8 +78,7 @@ _RECORD_IN_PLAIN_WORDS = {
     "plant_mapping": "a plant mapping",
     "plant_registries": "a plant location list",
     "delivery_events": "a delivered result",
-    "job_registry": "a saved job",
-    "hpo_sweep_manifest": "a tuning sweep",
+    "hpo_sweeps": "a tuning sweep",
 }
 """What each bound store means to the breeder reading the refusal, since the dialog renders that
 sentence verbatim and a store's own name says nothing to the person holding the mouse."""

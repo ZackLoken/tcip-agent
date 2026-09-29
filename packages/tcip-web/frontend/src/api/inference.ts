@@ -33,8 +33,6 @@ export interface RegisteredModel {
   experiment_id?: string | null;
 }
 
-// "interrupted" (one of JobStatus's members) is a job rehydrated after a restart: its worker
-// thread is gone and it is not resumable.
 export type InferenceStatus = JobStatus;
 
 export interface InferenceJob {

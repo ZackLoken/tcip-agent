@@ -127,7 +127,7 @@ def _phenology_fixture(
     seed_confirmed_crossing(tmp_path, BUD_OPENING.name, measured_subject="bud")
 
     # A stamp naming a producing run is only repeated in a delivery when that run really exists.
-    checkpoint_sha256 = (record_producing_run(tmp_path, producing_experiment_id)
+    checkpoint_sha256 = (record_producing_run(producing_experiment_id)
                          if validated and producing_experiment_id else "abc123")
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
@@ -1715,13 +1715,14 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
 ) -> None:
     """A relative stored checkpoint_path (the registry's own internal spelling) still answers
     absolute over this route, the surface the Inference tab feeds straight back into a launch."""
+    pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     ckpt_dir = tmp_path / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True)
-    ckpt = ckpt_dir / "m.pt"
-    ckpt.write_bytes(b"route fixture weights")
-    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
+    ckpt = checkpoint_file(ckpt_dir / "m.pt", "route fixture weights")
+    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {})
 
     resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
 

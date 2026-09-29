@@ -50,14 +50,12 @@ def _calibration_records() -> list[dict]:
 def inference_call(tmp_path, monkeypatch):
     """Call the verified pass behind ``run_inference`` with the model build stubbed, the real
     resolver behind calibration."""
-    from tcip_mcp import model_registry as model_registry_module
     from tcip_mcp.pipelines import calibration as calibration_pipeline
     from tcip_mcp.pipelines.inference import predictor as predictor_module
 
-    from tests._verified_checkpoint_fixtures import run_inference_verified, stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import project_checkpoint, run_inference_verified
 
-    checkpoint = tmp_path / "model.pt"
-    checkpoint.write_bytes(b"not-a-real-checkpoint")
+    checkpoint = project_checkpoint(tmp_path)
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     image_path = images_dir / "a.png"
@@ -87,15 +85,11 @@ def inference_call(tmp_path, monkeypatch):
         return bundle, "d", 0, evidence
 
     monkeypatch.setattr(predictor_module, "build_predictor", _stub_build_predictor)
-    monkeypatch.setattr(
-        model_registry_module, "load_registered_checkpoint",
-        lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _spy_calibrate)
 
     def _call(**kwargs):
         result = run_inference_verified(
-            str(checkpoint), images_dir=str(Path(str(image_path)).parent), device="cpu",
-            experiment_id="run-1", **kwargs)
+            checkpoint, images_dir=str(Path(str(image_path)).parent), device="cpu", **kwargs)
         assert "error" not in result, result
         return result
 
@@ -236,13 +230,11 @@ def test_the_dry_run_report_shows_the_applied_conf_never_the_raw_none(tmp_path, 
 def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monkeypatch):
     """The raster regime is reached through the same door, so the sentinel has to survive the hop
     rather than being resolved to a number on the way."""
-    from tcip_mcp import model_registry as model_registry_module
     from tcip_mcp.tools import inference_tools
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    checkpoint = tmp_path / "model.pt"
-    checkpoint.write_bytes(b"not-a-real-checkpoint")
+    checkpoint = project_checkpoint(tmp_path)
     raster = tmp_path / "mosaic.tif"
     raster.write_bytes(b"")
 
@@ -253,12 +245,9 @@ def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monk
         return {"image_count": 1}
 
     monkeypatch.setattr(inference_tools, "_export_predictions_raster", _spy_raster)
-    monkeypatch.setattr(
-        model_registry_module, "load_registered_checkpoint",
-        lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
 
     inference_tools.run_inference(
-        checkpoint_path=str(checkpoint), raster_path=str(raster),
+        checkpoint_path=checkpoint, raster_path=str(raster),
         output_dir=str(tmp_path / "out"))
 
     assert forwarded["cross_tile_nms"] is None

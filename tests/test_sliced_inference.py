@@ -308,7 +308,7 @@ def test_a_stated_merge_threshold_never_reaches_the_detectors_own_nms(tmp_path):
     p = _prepare_pass(
         checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=True,
         tile_size=TILE, overlap=OVERLAP, cross_tile_nms=0.9, max_dets=None, postprocess="nms",
-        experiment_id=None, tile_batch_size=2)
+        tile_batch_size=2)
 
     assert not isinstance(p, str), p
     assert (p.cross_tile_nms.value, p.cross_tile_nms.source) == (0.9, "explicit")

@@ -15,8 +15,6 @@ from tests._regime_fixtures import tiled_regime
 
 pytest.importorskip("torch")
 
-import tcip_store  # noqa: E402
-from tcip_mcp.experiments import split_key  # noqa: E402
 from tcip_mcp.pipelines.operating_point import resolve_operating_point  # noqa: E402
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT  # noqa: E402
 
@@ -25,9 +23,8 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 8
 
-CAL_STEMS = [f"cal_{i}" for i in range(N_IMAGES)]
-HOLD_STEMS = [f"hold_{i}" for i in range(N_IMAGES)]
-LABELS_DIR = "annotations/2-11-26"
+CAL_STEMS = [f"cal{i}" for i in range(N_IMAGES)]
+HOLD_STEMS = [f"hold{i}" for i in range(N_IMAGES)]
 
 
 def _records(stems: list[str], offset: float) -> list[dict]:
@@ -45,33 +42,47 @@ def _records(stems: list[str], offset: float) -> list[dict]:
     return recs
 
 
-def _write_split(experiment_id: str, train_stems: list[str]) -> None:
-    """The record's membership lives per ground-truth scope, the way every run writes it: a bare
-    member name means one image only within the scope its own block names."""
-    tcip_store.replace(split_key(experiment_id), {
-        "members": {LABELS_DIR: {
-            "train": train_stems, "val": [],
-            "group_key_map": {stem: stem for stem in train_stems}}},
-        "group_by": "stem"})
+def _trained_on(tmp_path, train_stems: list[str]) -> tuple[str, str]:
+    """A run that trained on every one of ``train_stems``, each its own group, its partition
+    resolved by the child's own producer over one labeled directory; answers ``(run id, labels
+    directory)``."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for stem in train_stems:
+        Image.new("RGB", (32, 32)).save(images_dir / f"{stem}.png")
+        json_io.write_annotations(str(labels_dir / f"{stem}.json"),
+                                  [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 32, 32)
+    run_dir = opened_run(None, {
+        "model_source": {"task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "scope": {"subject": "bud"}, "auto_val": False,
+                 "split": {"group_key_map": {stem: stem for stem in train_stems}}},
+        "evaluation": {"selection_metric": "loss"}})
+    return run_dir.name, str(labels_dir)
 
 
-def _resolve(experiment_id: str):
+def _resolve(experiment_id: str, labels_dir: str):
     return resolve_operating_point(
         "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
-        experiment_id=experiment_id, calibration_labels_dir=LABELS_DIR,
+        experiment_id=experiment_id, calibration_labels_dir=labels_dir,
         calibration_records=_records(CAL_STEMS, 0.0),
         holdout_records=_records(HOLD_STEMS, 100000.0))
 
 
-def test_a_reference_drawn_entirely_from_the_training_split_is_refused():
+def test_a_reference_drawn_entirely_from_the_training_split_is_refused(tmp_path):
     """Calibration and holdout share no image with each other, so the cal-versus-holdout signal
     reads clean, yet every one of their images was trained on. The refusal comes from the
     train-disjointness result alone, which here reports its leak at group level with nothing in the
     exact-stem list beside it.
     """
-    _write_split("exp_leaky", CAL_STEMS + HOLD_STEMS)
-
-    b = _resolve("exp_leaky")
+    b = _resolve(*_trained_on(tmp_path, CAL_STEMS + HOLD_STEMS))
     sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 
@@ -83,13 +94,11 @@ def test_a_reference_drawn_entirely_from_the_training_split_is_refused():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_the_same_reference_validates_against_a_training_split_it_never_touched():
+def test_the_same_reference_validates_against_a_training_split_it_never_touched(tmp_path):
     """The companion obligation: the identical records, against a run trained on other images
     entirely, must earn the held-out stamp.
     """
-    _write_split("exp_clean", [f"other_{i}" for i in range(6)])
-
-    b = _resolve("exp_clean")
+    b = _resolve(*_trained_on(tmp_path, [f"other{i}" for i in range(6)]))
     sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 

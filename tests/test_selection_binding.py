@@ -19,13 +19,18 @@ from torch.utils.data import Dataset  # noqa: E402
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
-from tcip_mcp.pipelines.data.split_construction import recorded_side
+from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject, write_registry
 from tcip_mcp.tools.data_tools import draw_splits
 
 SUBJECT = "leaf"
 OTHER_SUBJECT = "bud"
 DATES = ("2-11-26", "2-12-01")
+
+
+def _side_members(partition: dict, side: str) -> list[str]:
+    """The member names a resolved partition put on ``side``."""
+    return sorted({s.member for s in partition_samples(partition) if s.side == side})
 
 
 def _write_stem(images_dir: Path, labels_dir: Path, stem: str, annotations) -> None:
@@ -192,7 +197,7 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     read_from |= {Path(val_ds.sample_sources[key]).parent.name for key in val_ds.stems}
     assert read_from == set(DATES)
 
-    binding = data_cfg["split"]["selection_binding"]
+    binding = partition["selection"]
     assert binding["selection_dir"] == str(out)
     assert binding["redraw"] is False
     assert "date" not in binding
@@ -200,8 +205,8 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     assert data_cfg["scope"] == asdict(drawn.scope)
     assert drawn.scope.subject == SUBJECT
     assert "scope" not in binding
-    assert sorted(partition) == sorted(
-        {str(Path(s.ground_truth).parent) for s in drawn.samples})
+    assert {str(Path(s.ground_truth).parent) for s in partition_samples(partition)} == {
+        str(Path(s.ground_truth).parent) for s in drawn.samples}
 
 
 def _pixels_and_ground_truth(under: Path) -> dict[Path, int]:
@@ -220,25 +225,20 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
     """One selection spanning two capture dates trains for real through the worker, reading the
     images where they already sit.
 
-    The whole worker path runs (``auto_train_val``, the class-metadata stamp, the envelope, the
-    partition record), not a loader built by hand: the run's own recorded partition names members
-    from both label directories, the checkpoint carries the selection's own class map, and no
-    image or label document anywhere in the workspace outside a ``.tcip`` state tree was copied,
-    moved or rewritten. What the loaders themselves read is
+    The whole child path runs (``auto_train_val``, the class-metadata stamp, the resolved record,
+    the envelope), not a loader built by hand: the run's own resolved partition names members from
+    both label directories, the checkpoint carries the selection's own class map, and no image or
+    label document anywhere in the workspace outside a ``.tcip`` state tree was copied, moved or
+    rewritten. What the loaders themselves read is
     :func:`test_auto_train_val_binds_the_selections_own_partition`'s subject.
     """
-    import tcip_store as ts
-
-    import tcip_mcp.tools.training_tools as ttools
-    from tcip_mcp.experiments import create_experiment, read_run_partition, update_status
-    from tcip_mcp.pipelines.training import subprocess_worker as worker
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import opened_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
@@ -248,26 +248,22 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    create_experiment("exp-multi-date", config)
-    update_status("exp-multi-date", "running")
-    ts.replace(ttools.launch_config_key(run_dir), config)
+    run_dir = opened_run(tmp_path, config, experiment_id="exp-multi-date")
+
+    from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
     before = _pixels_and_ground_truth(tmp_path)
-    worker.run("exp-multi-date", str(run_dir), "")
+    run_directory(run_dir)
 
     assert _pixels_and_ground_truth(tmp_path) == before, (
         "a bound run reads the dataset's own imagery and ground truth; nothing is copied")
 
     # Both dates reach the members the run actually recorded, from two label directories.
-    partition = read_run_partition("exp-multi-date")
-    assert {Path(d).name for d in partition["members"]} == set(DATES)
-    consumed = set(recorded_side(partition["members"], "train")) | set(
-        recorded_side(partition["members"], "val"))
-    assert consumed == {Path(s.ground_truth).stem
-                        for s in drawn.on("train") + drawn.on("val")}
-    for date in DATES:
-        block = next(b for d, b in partition["members"].items() if Path(d).name == date)
-        assert block["train"] or block["val"]
+    samples = partition_samples(run_resolution(run_dir.name)["partition"])
+    consumed = {s for s in samples if s.side in ("train", "val")}
+    assert {Path(s.ground_truth).parent.name for s in consumed} == set(DATES)
+    assert {Path(s.ground_truth).stem for s in consumed} == {
+        Path(s.ground_truth).stem for s in drawn.on("train") + drawn.on("val")}
 
     # The checkpoint speaks the selection's own vocabulary, not one re-read from the registry.
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
@@ -283,11 +279,8 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
     still speak the vocabulary its samples were admitted under: a map re-resolved from the live
     registry here would stamp ids the model never trained in, which is a wrong value rather than
     a missing one."""
-    import tcip_store as ts
-
-    import tcip_mcp.tools.training_tools as ttools
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.training import subprocess_worker as worker
+    from tcip_mcp.pipelines.training.subprocess_worker import run_directory
+    from tests._verified_checkpoint_fixtures import opened_run
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -302,8 +295,6 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
         )),
     )))
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
@@ -317,11 +308,9 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    create_experiment("exp-reordered", config)
-    update_status("exp-reordered", "running")
-    ts.replace(ttools.launch_config_key(run_dir), config)
+    run_dir = opened_run(tmp_path, config, experiment_id="exp-reordered")
 
-    worker.run("exp-reordered", str(run_dir), "")
+    run_directory(run_dir)
 
     checkpoint = torch.load(run_dir / "model_final.pt", map_location="cpu", weights_only=False)
     stamped = ((checkpoint.get("config") or {}).get("data") or {})["scope"]
@@ -330,16 +319,18 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
 
 def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path):
     """The selection records the class space its samples were admitted under; a data section
-    stating another beside it refuses by name, and one stating none trains in the selection's."""
+    stating one beside it refuses by name, the selection's own included (a stated scope is a
+    second spelling, never compared against the record), and one stating none trains in the
+    selection's."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
 
-    with pytest.raises(ValueError, match="Drop data.scope"):
-        auto_train_val("detection", _run_data_cfg(root, out, scope={"subject": OTHER_SUBJECT}),
-                       None)
+    for stated in ({"subject": OTHER_SUBJECT}, asdict(drawn.scope)):
+        with pytest.raises(ValueError, match="Drop data.scope"):
+            auto_train_val("detection", _run_data_cfg(root, out, scope=stated), None)
 
     data_cfg = _run_data_cfg(root, out)
     train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
@@ -382,7 +373,7 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
-    assert Path(emptied.ground_truth).stem in set(recorded_side(partition, "train"))
+    assert Path(emptied.ground_truth).stem in set(_side_members(partition, "train"))
 
 
 def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_path: Path):
@@ -678,22 +669,23 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
 
 
 def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: Path):
-    """The batch a preflight smokes comes off the run's own training loader, resolved the way the
-    run resolves it. A bound config names no directories at all, and re-admitting one here would
-    smoke a batch holding the validation and calibration members the run never trains on, which is
-    not the batch whose measurement boundary the contract proves."""
+    """The batch a preflight smokes comes off the run's own training loader, resolved once the
+    way the launch records it. A bound config names no directories at all, and re-admitting one
+    here would smoke a batch holding the validation and calibration members the run never trains
+    on, which is not the batch whose measurement boundary the contract proves."""
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
-    config = {"data": _run_data_cfg(root, out)}
+    config = {"model_source": {"task": "detection"}, "data": _run_data_cfg(root, out)}
     config["data"]["dataset_source"] = {
         "builder": f"{__name__}:build_recording_dataset", "task": "detection",
     }
 
     before = len(_RECORDED_BUILDS)
-    batch, why = _one_real_batch("detection", config)
+    batch, why = _one_real_batch("detection", resolve_run(config).train_ds)
 
     assert why is None and batch is not None
     smoked = _RECORDED_BUILDS[before]  # the training side, built first
@@ -701,8 +693,8 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
         s.identity for s in drawn.on("train"))
     held_out = {s.identity for s in drawn.on("val") + drawn.on("calibration")}
     assert not held_out & {s.identity for s in smoked.seen_samples}
-    # The caller's own config is left exactly as it was found: preflight reads, never binds.
-    assert "selection_binding" not in config["data"]["split"]
+    # The caller's own config is left exactly as it was found: resolution reads a copy.
+    assert config["data"]["split"] == {"selection_dir": str(out)}
 
 
 def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
@@ -822,12 +814,12 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
     held_out = {s.identity for s in drawn.on("calibration")}
 
     data_cfg = _redraw_cfg(root, out, seed=1)
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
     assert set(train_ds.stems) | set(val_ds.stems) == pool
     assert not (set(train_ds.stems) | set(val_ds.stems)) & held_out
-    assert data_cfg["split"]["selection_binding"]["redraw"] is True
-    assert data_cfg["split"]["resolved_seed"] == 1
+    assert partition["selection"]["redraw"] is True
+    assert partition["seed"] == 1
 
 
 def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
@@ -991,65 +983,47 @@ def test_preflight_config_admits_the_redraw_pair_with_a_warning(tmp_path: Path):
     assert any("redraw_within_selection=true" in w for w in result["warnings"])
 
 
-# -- the run's own recorded partition ------------------------------------------
+# -- the run's own resolved record ---------------------------------------------
 
 
-def test_persist_run_partition_carries_the_selection_binding(tmp_path: Path):
-    import tcip_store as ts
-
-    from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(root, out)
-    data_cfg = _run_data_cfg(root, out)
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
 
-    create_experiment("exp-bound", {"data": data_cfg})
-    persist_run_partition("exp-bound", data_cfg, partition=partition)
+    run_dir = resolved_run(tmp_path, _run_data_cfg(root, out), experiment_id="exp-bound")
+    partition = read_record(run_dir / RUN_FILE)["resolved"]["partition"]
 
-    record = ts.read(split_key("exp-bound"))
-    assert record["selection_binding"]["selection_dir"] == str(out)
-    members = record["members"]
-    assert recorded_side(members, "train") == sorted(
+    assert partition["selection"]["selection_dir"] == str(out)
+    assert _side_members(partition, "train") == sorted(
         {Path(s.ground_truth).stem for s in drawn.on("train")})
-    assert recorded_side(members, "val") == sorted(
+    assert _side_members(partition, "val") == sorted(
         {Path(s.ground_truth).stem for s in drawn.on("val")})
-    assert sorted(members) == sorted(partition)
     # The selection's own named grouping policy, carried rather than collapsed into the finite
-    # per-stem map beside it: a stem the map does not cover is what the policy answers for.
-    assert record["group_by"] == drawn.group_by == "tile_prefix"
-    for block in record["members"].values():
-        assert block["group_key_map"]
-        assert block["label_digests"]["at_split"]
+    # per-sample groups beside it: a stem the groups do not cover is what the policy answers for.
+    assert partition["group_by"] == drawn.group_by == "tile_prefix"
+    samples = partition_samples(partition)
+    assert all(s.group for s in samples)
+    assert set(partition["ground_truth_digests"]) == {s.ground_truth for s in samples}
 
 
-def test_persist_run_partition_carries_no_stale_binding_when_this_run_did_not_bind(tmp_path: Path):
-    import tcip_store as ts
-
-    from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
+    """A run over the same tree that names no selection draws a partition of its own, and its
+    resolved partition names no selection it bound."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(root, out)
-    data_cfg = _run_data_cfg(root, out)
-    auto_train_val("detection", data_cfg, None)
+    run_dir = resolved_run(tmp_path, {
+        "images_dir": str(root / "images" / DATES[0]),
+        "labels_dir": str(root / "annotations" / DATES[0]),
+        "scope": {"subject": SUBJECT},
+    }, experiment_id="exp-drawn")
+    resolved = read_record(run_dir / RUN_FILE)["resolved"]
 
-    # The same config, relaunched with the binding dropped: it draws its own split instead.
-    data_cfg["images_dir"] = str(root / "images" / DATES[0])
-    data_cfg["labels_dir"] = str(root / "annotations" / DATES[0])
-    data_cfg["scope"] = {"subject": SUBJECT}
-    data_cfg["split"].pop("selection_dir")
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
-
-    create_experiment("exp-drawn", {"data": data_cfg})
-    persist_run_partition("exp-drawn", data_cfg, partition=partition)
-
-    record = ts.read(split_key("exp-drawn"))
-    assert "selection_binding" not in record
-    # A drawn run records a partition of its own; what must not survive is the earlier binding.
-    assert partition is not None
-    assert recorded_side(record["members"], "train")
-    assert recorded_side(record["members"], "val")
+    assert resolved["partition"]["selection"] is None
+    assert _side_members(resolved["partition"], "train")
+    assert _side_members(resolved["partition"], "val")

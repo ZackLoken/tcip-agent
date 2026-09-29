@@ -56,7 +56,8 @@ def test_fault_at_first_document_write_after_stamps_moved_is_finished_by_resume(
     assert bucket_stems(destination) == {"img"}
 
 
-def test_fault_between_artifact_record_and_first_stamp_write_is_finished_by_resume(tmp_path, monkeypatch):
+def test_fault_between_destination_creation_and_first_stamp_write_is_finished_by_resume(
+        tmp_path, monkeypatch):
     from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
@@ -183,7 +184,7 @@ def test_fault_between_document_write_and_source_delete_finished_by_resume(tmp_p
 def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path, monkeypatch):
     """A crash after the clear's own last write, before the body returns: a fresh publish landed
     into the emptied source before the resume runs. The resume moves nothing more and reports
-    source_republished, the artifact already recorded."""
+    source_republished."""
     from tcip_mcp.prediction_buckets import bucket_stems
     import tcip_mcp.prediction_buckets as prediction_buckets_mod
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket, run_inference
@@ -201,10 +202,10 @@ def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path
     assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
-    # A fresh publish lands into the now-empty, still-terminal, same-pointer source.
+    # A fresh publish lands into the now-empty source.
     republish = run_inference(
         str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(built["bucket"]),
-        tile=False, experiment_id="expFaultLastStep")
+        tile=False)
     assert "error" not in republish, republish
     assert bucket_stems(built["bucket"]) == {"img"}
 
@@ -215,7 +216,6 @@ def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path
     assert result["resumed"] is True
     assert result["source_republished"] is True
     assert result["documents_moved_this_call"] == 0
-    assert result["cleared_artifact_recorded"] is True
     # The re-publication is left exactly as it landed.
     assert bucket_stems(built["bucket"]) == {"img"}
     assert bucket_stems(destination) == {"img"}
@@ -283,8 +283,9 @@ def test_an_undecodable_stamp_at_the_destination_refuses_by_name_on_resume(tmp_p
 
 
 def test_unfinished_clear_no_destination_content_refuses_a_keyword_less_call(tmp_path, monkeypatch):
-    """A crash before any stamp write leaves the destination holding no document: the artifact
-    already names it, so a keyword-less call refuses on record as unfinished, naming it."""
+    """A crash before any stamp write leaves the destination holding no document: the destination
+    directory already records the clear, so a keyword-less call refuses it as unfinished, naming
+    it."""
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expUnfinishedNoContent")
@@ -325,10 +326,8 @@ def test_unfinished_clear_stamp_at_both_refuses_a_keyword_less_call(tmp_path, mo
 def test_a_keyword_less_call_in_the_stamps_moved_state_refuses_naming_the_newest_archive(
         tmp_path, monkeypatch):
     """A crash after every stamp has moved but before the first document leaves the source with no
-    operating_point stamp at all and its documents still in place: the door reads no experiment
-    from a stampless source, so the keyword-less refusal is the archive-walking one
-    (_find_cleared_candidate_with_no_source_stamp), not the artifact-record one, and it names the
-    same destination as the remedy."""
+    operating_point stamp at all and its documents still in place: the keyword-less refusal is the
+    stampless-source one, and it names the destination on record as the remedy."""
     from tcip_mcp.prediction_buckets import bucket_stems
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
 
@@ -352,8 +351,8 @@ def test_a_keyword_less_call_in_the_emptied_state_refuses_naming_the_newest_arch
         tmp_path, monkeypatch):
     """A source a clear emptied entirely, whose own audit entry never appended (the crash after the
     last delete and before the body returns): the source carries neither a stamp nor a document, so
-    a later keyword-less call over it still reads no experiment and is answered by the same
-    archive-walking refusal, naming this already-finished archive as the remedy."""
+    a later keyword-less call over it is answered by the same stampless-source refusal, naming
+    this already-finished archive as the remedy."""
     from tcip_mcp.prediction_buckets import bucket_stems
     import tcip_mcp.prediction_buckets as prediction_buckets_mod
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
@@ -567,9 +566,9 @@ def test_a_verdict_recorded_between_a_crash_and_the_resume_still_finishes_report
 
 def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_refuses_naming_the_newest(
         tmp_path, monkeypatch):
-    """A source cleared, republished and cleared again carries two cleared: artifacts on the same
-    experiment. A keyword-less call after the republication proceeds as a new, second clear with
-    its own second artifact (coverage: the pass-through baseline proceeds too), and a resume
+    """A source cleared, republished and cleared again has two cleared destinations. A
+    keyword-less call after the republication proceeds as a new, second clear with its own second
+    destination (coverage: the pass-through baseline proceeds too), and a resume
     naming the older archive refuses, naming the newest instead of merging this clear's own
     reconciliation into a finished, earlier publication."""
     import tcip_mcp.dataset_layout as dataset_layout_mod
@@ -590,8 +589,7 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     assert_source_stamps_absent(source)
 
     republish = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False,
-        experiment_id=exp_id)
+        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
     assert "error" not in republish, republish
     assert bucket_stems(source) == {"img"}
 

@@ -41,7 +41,7 @@ function config(
     images_dir: "/data/images",
     subject: "burr",
     created: "2026-08-01T00:00:00Z",
-    state: "created",
+    state: "completed",
     parent_experiment: null,
     ...overrides,
   };
@@ -57,9 +57,9 @@ afterEach(() => {
 });
 
 describe("TrainingTab run list", () => {
-  it("offers a stop control for a run the platform reconstructed from another process, and cancels it by id", async () => {
+  it("offers a stop control for a running run, and cancels it by id", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ experiment_id: "train-agent-1", status: "running", external: true })],
+      runs: [run({ experiment_id: "train-agent-1", status: "running" })],
     });
     const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue({
       experiment_id: "train-agent-1",
@@ -80,10 +80,8 @@ describe("TrainingTab run list", () => {
         run({
           experiment_id: "train-stale",
           status: "running",
-          external: true,
           heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
         }),
-        run({ experiment_id: "train-fresh", status: "created" }),
       ],
     });
 
@@ -96,17 +94,13 @@ describe("TrainingTab run list", () => {
       "title",
       "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses.",
     );
-    expect(screen.getByRole("button", { name: "Cancel train-fresh" })).toHaveAttribute(
-      "title",
-      "Cancels a run that has not started yet.",
-    );
   });
 
-  it("offers no stop control for a run in a terminal status, external or not", async () => {
+  it("offers no stop control for a run in a terminal status", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ experiment_id: "train-done", status: "completed", external: false }),
-        run({ experiment_id: "train-done-agent", status: "failed", external: true }),
+        run({ experiment_id: "train-done", status: "completed" }),
+        run({ experiment_id: "train-done-agent", status: "failed" }),
       ],
     });
 
@@ -156,11 +150,7 @@ describe("TrainingTab run list", () => {
 
     render(<TrainingTab />);
     expect(await screen.findByText("train-a")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Runs this running process itself launched come first, in launch order; every other recorded run follows/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Every recorded run, sorted by experiment id.")).toBeInTheDocument();
   });
 
   it("names the row's own select control with the id and status", async () => {
@@ -259,7 +249,7 @@ describe("TrainingTab run list", () => {
 });
 
 describe("TrainingTab run launcher mark", () => {
-  it("states who launched the run from launched_by alone, not from external", async () => {
+  it("states who launched the run from launched_by alone", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({ experiment_id: "train-gui", status: "running", launched_by: { launcher: "gui" } }),
@@ -285,8 +275,6 @@ describe("TrainingTab run launcher mark", () => {
         run({
           experiment_id: "train-other-value",
           status: "running",
-          // external true carries no weight on the sentence: the record is the fact.
-          external: true,
           launched_by: { launcher: "bespoke-cli" },
         }),
       ],
@@ -995,7 +983,11 @@ describe("TrainingTab config picker", () => {
     expect(await screen.findByText("exp-pristine-1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("exp-pristine-1"));
-    expect(screen.getByText("Its first run, on the data paths it names")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "A new run of this config on the data paths it names, as they are now, with the recorded seed",
+      ),
+    ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", null));
@@ -1042,7 +1034,7 @@ describe("TrainingTab config picker", () => {
           images_dir: "/data/images",
           subject: "leaf",
           created: null,
-          state: "created",
+          state: "completed",
           parent_experiment: null,
         },
       ],
@@ -1099,7 +1091,7 @@ describe("TrainingTab config picker", () => {
           images_dir: "/data/images",
           subject: "leaf",
           created: null,
-          state: "created",
+          state: "completed",
           parent_experiment: null,
         },
       ],
@@ -1135,7 +1127,7 @@ describe("TrainingTab config picker", () => {
           images_dir: "/data/images",
           subject: "leaf",
           created: null,
-          state: "created",
+          state: "completed",
           parent_experiment: null,
         },
       ],

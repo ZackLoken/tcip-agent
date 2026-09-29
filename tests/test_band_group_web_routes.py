@@ -215,7 +215,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     must decode through the channel-aware loader, never crash on a stringified BandGroupRef."""
     pytest.importorskip("torch")
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_web.routes.inference import InferenceJob, _worker
@@ -224,7 +224,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     images_dir.mkdir()
     _write_group(images_dir, "cap_001")
     out_dir = tmp_path / "out"
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
 
     seen = []
 

@@ -2224,7 +2224,6 @@ describe("ReviewTab priority queue", () => {
       ],
       total_candidates: 2,
       reviewed_skipped: 0,
-      marks_unresolved: null,
     });
 
     render(<ReviewTab />);
@@ -2274,7 +2273,6 @@ describe("ReviewTab priority queue", () => {
       ],
       total_candidates: 2,
       reviewed_skipped: 0,
-      marks_unresolved: null,
     });
 
     render(<ReviewTab />);
@@ -2289,43 +2287,6 @@ describe("ReviewTab priority queue", () => {
     );
 
     expect(await screen.findByText("Calibration")).toBeInTheDocument();
-  });
-
-  it("shows why a mark is missing instead of a silent non-member, when marks_unresolved is set", async () => {
-    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
-      models: [{ name: "run-42", checkpoint_path: "C:/ckpts/run-42.pt" }],
-    });
-    vi.spyOn(api.review, "launchPriorityQueue").mockResolvedValue({
-      status: "launched",
-      job_id: "pq-4",
-    });
-    vi.spyOn(api.review, "priorityQueueJob").mockResolvedValue({
-      job_id: "pq-4",
-      status: "completed",
-      error: null,
-      queue: [
-        { image: "img1.jpg", score: 0.9 },
-        { image: "img2.jpg", score: 0.4 },
-      ],
-      total_candidates: 2,
-      reviewed_skipped: 0,
-      marks_unresolved:
-        "images_dir='C:/data/images/2026-01-01' is not the bound run's recorded images root",
-    });
-
-    render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    openFilters();
-    await waitFor(() => expect(screen.getByText("run-42")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Priority-order model"), {
-      target: { value: "C:/ckpts/run-42.pt" },
-    });
-    fireEvent.click(
-      screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
-    );
-
-    expect(await screen.findByText("Calibration unknown")).toBeInTheDocument();
-    expect(screen.queryByText("Calibration")).not.toBeInTheDocument();
   });
 
   it("surfaces the tool's own refusal honestly, not a generic failure", async () => {
@@ -2343,7 +2304,6 @@ describe("ReviewTab priority queue", () => {
       queue: [],
       total_candidates: 0,
       reviewed_skipped: 0,
-      marks_unresolved: null,
     });
 
     render(<ReviewTab />);

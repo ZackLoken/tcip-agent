@@ -8,43 +8,35 @@ export interface Sweep {
   sweep_id: string;
   status: string;
   error: string | null;
-  /** True for a sweep recovered from its on-disk manifest rather than launched here. */
+  /** True for a sweep read from its directory rather than launched by this process. */
   external?: boolean;
   n_trials?: number | null;
   search_alg?: string | null;
   scheduler?: string | null;
   param_space_keys?: string[];
-  /** Whether the manifest passes every one of the backend's own relaunch conditions
-   * (tcip_web.routes.tuning._relaunch_refusal): the relaunchable marker. */
-  relaunchable?: boolean;
-  /** Why this sweep cannot be relaunched, in the platform's own words; null when it can be. */
-  reason?: string | null;
   cancel_requested?: boolean;
   /** The sweep this one was relaunched from, or null when it was not a relaunch. */
   relaunched_from: string | null;
-  /** Draws per sampled point (run_hyperparameter_search's own data.split.seed grid axis); null
-   * before the sweep's first manifest. */
-  split_draws: number | null;
+  /** Draws per sampled point (run_hyperparameter_search's own data.split.seed grid axis). */
+  split_draws: number;
   /** Whether the recorded base_config redraws train/val inside a bound selection's own
    * samples, rather than sweeping seeds over a drawn split. */
   redraw_within_selection?: boolean;
-  /** Whether run_hyperparameter_search has written this sweep's first manifest yet. False in the pre-manifest
-   * window a relaunch opens (the route registers the job before it answers), so a caller keys
-   * its not-yet-recorded state on this rather than on a 404 that window never produces. */
-  has_manifest: boolean;
 }
 
 export interface SweepDetail {
   sweep_id: string;
   status: string;
   error?: string | null;
-  result: unknown;
-  /** Whether run_hyperparameter_search has written this sweep's first manifest yet; see Sweep.has_manifest. */
-  has_manifest: boolean;
+  /** The sweep's recorded input, its split_draws among it. */
+  input: { split_draws: number } & Record<string, unknown>;
+  /** What the sweep's trials amount to (training_tools.sweep_outcome). */
+  outcome: unknown;
 }
 
 export interface SweepTrial {
   trial_id: string;
+  status: string;
   has_metrics: boolean;
   params: Record<string, unknown>;
 }
@@ -63,20 +55,18 @@ export interface SplitDrawBlock {
   seeds_complete: (number | null)[];
 }
 
-/** One split_sensitivity entry: a point's own params (null for Ray's own never-answered row,
- *  which names no point to group under), its draws block, and whether it is eligible for best. */
+/** One split_sensitivity entry: a point's own params, its draws block, and whether it is eligible
+ *  for best. */
 export interface SplitSensitivityGroup {
   point: Record<string, unknown> | null;
   block: SplitDrawBlock;
   eligible: boolean;
 }
 
-/** The split_draws spread a completed sweep's result carries when split_draws was above 1. */
+/** The split_draws spread a sweep's outcome carries when split_draws was above 1. */
 export interface SweepDraws {
   groups: SplitSensitivityGroup[];
   best: SplitDrawBlock | null;
-  bestReason: string | null;
-  splitDraws: number | null;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -109,19 +99,17 @@ function splitSensitivityGroupOf(value: unknown): SplitSensitivityGroup {
 }
 
 /**
- * A completed sweep's split_draws spread, narrowed field by field with null fallbacks (the
- * form of api/inference.ts's own refusal narrowers, extended to narrow the arrays), or null
- * when result carries no split_sensitivity array (split_draws was 1).
+ * A sweep outcome's split_draws spread, narrowed field by field with null fallbacks (the form of
+ * api/inference.ts's own refusal narrowers, extended to narrow the arrays), or null when the
+ * outcome carries no split_sensitivity array (split_draws was 1).
  */
-export function sweepDrawsOf(result: unknown): SweepDraws | null {
-  if (typeof result !== "object" || result === null) return null;
-  const r = result as Record<string, unknown>;
+export function sweepDrawsOf(outcome: unknown): SweepDraws | null {
+  if (typeof outcome !== "object" || outcome === null) return null;
+  const r = outcome as Record<string, unknown>;
   if (!Array.isArray(r.split_sensitivity)) return null;
   return {
     groups: r.split_sensitivity.map(splitSensitivityGroupOf),
     best: r.best_value_spread == null ? null : splitDrawBlockOf(r.best_value_spread),
-    bestReason: typeof r.best_value_reason === "string" ? r.best_value_reason : null,
-    splitDraws: numberOrNull(r.split_draws),
   };
 }
 

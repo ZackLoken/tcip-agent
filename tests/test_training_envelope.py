@@ -1,11 +1,13 @@
 """The audited training envelope: audit-around-body, custom train(ctx) dispatch, and ctx sinks.
 
 Proves the envelope guarantees hold around any training body (default trainer or a custom
-``train(ctx)``): the run is bracketed by audit events, env provenance is snapshotted, checkpoints
-saved through ``ctx`` are stamped, and completion registers the model + lineage + artifact.
+``train(ctx)``): the run is bracketed by audit events, checkpoints saved through ``ctx`` are
+stamped, and completion writes the final status whose checkpoint the registry reads.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -14,11 +16,14 @@ import tcip_store as ts
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
-from tcip_mcp.experiments import artifacts_key, env_key, lineage_key  # noqa: E402
+from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._verified_checkpoint_fixtures import (  # noqa: E402
+    completed_checkpoint,
+    detection_config,
+)
 
 
 def _audit_events(root, tool="training_run"):
@@ -26,9 +31,27 @@ def _audit_events(root, tool="training_run"):
     return [e for e in events if e.get("tool") == tool]
 
 
-# --------------------------------------------------------------------------
-# Custom train(ctx) dispatch: the agent's own loop drives training via ctx.
-# --------------------------------------------------------------------------
+def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
+    """A context over a run directory the launcher's own writer opened over ``config``, its run
+    training under the data section the launch resolved, as the child's own entry trains it."""
+    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    run_dir = opened_run(tmp_path, config, resume_from=kwargs.get("resume_from"))
+    record = read_record(run_dir / RUN_FILE)
+    run = TrainRun(id=run_dir.name,
+                   config={**record["config"], "data": record["resolved"]["data"]},
+                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+    return TrainContext(run=run, **{"train_loader": None, **kwargs}), run_dir
+
+
+def _bespoke(tmp_path, body: str) -> dict:
+    """A detector run over two frames of its own whose training body is ``body`` of this
+    module."""
+    return detection_config(tmp_path / "data", training_source=f"{__name__}:{body}",
+                            device="cpu")
+
 
 def _agent_train(ctx):
     """A minimal custom loop: uses ctx sinks, leaves status for the envelope to mark completed."""
@@ -39,31 +62,16 @@ def _agent_train(ctx):
 
 
 def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path):
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.experiments import METRICS_FILE, read_rows
+    from tcip_mcp.model_registry import load_registered_checkpoint
 
-    out = tmp_path / "out"
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:_agent_train",
-        "device": "cpu",
-    }
-    create_experiment("expE", config, data_source="imgs")
-    update_status("expE", "running")
-    run = create_run(config, str(out), id="auto-run-78")
-
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expE")
+    config = _bespoke(tmp_path, "_agent_train")
+    ctx, run_dir = _context(tmp_path, config)
     run_training_envelope(ctx)
 
-    # Custom loop ran via ctx: its rows land on the experiment's own metrics log (the record
-    # that tracks the run), not beside the weights in a separately-computed output dir.
-    assert run.status == "completed"
-    assert not (out / "metrics.jsonl").exists()
-    from tcip_mcp.experiments import read_metrics
-
-    assert [row["epoch"] for row in read_metrics("expE")] == [1]
-    best = torch.load(out / "model_best.pt", weights_only=False)
+    assert ctx.run.status == "completed"
+    assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [1]
+    best = torch.load(run_dir / "model_best.pt", weights_only=False)
     assert best["kind"] == KIND_TCIP_MODULE
     assert best["config"]["model_source"] == config["model_source"]
     assert "model_source" not in best
@@ -71,40 +79,21 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     # Body is bracketed on the append-only audit log (open running + close completed).
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]
-    assert events[-1]["arguments"]["experiment_id"] == "expE"
+    assert events[-1]["arguments"]["experiment_id"] == run_dir.name
 
-    # Env/source provenance snapshotted into the immutable experiment dir.
-    env = ts.read(env_key("expE"))
-    assert env["model_kind"] == KIND_TCIP_MODULE
-    assert env["env"]["torch"]
-
-    # Completion registered the model with the bespoke kind + recorded lineage + artifact.
-    entry = ModelRegistry(str(tmp_path)).get_model("expE")
-    assert entry is not None and entry["kind"] == KIND_TCIP_MODULE
-    lineage = ts.read(lineage_key("expE"))
-    assert lineage["model_weights"].endswith("model_best.pt")
-    artifacts = ts.read(artifacts_key("expE"))
-    assert "model_weights" in artifacts
-    # The digest completion recorded is the same fact in both members: complete_run's one
-    # transaction takes one hash of the one file and writes it into both.
-    assert lineage["model_weights_sha256"] == artifacts["model_weights"]["sha256"]
-    # The entry's own experiment_id is the run's, the binding registration wrote.
-    assert entry["sha256"] == lineage["model_weights_sha256"]
-    assert entry["experiment_id"] == "expE"
+    # Completion names the checkpoint, and the registry reads that one record for its producer.
+    checkpoint = completed_checkpoint(run_dir)
+    assert checkpoint is not None and checkpoint["kind"] == KIND_TCIP_MODULE
+    assert checkpoint["path"].endswith("model_best.pt")
+    verified = load_registered_checkpoint(checkpoint["path"], project_path=str(tmp_path))
+    assert verified.sha256 == checkpoint["sha256"]
+    assert verified.experiment_id == run_dir.name
 
     from tcip_mcp.pipelines.resolution import corroborated_producer
 
-    assert corroborated_producer(entry["sha256"], "expE") == (entry["sha256"], "expE")
+    assert corroborated_producer(checkpoint["sha256"], run_dir.name) == (
+        checkpoint["sha256"], run_dir.name)
 
-
-# --------------------------------------------------------------------------
-# Default path: no training_source, so ctx.default_train() (today's trainer) runs, still audited.
-# --------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------
-# A phantom deliverable (no discoverable weights) must fail the run, not register a
-# nonexistent path. An explicit ctx.set_final_weights() override still works.
-# --------------------------------------------------------------------------
 
 def _agent_train_default_tag_no_override(ctx):
     """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
@@ -112,109 +101,68 @@ def _agent_train_default_tag_no_override(ctx):
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}})
 
 
-def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(tmp_path):
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
-
-    out = tmp_path / "out"
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:_agent_train_default_tag_no_override",
-        "device": "cpu",
-    }
-    create_experiment("expF", config, data_source="imgs")
-    update_status("expF", "running")
-    run = create_run(config, str(out), id="auto-run-79")
-
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expF")
+def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(tmp_path):
+    """A phantom deliverable (no discoverable weights) fails the run rather than completing with
+    a nonexistent path."""
+    ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train_default_tag_no_override"))
     run_training_envelope(ctx)
 
-    assert run.status == "failed"
-    assert "final weights" in (run.error or "")
-    assert ModelRegistry(str(tmp_path)).get_model("expF") is None
+    assert ctx.run.status == "failed"
+    assert "final weights" in observe(run_dir).final["error"]
+    assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
 def _agent_train_declares_a_path_it_never_wrote(ctx):
-    """Declares its deliverable through set_final_weights at a path this loop never wrote."""
-    import os
+    """Declares its deliverable through set_final_weights under a tag this loop never saved, the
+    file under that name written behind the context's back."""
+    (ctx.run_dir / "never_written.pt").write_bytes(b"")
+    ctx.set_final_weights("never_written")
 
-    ctx.set_final_weights(os.path.join(ctx.run.output_dir, "never_written.pt"))
 
-
-def test_envelope_declared_deliverable_never_written_fails_run_and_registers_nothing(tmp_path):
-    """A declared path this run cannot read is refused by complete_run, and the envelope marks the run failed rather than completing with an
-    unrecorded digest, naming the path."""
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
-
-    out = tmp_path / "out"
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:_agent_train_declares_a_path_it_never_wrote",
-        "device": "cpu",
-    }
-    create_experiment("expUnwritten", config, data_source="imgs")
-    update_status("expUnwritten", "running")
-    run = create_run(config, str(out), id="auto-run-80")
-
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expUnwritten")
+def test_envelope_declared_deliverable_never_written_fails_run_and_completes_nothing(tmp_path):
+    """A declared tag this run's own saves never wrote ends the run failed rather than completing
+    with a file the run did not save, naming the tag."""
+    ctx, run_dir = _context(
+        tmp_path, _bespoke(tmp_path, "_agent_train_declares_a_path_it_never_wrote"))
     run_training_envelope(ctx)
 
-    assert run.status == "failed"
-    assert "never_written.pt" in (run.error or "")
-    assert ModelRegistry(str(tmp_path)).get_model("expUnwritten") is None
+    assert ctx.run.status == "failed"
+    assert "'never_written'" in observe(run_dir).final["error"]
+    assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
 def _agent_train_explicit_override(ctx):
     """Saves under a non-conventional tag, but explicitly declares it the deliverable."""
-    path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "custom_tag")
-    ctx.set_final_weights(path)
+    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "custom_tag")
+    ctx.set_final_weights("custom_tag")
 
 
 def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
-    from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
-
-    out = tmp_path / "out"
-    config = {
-        "model_source": {"builder": "x:y", "task": "detection"},
-        "data": {"num_channels": 3},
-        "training_source": f"{__name__}:_agent_train_explicit_override",
-        "device": "cpu",
-    }
-    create_experiment("expG", config, data_source="imgs")
-    update_status("expG", "running")
-    run = create_run(config, str(out), id="auto-run-81")
-
-    ctx = TrainContext(run=run, train_loader=None, val_loader=None, experiment_id="expG")
+    ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train_explicit_override"))
     run_training_envelope(ctx)
 
-    assert run.status == "completed"
-    entry = ModelRegistry(str(tmp_path)).get_model("expG")
-    assert entry is not None
-    assert entry["checkpoint_path"].endswith("custom_tag.pt")
+    assert ctx.run.status == "completed"
+    checkpoint = completed_checkpoint(run_dir)
+    assert checkpoint is not None
+    assert checkpoint["path"].endswith("custom_tag.pt")
 
 
-# --------------------------------------------------------------------------
-# Resume provenance: env.json records the resume request + whether RNG state was
-# actually restored, refreshed after dispatch (not just the pre-dispatch request).
-# --------------------------------------------------------------------------
-
-def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
+def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
+    """The run resumed from a checkpoint names it in its launch record and completes."""
     pytest.importorskip("torchvision")
     import csv
+
     from PIL import Image
     from torch.utils.data import DataLoader
-    from tcip_mcp.pipelines.training.generic_trainer import train
+
+    from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import create_run as gt_create_run
-    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -240,72 +188,62 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 2}], "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
+        "seed": 3,
     }
     # Generate the resumable checkpoint directly (not through the envelope).
-    train(gt_create_run(dict(cfg), str(tmp_path / "out"), id="auto-run-resume-provenance-1"),
-         build_loader())
+    train(trainer_run(dict(cfg), tmp_path / "out", has_val_loader=False, id="resume-source"),
+          build_loader())
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    # Resume through the full audited envelope: env.json must reflect the real outcome.
-    create_experiment("expH", cfg)
-    update_status("expH", "running")
-    run = gt_create_run(dict(cfg), str(tmp_path / "out2"), id="auto-run-resume-provenance-2")
-    ctx = TrainContext(run=run, train_loader=build_loader(), val_loader=None,
-                       experiment_id="expH", resume_from=str(ckpt))
+    launched = {**cfg, "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path)}}
+    ctx, run_dir = _context(tmp_path, launched, train_loader=build_loader(), val_loader=None,
+                            resume_from=str(ckpt))
     run_training_envelope(ctx)
 
-    assert run.status == "completed"
-    env = ts.read(env_key("expH"))
-    assert env["resumed_from"] == str(ckpt)
+    assert ctx.run.status == "completed"
+    assert read_record(run_dir / RUN_FILE)["resume_from"] == str(ckpt)
+    assert completed_checkpoint(run_dir) is not None
 
 
-# --------------------------------------------------------------------------
-# ctx.report_objective: a bespoke train(ctx)'s explicit primitive for reporting HPO
-# trial progress, independent of the automatic epoch_hook/metric-key-guessing path.
-# --------------------------------------------------------------------------
+def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(tmp_path):
+    """A bespoke body's reported objective is one metrics row stamping it the ``selection`` under
+    the run's objective, at the last epoch logged, and fires the epoch hook like any row."""
+    from tcip_mcp.experiments import METRICS_FILE, read_rows
 
-def test_report_objective_calls_trial_report_when_attached(tmp_path):
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-82")
-    reported: list = []
-    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append)
+    seen: list = []
+    ctx, run_dir = _context(tmp_path, detection_config(tmp_path / "data"),
+                            epoch_hook=lambda epoch, metrics: seen.append((epoch, metrics)))
+    ctx.log_metrics(2, {"train_loss": 0.5})
     ctx.report_objective(3.14)
-    assert reported == [3.14]
 
-
-def test_report_objective_is_noop_outside_hpo(tmp_path):
-    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"), id="auto-run-83")
-    ctx = TrainContext(run=run, train_loader=None)  # no trial_report, not an HPO trial
-    ctx.report_objective(3.14)  # must not raise
+    metric = ctx.run.objective["selection_metric"]
+    assert seen[-1] == (2, {"selection": 3.14, "selection_metric": metric})
+    last = read_rows(run_dir / METRICS_FILE)[0][-1]
+    assert (last["epoch"], last["selection"], last["selection_metric"]) == (2, 3.14, metric)
 
 
 def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.generic_trainer as gt
-    from tcip_mcp.experiments import create_experiment, update_status
 
-    out = tmp_path / "out"
-    out.mkdir(parents=True)
     captured = {}
+
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     def _stub_train(run, train_loader, val_loader=None,
                     epoch_callback=None, resume_from=""):
         captured["epoch_callback"] = epoch_callback
         captured["called"] = True
-        (out / "model_final.pt").write_bytes(b"stub")
+        run.saved["model_final"] = checkpoint_file(Path(run.output_dir) / "model_final.pt", "stub")
         run.status = "completed"
         return run
 
     monkeypatch.setattr(gt, "train", _stub_train)
 
-    config = {"model_source": {"builder": "x:y", "task": "classification"}, "device": "cpu"}
-    create_experiment("expD", config)
-    update_status("expD", "running")
-    run = create_run(config, str(out), id="auto-run-84")
-
-    ctx = TrainContext(run=run, train_loader=None, experiment_id="expD")
+    ctx, _ = _context(tmp_path, detection_config(tmp_path / "data", device="cpu"))
     run_training_envelope(ctx)
 
     assert captured.get("called") is True                     # dispatched to default_train
-    assert captured["epoch_callback"] == ctx._epoch_sink       # experiment logging wired in
+    assert captured["epoch_callback"] == ctx._epoch_sink       # the run's metrics log wired in
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]

@@ -40,14 +40,15 @@ class _BucketStub:
 
 
 def _export(tmp_path, monkeypatch, *, tile, tile_size=None):
-    """Run a calibrated export whose calibration collection is a dense held-out reference,
-    resolved under the regime of the pass the delivery prepared."""
+    """Run a calibrated export of a checkpoint no run of this project produced, whose calibration
+    collection is a dense held-out reference, resolved under the regime of the pass the delivery
+    prepared."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     from PIL import Image
 
@@ -76,7 +77,7 @@ def _export(tmp_path, monkeypatch, *, tile, tile_size=None):
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _calibrate)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
     result = itools.run_inference(
         str(ckpt), images_dir=str(images_dir),
         output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
@@ -128,13 +129,14 @@ def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_cla
 def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_record(
     tmp_path, monkeypatch,
 ):
-    """A bespoke checkpoint registered through the register_model tool's explicit mode, with no
-    experiment behind it, exports predictions and earns a validated count against an experiment
-    created for the calibration, with the producing run recorded as absent rather than invented.
-    An unregistered checkpoint is refused before any of this runs; that refusal is
+    """A checkpoint registered through the register_model tool's explicit mode, with no run of
+    this project behind it, exports predictions and earns a validated count in a run directory
+    created for the calibration, which reads completed and records the checkpoint's sha256 in its
+    launch record, with the producing run recorded as absent rather than invented. An
+    unregistered checkpoint is refused before any of this runs; that refusal is
     test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing in
     test_checkpoint_digest_rails.py."""
-    from tcip_mcp.experiments import experiment_exists, find_validation
+    from tcip_mcp.experiments import find_run, find_validation, observe
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     result = _export(tmp_path, monkeypatch, tile=False)
@@ -142,8 +144,14 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
 
     assert (bucket / "capture_a.json").is_file()  # written once the registered checkpoint admits
     pointer = read_operating_point_sidecar(bucket)["validated_by"]
-    assert experiment_exists(pointer["experiment_id"])
-    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert pointer["experiment_id"].startswith("calibration_")
+    run_dir = find_run(pointer["experiment_id"])
+    assert run_dir is not None
+    calibration = observe(run_dir)
+    assert calibration.state == "completed"
+    calibrated = calibration.record["calibrated"]
+    assert calibrated["checkpoint_sha256"] == read_operating_point_sidecar(bucket)["checkpoint_sha256"]
+    row = find_validation(calibration, pointer["record_digest"])
     assert row["producing_experiment_id"] is None
     assert row["trait"] == "bud_opening"
     assert list(row["covered_buckets"]) == ["predictions/baseline/2026-03-01"]
@@ -174,7 +182,7 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
     the bucket still floors."""
     import tcip_mcp.pipelines.resolution as resolution
 
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_operating_point_validity
 
     sealed: dict = {}
@@ -190,7 +198,8 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
         _export(tmp_path, monkeypatch, tile=False)
 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
-    assert find_validation(sealed["experiment_id"], sealed["record_digest"]) is not None
+    assert find_validation(find_observation(sealed["experiment_id"]),
+                           sealed["record_digest"]) is not None
     assert not (bucket / "operating_point.json").exists()
     assert reconcile_operating_point_validity([str(bucket)], trait="bud_opening")["validated"] == VALIDATED_FALSE
 

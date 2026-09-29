@@ -436,7 +436,6 @@ def test_resume_completes_an_interrupted_block_calibrated_pass_running_the_calib
     call_kwargs = {
         "raster_path": str(exp["raster_path"]), "conf_threshold": 0.0, "tile_size": BLOCK_TILE,
         "overlap": 0.2, "tile_batch_size": 50, "device": "cpu", "trait": "bud_opening",
-        "experiment_id": exp["experiment_id"],
     }
 
     interrupted_out = tmp_path / "interrupted"

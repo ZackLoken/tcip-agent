@@ -287,12 +287,13 @@ def test_refuses_a_registered_checkpoint_under_the_state_root_as_a_blob(
     """coverage of the blob branch, the one class reachable under .tcip/state: a model registry
     entry may name a checkpoint anywhere, so a .pt registered from under the state root is a
     recognized blob there and is refused as one rather than read as an unclaimed stray."""
+    pytest.importorskip("torch")
     from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import checkpoint_file
 
     root = _project(tmp_path, monkeypatch)
     state = _state(root)
-    checkpoint = state / "weights.pt"
-    checkpoint.write_bytes(b"not a real checkpoint")
+    checkpoint = checkpoint_file(state / "weights.pt", "a registered checkpoint")
 
     res = register_model(name="m1", checkpoint_path=str(checkpoint),
                          config={"arch": "probe"}, project_path=str(root))

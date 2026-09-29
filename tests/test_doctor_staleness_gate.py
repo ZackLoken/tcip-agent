@@ -187,9 +187,10 @@ def test_check_negatives_still_runs_and_reports_behind_a_stale_export(tmp_path):
 def test_gated_stores_names_exactly_the_checks_that_read_raw_files(tmp_path):
     """The table is exactly the checks that read a document off disk instead of through the
     seam: check_negatives and check_data_quality read image_status through
-    read_image_status_store and never belong here."""
+    read_image_status_store and never belong here, and check_provenance reads run directories,
+    which no database holds."""
     root = _project(tmp_path)
 
     assert set(doctor.gated_stores(root)) == {
-        "check_status_tokens", "check_region_completeness", "check_state", "check_provenance",
+        "check_status_tokens", "check_region_completeness", "check_state",
     }

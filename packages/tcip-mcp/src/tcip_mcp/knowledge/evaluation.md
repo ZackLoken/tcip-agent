@@ -38,7 +38,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named selection's `calibration` side (`selection_dir`); writes `test_results.json` |
+| `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named selection's `calibration` side (`selection_dir`); returns the result and writes nothing |
 | `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
 | `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |

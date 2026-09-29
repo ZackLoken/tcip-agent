@@ -402,11 +402,11 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
     (test_delivery_grade_eval_regime.py)."""
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as TT
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     captured: dict = {}
 
-    def _fake_diagnostic(ckpt, model, loader, device, output_dir, **kw):
+    def _fake_diagnostic(ckpt, model, loader, device, **kw):
         captured["diagnostic_max_dets"] = kw.get("max_dets")
         return {"eval_regime": "tile-level"}
 
@@ -427,7 +427,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
                                   [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
                                   64, 64)
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
-        ckpt = registered_checkpoint(tmp, project_root=tmp)
+        ckpt = foreign_checkpoint(tmp)
 
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir))
     finally:
@@ -445,9 +445,8 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines import resolution as R
-    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
     from tcip_mcp.tools import training_tools as TT
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     def _dataset(root):
         images_dir, labels_dir = root / "images", root / "labels"
@@ -481,8 +480,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     def _prepare(root_name, name):
         root = tmp_path / root_name
         images_dir, labels_dir = _dataset(root)
-        return images_dir, labels_dir, registered_checkpoint(
-            root, project_root=tmp_path, name=name)
+        return images_dir, labels_dir, foreign_checkpoint(tmp_path, name=name)
 
     tile_ds = _prepare("tile", "conf-tile-level")
     single_ds = _prepare("single", "conf-single-pass")
@@ -497,7 +495,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         images_dir, labels_dir, ckpt = dataset
         r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), **kw)
         assert "error" not in r, r
-        return ts.read(evaluation_results_key(Path(ckpt).parent))
+        return r
 
     tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0})
     assert tile_level["conf_threshold"] == R.DEFAULT_CONF == 0.5
@@ -588,12 +586,13 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
     producer identity (the real writer always stamps checkpoint_sha256 and experiment_id at the
     top level, so a fixture must carry them too).
 
-    A validated bucket also gets the producing run its stamp names filed, since a delivery repeats a
-    producer identity only where an experiment outside the bucket corroborates the stamp's claim."""
+    A validated bucket also gets the producing run its stamp names completed, since a delivery
+    repeats a producer identity only where a run outside the bucket corroborates the stamp's
+    claim."""
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     if checkpoint_sha256 is None and validated and experiment_id:
-        checkpoint_sha256 = record_producing_run(dataset_root, experiment_id)
+        checkpoint_sha256 = record_producing_run(experiment_id)
     stamp = {
         "validated": validated,
         "trait": "bud_opening",

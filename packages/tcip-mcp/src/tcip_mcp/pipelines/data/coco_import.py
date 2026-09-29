@@ -40,10 +40,11 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     declaration, an unregistered category, a record the reader or the writer's encoder refuses, an
     image id that is not an integer or is listed twice, an image not in the capture, two records
     naming one capture, an annotation naming an unlisted image, a stated frame the image does not
-    have, and a per-image document already present. The writes are then create-only, one document
-    at a time: a label placed after validation raises on that document and leaves the documents
-    written before it, which the audit event names under status ``failed`` beside the error, the
-    failing document's path and the store's refusal.
+    have, and a per-image document already present. The writes then commit as one store
+    transaction over every document, each checked absent under the locks: a label placed after
+    validation refuses the whole import with nothing written, and a failure while publishing is
+    rolled back, leaving no document of the import behind while the rollback itself succeeds
+    (``tcip_store.transaction``).
     """
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
@@ -131,20 +132,15 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     if problems:
         raise ValueError(f"{source} was not imported, nothing written: " + "; ".join(problems))
 
-    written: list[str] = []
+    written = [str(tcip_store.blob_path(key)) for key, _ in writes]
     arguments = {"document": source, "date": date, "written": written}
-    for key, data in writes:
-        path = str(tcip_store.blob_path(key))
-        try:
-            tcip_store.put_blob(key, data, expect=tcip_store.Version.ABSENT)
-        except Exception as exc:
-            if written:
-                record_event_or_raise(
-                    "coco_document_imported", {**arguments, "error": f"{path}: {exc}"},
-                    status="failed", scope=root, document_digest=digest_bytes(raw))
-            raise
-        written.append(path)
-    if written:
+    if writes:
+        with tcip_store.transaction(*(key for key, _ in writes)) as txn:
+            for (key, data), path in zip(writes, written):
+                if txn.read(key, default=None) is not None:
+                    raise ValueError(f"{source} was not imported, nothing written: {path} "
+                                     "already exists")
+                txn.write(key, data)
         record_event_or_raise("coco_document_imported", arguments, scope=root,
                               document_digest=digest_bytes(raw))
     return arguments

@@ -14,8 +14,7 @@ from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import create_run
-from tests.tiny_trainer_fixtures import ConstantImageClassDataset
+from tests.tiny_trainer_fixtures import ConstantImageClassDataset, trainer_run
 
 CLASSIFIER_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
 
@@ -68,7 +67,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
         "early_stopping": {"enabled": False},
     }
     out_dir = tmp_path / "out"
-    run = create_run(config, str(out_dir), id="auto-run-42")
+    run = trainer_run(config, out_dir, has_val_loader=True, id="auto-run-42")
     run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error
 
@@ -79,6 +78,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
 
 
 def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
+    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     images_dir, labels_dir, val_images, val_labels = _seed_leaf_detection_dataset(tmp_path / "ds")
@@ -91,14 +91,15 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }
-    trial_dir = tmp_path / "trial_x"
+    trial_dir = tmp_path / "hpo_study" / "trial_x"
+    trial_dir.parent.mkdir()
     reported: list[float] = []
+    _run_hpo_trial({}, reported.append, base_config, trial_dir,
+                   objective=resolve_objective(base_config, has_val_loader=True),
+                   launched_by={"launcher": "process"})
 
-    _run_hpo_trial(config={}, report=reported.append, base_config=base_config,
-                   trial_dir=str(trial_dir))
-
-    # One report per epoch, plus the trial's own final best-value re-report.
-    assert len(reported) == 3
+    # One report per epoch's metrics row, which is the trial's whole result.
+    assert len(reported) == 2
 
     tb_dir = trial_dir / "tensorboard"
     assert _scalar_steps(tb_dir, "train/loss") == [1, 2]
@@ -128,7 +129,7 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
         "checkpoint_every_n_epochs": 0,
         "early_stopping": {"enabled": False},
     }
-    run = create_run(config, str(tmp_path / "out"), id="auto-run-43")
+    run = trainer_run(config, tmp_path / "out", has_val_loader=True, id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error

@@ -152,28 +152,6 @@ def test_a_second_kinds_files_refuse_on_the_connection_that_already_served_the_f
     assert "tcip adopt-store" in message
 
 
-def test_a_file_two_kinds_of_root_claim_equally_refuses_naming_every_claimant(tmp_path):
-    """Two layouts' templates can describe one path: a free directory's ``metrics.jsonl`` is an
-    experiment's metrics log under one kind of root and a trial's under another. At a directory
-    serving both, no marker says whose the file is, so both claimants are named and neither is
-    picked, the way the planner refuses a tie rather than attributing one store's log to
-    another."""
-    experiment = ts.Key("experiment_metrics", str(tmp_path), ("exp_1", "metrics"))
-    trial = ts.Key("hpo_trial_metrics", str(tmp_path), ("trial_1", "metrics"))
-
-    with bound(SqliteBackend()):
-        ts.append(experiment, {"epoch": 1})
-        (tmp_path / "trial_1").mkdir()
-        (tmp_path / "trial_1" / "metrics.jsonl").write_text('{"epoch": 2}\n', encoding="utf-8")
-
-        with pytest.raises(ts.StoreError) as raised:
-            ts.read_log(trial)
-
-    message = str(raised.value)
-    assert "experiment_metrics" in message and "hpo_trial_metrics" in message
-    assert "metrics.jsonl" in message
-
-
 def test_a_file_of_a_store_the_database_never_held_refuses_beside_it(tmp_path):
     """With a database present a claimed file is ordinarily that store's own export, so the
     accounting is per store: a store the database has never held is the one whose file no
@@ -212,31 +190,6 @@ def test_a_process_that_imported_one_owning_module_still_sees_another_stores_fil
     )
 
     assert json.loads(result.stdout) == ["image_status.json"]
-
-
-def test_the_priority_queue_and_hpo_registries_are_claimed_beside_inference_jobs(tmp_path):
-    """``job_registry`` places three documents under ``.tcip/state``: ``inference_jobs.json``,
-    ``review_priority_jobs.json`` and ``hpo_sweeps.json``. A claim naming only the first left
-    the other two invisible to the conform rail and the adoption planner even though the same
-    store and locator write them; each has to be claimed once written through its own route."""
-    from tcip_store.layout_claims import ROOT, unconformed_files
-    from tcip_web.routes import review, tuning
-
-    with bound(FileBackend()):
-        review._pq_register(
-            review.PriorityQueueJob(job_id="pq1", checkpoint_path="c", images_dir="i",
-                                     dataset_root="d")
-        )
-        with tuning._lock:
-            tuning._registry.jobs["hpo1"] = tuning.HPOJob(sweep_id="hpo1")
-        tuning._persist()
-
-        names = {p.name for p in unconformed_files(str(tmp_path), ROOT)}
-    review._pq_registry.jobs.clear()
-    tuning._registry.jobs.clear()
-
-    assert "review_priority_jobs.json" in names
-    assert "hpo_sweeps.json" in names
 
 
 # ── the blob write that would land on a record's own path ────────────────────

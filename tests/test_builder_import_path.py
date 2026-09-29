@@ -124,7 +124,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
-    res = launch_training(cfg, str(tmp_path / "out"))
+    res = launch_training(cfg)
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()

@@ -97,7 +97,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
 
     from tests._binding_fixtures import record_producing_run, write_bound_sidecar
 
-    other_sha = record_producing_run(tmp_path / "other_run", "exp-other")
+    other_sha = record_producing_run("exp-other")
     second_stamp = {k: v for k, v in second.items() if k != "validated_by"}
     second_stamp.update({"checkpoint_sha256": other_sha, "experiment_id": "exp-other"})
     write_bound_sidecar(body["predictions_by_date"][dates[1]], second_stamp,

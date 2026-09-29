@@ -462,8 +462,7 @@ def resolve_operating_point_from_review(
 
     ``calibration_labels_dir`` (the directory the reviewed bucket's own labels live in, when the
     caller can name one) is forwarded to ``resolve_operating_point``'s selection-disjointness
-    check, applicable only when the checkpoint named by ``experiment_id`` carries a
-    ``selection_binding``.
+    check, applicable only when the run ``experiment_id`` names bound a selection.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (

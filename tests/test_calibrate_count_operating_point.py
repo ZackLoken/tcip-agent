@@ -13,7 +13,26 @@ pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tests._producer_fixtures import admission_of  # noqa: E402
-from tests._verified_checkpoint_fixtures import admit_any_checkpoint  # noqa: E402
+
+@pytest.fixture
+def producer(tmp_path) -> tuple[str, str]:
+    """A checkpoint no run of this project produced, registered into it, and its digest."""
+    from pathlib import Path
+
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+
+    path = foreign_checkpoint(tmp_path, name="count-producer")
+    checkpoint = observe(Path(path).parent).checkpoint
+    assert checkpoint is not None
+    return path, checkpoint["sha256"]
+
+
+def _no_claim_recorded() -> None:
+    """No validation row landed: no calibration run directory was created."""
+    from tcip_mcp.experiments import run_dirs
+
+    assert not any(d.name.startswith("calibration_") for d in run_dirs())
 
 
 class _Dataset:
@@ -33,12 +52,10 @@ class _Dataset:
 def _stub_dense_pass(monkeypatch, cal_stems=("a",), hold_stems=("b",), cal_records=(),
                      hold_records=()) -> None:
     """Stub every model-pass mechanic the count door composes around its own
-    ``resolve_operating_point`` call (the checkpoint, the predictor, dataset probing and the
-    prepared pass's record collection), leaving the resolver itself to run for real over the
-    records supplied.
+    ``resolve_operating_point`` call (the predictor, dataset probing and the prepared pass's
+    record collection), leaving the resolver itself to run for real over the records supplied.
     """
     cal_stems, hold_stems = list(cal_stems), list(hold_stems)
-    admit_any_checkpoint(monkeypatch)
 
     class _Predictor:
         def __init__(self):
@@ -160,7 +177,7 @@ def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
@@ -170,8 +187,8 @@ def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
         json_io.write_annotations(
             str(labels_dir / f"img{index}.json"),
             [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64, keep_empty=True)
-    ckpt = registered_checkpoint(
-        tmp_path, project_root=tmp_path,
+    ckpt = foreign_checkpoint(
+        tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
                       "builder_kwargs": {"min_size": 64, "max_size": 128, "image_mean": [0.4],
                                          "image_std": [0.2]},
@@ -187,7 +204,7 @@ def test_the_calibration_pass_reads_its_references_at_the_predictors_own_width(
 
 
 def test_calibrate_count_operating_point_earns_a_validated_stamp(
-    monkeypatch, tmp_path, seed_bud_trait_spec,
+    monkeypatch, tmp_path, seed_bud_trait_spec, producer,
 ):
     """The gate clears through the real ``resolve_operating_point`` (no resolver stub) over a
     dense held-out reference, and the merge earns a validated stamp only because the bucket's
@@ -212,30 +229,31 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
 
     _stub_dense_pass(monkeypatch, cal_stems, hold_stems, cal_records, hold_records)
     labels_dir = _label_pair(tmp_path)
+    ckpt, sha = producer
     dataset_root, pred_dir = _existing_bucket(
-        tmp_path, tile_size_validated=None, conf_value=production_conf)
+        tmp_path, tile_size_validated=None, conf_value=production_conf, checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
 
     assert "error" not in result, result
-    assert result["validated"] is True
-    assert result["validated_by"]["experiment_id"]
+    assert result["validated"] is True, result
+    assert result["validated_by"]["experiment_id"].startswith("calibration_")
     assert result["validated_against"] == "held_out_annotations"
 
     on_disk = read_operating_point_sidecar(pred_dir)
     assert on_disk["validated"] is True
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(production_conf)
-    assert on_disk["validated_by"]["experiment_id"]
+    assert on_disk["validated_by"] == result["validated_by"]
     assert on_disk["scope"]["id_map"] == {"bud_opening": 0}
     assert on_disk["images_dir"] == str(tmp_path / "images")
-    assert on_disk["checkpoint_sha256"] == "stub-sha256"
+    assert on_disk["checkpoint_sha256"] == sha
     assert on_disk["trait"] == "bud_opening"
     assert on_disk["shippable_issues"] == []
 
@@ -252,25 +270,27 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
 
 
 def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_production(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, producer,
 ):
     """A bucket's stored detections were filtered at the conf its stamp records, never at
     whatever conf a later calibration resolves: any other earned conf refuses by name rather
     than silently overwriting the production conf the stored detections never saw. The
     production conf is read before the pass runs, so this ordinary mismatch is caught before
-    open_validation/seal_validation ever run and mints no calibration experiment.
+    open_validation/seal_validation ever run and records no claim.
     """
     _stub_predictor(monkeypatch)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
                         _resolve_op_shippable)  # earns conf=0.42
     labels_dir = _label_pair(tmp_path)
-    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None, conf_value=0.3)
+    ckpt, sha = producer
+    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None, conf_value=0.3,
+                                              checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -282,13 +302,12 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
     on_disk = read_operating_point_sidecar(pred_dir)
     assert on_disk["validated"] is False
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(0.3)
-
-    from tcip_mcp.project_paths import platform_state_root
-
-    assert not (platform_state_root() / ".tcip" / "experiments").exists()
+    _no_claim_recorded()
 
 
-def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(monkeypatch, tmp_path):
+def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(
+    monkeypatch, tmp_path, producer,
+):
     """A bucket whose tile geometry never validated (``tile_size_validated="false"``) cannot earn
     a validated count operating point no matter how clean the count gate itself is:
     ``operating_point_stamp``'s own floor (``fold_tile_validation``) decides ``validated`` here
@@ -297,13 +316,15 @@ def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(mon
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
                         _resolve_op_shippable)
     labels_dir = _label_pair(tmp_path)
-    dataset_root, pred_dir = _existing_bucket(tmp_path)  # tile_size_validated="false" default
+    ckpt, sha = producer
+    # tile_size_validated="false" default
+    dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -316,25 +337,26 @@ def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(mon
     assert on_disk["validated"] is False
     assert on_disk["validated_by"] is None
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(0.42)
-    from tcip_mcp.project_paths import platform_state_root
-
-    assert not (platform_state_root() / ".tcip" / "experiments").exists()
+    _no_claim_recorded()
 
 
-def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(monkeypatch, tmp_path):
+def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(
+    monkeypatch, tmp_path, producer,
+):
     """A calibration that does not clear its gate merges the honest, unvalidated conf and earns
     no validation record."""
     _stub_predictor(monkeypatch)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
                         _resolve_op_unshippable)
     labels_dir = _label_pair(tmp_path)
-    dataset_root, pred_dir = _existing_bucket(tmp_path)
+    ckpt, sha = producer
+    dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -348,14 +370,11 @@ def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(monk
     assert on_disk["validated_by"] is None
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(0.3)
     assert on_disk["gate_evidence_summary"]["passed_holdout"] is False
-
-    from tcip_mcp.project_paths import platform_state_root
-
-    assert not (platform_state_root() / ".tcip" / "experiments").exists()
+    _no_claim_recorded()
 
 
 def test_calibrate_count_operating_point_does_not_write_trait_on_the_unvalidated_path(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, producer,
 ):
     """The trait is written into the stamp only when this calibration actually earns the claim
     (a gate cleared): an honest unvalidated merge leaves whatever trait the bucket's own stamp
@@ -366,13 +385,14 @@ def test_calibrate_count_operating_point_does_not_write_trait_on_the_unvalidated
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
                         _resolve_op_unshippable)
     labels_dir = _label_pair(tmp_path)
-    dataset_root, pred_dir = _existing_bucket(tmp_path, trait="other-trait")
+    ckpt, sha = producer
+    dataset_root, pred_dir = _existing_bucket(tmp_path, trait="other-trait", checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -504,7 +524,7 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
 
 
 def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_unvalidated(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, producer,
 ):
     """A stamp asserting ``validated: true`` with no record answering for it (a pointer naming
     no real record, the shape ``verify_stamp_binding`` treats as unvalidated everywhere else) is
@@ -529,12 +549,13 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
                         derived_from="x", validated_against="held_out_annotations"),
         **_untiled_regime(),
     }).to_provenance()["operating_point"]
+    ckpt, sha = producer
     stamp = operating_point_stamp(
         op, slicing=None, validated=True,
         validated_by={"experiment_id": "exp-nonexistent", "record_digest": "deadbeef"},
         tile_size_validated=None, shippable_issues=[],
         scope=ClassScope(subject="bud", id_map={"bud": 0}), trait="bud_opening",
-        dataset_hash="H", checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
+        dataset_hash="H", checkpoint="m", checkpoint_sha256=sha, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
         produced_at="2024-01-01T00:00:00Z",
     )
@@ -543,7 +564,7 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -553,17 +574,11 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
 
 
 def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_the_pass(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, producer,
 ):
     """The checkpoint identity is derived and checked before the calibration pass draws its
     cal/holdout lock: a mismatch refuses having run no pass at all."""
-    import tcip_mcp.model_registry as model_registry_mod
-
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
-
-    monkeypatch.setattr(
-        model_registry_mod, "load_registered_checkpoint",
-        lambda path, *a, **kw: stub_verified_checkpoint(str(path), sha256="new-sha256"))
+    ckpt, _sha = producer
 
     def _never(**kw):
         raise AssertionError("the pass must not run before the checkpoint identity is checked")
@@ -575,7 +590,7 @@ def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_th
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -585,18 +600,17 @@ def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_th
 
 
 def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha256(
-    monkeypatch, tmp_path,
+    tmp_path, producer,
 ):
     """A stamp sealed under a digest it does not carry could never bind at delivery, so a bucket
     with no ``checkpoint_sha256`` at all refuses the same as a disagreeing one."""
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
-    admit_any_checkpoint(monkeypatch)
-
+    ckpt, _sha = producer
     dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=None)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -605,7 +619,9 @@ def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha2
     assert "carries no checkpoint_sha256" in result["error"]
 
 
-def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monkeypatch, tmp_path):
+def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(
+    monkeypatch, tmp_path, producer,
+):
     """The merge decides against the stamp as it is actually stored when the lock is taken, not
     the copy read before the (potentially long) calibration pass: a stamp another process
     validates while this pass is running, through a real record that answers for it, is left
@@ -616,7 +632,9 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
     labels_dir = _label_pair(tmp_path)
     # conf_value=0.42 matches what this calibration earns below, so the pre-pass equality
     # check clears and this test reaches the race, caught only under the lock.
-    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None, conf_value=0.42)
+    ckpt, sha = producer
+    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None, conf_value=0.42,
+                                              checkpoint_sha256=sha)
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT, ResolvedBundle, derived, read_operating_point_sidecar, write_sidecar,
@@ -647,7 +665,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
+        checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -660,7 +678,9 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
     assert on_disk["validated_by"]["experiment_id"] == "exp_other"
 
 
-def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, tmp_path):
+def test_script_and_tool_call_the_same_count_calibration_function(
+    monkeypatch, tmp_path, producer,
+):
     """Import identity, not a second implementation: both entry points resolve
     ``resolve_count_operating_point`` off the one module at call time."""
     _stub_predictor(monkeypatch)
@@ -680,17 +700,16 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert len(calls) == 1
 
-    dataset_root, pred_dir = _existing_bucket(tmp_path)
+    # The bucket names the producing run's checkpoint, so this door's own pre-pass identity check
+    # clears and the stub below is reached, same as the script's own call above.
+    ckpt, sha = producer
+    dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=sha)
 
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
-    # Matches _existing_bucket's checkpoint_sha256, so this door's own pre-pass identity check
-    # clears and the stub below is reached, same as the script's own call above.
-    admit_any_checkpoint(monkeypatch)
-
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
+            checkpoint_path=ckpt, trait="bud_opening", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
             pred_dir=str(pred_dir),
         )

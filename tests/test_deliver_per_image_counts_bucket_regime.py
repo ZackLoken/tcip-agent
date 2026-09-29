@@ -19,13 +19,7 @@ from tests._binding_fixtures import (
     calibrated_run_fields, run_result, write_bound_sidecar, write_prediction,
 )
 from tests._record_damage_fixtures import damage_record
-from tests._verified_checkpoint_fixtures import admit_any_checkpoint, dummy_checkpoint
-
-
-@pytest.fixture(autouse=True)
-def _stub_checkpoint_verification(monkeypatch):
-    """Every test here exercises the door's own logic, not a checkpoint load."""
-    admit_any_checkpoint(monkeypatch)
+from tests._verified_checkpoint_fixtures import project_checkpoint
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +111,7 @@ def test_no_output_path_refuses(tmp_path):
     ("conf_threshold", 0.5), ("device", "cpu"), ("tile", True), ("tile_size", 320),
     ("overlap", 0.2), ("cross_tile_nms", 0.4), ("max_dets", 50),
     ("calibration_labels_dir", "labels"), ("calibration_images_dir", "images"),
-    ("selection_dir", "manifest"), ("experiment_id", "exp-live-only"),
+    ("selection_dir", "manifest"),
     ("postprocess", "nmm"), ("tile_batch_size", 32),
 ])
 def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, value):
@@ -387,59 +381,11 @@ def test_publish_bracket_refuses_a_fabricated_tile_with_the_bucket_left_absent(t
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
     assert "error" in r
     assert not bucket.exists()
-
-
-def test_publish_bracket_refuses_a_frozen_lineage_pointer(tmp_path, monkeypatch):
-    """A second live publish for a terminal experiment whose lineage already names a different
-    bucket refuses; the remedy is the bucket regime, re-delivering from the existing bucket."""
-    import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
-
-    eid = "exp-tabulate-lineage-frozen"
-    create_experiment(eid, {"note": "producing run"})
-    update_status(eid, "running")
-    update_lineage(eid, predictions=str(tmp_path / "already-published"))
-    update_status(eid, "completed")
-
-    monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
-    assert "error" in r
-    assert eid in r["error"]
-    assert not bucket.exists()
-
-
-def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(tmp_path, monkeypatch):
-    """The bracket links a resolvable run into its lineage as it publishes, before the CSV's own
-    gate ever runs: an uncalibrated conf with no acknowledgment route refuses the CSV, but the
-    refusal still discloses the bucket it published and the lineage it linked."""
-    import tcip_store
-    import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
-    from tcip_mcp.experiments import create_experiment, lineage_key, update_status
-
-    eid = "exp-tabulate-lineage-link"
-    create_experiment(eid, {"note": "producing run"})
-    update_status(eid, "running")
-
-    monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
-    assert "error" in r
-    assert r["operating_point_validated"] == VALIDATED_FALSE
-    assert r["files"]
-    assert r["lineage_linked"] is True
-    lineage = tcip_store.read(lineage_key(eid), default={})
-    assert lineage.get("predictions") == str(bucket)
 
 
 # ── refusal-channel separation ──────────────────────────────────────────────
@@ -488,7 +434,7 @@ def test_a_meaning_refusal_is_count_free_in_the_live_regime(tmp_path, monkeypatc
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     result = itools.deliver_per_image_counts(
-        dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+        project_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
         trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert result == {"error": "meaning refused here"}
     assert ran == [] and not bucket.exists()
@@ -522,7 +468,7 @@ def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path
                         lambda *a, **kw: _unvalidated_run_result())
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     out_csv = tmp_path / "o.csv"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert r["image_count"] == 1
@@ -530,7 +476,6 @@ def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path
     assert r["files"]
     assert r["output_dir"] == str(bucket)
     assert r["bucket_redirected"] is False
-    assert r["lineage_linked"] is None
     assert r["csv_delivered"] is False
     assert r["unvalidated_dimensions"] == "operating_point"
     assert bucket.exists()
@@ -548,7 +493,7 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
                         lambda *a, **kw: _earned_run_result(tmp_path))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
-    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
+    live = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(csv_a),
                                   trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                   predictions_dir=str(bucket))
     assert "error" not in live, live
@@ -575,14 +520,16 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
 
 def _audit_tools(*roots) -> list[str]:
     """Every audit row's tool name across the platform log and each named root's own log, less
-    the trait proposals and confirmations the fixture seeds before the delivery."""
+    the trait proposals, confirmations, run and checkpoint registration the fixtures seed before
+    the delivery."""
     import tcip_store as ts
 
     from tcip_mcp.audit import audit_log_key
 
     keys = [audit_log_key()] + [audit_log_key(r) for r in roots]
+    seeded = ("propose_trait", "confirm_trait_revision", "training_run", "model_registered")
     return sorted(row["tool"] for key in keys for row in ts.read_log(key).records
-                  if row["tool"] not in ("propose_trait", "confirm_trait_revision"))
+                  if row["tool"] not in seeded)
 
 
 def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch):
@@ -595,7 +542,7 @@ def test_each_act_of_a_delivery_leaves_one_row_of_its_own(tmp_path, monkeypatch)
                         lambda *a, **kw: _earned_run_result(tmp_path))
     root = tmp_path / "ds"
     bucket = root / "predictions" / "baseline" / "2026-01-01"
-    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    live = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                            str(tmp_path / "a.csv"), trait=fx.COUNT_TRAIT,
                                            calibration_labels_dir=str(tmp_path),
                                            predictions_dir=str(bucket))
@@ -688,7 +635,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
@@ -700,7 +647,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
         raise AssertionError("_run_inference_verified must not run on a refused publish")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fail_if_reached)
-    second = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    second = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                     str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                     calibration_labels_dir=str(tmp_path),
                                     predictions_dir=str(bucket))
@@ -715,7 +662,7 @@ def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_p
     # The admitting case: the suggested bucket is free of both a verdict and a document.
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="b"))
-    third = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    third = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "third.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path),
                                    predictions_dir=second["suggested_bucket"])
@@ -738,7 +685,7 @@ def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalida
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
@@ -748,7 +695,7 @@ def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalida
         raise AssertionError("_run_inference_verified must not run on a refused publish")
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fail_if_reached)
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -777,13 +724,13 @@ def test_live_regime_second_publish_refuses_before_the_checkpoint_is_read(tmp_pa
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
-    first = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    first = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
     assert calls["n"] == 1
 
-    second = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    second = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                     str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                     predictions_dir=str(bucket))
     assert "error" in second
@@ -841,9 +788,8 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
     source's own dataset-relative key, not the cleared one: the bucket regime reads it,
     verify_stamp_binding floors it, and the refusal names the source's key among what the record
     covers. The validation row is earned through the real two-phase gate (open_validation, then
-    seal_validation) over the bucket a terminal experiment's own lineage already names."""
+    seal_validation) over the published bucket."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, seal_validation, write_sidecar,
@@ -851,16 +797,9 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
     from tcip_mcp.tools.inference_tools import clear_prediction_bucket
     from tests._dense_op_fixtures import dense_records
 
-    exp_id = "expClearedDeliveryFloor"
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-
-    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
-    update_status(exp_id, "running")
-    relink = update_lineage(exp_id, predictions=str(bucket))
-    assert "error" not in relink, relink
-    update_status(exp_id, "completed")
 
     common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
                   fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
@@ -884,7 +823,7 @@ def test_bucket_regime_over_a_cleared_bucket_refuses_the_floored_binding_naming_
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(),
         scope=ClassScope(subject=fx.COUNT_SUBJECT, id_map={fx.COUNT_SUBJECT: 0}),
         trait=fx.COUNT_TRAIT, dataset_hash="H", checkpoint="best", checkpoint_sha256="deadbeef",
-        experiment_id=exp_id, images_dir=str(tmp_path), raster_path=None,
+        experiment_id=None, images_dir=str(tmp_path), raster_path=None,
         produced_at="2026-01-01T00:00:00Z", image_filenames={"a": "a.png"},
     )
     stamped = seal_validation(
@@ -917,7 +856,7 @@ def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, m
                         lambda *a, **kw: _unvalidated_run_result())
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
-    live = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
+    live = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path), str(csv_a),
                                   trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in live
     assert live["operating_point_validated"] == VALIDATED_FALSE
@@ -1047,7 +986,7 @@ def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.deliver_per_image_counts(dummy_checkpoint(tmp_path), str(tmp_path),
+    r = itools.deliver_per_image_counts(project_checkpoint(tmp_path), str(tmp_path),
                                str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
                                predictions_dir=str(bucket))
 

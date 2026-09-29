@@ -32,11 +32,10 @@ def _rows() -> list[dict]:
 def test_a_successful_monitor_result_with_a_null_error_audits_nothing(platform_root: Path) -> None:
     """The stream's own read: a run whose status carries ``error: None`` polled through
     ``monitor_training`` leaves the log exactly as it found it."""
-    from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.training_tools import monitor_training
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    create_experiment("exp-polled", {"model_source": {"builder": "m:f"}})
-    update_status("exp-polled", "running")
+    opened_run(None, detection_config(platform_root.parent / "ds"), experiment_id="exp-polled")
     before = len(_rows())
 
     status = monitor_training("exp-polled")
@@ -47,14 +46,14 @@ def test_a_successful_monitor_result_with_a_null_error_audits_nothing(platform_r
 
 
 def test_read_only_doors_leave_no_line(platform_root: Path) -> None:
-    from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.experiment_tools import get_experiment, list_experiments
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
     from tcip_mcp.tools.meta_tools import read_audit_log
     from tcip_mcp.tools.project_tools import view_gui_state
     from tcip_mcp.tools.training_tools import inspect_compute_resources, monitor_training
+    from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    create_experiment("exp-read", {"model_source": {"builder": "m:f"}})
+    opened_run(None, detection_config(platform_root.parent / "ds"), experiment_id="exp-read")
     before = len(_rows())
 
     get_experiment("exp-read")
@@ -96,14 +95,14 @@ def test_ranking_a_review_queue_leaves_no_line(tmp_path: Path, monkeypatch: pyte
     successful ranking through a registered run leaves the platform log as it found it."""
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
-    from tests.test_feedback_tools import _registered_checkpoint_from_experiment, _stub_scorer
-    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+    from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
+    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
 
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
     _draw(root, manifest_dir)
-    _bind_run(root, manifest_dir, "exp-ranked", date=DATES[0])
-    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, "exp-ranked")
+    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-ranked")
     _stub_scorer(monkeypatch)
     before = _rows()
 

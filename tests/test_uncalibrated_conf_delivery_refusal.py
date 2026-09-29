@@ -80,11 +80,12 @@ def _held_out_bundle():
 
 def _prepare(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _CountStub())
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, data={
+    # No run of this project produced it, the provenance the stubbed calibration resolves under.
+    ckpt = foreign_checkpoint(tmp_path, data={
         "num_channels": 3,
         "scope": {"subject": fx.COUNT_SUBJECT, "id_map": {fx.COUNT_SUBJECT: 0}}})
     return ckpt, _images_dir(tmp_path)

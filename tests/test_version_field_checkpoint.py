@@ -1,9 +1,5 @@
-"""load_registered_checkpoint runs the schema-version check on the checkpoint payload once the
-digest has already verified its producer, raising ValueError the same way an unrecognized kind
-sniff does. No writer stamps a version yet (the field is lazy), so the refusal case stamps one
-onto a real, registered checkpoint's payload directly rather than through a writer that does not
-exist.
-"""
+"""load_registered_checkpoint loads a registered checkpoint of the platform's own payload shape
+once its digest has verified it."""
 
 from __future__ import annotations
 
@@ -15,7 +11,7 @@ torch = pytest.importorskip("torch")
 torchvision = pytest.importorskip("torchvision")
 
 
-def _bespoke_checkpoint(path: Path, *, extra: dict | None = None) -> str:
+def _bespoke_checkpoint(path: Path) -> str:
     """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
 
@@ -30,8 +26,6 @@ def _bespoke_checkpoint(path: Path, *, extra: dict | None = None) -> str:
         "config": config,
         "model_state_dict": build_model(config, recorded_model_dims(config)).state_dict(),
     }
-    if extra:
-        payload.update(extra)
     torch.save(payload, str(path))
     return str(path)
 
@@ -51,13 +45,3 @@ def test_a_version_one_checkpoint_loads_through_the_platforms_own_registration(t
 
     verified = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     assert "model_state_dict" in verified.payload
-
-
-def test_a_checkpoint_above_the_ceiling_refuses_as_a_value_error(tmp_path):
-    from tcip_mcp.model_registry import load_registered_checkpoint
-
-    ckpt = _bespoke_checkpoint(tmp_path / "m.pt", extra={"schema_version": 2})
-    _register(tmp_path, ckpt, "version-two-model")
-
-    with pytest.raises(ValueError):
-        load_registered_checkpoint(ckpt, project_path=str(tmp_path))

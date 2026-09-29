@@ -49,7 +49,7 @@ def test_triages_over_a_fixture_root_with_the_checkpoint_registered(tmp_path, mo
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = registered_checkpoint(tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")

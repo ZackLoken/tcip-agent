@@ -201,7 +201,6 @@ def calibrate_scalar_operating_point(
     criterion: str,
     output_dir: str,
     dataset_root: str,
-    experiment_id: str | None = None,
     group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
     seed: int = DEFAULT_CAL_SEED,
@@ -226,8 +225,9 @@ def calibrate_scalar_operating_point(
     calibration that does not clear its gate stamps unvalidated, with its failures, and earns
     nothing.
 
-    Record and stamp carry ``checkpoint_sha256`` from ``resolve_model_identity`` over the
-    checkpoint this door ran.
+    Record and stamp carry ``checkpoint_sha256`` and ``experiment_id`` from
+    ``resolve_model_identity`` over the checkpoint this door ran; a producing run gates
+    train-disjointness, and a foreign checkpoint names none.
 
     The checkpoint's own task, ordinal or regression, dispatches which criterion toolkit, item
     shape and sidecar file apply; any other task refuses.
@@ -247,9 +247,6 @@ def calibrate_scalar_operating_point(
             the cal/holdout lock is stored under it. Refuses when the images directory's own layout
             places it under a different root; a loose directory the layout cannot place refuses
             nothing.
-        experiment_id: The checkpoint's own training run's record id (``tcip_mcp.experiments``), if
-            known, gates train-disjointness. ``None`` (a foreign/unregistered checkpoint) skips
-            that check.
         group_by / group_key_map / seed / holdout_ratio: The locked cal/holdout split's grouping
         policy, same semantics as ``run_inference``'s own calibration arguments; only the first
         call for this CSV's identity draws the split.
@@ -260,7 +257,7 @@ def calibrate_scalar_operating_point(
     if disagreement:
         return {"error": disagreement}
 
-    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
     from tcip_mcp.pipelines.data.splits import cal_holdout_scope_root, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
@@ -284,6 +281,8 @@ def calibrate_scalar_operating_point(
         dims = recorded_model_dims(checkpoint.payload.get("config") or {})
     except ValueError as exc:
         return {"error": str(exc)}
+    identity = resolve_model_identity(checkpoint)
+    checkpoint_sha256, experiment_id = identity["sha256"], identity["experiment_id"]
     if task not in _ORDINAL_REGRESSION_TASKS:
         return {"error": f"{checkpoint_path} is a {task!r} checkpoint; this door calibrates "
                          f"{sorted(_ORDINAL_REGRESSION_TASKS)} predictions."}
@@ -347,13 +346,10 @@ def calibrate_scalar_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
-    from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
     out = resolve_output_path(output_dir)
     document = f"{task}_operating_point"
-    checkpoint_sha256 = resolve_model_identity(
-        checkpoint, experiment_id=experiment_id)["sha256"]
     stamp = {
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
@@ -403,7 +399,6 @@ def calibrate_count_operating_point(
     dataset_root: str,
     pred_dir: str,
     *,
-    experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     selection_dir: str | None = None,
@@ -440,8 +435,9 @@ def calibrate_count_operating_point(
     checkpoint disagrees with ``checkpoint_path``, or that already carries a claim
     ``verify_stamp_binding`` answers for, all refuse by name before the calibration pass draws its
     cal/holdout lock. A stamp changing to a different production conf while the pass is running
-    refuses after a record was sealed; that leaves a minted calibration experiment and an inert
-    validation row behind, which the response names.
+    refuses after a record was sealed; that leaves an inert validation row behind, which the
+    response names. The producing run is the checkpoint's resolved one
+    (``resolve_model_identity``); a foreign checkpoint names none and skips train-disjointness.
 
     Args:
         checkpoint_path: The trained checkpoint to calibrate; must be registered under the platform
@@ -453,9 +449,6 @@ def calibrate_count_operating_point(
             beneath; the labels' dataset root, or ``labels_dir`` itself when the layout places it
             under none.
         pred_dir: The already-published prediction bucket this claim covers.
-        experiment_id: The checkpoint's own training run's record id (``tcip_mcp.experiments``), if
-            known, gates train-disjointness; ``None`` (a foreign/unregistered checkpoint) skips
-            that check.
         group_by / group_key_map: The locked cal/holdout split's grouping policy; only the first
         call for this labels_dir's identity draws the split.
         selection_dir: Restrict the calibration universe to a selection's calibration samples under
@@ -512,7 +505,8 @@ def calibrate_count_operating_point(
             checkpoint_path, project_path=str(platform_state_root()))
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
-    checkpoint_sha256 = resolve_model_identity(checkpoint, experiment_id=experiment_id)["sha256"]
+    identity = resolve_model_identity(checkpoint)
+    checkpoint_sha256, experiment_id = identity["sha256"], identity["experiment_id"]
     if not existing_sha:
         return {"error": f"{bucket} carries no checkpoint_sha256 in its operating_point.json "
                          "stamp; a count-calibration claim sealed under a digest the stamp does "
@@ -536,7 +530,7 @@ def calibrate_count_operating_point(
         resolved = resolve_count_operating_point(
             checkpoint_path=checkpoint_path, trait=trait, labels_dir=labels_dir,
             images_dir=images_dir, dataset_root=dataset_root,
-            project_root=str(platform_state_root()), experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
+            project_root=str(platform_state_root()), group_by=group_by, group_key_map=group_key_map,
             selection_dir=selection_dir, holdout_ratio=holdout_ratio, seed=seed, device=device,
             regime=regime,
         )

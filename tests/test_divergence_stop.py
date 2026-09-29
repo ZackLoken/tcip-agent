@@ -15,8 +15,7 @@ from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
-from tcip_mcp.pipelines.training.run_registry import create_run
-from tests.tiny_trainer_fixtures import ConstantImageDataset
+from tests.tiny_trainer_fixtures import ConstantImageDataset, trainer_run
 
 DIVERGED_BUILDER = "tests.tiny_trainer_fixtures:build_always_diverged_model"
 HEALTHY_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
@@ -54,7 +53,8 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(tmp_pat
     full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
     at exactly the same epoch with the same wording."""
     train_loader = _train_loader(batch_size)
-    run = create_run(_config(DIVERGED_BUILDER, {}, epochs=30), str(tmp_path / "out"), id="auto-run-9")
+    run = trainer_run(_config(DIVERGED_BUILDER, {}, epochs=30), tmp_path / "out",
+                      has_val_loader=False, id="auto-run-9")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
@@ -67,7 +67,8 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     """A run whose loss stays finite throughout completes normally and carries no divergence
     text, proving the counter never fires on a model that never produces a bad batch."""
     train_loader = _train_loader()
-    run = create_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), str(tmp_path / "out"), id="auto-run-10")
+    run = trainer_run(_config(HEALTHY_BUILDER, {"init_weight": 0.0}, epochs=3), tmp_path / "out",
+                      has_val_loader=False, id="auto-run-10")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
@@ -79,9 +80,9 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
     """One fully diverged epoch, short of the two-pass rule, followed by a recovery to finite
     losses completes the run: the counter resets on the first epoch with a finite loss."""
     train_loader = _train_loader()
-    run = create_run(
+    run = trainer_run(
         _config(TRANSIENT_BUILDER, {"bad_batches": 3, "init_weight": 0.0}, epochs=3),
-        str(tmp_path / "out"), id="auto-run-11")
+        tmp_path / "out", has_val_loader=False, id="auto-run-11")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
@@ -94,9 +95,9 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
     count: a second, fully diverged epoch right after would only stop the run if the first
     (wrongly) counted too."""
     train_loader = _train_loader()  # three batches/epoch
-    run = create_run(
+    run = trainer_run(
         _config(STEP_COUNTED_BUILDER, {"finite_at": [2]}, epochs=2),  # epoch 1's middle batch only
-        str(tmp_path / "out"), id="auto-run-12")
+        tmp_path / "out", has_val_loader=False, id="auto-run-12")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
@@ -109,7 +110,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
     train_loader = _train_loader()  # three batches/epoch, twelve calls total across four epochs
     config = _config(STEP_COUNTED_BUILDER, {"finite_at": [1, 2, 3, 10, 11, 12]}, epochs=2)
     config["stages"] = [{"freeze_to": 0, "epochs": 2}, {"freeze_to": 0, "epochs": 2}]
-    run = create_run(config, str(tmp_path / "out"), id="auto-run-13")
+    run = trainer_run(config, tmp_path / "out", has_val_loader=False, id="auto-run-13")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "completed", run.error
@@ -124,7 +125,8 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     train_loader = _train_loader()  # three batches/epoch: epoch 2 is calls 4, 5, 6
     out_dir = str(tmp_path / "out")
     on_forward = CancelSentinelAtCall(out_dir, at_call=5)
-    run = create_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir, id="auto-run-14")
+    run = trainer_run(_config(DIVERGED_BUILDER, {"on_forward": on_forward}, epochs=30), out_dir,
+                      has_val_loader=False, id="auto-run-14")
     run = train(run, train_loader, val_loader=None)
 
     assert run.status == "failed"
@@ -155,7 +157,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, mon
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    res = launch_training(cfg, str(tmp_path / "out"))
+    res = launch_training(cfg)
     assert "error" not in res, res
     experiment_id = res["experiment_id"]
 

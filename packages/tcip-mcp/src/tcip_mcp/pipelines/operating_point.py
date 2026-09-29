@@ -34,7 +34,7 @@ from tcip_mcp.pipelines.resolution import (
     accepted_references,
     default,
     derived,
-    members_moved_since,
+    moved_since_run,
     resolve_cross_tile_nms,
     resolve_tile_size_param,
 )
@@ -369,7 +369,7 @@ def _spatial_strip_geometric_disjointness(
     """The geometric form of the spatial_strip check: a cal/holdout rect must be fully contained
     in a persisted non-train region (``val_region``/``test_region``/``calibration_region``, the
     last only present on a four-way split) and disjoint from every persisted train region, read
-    from ``spatial`` (the ``split.json`` ``"spatial"`` block ``persist_run_partition`` writes).
+    from ``spatial`` (the run's resolved ``data.split.spatial_manifest``).
     Compares real geometry, so it catches a leak the lexical stem-identity check can't: a rect
     that spills into the reserved train area from a source stem whose name never matches the
     training stem's own.
@@ -394,24 +394,13 @@ def _spatial_strip_geometric_disjointness(
     }
 
 
-def _members_under(
-    split: dict, calibration_labels_dir: str | None,
-) -> tuple[str | None, dict | None]:
-    """``(the recorded directory, the run's own members under it)`` for ``calibration_labels_dir``,
-    or ``(None, None)`` when the record carries no per-directory block or names no block for that
-    directory.
-
-    A bare stem names one image only within one label directory, so a run whose selection spanned
-    several is compared against the one a calibration read from. A block whose own side is empty is
-    still a block.
-    """
-    members = split.get("members")
-    if not isinstance(members, dict) or calibration_labels_dir is None:
-        return None, None
-    for recorded, block in members.items():
-        if same_directory(recorded, calibration_labels_dir):
-            return recorded, block
-    return None, None
+def _samples_under(samples: Sequence[Any], calibration_labels_dir: str | None) -> list[Any]:
+    """The run's own samples whose ground-truth scope is ``calibration_labels_dir``, empty when
+    none is or no directory is named. A bare stem names one image only within one scope, so a run
+    whose selection spanned several is compared against the one a calibration read from."""
+    if calibration_labels_dir is None:
+        return []
+    return [s for s in samples if same_directory(s.ground_truth_scope, calibration_labels_dir)]
 
 
 def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str], str] | None:
@@ -427,23 +416,18 @@ def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str
     return recorded_group_key_fn(group_by, date=date)
 
 
-def _bound_side_disjointness(
-    split: dict, recorded_dir: str, narrowed: dict, side: str, cal_hold_stems: Sequence[str],
+def _scoped_side_disjointness(
+    group_by: str, scoped: Sequence[Any], side: str, cal_hold_stems: Sequence[str],
 ) -> dict:
-    """The leak resolution for a run whose partition was recorded per label directory, narrowed to
-    ``narrowed``, the block for the directory the calibration read from.
-
-    An empty local ``side`` is a real answer: that directory holds none of this run's members on
-    that side.
-    """
+    """The leak resolution for the run's samples under the scope the calibration read from
+    (``scoped``, non-empty), against the members on ``side``. An empty local ``side`` is a real
+    answer: that scope holds none of this run's members on that side."""
     from tcip_mcp.dataset_layout import annotation_date
 
-    # The block's own keys are bare stems: the block's directory is what scopes them, and the
-    # member lists beside them in that block are spelled the same way.
-    block_map: dict[str, str] = narrowed.get("group_key_map") or {}
+    group_of = {s.member: s.group for s in scoped}
     return _resolve_group_stem_disjointness(
-        narrowed.get(side) or [], cal_hold_stems, block_map.get,
-        _named_group_key_fn(split.get("group_by"), annotation_date(recorded_dir)),
+        sorted({s.member for s in scoped if s.side == side}), cal_hold_stems, group_of.get,
+        _named_group_key_fn(group_by, annotation_date(scoped[0].ground_truth_scope)),
     )
 
 
@@ -456,11 +440,9 @@ def _train_disjointness(
     """Whether the cal/holdout images were also in the checkpoint's own training split.
 
     ``experiment_id is None`` -> a foreign/unregistered checkpoint with no known training
-    provenance; allowed through. Only a known ``experiment_id`` whose provenance can't be read
-    fails closed.
-
-    Two cases stay ``unresolvable: True`` (fail-closed): ``split.json`` is missing/unreadable, or
-    it is readable but records no training stems at all.
+    provenance; allowed through. A named run's resolution is read through
+    ``experiments.run_resolution``, which refuses an id naming no training run; a run recording
+    no training member at all stays ``unresolvable: True`` (fail-closed).
 
     Otherwise group-level resolution is attempted per stem:
 
@@ -483,48 +465,48 @@ def _train_disjointness(
     comparison over the union of the record's scopes.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
-    stem) are optional. When either is given and the persisted split is ``group_by ==
-    "spatial_strip"``, the check becomes geometric containment against the persisted
+    stem) are optional. When either is given and the run drew a within-image spatial split, the
+    check becomes geometric containment against the persisted
     ``train_region``/``val_region``/``test_region`` rects
     (:func:`_spatial_strip_geometric_disjointness`) instead of the same-source check.
     """
     if experiment_id is None:
         return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                 "group_check": None}
-    from tcip_mcp.experiments import read_run_partition
+    from tcip_mcp.experiments import run_resolution
 
-    split = read_run_partition(experiment_id)
+    resolved = run_resolution(experiment_id)
     cal_hold_stems = sorted(cal_ids | hold_ids)
-    group_by = split.get("group_by")
-    if group_by == "spatial_strip":
+    partition = resolved["partition"]
+    spatial = resolved["data"]["split"].get("spatial_manifest")
+    if spatial is not None:
         from tcip_mcp.pipelines.data.splits import stem_of_spatial_identity
 
         if cal_rects or hold_rects:
-            return _spatial_strip_geometric_disjointness(
-                split.get("spatial") or {}, cal_rects, hold_rects)
+            return _spatial_strip_geometric_disjointness(spatial, cal_rects, hold_rects)
         # A spatial record's members are per-region identities, not bare stems; only a same-source
         # reference is caught here (a caller with real rects gets the geometric check above).
-        train_source_stems = {stem_of_spatial_identity(s)
-                              for s in split["spatial"]["train_identities"]}
+        train_source_stems = {stem_of_spatial_identity(s) for s in spatial["train_identities"]}
         if not train_source_stems:
             return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-        spatial_leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
         return {
-            "checked": True, "unresolvable": False, "leaked_groups": spatial_leaked_groups,
+            "checked": True, "unresolvable": False,
+            "leaked_groups": sorted(train_source_stems & set(cal_hold_stems)),
             "leaked_stems": [], "group_check": "spatial_strip",
         }
 
-    from tcip_mcp.pipelines.data.split_construction import recorded_side
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    train_stems = recorded_side(split.get("members", {}), "train")
+    samples = partition_samples(partition)
+    train_stems = sorted({s.member for s in samples if s.side == "train"})
     if not train_stems:
         # Nothing recorded to check against at all, not even the stem-overlap fallback has
         # anything to compare, so this is unresolvable rather than merely ungrouped.
         return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
 
-    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
-    if narrowed is not None and recorded_dir is not None:
-        return _bound_side_disjointness(split, recorded_dir, narrowed, "train", cal_hold_stems)
+    scoped = _samples_under(samples, calibration_labels_dir)
+    if scoped:
+        return _scoped_side_disjointness(partition["group_by"], scoped, "train", cal_hold_stems)
 
     # No scope of this record answers for the directory the calibration read, so no recorded
     # group key is in a vocabulary this comparison could use: exact member names only.
@@ -540,10 +522,8 @@ def _resolve_group_stem_disjointness(
     """The group- and stem-level leak resolution: ``recorded_key_of`` answers for every stem the
     run's own map covers, ``named_key_fn`` answers for the rest, and a stem neither reaches is
     uncovered and falls back to exact stem-set overlap between ``named_side_stems`` and
-    ``cal_hold_stems``. Never called for a ``spatial_strip`` record.
-
-    ``named_key_fn`` (:func:`_named_group_key_fn`) is ``None`` where the caller cannot say which
-    capture date a bare stem belongs to.
+    ``cal_hold_stems``. ``named_key_fn`` (:func:`_named_group_key_fn`) may be ``None``, resolving
+    no stem.
     """
     def _key_of(stem: str) -> str | None:
         recorded = recorded_key_of(stem)
@@ -592,27 +572,26 @@ _UNRESOLVABLE_SELECTION_SHAPE = {
 
 
 def _resolve_label_movement(
-    label_digests_block: dict | None, cal_ids: set,
+    scoped: Sequence[Any], at_run: Mapping[str, str], cal_ids: set,
     calibration_labels_dir: str | None, selection_sha256: str | None,
     recorded_sha256: str | None,
 ) -> dict:
-    """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's own
-    ``split.json``: its scope block's ``label_digests`` (``at_split``/``at_run``), the digest of
-    the selection that run bound (``recorded_sha256``, recorded once in its binding block) and the
-    calibration's own labels directory, when it read one.
+    """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's samples
+    under the scope the calibration read (``scoped``, each carrying its digest at draw time), the
+    digests its ground truth had when the run read it (``at_run``, by path), the digest of the
+    selection that run bound (``recorded_sha256``) and the calibration's own labels directory.
 
-    All four keys ``None`` when the run recorded no ``label_digests`` block, or one with an empty
-    ``at_split`` (an unbound run calibrated under a caller-named selection). Otherwise the two
-    digest dictionaries share one key set (the draw's).
+    All four keys ``None`` when no scoped sample carries a draw-time digest (an unbound run
+    calibrated under a caller-named selection).
 
     The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's own
-    universe, and recomputed through :func:`~tcip_mcp.pipelines.resolution.members_moved_since`
-    over the path the run's own producer recorded for each member. It is left unsealed (``None``)
-    when the scoped set is empty or a record names no path for a scoped member.
+    universe, and recomputed through :func:`~tcip_mcp.pipelines.resolution.moved_since_run`; it is
+    ``None`` when that scoped set is empty.
 
     ``selection_redrawn`` answers only when both digests are in hand, else ``None``.
     """
-    if not label_digests_block or not label_digests_block.get("at_split"):
+    drawn = [s for s in scoped if s.ground_truth_digest is not None]
+    if not drawn:
         return {
             "labels_moved_draw_to_run": None,
             "labels_moved_run_to_now": None,
@@ -620,17 +599,10 @@ def _resolve_label_movement(
             "selection_redrawn": None,
             "calibration_labels_dir": calibration_labels_dir,
         }
-    at_split = label_digests_block.get("at_split") or {}
-    at_run = label_digests_block.get("at_run") or {}
-    recorded_paths = label_digests_block.get("ground_truth") or {}
-
     labels_moved_draw_to_run = sorted(
-        stem for stem, digest in at_split.items() if at_run.get(stem) != digest)
-    scoped = sorted(set(at_run) & cal_ids) if calibration_labels_dir is not None else []
-    if scoped and all(stem in recorded_paths for stem in scoped):
-        labels_moved_run_to_now = members_moved_since(recorded_paths, at_run, scoped)
-    else:
-        labels_moved_run_to_now = None
+        s.member for s in drawn if at_run[s.ground_truth] != s.ground_truth_digest)
+    in_universe = [s for s in scoped if s.member in cal_ids]
+    labels_moved_run_to_now = moved_since_run(in_universe, at_run) if in_universe else None
 
     moved = set(labels_moved_draw_to_run) | set(labels_moved_run_to_now or [])
     return {
@@ -651,23 +623,23 @@ def _selection_disjointness(
     calibration_labels_dir: str | None = None, selection_sha256: str | None = None,
 ) -> dict:
     """Whether the cal/holdout images were also on the checkpoint's own selection side (its
-    ``split.json``'s ``val``), the side the shipped weights were chosen on.
+    resolved partition's ``val`` side), the side the shipped weights were chosen on.
 
     ``applicable`` only when the calibration names a selection (``selection_dir``) or the
-    checkpoint's own record carries a ``selection_binding``. Not-applicable, each with a
-    breeder-legible ``reason``, for: no selection named and no ``selection_binding`` on the record;
-    a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is a different
-    check); an empty ``val``; ``calibration_labels_dir is None``; or a ``calibration_labels_dir``
-    none of the run's own members live under.
+    checkpoint's own run was bound to one. Not-applicable, each with a breeder-legible ``reason``,
+    for: no selection named and no binding on the run; a within-image spatial split (that route's
+    own ``calibration_region`` is a different check); an empty ``val``; ``calibration_labels_dir is
+    None``; or a ``calibration_labels_dir`` none of the run's own members live under.
 
-    A record carrying no per-scope ``members`` block at all is unresolvable. Unresolvable, too,
-    when the calibration names a selection but ``experiment_id is None``.
+    Unresolvable when the calibration names a selection but ``experiment_id is None``. A named
+    run's resolution is read through ``experiments.run_resolution``, which refuses an id naming no
+    training run.
 
     Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and on
     the applicable path the four label-movement keys plus ``calibration_labels_dir``
     (:func:`_resolve_label_movement`): the four movement keys ``null``, ``calibration_labels_dir``
-    preserved from the caller, and ``reason`` naming why, when the run recorded no
-    ``label_digests`` block on its ``split.json``.
+    preserved from the caller, and ``reason`` naming why, when no scoped sample carries a
+    draw-time digest.
     """
     if experiment_id is None:
         if selection_dir is not None:
@@ -680,62 +652,51 @@ def _selection_disjointness(
                           "selection side from",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
 
-    from tcip_mcp.experiments import read_run_partition
+    from tcip_mcp.experiments import run_resolution
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    split = read_run_partition(experiment_id)
-    selection_binding = split.get("selection_binding")
-    if selection_dir is None and not selection_binding:
+    resolved_record = run_resolution(experiment_id)
+    partition = resolved_record["partition"]
+    selection_binding = partition["selection"]
+    if selection_dir is None and selection_binding is None:
         return {"applicable": False,
                 "reason": "no selection named and this checkpoint's own run was not bound to one",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    if not split:
-        return {"applicable": True,
-                "reason": "the calibration names a selection but this checkpoint's run "
-                          "recorded no split.json to check its selection side against",
-                **_UNRESOLVABLE_SELECTION_SHAPE}
-    if split.get("group_by") == "spatial_strip":
+    if "spatial_manifest" in resolved_record["data"]["split"]:
         return {"applicable": False,
                 "reason": "the run drew a within-image spatial split; its own calibration_region "
                           "is the selection check for that route, not this one",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    if not isinstance(split.get("members"), dict):
-        return {"applicable": True,
-                "reason": "this run's split.json records no per-scope membership, so which scope "
-                          "its val members live under is not on record: comparing them against "
-                          "the one this calibration read would answer for a scope the record "
-                          "never stated. Retrain, or calibrate under a selection drawn over the "
-                          "current data, so the run's own membership is recorded per scope",
-                **_UNRESOLVABLE_SELECTION_SHAPE}
-    from tcip_mcp.pipelines.data.split_construction import recorded_side
-
-    if not recorded_side(split["members"], "val"):
-        return {"applicable": False, "reason": "the run's split.json carries no val members",
+    samples = partition_samples(partition)
+    if not any(s.side == "val" for s in samples):
+        return {"applicable": False, "reason": "the run's partition carries no val members",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
     if calibration_labels_dir is None:
         return {"applicable": False,
                 "reason": "this calibration named no labels directory to check against the "
                           "scopes the run's own val members live under",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
-    recorded_dir, narrowed = _members_under(split, calibration_labels_dir)
-    if narrowed is None or recorded_dir is None:
+    scoped = _samples_under(samples, calibration_labels_dir)
+    if not scoped:
         return {"applicable": False,
                 "reason": f"the calibration reads labels from {calibration_labels_dir!r}, and the "
-                          f"run's own members live under {sorted(split['members'])}; a bare "
-                          "member name means the same image only within one scope",
+                          f"run's own members live under "
+                          f"{sorted({s.ground_truth_scope for s in samples})}; a bare member name "
+                          "means the same image only within one scope",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
 
     cal_hold_stems = sorted(cal_ids | hold_ids)
-    resolved = _bound_side_disjointness(split, recorded_dir, narrowed, "val", cal_hold_stems)
-    label_digests_block = narrowed.get("label_digests")
+    resolved = _scoped_side_disjointness(partition["group_by"], scoped, "val", cal_hold_stems)
     moved = _resolve_label_movement(
-        label_digests_block, cal_ids, calibration_labels_dir, selection_sha256,
-        (split.get("selection_binding") or {}).get("selection_sha256"))
+        scoped, partition["ground_truth_digests"], cal_ids, calibration_labels_dir,
+        selection_sha256,
+        selection_binding["selection_sha256"] if selection_binding is not None else None)
     reason = None
-    if not label_digests_block or not label_digests_block.get("at_split"):
+    if moved["labels_moved_draw_to_run"] is None:
         reason = (
-            "this run's split.json recorded no label_digests block, so a calibration label "
-            "moved since the draw cannot be named: the run was calibrated with no bound run "
-            "under a caller-named selection"
+            "this run's partition records no draw-time digest, so a calibration label moved "
+            "since the draw cannot be named: the run was calibrated with no bound run under a "
+            "caller-named selection"
         )
     return {"applicable": True, "reason": reason, **resolved, **moved}
 

@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 _HOST = object()
-"""Default for ``producing_experiment_id``: the run that produced the predictions is the experiment
-the row is filed on, which is the ordinary case for a bucket a training run's checkpoint produced."""
+"""Default for ``producing_experiment_id``: the run that produced the predictions is the run the
+row is filed on, which is the ordinary case for a bucket a training run's checkpoint produced."""
 
 _UNSTATED = object()
 """Default for ``train_disjointness``: the same shape an unchecked, foreign-checkpoint row carries,
@@ -39,18 +39,9 @@ def document_reconciliation(
     conf: float | None = None,
     confs: dict[str, float | None] | None = None,
 ) -> dict:
-    """A ``_reconcile_validity``-shaped mapping, forged from real ``StampBinding`` objects rather
-    than a hand-typed dict a real reconciler would never produce.
-
-    ``bindings`` stays exactly the ``StampBinding`` mapping it is given, the same raw shape a real
-    reconciler's own ``bindings`` key carries (rendered to plain JSON only by
-    ``record_delivery_binding_event`` itself, at write time); ``binding_notes`` is derived from it
-    (one note per bucket whose binding does not hold), the only two keys a ``StampBinding`` carries
-    anything about. Every other key a reconciler decides for itself (which document validated,
-    which buckets it floored and why, whether it read every bucket on disk) is a named argument
-    here, so a forged reconciliation states every fact the reconciler would have decided rather
-    than inferring one from the binding it stands beside.
-    """
+    """A ``_reconcile_validity``-shaped mapping over ``bindings``, a ``StampBinding`` mapping kept
+    as given, with ``binding_notes`` one note per bucket whose binding does not hold and every
+    other key the named argument of the same name."""
     return {
         "validated": validated,
         "on_disk_validated": on_disk_validated,
@@ -99,8 +90,9 @@ def file_validation_record(
     """
     if document == "operating_point":
         stamp = complete_stamp(stamp)
-    from tcip_mcp.experiments import _append_validation, create_experiment, experiment_exists
+    from tcip_mcp.experiments import append_validation, experiment_dir, find_run
     from tcip_mcp.pipelines.resolution import _DOCUMENT_PARAM, claim_payload, cleared_reference
+    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     param_key, validation_kind = _DOCUMENT_PARAM[document]
@@ -136,9 +128,9 @@ def file_validation_record(
     else:
         sd = selection_disjointness
 
-    if not experiment_exists(experiment_id):
-        create_experiment(experiment_id, {"derived_from": "a reference for a test whose subject is "
-                                                          "not the binding itself"})
+    if find_run(experiment_id) is None:
+        opened_run(None, detection_config(fixture_data_dir(None, experiment_id)),
+                   experiment_id=experiment_id)
     body = {
         "document": document,
         "trait": trait if trait is not None else stamp.get("trait"),
@@ -153,10 +145,8 @@ def file_validation_record(
         "train_disjointness": td,
         "selection_disjointness": sd,
     }
-    appended = _append_validation(experiment_id, body)
-    assert "error" not in appended, appended
-    return {**stamp, "validated_by": {"experiment_id": experiment_id,
-                                      "record_digest": appended["record_digest"]}}
+    digest = append_validation(experiment_dir(experiment_id), body)
+    return {**stamp, "validated_by": {"experiment_id": experiment_id, "record_digest": digest}}
 
 
 def complete_stamp(partial: dict) -> dict:
@@ -212,54 +202,32 @@ def validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_p
     return str(bucket)
 
 
-PRODUCER_WEIGHTS = b"the weights a producing run filed under the experiment its predictions name"
-
-
-def _producer_bytes(experiment_id: str) -> bytes:
-    """The per-experiment bytes :func:`record_producing_run` files and
-    :func:`producer_checkpoint_sha256` digests: ``PRODUCER_WEIGHTS`` plus the id, so two
-    producing runs never share one digest by construction."""
-    return PRODUCER_WEIGHTS + experiment_id.encode("utf-8")
-
-
 def producer_checkpoint_sha256(experiment_id: str) -> str:
-    """The digest :func:`record_producing_run` files for ``experiment_id``, so a golden asserting
-    the delivered cell can compute its own expectation without re-running the fixture."""
-    from tcip_mcp.model_registry import _sha256_of_bytes
+    """The digest of the checkpoint the completed run ``experiment_id`` under the pinned platform
+    root names, so a golden asserting the delivered cell reads its own expectation off the run."""
+    from tcip_mcp.experiments import experiment_dir, observe
 
-    return _sha256_of_bytes(_producer_bytes(experiment_id))
+    checkpoint = observe(experiment_dir(experiment_id)).checkpoint
+    assert checkpoint is not None, f"{experiment_id} did not complete"
+    return checkpoint["sha256"]
 
 
-def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
-    """File the run a bucket's stamp names as its producer, bound through the platform's own
-    registration, and return the registered entry's checkpoint hash.
+def record_producing_run(experiment_id: str) -> str:
+    """Complete the run a bucket's stamp names as its producer under the pinned platform root,
+    through the training envelope whose final status registers its checkpoint, and return that
+    checkpoint's hash.
 
     A delivered producer column is emitted only where something outside the prediction bucket
-    corroborates the identity the stamp asserts: the experiment has to exist, be completed with a
-    recorded digest, and be bound to a registry entry naming that digest. A fixture that wants the
-    populated case has to leave all of that behind, which is what a completed, registered training
-    run leaves behind for itself. Idempotent under a repeat call for the same ``experiment_id``
-    (some callers file more than one bucket behind one producing run): a run completion cannot be
-    repeated once terminal, so a second call skips straight to registration, itself idempotent for
-    the recorded bytes.
+    corroborates the identity the stamp asserts: the run has to have completed naming the digest.
+    Idempotent under a repeat call for the same ``experiment_id`` (some callers file more than one
+    bucket behind one producing run): a completed run is read, never run twice.
     """
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_exists, read_member,
-        register_model_from_experiment, status_key,
-    )
+    from tcip_mcp.experiments import find_run
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    ckpt = Path(weights_dir) / "model_best.pt"
-    ckpt.parent.mkdir(parents=True, exist_ok=True)
-    ckpt.write_bytes(_producer_bytes(experiment_id))
-    if not experiment_exists(experiment_id):
-        create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
-    status = read_member(status_key(experiment_id), {})
-    if not (isinstance(status, dict) and status.get("state") == "completed"):
-        completed = complete_run(experiment_id, str(ckpt))
-        assert "error" not in completed, completed
-    registered = register_model_from_experiment(experiment_id, str(ckpt))
-    assert "error" not in registered, registered
-    return registered["sha256"]
+    if find_run(experiment_id) is None:
+        finished_run(None, experiment_id=experiment_id)
+    return producer_checkpoint_sha256(experiment_id)
 
 
 def register_plant_registry_for(
@@ -306,14 +274,8 @@ def write_plant_mapping(
 ) -> str:
     """Persist a hand-composed ``{date: [assignment dict, ...]}`` mapping through the platform's
     own producer (``persist_mapping``, record then receipt), and return the dataset id it minted.
-
-    A fixture's real interest is only ``mapping``; every other provenance field is a placeholder
-    a delivery's dataset-identity and receipt checks require but do not otherwise inspect.
-    ``dataset_root`` is registered (``register_dataset``) if it carries no identity yet, so a
-    delivery reading these predictions binds on a real minted id. ``plant_registry`` names a real,
-    empty registry (``register_plant_registry_record`` over no CSVs, idempotent under a repeat
-    call), so a delivery's own registry check (``registry_entries_or_refusal``) finds a real
-    record to load rather than refusing a fixture's placeholder name as vanished.
+    ``dataset_root`` is registered (``register_dataset``), and the mapping names a registered,
+    empty plant registry (``register_plant_registry_record`` over no CSVs).
     """
     from datetime import datetime, timezone
 
@@ -377,7 +339,7 @@ def calibrated_run_fields(
     identity (``calibration_curve_identity``, the same key a real run's write and a delivery door's
     read agree on) exactly where a calibrated run files it, and hands back the result fields that
     carry it, its ``slicing`` record included. The producing experiment is ``None``, the ordinary
-    bespoke-checkpoint case, so the door earns through a created calibration experiment.
+    bespoke-checkpoint case, so the door earns through a calibration run directory of its own.
     """
     from tcip_store import store
 

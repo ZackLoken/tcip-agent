@@ -489,23 +489,21 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
     _native_frame_gt(images_dir, labels_dir)
-    checkpoint = stub_verified_checkpoint("ckpt.pt")
+    checkpoint = verified_checkpoint(tmp_path)
 
     build = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _persisted_regime_predictor()
-        persisted = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"))
+        persisted = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
 
         predictor_mod.build_predictor = lambda *a, **kw: _native_frame_regime_predictor()
-        native = run_full_frame_evaluation(
-            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_native"))
+        native = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
     finally:
         predictor_mod.build_predictor = build
 
@@ -540,7 +538,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     with it, so the evaluation door never silently runs each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
@@ -563,8 +561,8 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     build = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = _spy_predictor
-        r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
-                                      str(labels_dir), str(tmp_path / "out"))
+        r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
+                                      str(labels_dir))
     finally:
         predictor_mod.build_predictor = build
 

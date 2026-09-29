@@ -16,13 +16,12 @@ one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out`` pi
 ``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``,
 and ``test_trait_revisions.py`` asserts its own field-level content.
 
-The other four (dataset identity, friction report, retrospective, snapshot manifest) pin
-the codec and the path only, through the seam expression their writer makes, because those writers
-mint an id, stamp a timestamp, draw a random suffix or capture a live environment, none of which a
-fixed byte comparison can hold still. That those writers reach the store through this very
-expression is covered where each writer's own content is asserted: ``test_project_tools`` for the
-identity document, ``test_meta_tools`` for reports and retrospectives, and ``test_bespoke_provenance``
-plus ``test_model_build_provenance_and_dims`` for the snapshot manifest.
+The other three (dataset identity, friction report, retrospective) pin the codec and the path
+only, through the seam expression their writer makes, because those writers mint an id, stamp a
+timestamp or draw a random suffix, none of which a fixed byte comparison can hold still. That
+those writers reach the store through this very expression is covered where each writer's own
+content is asserted: ``test_project_tools`` for the identity document and ``test_meta_tools`` for
+reports and retrospectives.
 
 The bytes are the ones these documents carry on disk today; the placement of each file is pinned
 separately, for every registered store at once, by ``test_store_contract``. The cases whose store
@@ -31,8 +30,6 @@ answer rather than an export's.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import tcip_store as ts
 
@@ -122,43 +119,6 @@ RETROSPECTIVE_BYTES = (
     "---\n"
 ).encode("utf-8")
 
-EXPERIMENT = "exp_042"
-SNAPSHOT_MANIFEST_VALUE = {
-    "builder": "my_module:build",
-    "training_source": None,
-    "dataset_builder": None,
-    "declared_files": ["my_model_ü.py"],
-    "files": [{"file": "ab12cd34/my_model_ü.py", "sha256": "0" * 64, "bytes": 27}],
-    "missing": [],
-    "snapshot_errors": [],
-    "env": {"python": "3.12.13"},
-    "seed": 7,
-}
-SNAPSHOT_MANIFEST_BYTES = (
-    '{\n'
-    '  "builder": "my_module:build",\n'
-    '  "training_source": null,\n'
-    '  "dataset_builder": null,\n'
-    '  "declared_files": [\n'
-    '    "my_model_ü.py"\n'
-    '  ],\n'
-    '  "files": [\n'
-    '    {\n'
-    '      "file": "ab12cd34/my_model_ü.py",\n'
-    '      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",\n'
-    '      "bytes": 27\n'
-    '    }\n'
-    '  ],\n'
-    '  "missing": [],\n'
-    '  "snapshot_errors": [],\n'
-    '  "env": {\n'
-    '    "python": "3.12.13"\n'
-    '  },\n'
-    '  "seed": 7\n'
-    '}\n'
-).encode("utf-8")
-
-
 def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(tmp_path):
     """Written through ``write_registry``, which encodes with the canonical record codec: the
     subject and attribute sequences keep their declared order rather than being sorted."""
@@ -232,29 +192,3 @@ def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_pa
 
     path = meta_tools._retrospective_path(str(tmp_path), RETROSPECTIVE_ID)
     assert path.read_bytes() == RETROSPECTIVE_BYTES
-
-
-def test_a_snapshot_manifest_lands_in_its_experiment_directory_under_the_experiments_scope(tmp_path):
-    """The manifest hangs off the experiments root, the scope its experiment's other members
-    already use, and still lands at ``<experiment_id>/model_src/manifest.json`` for the raw
-    reader that checks a bespoke run's provenance.
-
-    Bound to the file backend on purpose: unlike the documents around it this manifest is a
-    record, so the path its bespoke locator preserves is a fact about the file layout, and a
-    database backend keeps it in the database instead.
-    """
-    from tcip_store.file_backend import FileBackend
-
-    from tcip_mcp.pipelines.model_build import snapshot_manifest_key
-
-    ts.bind(FileBackend())
-    exp_dir = tmp_path / EXPERIMENT
-    exp_dir.mkdir()
-    key = snapshot_manifest_key(exp_dir)
-    assert key.root == str(Path(tmp_path).resolve())
-    assert key.parts == (EXPERIMENT, "manifest")
-
-    ts.replace(key, SNAPSHOT_MANIFEST_VALUE, expect=ts.Version.ABSENT)
-
-    landed = exp_dir / "model_src" / "manifest.json"
-    assert landed.read_bytes() == SNAPSHOT_MANIFEST_BYTES

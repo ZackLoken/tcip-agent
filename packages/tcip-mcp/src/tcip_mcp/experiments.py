@@ -1,22 +1,19 @@
-"""Experiment tracking for ML training runs.
+"""A run as a directory: ``<project>/.tcip/experiments/<experiment_id>/``.
 
-An experiment is one run's record, named by the caller before the run or minted at launch. A
-relaunch of a record that has history forks a new one whose ``parent_experiment`` names it.
+Each file in it has one writer:
 
-Stores experiment state in .tcip/experiments/<experiment_id>/:
-  config.json, full training config snapshot
-  metrics.jsonl, epoch-by-epoch metrics (append-only)
-  artifacts.json, pointers to model weights, predictions
-  lineage.json, data → model → predictions chain
-  status.json, current state and timestamps
-  split.json, the train/val membership, seed, capture date and dataset identity a metric is
-    reproducible with (plus a bound run's calibration-side counts, held out from both)
-  env.json, the library versions, seed and model kind behind a reproducible run
-  validations.jsonl, the claims earned against this run's evidence (append-only)
+- ``run.json``: the launcher's record of the run, its input and what that input resolved to,
+  written once before the child starts.
+- ``metrics.jsonl``: the child's epoch rows, created empty with the directory and appended.
+- ``heartbeat``: touched by the child while it lives.
+- ``cancel_requested.json``: the first cancellation request (:func:`request_cancel`).
+- ``final_status.json``: the outcome, written once at exit (:func:`write_final_status`).
+- ``validations.jsonl``: the claims the seal door earned against this run, created empty with the
+  directory and appended.
 
-This module declares the record's members and their key constructors; ``experiment_dir`` serves the
-run artifacts that live beside the record without being members of it (checkpoints, TensorBoard
-logs, a bespoke run's source snapshot).
+Checkpoints, TensorBoard logs, a bespoke run's source snapshot and its recorded artifacts are
+files beside them. A sweep is a directory of trial run directories with its own input, heartbeat,
+cancellation and final status (``tools.training_tools``).
 """
 
 from __future__ import annotations
@@ -25,837 +22,547 @@ import hashlib
 import json
 import logging
 import math
+import os
+import threading
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from collections.abc import Callable, Mapping
-from typing import Any
+from pathlib import Path, PureWindowsPath
+from typing import Any, BinaryIO
 
-from tcip_store import (
-    LOG_JSON,
-    RECORD_JSON,
-    BadKey,
-    DecodeError,
-    Key,
-    StoreDescriptor,
-    Version,
-    VersionConflict,
-    check_json_value,
-    register_store,
-    store,
-)
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import LOG_JSON, RECORD_JSON, BadKey, DecodeError, check_json_value
 
 from tcip_mcp.project_paths import resolve_state
 
 logger = logging.getLogger(__name__)
 
-# Relative default (tests rebind this constant). Consumers must go through
-# ``experiments_dir()`` so the store anchors to ``$TCIP_STATE_ROOT`` when pinned (no
-# subdir fragmentation) while a rebound absolute path / unpinned cwd still work.
 EXPERIMENTS_DIR = Path(".tcip/experiments")
+SWEEPS_DIR = Path(".tcip/hpo")
+
+RUN_FILE = "run.json"
+METRICS_FILE = "metrics.jsonl"
+HEARTBEAT_FILE = "heartbeat"
+CANCEL_FILE = "cancel_requested.json"
+FINAL_STATUS_FILE = "final_status.json"
+VALIDATIONS_FILE = "validations.jsonl"
+SWEEP_FILE = "sweep.json"
+"""A sweep directory's input, written once before its first trial."""
+TRIAL_DIR_PREFIX = "trial_"
+"""The name every trial run directory of a sweep starts with."""
+
+FINAL_STATES = ("completed", "failed", "canceled")
+"""The states a final status names."""
+TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})
+"""Every state a run or sweep ends in: a final status's, and ``interrupted``, the state a directory
+with no final status reads as once its heartbeat is stale."""
+
+HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
+"""How long a directory with no final status reads ``running`` after its last sign of life,
+from ``$TCIP_HEARTBEAT_STALE_SECONDS``."""
 
 
-def experiments_dir() -> Path:
-    """The experiment store, resolved against the pinned platform root at use time."""
-    return resolve_state(EXPERIMENTS_DIR)
+def experiments_dir(root: Path | str | None = None) -> Path:
+    """The directory every run directory of a project sits in: under ``root`` when given, else
+    under the pinned platform root."""
+    return resolve_state(EXPERIMENTS_DIR) if root is None else Path(root) / EXPERIMENTS_DIR
 
 
-def experiment_dir(experiment_id: str) -> Path:
-    """One experiment's directory: the record's members plus the run artifacts beside them.
-
-    Serves the files the record's own layout does not name: weights, TensorBoard event files, and
-    the per-file source snapshot a bespoke run copies in.
-    """
-    return experiments_dir() / experiment_id
+def sweeps_dir(root: Path | str | None = None) -> Path:
+    """The directory every HPO sweep directory of a project sits in: under ``root`` when given,
+    else under the pinned platform root."""
+    return resolve_state(SWEEPS_DIR) if root is None else Path(root) / SWEEPS_DIR
 
 
-# ── the experiment stores ────────────────────────────────────────────────────
-
-_MEMBER_DOC = RootedFileLocator(suffix=".json")
-"""One member document inside its experiment's directory."""
-
-_MEMBER_LOG = RootedFileLocator(suffix=".jsonl")
-"""One append-only member log inside its experiment's directory."""
-
-
-def experiments_scope(root: Path | str | None = None) -> str:
-    """The root every experiment key hangs off: the experiment store, made absolute.
-
-    Resolved per call because ``EXPERIMENTS_DIR`` is relative until a platform root is pinned, and
-    a pin can land mid-process. ``root`` names a different platform root than this process's own.
-    """
-    if root is None:
-        return str(experiments_dir().resolve())
-    return str((Path(root) / EXPERIMENTS_DIR).resolve())
-
-
-def _member_key(store_name: str, experiment_id: str, document: str, root: Path | str | None) -> Key:
-    if "/" in experiment_id or "\\" in experiment_id or experiment_id in ("", ".", ".."):
+def run_name(name: str) -> str:
+    """``name`` once it is known to be one directory name. A separator, a drive, an empty name or
+    a dot name refuses with ``BadKey``."""
+    if not name or name in (".", "..") or PureWindowsPath(name).name != name:
         raise BadKey(
-            f"experiment id {experiment_id!r} is not a single name: an id carrying a path "
-            "separator would address a record outside the experiment store"
+            f"{name!r} is not a single directory name: a name carrying a separator, a drive or a "
+            "parent reference would address a directory outside the one it names."
         )
-    return Key(store_name, experiments_scope(root), (experiment_id, document))
+    return name
 
 
-EXPERIMENT_CONFIG_STORE = "experiment_config"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_CONFIG_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
+def experiment_dir(experiment_id: str, *, root: Path | str | None = None) -> Path:
+    """One run's directory. Refuses an id that is not a single directory name (:func:`run_name`)."""
+    return experiments_dir(root) / run_name(experiment_id)
 
 
-def config_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The config snapshot a run trained under.
-
-    ``last_writer_wins``: it is written whole at creation and replaced only while the record
-    is still pristine, never merged into.
-    """
-    return _member_key(EXPERIMENT_CONFIG_STORE, experiment_id, "config", root)
-
-
-EXPERIMENT_STATUS_STORE = "experiment_status"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_STATUS_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
-
-
-STATUS_DOCUMENT = "status"
-
-
-def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The run's state, timestamps, liveness heartbeat and launcher declaration.
-
-    ``cas``: every writer here reads the document and updates fields inside it, from the training
-        subprocess and the tool process at once.
-
-    ``launched_by`` is a mapping naming who launched the run: ``{"launcher": "gui"}`` for a launch
-    through the web app's own route, ``{"launcher": "agent", **agent_identity.audit_fields()}``
-    for a launch inside an MCP handshake, ``{"launcher": "process"}`` for a launch from neither.
-    Absent on a record whose launch was never stamped.
-    """
-    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, STATUS_DOCUMENT, root)
-
-
-EXPERIMENT_LINEAGE_STORE = "experiment_lineage"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_LINEAGE_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
-
-
-def lineage_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The data to model to predictions chain, written compare-and-set."""
-    return _member_key(EXPERIMENT_LINEAGE_STORE, experiment_id, "lineage", root)
-
-
-EXPERIMENT_ARTIFACTS_STORE = "experiment_artifacts"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_ARTIFACTS_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
-
-
-def artifacts_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The run's artifact pointers, written compare-and-set."""
-    return _member_key(EXPERIMENT_ARTIFACTS_STORE, experiment_id, "artifacts", root)
-
-
-EXPERIMENT_ENV_STORE = "experiment_env"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_ENV_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
-
-
-def env_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The environment capture behind a reproducible run, last writer wins."""
-    return _member_key(EXPERIMENT_ENV_STORE, experiment_id, "env", root)
-
-
-EXPERIMENT_SPLIT_STORE = "experiment_split"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_SPLIT_STORE,
-        kind="record",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        enumerable=True,
-        locator=_MEMBER_DOC,
-    )
-)
-
-
-def split_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The train/val membership, seed and dataset identity of this run, last writer wins."""
-    return _member_key(EXPERIMENT_SPLIT_STORE, experiment_id, "split", root)
-
-
-EXPERIMENT_METRICS_STORE = "experiment_metrics"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_METRICS_STORE,
-        kind="log",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=LOG_JSON,
-        enumerable=True,
-        locator=_MEMBER_LOG,
-    )
-)
-
-
-def metrics_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The run's epoch-by-epoch metrics, one entry per row, append only."""
-    return _member_key(EXPERIMENT_METRICS_STORE, experiment_id, "metrics", root)
-
-
-EXPERIMENT_VALIDATIONS_STORE = "experiment_validations"
-register_store(
-    StoreDescriptor(
-        name=EXPERIMENT_VALIDATIONS_STORE,
-        kind="log",
-        key_fields=("experiment_id", "document"),
-        frozen=True,
-        codec=LOG_JSON,
-        enumerable=True,
-        locator=_MEMBER_LOG,
-    )
-)
-
-
-def validations_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The claims earned against this run's evidence, one row per claim, append only.
-
-    A re-validation appends rather than rewriting, so the member holds the whole history and
-    a stamp names the one row it was minted from.
-    """
-    return _member_key(EXPERIMENT_VALIDATIONS_STORE, experiment_id, "validations", root)
-
-
-# Once terminal, a record is immutable and additive-only. Excludes "canceled": that record
-# stays writable; a resume always mints a fresh id via _ensure_experiment rather than reopening it.
-_TERMINAL_STATES = {"completed", "failed"}
-
-# A different concept sharing similar vocabulary, states reconstruct_run_status trusts as
-# already-decided and never re-derives from heartbeat freshness. Unlike _TERMINAL_STATES above,
-# this does include "canceled": a gracefully canceled run recorded its own final state honestly
-# (model_final.pt was written, cancel_training's own documented contract), and re-deriving it from
-# heartbeat staleness would misreport it as "running" then permanently as "interrupted", implying
-# a crash that never happened. Named separately rather than reusing _TERMINAL_STATES so the two
-# purposes (mutation-lock vs. heartbeat-reconstruction) can never silently drift onto each other.
-_RECORDED_AS_DONE = {"completed", "failed", "canceled"}
-
-
-def read_member(key: Key, default: Any = None) -> Any:
-    """One member document, with an unreadable record folded onto ``default``."""
+def find_run(experiment_id: str, *, root: Path | str | None = None) -> Path | None:
+    """The run directory ``experiment_id`` names, or ``None`` for an id that is not a single
+    directory name or names no directory holding a launch record."""
     try:
-        return store.read(key, default=default)
-    except DecodeError:
-        logger.warning("experiment member %s does not decode", list(key.parts), exc_info=True)
-        return default
-
-
-def experiment_exists(experiment_id: str, *, root: Path | str | None = None) -> bool:
-    """Whether this id names a real experiment record, by its config snapshot.
-
-    ``root`` defaults to the current platform root; a caller resolving a run under a root other
-    than the one it started under passes the launch root explicitly.
-    """
-    return store.exists(config_key(experiment_id, root=root))
-
-
-def recorded_state(status: Mapping[str, Any]) -> str:
-    """The ``state`` a status record states, which :func:`create_experiment` writes on every one."""
-    return status["state"]
-
-
-def _current_state(experiment_id: str, *, root: Path | str | None = None) -> str | None:
-    """The experiment's recorded ``state``, or ``None`` when no status record exists for it."""
-    status = read_member(status_key(experiment_id, root=root), None)
-    return None if status is None else recorded_state(status)
-
-
-class ExperimentTerminal(RuntimeError):
-    """A write reached an experiment record already in a terminal state (completed/failed;
-    canceled stays resumable and is never terminal here).
-    """
-
-
-def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
-    """Raise :class:`ExperimentTerminal` if ``state`` is terminal.
-
-    ``state`` is the value the caller already read, inside its own transaction when it holds one
-    (so the check and the write it guards see the same value) or via :func:`_current_state` when it
-    doesn't.
-    """
-    if state in _TERMINAL_STATES:
-        raise ExperimentTerminal(f"Experiment {experiment_id} is {state} (terminal); refusing to {op}.")
-
-
-def rewrite_live_member(experiment_id: str, key: Any, op: str,
-                        update: Callable[[Any], Any]) -> None:
-    """Rewrite one member of a live experiment record inside its status lock: ``update`` takes the
-    member's stored value (``None`` when absent) and returns what is written.
-
-    Raises :class:`ExperimentTerminal` naming ``op`` for a terminal record, and whatever the store
-    raises on any other read or write failure.
-    """
-    st_key = status_key(experiment_id)
-    with store.transaction(key, st_key) as txn:
-        refuse_if_terminal(experiment_id, op, recorded_state(txn.read(st_key)))
-        txn.write(key, update(txn.read(key, default=None)))
+        run_dir = experiment_dir(experiment_id, root=root)
+    except BadKey:
+        return None
+    return run_dir if (run_dir / RUN_FILE).is_file() else None
 
 
 def mint_experiment_id() -> str:
-    """A fresh, unclaimed experiment id: ``run_<epoch-seconds>_<6 hex chars>``.
-
-    The uuid suffix, not a counter, so two ids minted in the same process, or in two different
-    processes sharing one experiment store, never collide on the same clock second.
-    """
+    """A fresh run id: ``run_<epoch-seconds>_<6 hex chars>``."""
     return f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
 
 
-def create_experiment(
-    experiment_id: str,
-    config: dict[str, Any],
-    *,
-    parent_experiment: str | None = None,
-    data_source: str | None = None,
-    dataset_id: str | None = None,
-    dataset_fingerprint: str | None = None,
-) -> dict[str, Any]:
-    """Create a new experiment record with its config snapshot.
+def now_iso() -> str:
+    """The current instant as an ISO-8601 UTC string."""
+    return datetime.now(timezone.utc).isoformat()
 
-    The config snapshot is written create-only, so an id that already names an experiment is
-    refused inside the write's own lock.
 
-    ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on,
-    written into the lineage at creation and never via ``update_lineage``.
+# ── the files ────────────────────────────────────────────────────────────────
 
-    The config is checked against what JSON can hold before the write, naming the offending field.
-    """
-    check_json_value(config, path="config")
+
+class RunDirectoryExists(FileExistsError):
+    """A launch named a run or sweep directory that already exists."""
+
+
+def create_run_directory(directory: Path) -> Path:
+    """Create ``directory`` and its parents, refusing one that already exists with
+    :class:`RunDirectoryExists` naming it."""
     try:
-        store.replace(config_key(experiment_id), config, expect=Version.ABSENT)
-    except VersionConflict:
-        return {"error": f"Experiment already exists: {experiment_id}"}
-
-    status = {
-        "state": "created",
-        "created": datetime.now(timezone.utc).isoformat(),
-        "started": None,
-        "ended": None,
-    }
-    store.replace(status_key(experiment_id), status, expect=Version.ABSENT)
-
-    lineage = {
-        "data_source": data_source,
-        "dataset_id": dataset_id,
-        "dataset_fingerprint": dataset_fingerprint,
-        "parent_experiment": parent_experiment,
-        "model_weights": None,
-        "model_weights_sha256": None,
-        "predictions": None,
-    }
-    store.replace(lineage_key(experiment_id), lineage, expect=Version.ABSENT)
-    store.replace(artifacts_key(experiment_id), {}, expect=Version.ABSENT)
-
-    return {
-        "experiment_id": experiment_id,
-        "path": str(experiment_dir(experiment_id)),
-        "state": "created",
-    }
+        directory.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        raise RunDirectoryExists(
+            f"{directory} already exists: a run directory is written by one launch, so a new run "
+            "takes a new id."
+        ) from None
+    return directory
 
 
-def is_pristine(state: str | None, metrics_logged: bool) -> bool:
-    """Whether an experiment record with this ``state`` and ``metrics_logged`` was never launched,
-    and so may still take a full ``config.json`` rewrite: ``state == "created"`` and no metrics
-    logged yet.
-    """
-    return state == "created" and not metrics_logged
+def open_run_directory(run_dir: Path, compose: Callable[[Path], dict]) -> None:
+    """Create the run directory ``run_dir`` (:func:`create_run_directory`) with its empty metrics
+    and validations logs, then write the record ``compose(run_dir)`` returns as its ``run.json``
+    once, so a directory holding a launch record holds every file a reader of a live run reads.
+    ``compose`` may write files of its own into the directory first."""
+    create_run_directory(run_dir)
+    for log in (METRICS_FILE, VALIDATIONS_FILE):
+        (run_dir / log).touch(exist_ok=False)
+    write_once(run_dir / RUN_FILE, compose(run_dir))
 
 
-def metrics_logged_of(status: dict[str, Any] | None) -> bool:
-    """Whether a status record carries the ``metrics_logged`` marker :func:`log_metrics` stamps."""
-    return bool(status.get("metrics_logged")) if isinstance(status, dict) else False
-
-
-def overwrite_config_if_pristine(
-    experiment_id: str, config: dict[str, Any], *, root: Path | str | None = None,
-) -> dict[str, Any]:
-    """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
-    still pristine (state == "created" and no epochs logged yet).
-
-    Refuses once :func:`is_pristine` says the record is no longer pristine. Both of its inputs,
-    ``state`` and ``metrics_logged``, are read from the one status record this opens a transaction
-    over.
-
-    ``root`` names a platform root other than this process's own.
-    """
-    check_json_value(config, path="config")
-    if not experiment_exists(experiment_id, root=root):
-        return {"error": f"Experiment not found: {experiment_id}"}
-    cfg_key, st_key = config_key(experiment_id, root=root), status_key(experiment_id, root=root)
-    state: str | None = None
-    metrics_logged = False
-    refused = False
-    with store.transaction(cfg_key, st_key) as txn:
-        status = txn.read(st_key)
-        state = recorded_state(status)
-        metrics_logged = metrics_logged_of(status)
-        refused = not is_pristine(state, metrics_logged)
-        if not refused:
-            txn.write(cfg_key, config)
-    if refused:
-        return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
-                         f"overwrite its config.json."}
-    return {"experiment_id": experiment_id, "overwritten": True}
-
-
-def _mark_completed(status: dict[str, Any]) -> None:
-    """Write the completed state, heartbeat and ended timestamp into a status record in place."""
-    now = datetime.now(timezone.utc).isoformat()
-    status["state"] = "completed"
-    status["heartbeat"] = now
-    status["ended"] = now
-
-
-def update_status(
-    experiment_id: str,
-    state: str,
-    *,
-    error: str | None = None,
-    root: Path | str | None = None,
-) -> dict[str, Any]:
-    """Update experiment state (created → running → completed | failed).
-
-    A repeat of the record's current state is idempotent: nothing restamps (not ``heartbeat``, not
-    ``ended``), and ``error`` lands only when the record does not already carry one, so a second
-    reason never overwrites a first. Any other write to a terminal record
-    (``completed``/``failed``, the other terminal state included) refuses through
-    :func:`refuse_if_terminal`. ``canceled`` is not terminal here, so a record in that state still
-    takes any write, including back to ``running``.
-
-    ``error`` records a specific failure reason (e.g. a wall-clock-timeout kill) into
-    ``status.json["error"]``; outside the idempotent-repeat case above, omitted/``None`` never
-    clears a previously-recorded error, only an explicit new value overwrites it.
-
-    ``root`` defaults to the current platform root; a caller passes another to reach a run's own
-    record under a root other than this process's.
-    """
-    if not experiment_exists(experiment_id, root=root):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    key = status_key(experiment_id, root=root)
-    current: str | None = None
-    refused = False
-    with store.transaction(key) as txn:
-        status = txn.read(key)
-        current = recorded_state(status)
-        if state == current:
-            if error is not None and status.get("error") is None:
-                status["error"] = error
-                txn.write(key, status)
+def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
+    """Write a file's whole content through ``write`` into a staging file beside ``path``, then
+    publish it under ``path`` without replacing anything, so a file under its final name is always
+    whole. A name already published refuses with ``FileExistsError``; a write that fails publishes
+    nothing."""
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
+    try:
+        with open(staging, "xb") as handle:
+            write(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # Windows' rename refuses an existing destination, where a POSIX rename would replace it.
+        if os.name == "nt":
+            os.rename(staging, path)
         else:
+            os.link(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+def write_once(path: Path, value: Any) -> None:
+    """Publish ``value`` as the JSON record at ``path`` (:func:`publish_once`). Refuses a value
+    JSON cannot hold before anything is created, and a path already written with
+    ``FileExistsError``."""
+    check_json_value(value, path=path.name)
+    data = RECORD_JSON.encode(value)
+    publish_once(path, lambda handle: handle.write(data))
+
+
+def write_final_status(directory: Path, state: str, error: str | None, **outcome: Any) -> None:
+    """Write the final status of the run or sweep at ``directory`` once: ``state``, the instant,
+    the error behind it, and ``outcome``, what it produced (a run's ``checkpoint``). Refuses
+    (``ValueError``) a state outside :data:`FINAL_STATES`, and a status already written with
+    ``FileExistsError``."""
+    if state not in FINAL_STATES:
+        raise ValueError(f"{state!r} is not a final state; a final status names one of "
+                         f"{list(FINAL_STATES)}.")
+    write_once(directory / FINAL_STATUS_FILE,
+               {"state": state, "ended": now_iso(), "error": error, **outcome})
+
+
+def append_row(path: Path, row: dict) -> None:
+    """Append ``row`` as one line of the JSON log at ``path``, refusing a row JSON cannot hold
+    and (``FileNotFoundError``) a log its directory was not opened with."""
+    check_json_value(row, path=path.name)
+    with open(path, "r+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.write(LOG_JSON.encode(row) + b"\n")
+
+
+def read_record(path: Path) -> Any:
+    """The JSON record at ``path``. A missing file raises ``FileNotFoundError``; bytes that do not
+    decode raise ``DecodeError`` naming the file."""
+    data = path.read_bytes()
+    try:
+        return RECORD_JSON.decode(data)
+    except ValueError as exc:
+        raise DecodeError(f"{path} does not decode as JSON: {exc}") from exc
+
+
+def read_rows(path: Path, *, after: int = 0) -> tuple[list[dict], int]:
+    """Every complete row of the JSON log at ``path`` past byte offset ``after``, and the offset
+    past the last complete one. A line still being appended is left for the next read. A log that
+    does not exist raises ``FileNotFoundError``; a complete line that does not decode raises
+    ``DecodeError`` naming the file."""
+    with open(path, "rb") as handle:
+        handle.seek(after)
+        data = handle.read()
+    end = data.rfind(b"\n") + 1
+    rows: list[dict] = []
+    for line in data[:end].splitlines():
+        try:
+            rows.append(LOG_JSON.decode(line))
+        except ValueError as exc:
+            raise DecodeError(f"{path} holds a row that does not decode: {exc}") from exc
+    return rows, after + end
+
+
+# ── liveness ─────────────────────────────────────────────────────────────────
+
+
+def touch_heartbeat(directory: Path) -> None:
+    """Mark ``directory``'s process alive now."""
+    (directory / HEARTBEAT_FILE).touch()
+
+
+def keep_heartbeat(directory: Path) -> threading.Event:
+    """Touch ``directory``'s heartbeat now and every tenth of :data:`HEARTBEAT_STALE_SECONDS` on a
+    daemon thread until the returned event is set."""
+    stop = threading.Event()
+    touch_heartbeat(directory)
+
+    def beat() -> None:
+        while not stop.wait(HEARTBEAT_STALE_SECONDS / 10):
             try:
-                refuse_if_terminal(experiment_id, "update_status", current)
-            except ExperimentTerminal:
-                refused = True
+                touch_heartbeat(directory)
+            except OSError:
+                logger.warning("could not touch the heartbeat of %s", directory, exc_info=True)
 
-            if not refused:
-                if state == "completed":
-                    _mark_completed(status)
-                else:
-                    status["state"] = state
-                    now = datetime.now(timezone.utc).isoformat()
-                    status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
-                    if state == "running" and not status.get("started"):
-                        status["started"] = now
-                    if state == "failed":
-                        status["ended"] = now
-                if error is not None:
-                    status["error"] = error
-
-                txn.write(key, status)
-
-    if refused:
-        return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
-                         f"move it to {state!r}.", "state": current}
-    return {"experiment_id": experiment_id, "state": state}
+    threading.Thread(target=beat, daemon=True).start()
+    return stop
 
 
-def complete_run(
-    experiment_id: str, final_weights: str, *, root: Path | str | None = None,
+def last_alive(directory: Path, record_file: str = RUN_FILE) -> float:
+    """The latest sign of life of a run or sweep directory, as a POSIX time: its heartbeat's
+    modification time, or its launch record's before the heartbeat was first touched."""
+    heartbeat = directory / HEARTBEAT_FILE
+    return (heartbeat if heartbeat.exists() else directory / record_file).stat().st_mtime
+
+
+class RunEnded(ValueError):
+    """A write addressed a run or sweep whose final status is written."""
+
+
+def require_open(directory: Path) -> None:
+    """Refuse (:class:`RunEnded`) the run or sweep at ``directory`` once its final status is
+    written: from then on it takes no write but a validation."""
+    if (directory / FINAL_STATUS_FILE).exists():
+        raise RunEnded(f"{directory.name} has ended: its final status is written, so it takes no "
+                       "more writes.")
+
+
+def request_cancel(directory: Path) -> str:
+    """Record a cancellation request of the run or sweep at ``directory`` and return the time of
+    its first one: a later request leaves that record as written. Refuses a directory that has
+    ended (:func:`require_open`)."""
+    require_open(directory)
+    try:
+        write_once(directory / CANCEL_FILE, {"requested": now_iso()})
+    except FileExistsError:
+        pass
+    return read_record(directory / CANCEL_FILE)["requested"]
+
+
+def cancel_requested(directory: Path) -> bool:
+    """Whether a cancellation of the run or sweep at ``directory`` has been requested."""
+    return (directory / CANCEL_FILE).exists()
+
+
+# ── reading a run ────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RunObservation:
+    """One run or sweep directory read once: its launch record, its final status (``None`` while
+    it has not ended), its latest sign of life as a POSIX time (:func:`last_alive`), and the state
+    those derive."""
+
+    directory: Path
+    record: dict
+    final: dict | None
+    alive: float
+    state: str
+
+    @property
+    def metrics_log(self) -> Path:
+        """The run's metrics log, which exists from the moment the run opened."""
+        return self.directory / METRICS_FILE
+
+    @property
+    def validations_log(self) -> Path:
+        """The run's validations log, which exists from the moment the run opened."""
+        return self.directory / VALIDATIONS_FILE
+
+    @property
+    def checkpoint(self) -> dict | None:
+        """The checkpoint a completed training run's final status selects, ``path`` made
+        absolute, or ``None`` for a run that has not completed and for a calibration run, which
+        trains nothing."""
+        if self.final is None or self.state != "completed" or self.record["config"] is None:
+            return None
+        checkpoint = self.final["checkpoint"]
+        return {**checkpoint, "path": str(self.directory / checkpoint["path"])}
+
+
+def observe(directory: Path, record_file: str = RUN_FILE) -> RunObservation:
+    """Read the run or sweep at ``directory`` once. Its state is the one its final status names
+    once one is written; before that ``running`` while its latest sign of life is within
+    :data:`HEARTBEAT_STALE_SECONDS`, else ``interrupted``. A run (``record_file`` its ``run.json``)
+    holds its two logs from the moment it opened; one missing either refuses with
+    ``FileNotFoundError`` naming each. A completed run's checkpoint is read, and refused when
+    absent, by whatever loads it: an archive may carry a run without its weights."""
+    record = read_record(directory / record_file)
+    final_path = directory / FINAL_STATUS_FILE
+    final = read_record(final_path) if final_path.exists() else None
+    alive = last_alive(directory, record_file)
+    if final is not None:
+        state = final["state"]
+    else:
+        state = "running" if time.time() - alive <= HEARTBEAT_STALE_SECONDS else "interrupted"
+    observation = RunObservation(directory, record, final, alive, state)
+    if record_file == RUN_FILE:
+        missing = [str(path) for path in (observation.metrics_log, observation.validations_log)
+                   if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(f"run {directory.name} ({state}) is missing "
+                                    f"{', '.join(missing)}.")
+    return observation
+
+
+def run_dirs(root: Path | str | None = None) -> list[Path]:
+    """Every run directory of the project under ``root`` (default: the pinned platform root) that
+    holds a launch record, sorted by id."""
+    parent = experiments_dir(root)
+    if not parent.is_dir():
+        return []
+    return sorted(d for d in parent.iterdir() if (d / RUN_FILE).is_file())
+
+
+def run_observations(root: Path | str | None = None) -> list[RunObservation]:
+    """Every run of the project under ``root`` (:func:`run_dirs`), each observed once."""
+    return [observe(d) for d in run_dirs(root)]
+
+
+def training_runs(root: Path | str | None = None) -> list[RunObservation]:
+    """Every run of the project under ``root`` that trains a model (:func:`run_observations`); a
+    calibration run, whose launch record carries no config, is not one."""
+    return [obs for obs in run_observations(root) if obs.record["config"] is not None]
+
+
+def find_observation(experiment_id: str, *,
+                     root: Path | str | None = None) -> RunObservation | None:
+    """The run ``experiment_id`` names (:func:`find_run`), observed, or ``None``."""
+    run_dir = find_run(experiment_id, root=root)
+    return observe(run_dir) if run_dir is not None else None
+
+
+def run_resolution(experiment_id: str) -> dict:
+    """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`): its
+    ``data`` section, its ``partition`` and its ``objective``. Refuses (``ValueError``) an id
+    naming no run directory and one naming a calibration run, which resolved nothing."""
+    observation = find_observation(experiment_id)
+    if observation is None:
+        raise ValueError(f"no run directory records {experiment_id!r}, so nothing it resolved "
+                         "can be read.")
+    if observation.record["config"] is None:
+        raise ValueError(f"{experiment_id!r} is a calibration run: it trained nothing and "
+                         "resolved no data.")
+    return observation.record["resolved"]
+
+
+def best_selection(rows: list[dict[str, Any]], objective: dict) -> float | None:
+    """The best finite ``selection`` among a run's metrics-log ``rows`` in the direction of
+    ``objective``, the run's recorded ``{"selection_metric", "higher_is_better"}``; ``None`` when
+    no row carries one."""
+    values = [float(row["selection"]) for row in rows
+              if isinstance(row.get("selection"), (int, float))
+              and not isinstance(row["selection"], bool) and math.isfinite(row["selection"])]
+    if not values:
+        return None
+    return max(values) if objective["higher_is_better"] else min(values)
+
+
+def run_summary(observation: RunObservation, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """One run's status row over its metrics-log ``rows`` (:func:`read_rows` of its
+    ``metrics_log``): its state, its last logged epoch, its directory, its final status's error,
+    who launched it, its last sign of life, and its best selection value under the objective its
+    launch recorded, folded from ``rows`` (:func:`best_selection`), with that objective's metric
+    name."""
+    run_dir = observation.directory
+    objective = observation.record["resolved"]["objective"]
+    final = observation.final
+    return {
+        "experiment_id": run_dir.name,
+        "status": observation.state,
+        "current_epoch": rows[-1].get("epoch") if rows else None,
+        "best_metric": best_selection(rows, objective),
+        "best_metric_name": objective["selection_metric"],
+        "output_dir": str(run_dir),
+        "error": final["error"] if final is not None else None,
+        "launched_by": observation.record["launched_by"],
+        "heartbeat": datetime.fromtimestamp(observation.alive, timezone.utc).isoformat(),
+    }
+
+
+def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:
+    """The number of distinct ``epoch`` values among ``rows``, compared as canonical JSON text."""
+    return len({json.dumps(row.get("epoch"), sort_keys=True, default=str) for row in rows})
+
+
+def get_experiment(
+    experiment_id: str, *, metrics_limit: int | None = None, metrics_offset: int = 0,
 ) -> dict[str, Any]:
-    """Mark a run completed and record its final weights pointer and their digest, as one
-    transaction.
-
-    Hashes ``final_weights`` before opening the transaction. A missing or unreadable file returns
-    an error naming the path and the read failure, and writes nothing (no transaction is even
-    opened).
-
-    Names the artifacts key before the lineage key, and the lineage key before the status key: a
-    file-backend transaction applies its writes in named-key order and is not crash-atomic across
-    keys, so a crash mid-apply leaves a detectably stale record (a pointer with no digest, or a
-    digest recorded on a record still ``running``), never a ``completed`` record carrying a
-    mismatched or absent digest. Refuses a run already terminal, naming the weights file; the
-    refusal's ``state`` carries the state the record actually holds.
-
-    ``root`` names a platform root other than this process's own.
-    """
-    if not experiment_exists(experiment_id, root=root):
+    """One run's directory read whole: its launch record, its final status (``None`` until
+    written), its state, its metrics rows paginated by ``metrics_offset`` and ``metrics_limit``
+    over the row list (``n_rows`` bounds the paging, ``n_epochs`` counts distinct epochs), and its
+    validations. ``{"error": ...}`` for an id naming no run."""
+    observation = find_observation(experiment_id)
+    if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
-
-    from tcip_mcp.model_registry import _compute_sha256
-
-    try:
-        digest = _compute_sha256(final_weights)
-    except OSError as exc:
-        return {"error": f"complete_run: final_weights {final_weights!r} could not be read "
-                         f"({exc}); refusing to complete with an unrecorded digest.",
-                "final_weights": final_weights}
-
-    art_key, lin_key, st_key = (
-        artifacts_key(experiment_id, root=root), lineage_key(experiment_id, root=root),
-        status_key(experiment_id, root=root),
-    )
-    current: str | None = None
-    try:
-        with store.transaction(art_key, lin_key, st_key) as txn:
-            status = txn.read(st_key)
-            current = recorded_state(status)
-            refuse_if_terminal(experiment_id, "complete_run", current)
-
-            recorded_at = datetime.now(timezone.utc).isoformat()
-            artifacts = txn.read(art_key, default={})
-            artifacts["model_weights"] = {
-                "path": final_weights, "sha256": digest, "recorded": recorded_at,
-            }
-            txn.write(art_key, artifacts)
-
-            lineage = txn.read(lin_key, default={})
-            lineage["model_weights"] = final_weights
-            lineage["model_weights_sha256"] = digest
-            txn.write(lin_key, lineage)
-
-            _mark_completed(status)
-            txn.write(st_key, status)
-    except ExperimentTerminal as exc:
-        return {"error": f"{exc} Final weights at {final_weights!r} were not recorded.",
-                "final_weights": final_weights, "state": current}
-
-    return {"experiment_id": experiment_id, "state": "completed", "model_weights": final_weights,
-            "model_weights_sha256": digest}
-
-
-class StampPreconditionFailed(RuntimeError):
-    """A run identity stamped onto a record that is not a fresh, unstamped one: its state is not
-    ``"created"``, it already carries an ``output_dir``, or (when the stamp was given a config to
-    write) it already carries a metrics row.
-    """
-
-
-def stamp_run_identity(
-    experiment_id: str, output_dir: str, *, launched_by: dict[str, Any],
-    config: dict[str, Any] | None = None,
-) -> None:
-    """Stamp a launch onto this experiment's ``status.json``, moving it to ``running`` in the same
-    write: ``output_dir`` (the real, caller-influenced artifact directory), ``launched_by`` (who
-    launched it), and the ``state``/``heartbeat``/``started`` triple :func:`update_status` writes
-    for that transition.
-
-    One compare-and-set transaction, requiring ``state == "created"``, no ``output_dir`` already
-    stamped, and, when ``config`` is given, no metrics logged yet. Raises
-    :class:`StampPreconditionFailed` when that precondition fails, so two launches racing to stamp
-    one pristine record never both win it, and raises whatever the store itself raises on any other
-    write failure.
-
-    ``config``, given, makes the transaction also span ``config_key``, written before
-    ``status_key`` (a file-backend transaction applies its writes in the order its keys were
-    named), so the config actually launched lands in the pre-created record's snapshot in the same
-    write as the stamp. Omitted, the transaction spans ``status_key`` alone.
-    """
-    key = status_key(experiment_id)
-    cfg_key = config_key(experiment_id) if config is not None else None
-    keys = (cfg_key, key) if cfg_key is not None else (key,)
-    with store.transaction(*keys) as txn:
-        status = txn.read(key)
-        logged = config is not None and metrics_logged_of(status)
-        if not is_pristine(recorded_state(status), logged) or status.get("output_dir"):
-            raise StampPreconditionFailed(
-                f"experiment {experiment_id!r} is not a fresh, unstamped record "
-                f"(state={status.get('state')!r}, output_dir={status.get('output_dir')!r}); "
-                "another launch has already claimed it."
-            )
-        if cfg_key is not None:
-            txn.write(cfg_key, config)
-        now = datetime.now(timezone.utc).isoformat()
-        status["output_dir"] = output_dir
-        status["launched_by"] = launched_by
-        status["state"] = "running"
-        status["heartbeat"] = now
-        status["started"] = now
-        txn.write(key, status)
-
-
-def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
-    """Every experiment id the store holds a status record for, sorted."""
-    found = store.keys(EXPERIMENT_STATUS_STORE, experiments_scope(root))
-    return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
-
-
-def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
-    """The state a status record reads as once heartbeat freshness applies: a state already
-    recorded as done (:data:`_RECORDED_AS_DONE`) is trusted as-is; any other state derives to
-    ``"running"`` while the heartbeat is fresh, else ``"interrupted"``.
-    """
-    state = recorded_state(status)
-    heartbeat = status.get("heartbeat")
-    if state not in _RECORDED_AS_DONE:
-        state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
-    return state
-
-
-def reconstruct_from_status(
-    experiment_id: str, status: dict[str, Any], *, stale_seconds: float, read_progress: bool,
-) -> dict[str, Any]:
-    """One record's run row, reconstructed from a status document the caller already read.
-    ``current_epoch``, ``best_metric`` and ``best_metric_name`` cost one metrics-log read and are
-    included only when ``read_progress`` is true, read back through :func:`best_selection_from_log`
-    from what the run itself stamped.
-
-    ``launched_by`` carries the record's own stamped declaration (see :func:`stamp_run_identity`)
-    whole, or ``None`` for a record never launched.
-
-    ``heartbeat`` carries the record's own last-touched instant (see :func:`_touch_heartbeat`)
-    whole, the same value :func:`derived_state` reads to decide ``running`` vs ``interrupted``; no
-    process id is persisted.
-    """
-    current_epoch = None
-    best_metric_name = None
-    best_metric = None
-    if read_progress:
-        rows = read_metrics(experiment_id)
-        current_epoch = rows[-1].get("epoch") if rows else None
-        best_metric_name, best_metric = best_selection_from_log(rows)
+    rows = read_rows(observation.metrics_log)[0]
+    end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
     return {
         "experiment_id": experiment_id,
-        "status": derived_state(status, stale_seconds),
-        "current_epoch": current_epoch,
-        "best_metric": best_metric,
-        "best_metric_name": best_metric_name,
-        "output_dir": status.get("output_dir"),
-        "error": status.get("error"),
-        "launched_by": status.get("launched_by"),
-        "heartbeat": status.get("heartbeat"),
+        "run": observation.record,
+        "final_status": observation.final,
+        "state": observation.state,
+        "n_epochs": _distinct_epoch_count(rows),
+        "n_rows": len(rows),
+        "metrics": rows[metrics_offset:end],
+        "metrics_offset": metrics_offset,
+        "validations": read_rows(observation.validations_log)[0],
     }
 
 
-def reconstruct_run_status(
-    experiment_id: str, *, stale_seconds: float,
-) -> dict[str, Any] | None:
-    """Reconstruct one experiment's status from disk; ``None`` for an absent or unaddressable id (a
-    path separator, an empty or dot name). ``stale_seconds`` is the heartbeat window.
+def list_experiments() -> list[dict[str, Any]]:
+    """Every run directory of the project: its id, state, creation time, and whether it trains a
+    model (``has_model_source``: its launch record carries a config, which a calibration run's
+    does not)."""
+    return [{
+        "experiment_id": obs.directory.name,
+        "state": obs.state,
+        "created": obs.record["created"],
+        "has_model_source": obs.record["config"] is not None,
+    } for obs in run_observations()]
+
+
+def _split_summary(resolved: dict) -> dict[str, Any]:
+    """The partition column of a comparison: ``{"case": "bound", "selection_dir", "seed",
+    "redraw"}`` for a run bound to a selection, ``{"case": "spatial"}`` for a within-image split,
+    and ``{"case": "drawn", "seed"}`` otherwise."""
+    partition = resolved["partition"]
+    binding = partition["selection"]
+    if binding is not None:
+        return {"case": "bound", "selection_dir": binding["selection_dir"],
+                "seed": partition["seed"], "redraw": binding["redraw"]}
+    if "spatial_manifest" in resolved["data"]["split"]:
+        return {"case": "spatial"}
+    return {"case": "drawn", "seed": partition["seed"]}
+
+
+def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
+    """Side-by-side comparison of training runs.
+
+    Per run: ``state``, ``n_epochs``/``n_rows``, ``last_logged_metrics`` (the log's last row, not
+    a verified result), ``rows_after_end`` (rows whose own ``timestamp`` is a later instant than
+    the final status's ``ended``; ``None`` before a final status), the final status's ``error`` as
+    ``status_error``, ``registry`` (a completed run's own registry entry,
+    ``model_registry.run_entry``, with the metrics and source its checkpoint carries,
+    ``model_registry.entry_facts``, as a one-entry list, empty otherwise), ``split``
+    (:func:`_split_summary`), and the builder, task, subject and dataset identity its records
+    carry. An id naming no run, or a calibration run, is an entry carrying only ``error``.
+    ``same_dataset_fingerprint`` is ``None`` when any entry is an error or any fingerprint is
+    unset, else whether every run names one fingerprint.
     """
-    try:
-        key = status_key(experiment_id)
-    except BadKey:
-        return None
-    status = read_member(key)
-    if not isinstance(status, dict):
-        return None
-    return reconstruct_from_status(experiment_id, status, stale_seconds=stale_seconds,
-                                   read_progress=True)
+    from tcip_mcp.model_registry import entry_facts, run_entry
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
 
-
-def _parse_iso_instant(value: Any) -> datetime | None:
-    """One timestamp read as an instant: a non-string, or a string ``datetime.fromisoformat`` can't
-    parse (a trailing ``Z`` and an offset both parse fine), is ``None`` rather than a raise. A
-    naive value is read as UTC.
-    """
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float) -> bool:
-    """True if ``hb_iso`` (ISO-8601) is within the staleness window, a process is still actively
-    updating this run. Missing/unparseable → not fresh (treat as dead).
-    """
-    hb = _parse_iso_instant(hb_iso)
-    if hb is None:
-        return False
-    return (datetime.now(timezone.utc) - hb).total_seconds() <= stale_seconds
-
-
-def _touch_heartbeat(experiment_id: str, *, root: Path | str | None = None) -> None:
-    """Best-effort: stamp the current time into ``status.json['heartbeat']``.
-
-    Called each epoch so a run still training in another process reads as live. Never raises, a
-    heartbeat failure must not break metric logging.
-    """
-    key = status_key(experiment_id, root=root)
-    if not store.exists(key):
-        return
-    try:
-        with store.transaction(key) as txn:
-            status = txn.read(key, default={})
-            status["heartbeat"] = datetime.now(timezone.utc).isoformat()
-            txn.write(key, status)
-    except Exception:
-        pass
-
-
-def read_metrics(experiment_id: str, *, root: Path | str | None = None) -> list[dict[str, Any]]:
-    """Every epoch row this run has logged, in order, oldest first.
-
-    An entry still being appended when the log is read is left for the next read rather than
-    returned half-formed, so a live run's tail is never served as a truncated row.
-    """
-    page = store.read_log(metrics_key(experiment_id, root=root))
-    if page.corrupt:
-        logger.warning("experiment %s metrics log has %d undecodable entries",
-                       experiment_id, len(page.corrupt))
-    if page.version_refused:
-        logger.warning("experiment %s metrics log has %d entries at a schema_version this "
-                       "reader does not accept", experiment_id, len(page.version_refused))
-    return [dict(record) for record in page.records]
-
-
-def best_selection_from_log(rows: list[dict[str, Any]]) -> tuple[str | None, float | None]:
-    """The selection metric name and its best value, read from a run's own metrics-log rows.
-
-    Every row a training body writes carries ``selection_metric`` (the bare name
-    ``generic_trainer.train()`` resolved once, before the first epoch) and ``selection`` (that
-    epoch's value on it); this reads those back.
-
-    The name is the most recently stamped one; the best is compared over every row stamped with
-    that name in its declared ranking direction (``evaluation.HIGHER_IS_BETTER_BY_METRIC`` on the
-    bare name). A row with no name or a non-finite value is skipped when finding the best. No name
-    in any row, or a name the declaration table does not carry, leaves both ``None``.
-    """
-    name: str | None = None
-    for row in reversed(rows):
-        candidate = row.get("selection_metric")
-        if isinstance(candidate, str) and candidate:
-            name = candidate
-            break
-    if name is None:
-        return None, None
-
-    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
-
-    higher_is_better = HIGHER_IS_BETTER_BY_METRIC.get(name)
-    if higher_is_better is None:
-        return None, None
-
-    best: float | None = None
-    for row in rows:
-        if row.get("selection_metric") != name:
+    comparisons: list[dict[str, Any]] = []
+    for eid in experiment_ids:
+        observation = find_observation(eid)
+        if observation is None:
+            comparisons.append({"experiment_id": eid, "error": f"Experiment not found: {eid}"})
             continue
-        value = row.get("selection")
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        run, final = observation.record, observation.final
+        config = run["config"]
+        if config is None:
+            comparisons.append({"experiment_id": eid,
+                                "error": f"{eid} is a calibration run; it trained nothing"})
             continue
-        if best is None or (value > best if higher_is_better else value < best):
-            best = float(value)
-    return name, best
+        metrics = read_rows(observation.metrics_log)[0]
+        summary: dict[str, Any] = {
+            "experiment_id": eid, "state": observation.state,
+            "n_epochs": _distinct_epoch_count(metrics), "n_rows": len(metrics),
+        }
+        if metrics:
+            summary["last_logged_metrics"] = metrics[-1]
+        rows_after_end = None
+        if final is not None:
+            ended = datetime.fromisoformat(final["ended"])
+            rows_after_end = sum(
+                1 for row in metrics
+                if isinstance(row.get("timestamp"), str)
+                and datetime.fromisoformat(row["timestamp"]) > ended
+            )
+        summary["rows_after_end"] = rows_after_end
+        summary["status_error"] = final["error"] if final is not None else None
+        entry = run_entry(observation)
+        summary["registry"] = [] if entry is None else [{
+            "name": entry["name"], "registered_at": entry["registered_at"],
+            **{k: v for k, v in entry_facts(entry).items() if k != "kind"},
+        }]
+        resolved = run["resolved"]
+        summary["split"] = _split_summary(resolved)
+        summary["model"] = config[MODEL_SOURCE_KEY]["builder"]
+        summary["task"] = run_task(config)
+        summary["subject"] = ClassScope.of(resolved["data"]).subject
+        summary["dataset_id"] = run["dataset"]["id"]
+        summary["dataset_fingerprint"] = run["dataset"]["fingerprint"]
+        comparisons.append(summary)
+
+    any_error = any("error" in c for c in comparisons)
+    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
+    same_dataset = None if (any_error or not fps or None in fps) else len(fps) == 1
+    return {"experiments": comparisons, "count": len(comparisons),
+            "same_dataset_fingerprint": same_dataset}
 
 
-def log_metrics(
-    experiment_id: str,
-    epoch: int,
-    metrics: dict[str, Any],
-    *,
-    root: Path | str | None = None,
-) -> dict[str, Any]:
-    """Append epoch metrics to the run's metrics log and refresh its liveness heartbeat.
-
-    A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or a
-    non-finite loss is named here.
-
-    Stamps ``status.json["metrics_logged"] = True`` before appending, so a marker written but then
-    an append that fails still reads non-pristine, never the reverse. A failure inside that marker
-    transaction raises.
-
-    ``root`` names a platform root other than this process's own.
-    """
-    check_json_value(metrics, path="metrics")
-    if not experiment_exists(experiment_id, root=root):
+def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
+    """A training run's data-to-model chain read off its records: the data section it resolved,
+    its dataset identity, the run it was relaunched from and the checkpoint it resumed from, and
+    the checkpoint its completion selected. ``{"error": ...}`` for an id naming no training
+    run."""
+    observation = find_observation(experiment_id)
+    if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
+    run = observation.record
+    if run["config"] is None:
+        return {"error": f"{experiment_id} is a calibration run; it trained nothing"}
+    return {"experiment_id": experiment_id, "lineage": {
+        "data": run["resolved"]["data"],
+        "dataset_id": run["dataset"]["id"],
+        "dataset_fingerprint": run["dataset"]["fingerprint"],
+        "parent_experiment": run["parent_experiment"],
+        "resume_from": run["resume_from"],
+        "checkpoint": observation.checkpoint,
+    }}
 
-    # Terminal-state lock: a completed/failed run's metric history is frozen, no new epochs.
-    try:
-        refuse_if_terminal(experiment_id, "log_metrics", _current_state(experiment_id, root=root))
-    except ExperimentTerminal as exc:
-        return {"error": str(exc)}
 
-    key = status_key(experiment_id, root=root)
-    with store.transaction(key) as txn:
-        status = txn.read(key, default={})
-        status["metrics_logged"] = True
-        txn.write(key, status)
-
-    entry = {
-        "epoch": epoch,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        **metrics,
-    }
-    store.append(metrics_key(experiment_id, root=root), entry)
-    _touch_heartbeat(experiment_id, root=root)
-
-    return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
+# ── validations ──────────────────────────────────────────────────────────────
 
 
 _VALIDATION_FIELDS = (
@@ -872,20 +579,11 @@ _VALIDATION_FIELDS = (
     "train_disjointness",
     "selection_disjointness",
 )
-"""Every field a validation row carries. All required, none defaulted.
-
-A claim reads as provenance only when all of it is there: what was claimed, for which trait,
-against which reference, produced by which checkpoint and run, over which content, and when.
-A field a writer could omit would be a field a reader could not compare.
+"""Every field a validation row carries, all required.
 
 ``train_disjointness`` is ``{"checked": bool, "group_check": str | None}`` for the four documents
-whose gate runs the check (never a bare ``true`` over a check the gate's own record says did not
-run), or ``null`` for ``resolve_scale``, whose gate has no training run to check against.
-
-``selection_disjointness`` is the same two facts plus ``applicable``/``reason``: whether the
-checkpoint's own selection side (its ``split.json``'s ``val``) was also checked disjoint from the
-reference, applicable only when the calibration named a selection or the checkpoint carries
-a ``selection_binding``, ``null`` for ``resolve_scale``.
+whose gate runs the check, or ``null`` for ``resolve_scale``. ``selection_disjointness`` is the
+same two facts plus ``applicable``/``reason``, ``null`` for ``resolve_scale``.
 """
 
 
@@ -896,660 +594,50 @@ def _content_digest(value: dict[str, Any]) -> str:
 
 
 def validation_digest(body: dict[str, Any]) -> str:
-    """The content identity of a validation row.
-
-    Pure: a reader recomputes it from a row it read. It is not stored in the row.
-    """
+    """The content identity of a validation row, recomputed from the row a reader holds."""
     return _content_digest(body)
 
 
-def _append_validation(experiment_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Append one earned claim to this experiment's validations log.
-
-    The row is checked against ``_VALIDATION_FIELDS`` first: a missing field is refused, never
-    filled in.
-    """
-    check_json_value(body, path="validation")
-    if not experiment_exists(experiment_id):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
+def append_validation(run_dir: Path, body: dict[str, Any]) -> str:
+    """Append one earned claim to ``run_dir``'s validations and record the append, returning the
+    row's :func:`validation_digest`. Refuses (``ValueError``) a row missing any of
+    :data:`_VALIDATION_FIELDS` and a directory holding no run."""
     missing = [field for field in _VALIDATION_FIELDS if field not in body]
     if missing:
-        return {"error": f"Validation record is missing {', '.join(missing)}; every field of a "
-                         f"record is required and none has a default."}
-
-    # No terminal-state check: a validation is a statement made about a run after it ended.
-    store.append(validations_key(experiment_id), body)
+        raise ValueError(f"Validation record is missing {', '.join(missing)}; every field of a "
+                         "record is required and none has a default.")
+    if not (run_dir / RUN_FILE).is_file():
+        raise ValueError(f"Experiment not found: {run_dir.name}")
+    append_row(run_dir / VALIDATIONS_FILE, body)
     digest = validation_digest(body)
     from tcip_mcp.audit import record_event_or_raise
 
-    # Platform log: the row above is already on disk, so a failed append raises rather than
-    # leaving a provenance gap nobody is told about.
     record_event_or_raise("experiment_validation_recorded",
-                 {"experiment_id": experiment_id, "document": body["document"],
-                  "trait": body["trait"], "record_digest": digest})
-    return {"experiment_id": experiment_id, "record_digest": digest}
+                          {"experiment_id": run_dir.name, "document": body["document"],
+                           "trait": body["trait"], "record_digest": digest})
+    return digest
 
 
-def read_validations(
-    experiment_id: str, *, root: Path | str | None = None
-) -> list[dict[str, Any]]:
-    """Every claim this experiment has earned, in order, oldest first.
-
-    A repeated validation of one claim appends a second row rather than replacing the first,
-    so the history is the whole list and a stamp names one row of it.
-    """
-    page = store.read_log(validations_key(experiment_id, root=root))
-    if page.corrupt:
-        logger.warning("experiment %s validations log has %d undecodable entries",
-                       experiment_id, len(page.corrupt))
-    if page.version_refused:
-        logger.warning("experiment %s validations log has %d entries at a schema_version "
-                       "this reader does not accept", experiment_id, len(page.version_refused))
-    return [dict(record) for record in page.records]
-
-
-def find_validation(
-    experiment_id: str, digest: str, *, root: Path | str | None = None
-) -> dict[str, Any] | None:
-    """The row whose own content identity is ``digest``, or ``None`` when no row has it.
-
-    The identity is recomputed from each stored row rather than read off it, so a row answers
-    for the content it actually holds.
-    """
-    for row in read_validations(experiment_id, root=root):
+def find_validation(observation: RunObservation, digest: str) -> dict[str, Any] | None:
+    """The row of the observed run's validations whose own recomputed identity is ``digest``, or
+    ``None`` when no row has it."""
+    for row in read_rows(observation.validations_log)[0]:
         if validation_digest(row) == digest:
             return row
     return None
 
 
-def ensure_calibration_experiment(
-    *,
-    document: str,
-    checkpoint_sha256: str | None,
-    reference_identity: dict[str, Any],
-    trait: str,
-    config: dict[str, Any],
-) -> str:
-    """The experiment a calibration's claims hang off, created when it does not exist yet.
-
-    The id is derived from the same content that constitutes the claim's identity, so a second
-    calibration of the same document, checkpoint, reference and trait resolves to the same
-    experiment.
-
-    ``config`` is the free text describing the calibration. The identity fields are written here
-    from the arguments the id was derived from, so a config restating one is refused.
-    """
-    identity = {
-        "document": document,
-        "checkpoint_sha256": checkpoint_sha256,
-        "reference_identity": reference_identity,
-        "trait": trait,
-    }
-    restated = sorted(set(config) & set(identity))
-    if restated:
-        raise ValueError(
-            f"calibration config restates {', '.join(restated)}: those fields are written from "
-            "the content the experiment id is derived from, so a second spelling of them could "
-            "disagree with the id itself"
-        )
-
-    experiment_id = f"calibration_{_content_digest(identity)}"
-    # create_experiment's create-only refusal is the existence check; a repeat names this same calibration.
-    created = create_experiment(experiment_id, {**identity, **config})
-    if "error" not in created:
-        from tcip_mcp.audit import record_event_or_raise
-
-        # Platform log: the experiment above is already created, so a failed append raises
-        # rather than leaving a provenance gap nobody is told about.
-        record_event_or_raise("calibration_experiment_created",
-                     {"experiment_id": experiment_id, "document": document, "trait": trait})
-    return experiment_id
-
-
-def _pointer_populated(doc: dict[str, Any], field: str) -> bool:
-    """Whether ``field`` already carries a real value in ``doc`` (an artifacts or lineage record):
-    present and not an empty placeholder.
-    """
-    return doc.get(field) not in (None, "", [], {})
-
-
-def _artifact_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
-    """The artifacts member's additive lock: a name already present freezes, regardless of
-    whether the value recorded under it is itself falsy. Presence, not populated-ness, is the
-    lock's baseline semantics here, so a name recorded with a falsy entry stays frozen too."""
-    return field in doc
-
-
-def _lineage_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
-    """The lineage member's additive lock: a populated field freezes unless the write would record
-    the same value it already holds.
-    """
-    return _pointer_populated(doc, field) and doc.get(field) != value
-
-
-# One predicate per member, evaluated by pointer_frozen, record_artifact and update_lineage alike
-# so the three never carry separate copies of what "frozen" means for that member.
-_MEMBER_WRITE_REFUSED = {"artifacts": _artifact_write_refused, "lineage": _lineage_write_refused}
-_POINTER_MEMBER_KEYS = {"artifacts": artifacts_key, "lineage": lineage_key}
-
-
-def pointer_frozen(experiment_id: str, member: str, field: str, value: Any) -> str | None:
-    """Whether writing ``value`` into ``field`` of the named member (``"artifacts"`` or
-    ``"lineage"``) would be refused right now: the experiment terminal and the member's own
-    additive lock (:data:`_MEMBER_WRITE_REFUSED`).
-
-    An untransacted pre-check for a caller about to write a file outside the store; the writer's
-    own transactional refusal still decides. Returns the refusal text, or ``None`` when the write
-    would be admitted.
-    """
-    doc = read_member(_POINTER_MEMBER_KEYS[member](experiment_id), {})
-    state = _current_state(experiment_id)
-    if state in _TERMINAL_STATES and _MEMBER_WRITE_REFUSED[member](
-        doc if isinstance(doc, dict) else {}, field, value
-    ):
-        return (f"Experiment {experiment_id} is {state} (terminal); {member}.{field} is already "
-                "recorded and is immutable.")
-    return None
-
-
-def record_artifact(
-    experiment_id: str,
-    name: str,
-    path: str,
-    *,
-    root: Path | str | None = None,
-) -> dict[str, Any]:
-    """Register an artifact (model weights, predictions, etc.).
-
-    ``root`` names a platform root other than this process's own.
-    """
-    if not experiment_exists(experiment_id, root=root):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    key, state = artifacts_key(experiment_id, root=root), status_key(experiment_id, root=root)
-    current: str | None = None
-    refused_overwrite = False
-    with store.transaction(key, state) as txn:
-        artifacts = txn.read(key, default={})
-        current = recorded_state(txn.read(state))
-        # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
-        # but an existing one is frozen, no silent overwrite of a delivered pointer.
-        refused_overwrite = current in _TERMINAL_STATES and _MEMBER_WRITE_REFUSED["artifacts"](
-            artifacts, name, path)
-        if not refused_overwrite:
-            artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
-            txn.write(key, artifacts)
-
-    if refused_overwrite:
-        try:
-            refuse_if_terminal(experiment_id, "record_artifact", current)
-        except ExperimentTerminal as exc:
-            return {"error": f"{exc} Artifact {name!r} is already recorded and is immutable; "
-                             f"the file at {path!r} was not recorded.",
-                    "artifact": name}
-    return {"experiment_id": experiment_id, "artifact": name, "path": path}
-
-
-_COMPLETION_ONLY_LINEAGE_FIELDS = ("model_weights", "model_weights_sha256")
-"""The two lineage fields only ``complete_run`` writes: the digest completion recorded, and the
-path it was taken over. Unlike the identity fields below, naming either here is a caller error,
-not a state a still-empty field could legitimately take later, so the whole call refuses before
-any field lands, never merged in and never silently dropped."""
-
-
-def update_lineage(
-    experiment_id: str,
-    *,
-    root: Path | str | None = None,
-    **updates: Any,
-) -> dict[str, Any]:
-    """Update lineage fields (predictions, data_source, review_session, etc.).
-
-    The updates are the caller's own kwargs, merged whole into the stored document, so they are
-    checked against what JSON can hold before any of them lands. ``model_weights`` and
-    ``model_weights_sha256`` are ``complete_run``'s alone: naming either raises ``ValueError``
-    before any field, including a legitimate companion in the same call, lands.
-
-    A field refused (a dataset identity field, or a populated field of a terminal run) is named
-    under ``refused`` in the result, and the others land.
-
-    ``root`` names a platform root other than this process's own.
-    """
-    check_json_value(updates, path="updates")
-    completion_fields = sorted(f for f in _COMPLETION_ONLY_LINEAGE_FIELDS if f in updates)
-    if completion_fields:
-        raise ValueError(
-            f"update_lineage: {', '.join(completion_fields)} is complete_run's alone to write; "
-            "no other caller populates the run's recorded digest."
-        )
-    if not experiment_exists(experiment_id, root=root):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill: the additive-only lock below would otherwise permit a first write to an empty identity field even post-terminal.
-    # That write would be a silent change to what data the run trained on.
-    identity_updates = {k: updates.pop(k) for k in ("dataset_id", "dataset_fingerprint") if k in updates}
-
-    key, state = lineage_key(experiment_id, root=root), status_key(experiment_id, root=root)
-    refused: dict[str, Any] = {}
-    with store.transaction(key, state) as txn:
-        lineage = txn.read(key, default={})
-        current_state = recorded_state(txn.read(state))
-        # Additive-only, unlike refuse_if_terminal's own all-or-nothing refusal: a still-empty
-        # field may take its first write post-terminal, only a populated one is frozen.
-        try:
-            refuse_if_terminal(experiment_id, "update_lineage", current_state)
-        except ExperimentTerminal:
-            refused = {k: v for k, v in updates.items()
-                       if _MEMBER_WRITE_REFUSED["lineage"](lineage, k, v)}
-            if refused:
-                updates = {k: v for k, v in updates.items() if k not in refused}
-        lineage.update(updates)
-        txn.write(key, lineage)
-
-    refused_fields = sorted([*identity_updates, *refused])
-    return {"experiment_id": experiment_id, "lineage": lineage,
-            **({"refused": refused_fields} if refused_fields else {})}
-
-
-def register_model_from_experiment(
-    experiment_id: str,
-    checkpoint_path: str,
-    *,
-    project_path: str = "",
-    name: str | None = None,
-    root: Path | str | None = None,
-) -> dict[str, Any]:
-    """Bind the registry's own entry to the run that produced it: the digest completion recorded.
-
-    Requires a completed run whose completion recorded a digest (``complete_run``'s own write): a
-    run in ``created`` or ``running``, or one that ended ``failed``/``canceled``, refuses by name.
-    Hashes the caller's ``checkpoint_path`` through the same function completion hashed with and
-    refuses when the two digests differ, naming both and the path completion recorded: the caller's
-    path may be the recorded path or any byte-identical copy, never a different file.
-    ``project_path``, when given, must be the directory the experiment's own keys hang off
-    (compared through ``splits.same_directory``, tolerant of a different spelling of the same
-    directory); any other directory refuses by name, naming the root this call would otherwise have
-    searched.
-
-    Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced this
-    checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training epoch.
-    Registers with no tags and writes only the registry's own entry, with ``experiment_id`` set to
-    this run. A checkpoint that carries no metrics dict, or that will not load at all, registers
-    with an empty ``metrics`` and a ``metrics_source`` of ``None``. The unpickle and its
-    ``schema_version`` check are ``model_registry._load_verified_payload``.
-
-    ``metrics_source`` records which path produced the numbers, not that anyone verified them:
-    ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
-    ``default_train`` computed them), ``"training_source"`` when it does (a bespoke loop's own
-    saved state), and ``None`` when the checkpoint carries no metrics.
-
-    A name a prior run bound is not evicted by this call unless ``experiment_id`` is that same run:
-    the registry's own eviction rail refuses, returned here as an error naming the run that holds
-    the name (see ``model_registry.EntryOwnedByRun``).
-
-    ``root`` names the platform root the experiment's own keys hang off; the default is this
-    process's pinned platform root, and ``project_path``'s own check is against whichever one
-    applies.
-    """
-    if not experiment_exists(experiment_id, root=root):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    from tcip_mcp.pipelines.data.splits import same_directory
-    from tcip_mcp.project_paths import platform_state_root
-
-    platform_root = str(Path(root).resolve()) if root is not None else str(platform_state_root())
-    if project_path and not same_directory(project_path, platform_root):
-        return {"error": f"register_model_from_experiment: project_path {project_path!r} is not "
-                         f"the root experiment {experiment_id!r}'s own keys hang off "
-                         f"({platform_root!r})."}
-    # Resolved once confirmed the same root: the index key refuses a non-absolute one, so a
-    # relative or forward-slash spelling of the root must still reach it.
-    registry_root = str(Path(project_path).resolve()) if project_path else platform_root
-
-    ckpt = Path(checkpoint_path)
-    if not ckpt.is_file():
-        return {"error": f"register_model_from_experiment: checkpoint_path {checkpoint_path!r} "
-                         "does not exist."}
-    with open(ckpt, "rb") as f:
-        data = f.read()
-
-    from tcip_mcp.model_registry import _sha256_of_bytes
-
-    digest = _sha256_of_bytes(data)
-
-    state = _current_state(experiment_id, root=root)
-    lineage = read_member(lineage_key(experiment_id, root=root), {})
-    recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
-    recorded_path = lineage.get("model_weights") if isinstance(lineage, dict) else None
-    if state != "completed" or not recorded_digest:
-        return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
-                         f"digest (state={state!r}): its run has not said what it produced. "
-                         "complete_run records the digest when the run finishes."}
-
-    if digest != recorded_digest:
-        return {"error": f"{checkpoint_path} (sha256 {digest}) is not the bytes experiment "
-                         f"{experiment_id!r}'s completion recorded (sha256 {recorded_digest}, at "
-                         f"{recorded_path!r}): the caller's path must be the recorded path or a "
-                         "byte-identical copy of it."}
-
-    config = read_member(config_key(experiment_id, root=root), {})
-
-    # Metrics stored in the checkpoint describe the epoch it was saved at (never a later epoch's).
-    # Read through the same unpickle+version-check load_registered_checkpoint uses.
-    final_metrics: dict[str, Any] = {}
-    kind: str | None = None
-    payload: dict | None = None
-    try:
-        from tcip_mcp.model_registry import _load_verified_payload
-
-        payload = _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
-    except Exception as exc:
-        logger.warning(
-            "checkpoint %s would not load (%s); registering experiment %s with no metrics "
-            "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
-        )
-    if payload is not None:
-        kind = payload.get("kind")
-        stamped = payload.get("metrics")
-        if isinstance(stamped, dict) and stamped:
-            final_metrics = dict(stamped)
-            if payload.get("epoch") is not None:
-                final_metrics.setdefault("epoch", payload["epoch"])
-
-    metrics_source: str | None = None
-    if final_metrics:
-        from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
-
-        metrics_source = "training_source" if config.get(TRAINING_SOURCE_KEY) else "trainer"
-
-    from tcip_mcp.model_registry import EntryOwnedByRun, _register_entry
-    from tcip_mcp.registry_paths import resolved_registry_path
-
-    try:
-        entry = _register_entry(
-            registry_root, name=name or experiment_id, checkpoint_path=checkpoint_path,
-            config=config, metrics=final_metrics, tags=[], kind=kind,
-            metrics_source=metrics_source, experiment_id=experiment_id, sha256=digest,
-        )
-    except EntryOwnedByRun as exc:
-        return {"error": str(exc)}
-    return {
-        "experiment_id": experiment_id,
-        "registered": entry["name"],
-        "checkpoint": str(resolved_registry_path(registry_root, entry["checkpoint_path"])),
-        "sha256": digest,
-        "metrics": final_metrics,
-        "metrics_source": metrics_source,
-    }
-
-
-def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:
-    """The number of distinct ``epoch`` values among ``rows``, compared as each row's own
-    canonical JSON text so an ``epoch`` of any type, including a bespoke loop's own unhashable
-    one, counts without raising."""
-    seen = {json.dumps(row.get("epoch"), sort_keys=True, default=str) for row in rows}
-    return len(seen)
-
-
-def get_experiment(
-    experiment_id: str, *, metrics_limit: int | None = None, metrics_offset: int = 0,
-) -> dict[str, Any]:
-    """Read full experiment state.
-
-    ``metrics`` is the run's own log: every row the run's own :func:`log_metrics` appended, in
-    order, oldest first. Its last row is only the last one logged, not a verified result.
-
-    ``metrics`` can be paginated for long runs: ``metrics_offset`` and ``metrics_limit`` index into
-    the row list, so ``n_rows`` (the row count) is the paging bound, not ``n_epochs`` (the count of
-    distinct ``epoch`` values; the stock loop logs one row per epoch, a bespoke one may log
-    several). Defaults return all metrics. ``validations`` is the whole claim history, unpaginated.
-    """
-    if not experiment_exists(experiment_id):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    result: dict[str, Any] = {"experiment_id": experiment_id}
-
-    members = {"config": config_key, "status": status_key,
-               "artifacts": artifacts_key, "lineage": lineage_key}
-    for name, key_of in members.items():
-        document = read_member(key_of(experiment_id))
-        if document is not None:
-            result[name] = document
-
-    rows = read_metrics(experiment_id)
-    end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
-    result["n_epochs"] = _distinct_epoch_count(rows)
-    result["n_rows"] = len(rows)
-    result["metrics"] = rows[metrics_offset:end]
-    result["metrics_offset"] = metrics_offset
-    result["validations"] = read_validations(experiment_id)
-
-    return result
-
-
-def list_experiments() -> list[dict[str, Any]]:
-    """List every experiment the store holds a status record for, run or not.
-
-    Covers a calibration experiment (id derived from a claim's content), a review-feedback lineage,
-    a pre-created experiment never launched, and a launched one. The ids come from
-    :func:`experiment_ids_with_status`. ``has_model_source`` is whether the config carries a
-    ``model_source`` (a training run) versus an experiment that tracks something else.
-    """
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-
-    experiments = []
-    for experiment_id in experiment_ids_with_status(None):
-        status = read_member(status_key(experiment_id))
-        if isinstance(status, dict):
-            config = read_member(config_key(experiment_id), {})
-            experiments.append({
-                "experiment_id": experiment_id,
-                "state": recorded_state(status),
-                "created": status.get("created"),
-                "has_model_source": bool(isinstance(config, dict) and config.get(MODEL_SOURCE_KEY)),
-            })
-
-    return experiments
-
-
-def _split_summary(experiment_id: str) -> dict[str, Any]:
-    """The partition column for one experiment: :func:`read_run_partition_checked` reduced to
-    the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
-    exists but will not decode; ``{"case": "none"}`` for a run that never wrote one;
-    ``{"case": "bound", "selection_dir": ..., "seed": ..., "redraw": bool}`` for a run bound to
-    a named selection, ``selection_dir`` and ``redraw`` as ``split.json``'s own
-    ``selection_binding`` records them; ``{"case": "drawn", "seed": ...}`` otherwise.
-    """
-    partition, decode_error = read_run_partition_checked(experiment_id)
-    if decode_error is not None:
-        return {"case": "error", "error": decode_error}
-    if not partition:
-        return {"case": "none"}
-    if "selection_binding" in partition:
-        binding = partition["selection_binding"]
-        return {"case": "bound", "selection_dir": binding["selection_dir"],
-                "seed": partition["seed"], "redraw": binding["redraw"]}
-    return {"case": "drawn", "seed": partition["seed"]}
-
-
-def _index_registry_entries(
-    experiment_ids: list[str],
-) -> tuple[dict[str, list[dict[str, Any]]] | None, str | None]:
-    """Every registered model entry naming one of ``experiment_ids`` as its producer, indexed by
-    experiment id, from one read of the platform root's registry index. Returns ``(index, error)``:
-    ``index`` is ``None`` and ``error`` names why when the index document could not be read (an
-    absent registry reads as an empty index). Otherwise ``index`` holds every match, each entry
-    reduced to ``name``, ``metrics``, ``metrics_source``, ``registered_at``; an experiment with no
-    registered entry is absent from the index.
-    """
-    from tcip_mcp.model_registry import read_registry_index
-    from tcip_mcp.project_paths import platform_state_root
-
-    try:
-        entries = read_registry_index(platform_state_root())
-    except Exception as exc:
-        return None, f"registry unreadable: {exc}"
-
-    wanted = set(experiment_ids)
-    index: dict[str, list[dict[str, Any]]] = {}
-    for e in entries:
-        eid = e["experiment_id"]
-        if eid not in wanted:
-            continue
-        index.setdefault(eid, []).append({
-            "name": e["name"], "metrics": e["metrics"],
-            "metrics_source": e["metrics_source"], "registered_at": e["registered_at"],
-        })
-    return index, None
-
-
-def compare_experiments(experiment_ids: list[str], *, stale_seconds: float) -> dict[str, Any]:
-    """Side-by-side comparison of multiple experiments.
-
-    ``stale_seconds`` is the heartbeat freshness window :func:`derived_state` applies.
-
-    Per experiment: ``recorded_state`` (the stored state) and ``state``, the heartbeat-derived
-    state via :func:`derived_state`, but only for a record no longer pristine (:func:`is_pristine`): a
-    pre-created experiment never launched reports ``state`` equal to ``recorded_state``
-    (``"created"``). ``log_locked``, true when ``recorded_state`` is in the mutation lock's
-    terminal set, meaning only that :func:`log_metrics` refuses further rows;
-    ``last_logged_metrics``, the run's own log's last row (not a verified result, see
-    :func:`get_experiment`); ``rows_after_end``, the count of rows whose ``timestamp`` is a later
-    instant than the record's own ``ended``, ``None`` when the record has no ``ended``, and a row
-    whose own ``timestamp`` is missing or unparseable never counted; and ``n_epochs``/``n_rows``,
-    always present.
-
-    Also per experiment: ``task``/``subject`` from the config already read; ``status_error``, the
-    status record's own failure reason (``None`` for a run that never failed, distinct from a
-    comparison entry's own top-level ``error`` when :func:`get_experiment` could not read it at
-    all); ``model``, the config's builder, ``None`` when the config names none; ``split`` (see
-    :func:`_split_summary`); and ``registry``, this experiment's own registered entries (see
-    :func:`_index_registry_entries`), absent, with ``registry_error`` naming why, when the
-    project's registry index can't be read or matched at all (an experiment with no registered
-    entry still carries ``registry: []``). ``same_dataset_fingerprint`` is ``None``, never
-    ``True``, when any compared id is an error entry.
-    """
-    from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, run_task
-
-    comparisons: list[dict[str, Any]] = []
-    registry_index, registry_error = _index_registry_entries(experiment_ids)
-
-    for eid in experiment_ids:
-        exp = get_experiment(eid)
-        if "error" in exp:
-            comparisons.append({"experiment_id": eid, "error": exp["error"]})
-            continue
-
-        status_doc = exp.get("status")
-        status_doc = status_doc if isinstance(status_doc, dict) else {}
-        stored_state = recorded_state(status_doc)
-        ended = status_doc.get("ended")
-        launched = not is_pristine(stored_state, metrics_logged_of(status_doc))
-
-        summary: dict[str, Any] = {
-            "experiment_id": eid,
-            "recorded_state": stored_state,
-            "state": derived_state(status_doc, stale_seconds) if launched else stored_state,
-            "log_locked": stored_state in _TERMINAL_STATES,
-            "n_epochs": exp["n_epochs"],
-            "n_rows": exp["n_rows"],
-        }
-
-        metrics = exp.get("metrics", [])
-        if metrics:
-            summary["last_logged_metrics"] = metrics[-1]
-        rows_after_end = None
-        ended_instant = _parse_iso_instant(ended) if ended else None
-        if ended_instant is not None:
-            rows_after_end = sum(
-                1 for row in metrics
-                if (row_instant := _parse_iso_instant(row.get("timestamp"))) is not None
-                and row_instant > ended_instant
-            )
-        summary["rows_after_end"] = rows_after_end
-        # status_error, not "error": that key already marks a comparison entry get_experiment
-        # could not even read (the sentinel with_fp/same_dataset_fingerprint filter on below).
-        summary["status_error"] = status_doc.get("error")
-
-        if registry_index is not None:
-            summary["registry"] = registry_index.get(eid, [])
-        else:
-            summary["registry_error"] = registry_error
-
-        summary["split"] = _split_summary(eid)
-
-        # Get config summary
-        config = exp.get("config", {})
-        config = config if isinstance(config, dict) else {}
-        model_source = config.get(MODEL_SOURCE_KEY, {})
-        model_source = model_source if isinstance(model_source, dict) else {}
-        summary["model"] = model_source.get("builder")
-        summary["task"] = run_task(config) if config else None
-        data_cfg = config.get("data", {})
-        summary["subject"] = (ClassScope.of(data_cfg).subject
-                              if isinstance(data_cfg, dict) and "scope" in data_cfg else None)
-
-        # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.
-        lin = exp.get("lineage")
-        if isinstance(lin, dict):
-            summary["dataset_id"] = lin.get("dataset_id")
-            summary["dataset_fingerprint"] = lin.get("dataset_fingerprint")
-
-        comparisons.append(summary)
-
-    # Whether every compared run trained on the same dataset content; an unset fingerprint, or a
-    # record this call could not read, makes it unknown, not "same".
-    any_error = any("error" in c for c in comparisons)
-    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
-    same_dataset = None if (any_error or not fps or None in fps) else len(fps) == 1
-    return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}
-
-
-def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
-    """Trace the full data → model → predictions chain."""
-    if not experiment_exists(experiment_id):
-        return {"error": f"Experiment not found: {experiment_id}"}
-
-    lineage = read_member(lineage_key(experiment_id))
-    if lineage is None:
-        return {"error": "No lineage file found"}
-
-    from tcip_mcp.pipelines.model_build import run_task
-
-    config = read_member(config_key(experiment_id))
-    if isinstance(config, dict):
-        data_cfg = config.get("data", {})
-        lineage["data_config"] = {
-            "images_dir": data_cfg.get("images_dir"),
-            "labels_dir": data_cfg.get("labels_dir"),
-            "task": run_task(config),
-        }
-
-    return {"experiment_id": experiment_id, "lineage": lineage}
-
-
-def read_run_partition_checked(
-    experiment_id: str, *, root: Path | str | None = None,
-) -> tuple[dict[str, Any], str | None]:
-    """The run's persisted partition, and the decode failure behind an unreadable one.
-
-    Returns ``(manifest, decode_error)``. ``manifest`` is ``{}`` with ``decode_error`` ``None`` for
-    a run that never wrote one. A record that exists but will not decode also answers
-    ``manifest={}``, but ``decode_error`` names why. ``root`` resolves the same project a caller's
-    own checkpoint lookup used.
-    """
-    from tcip_store import DecodeError
-
-    try:
-        manifest = store.read(split_key(experiment_id, root=root), default={})
-    except DecodeError as exc:
-        return {}, str(exc)
-    return (manifest if isinstance(manifest, dict) else {}), None
-
-
-def read_run_partition(experiment_id: str) -> dict[str, Any]:
-    """The run's persisted partition, or ``{}`` when it was never written or could not be decoded."""
-    manifest, _ = read_run_partition_checked(experiment_id)
-    return manifest
+def open_calibration_run(calibrated: dict[str, Any]) -> Path:
+    """Open a fresh run directory (:func:`open_run_directory`) for one calibration of a checkpoint
+    no run of this project produced, and record its creation. Its launch record carries no config
+    and ``calibrated``: the ``document``, ``checkpoint_sha256``, ``reference_identity`` and
+    ``trait`` the claim is earned for, and what it was ``derived_from``."""
+    run_dir = experiment_dir(f"calibration_{mint_experiment_id()}")
+    open_run_directory(run_dir, lambda _: {"created": now_iso(), "config": None,
+                                           "launched_by": None, "calibrated": calibrated})
+    from tcip_mcp.audit import record_event_or_raise
+
+    record_event_or_raise("calibration_experiment_created",
+                          {"experiment_id": run_dir.name, "document": calibrated["document"],
+                           "trait": calibrated["trait"]})
+    return run_dir

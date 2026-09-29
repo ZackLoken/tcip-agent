@@ -42,12 +42,13 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
 
 
 def test_get_experiment_metrics_pagination(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, get_experiment, log_metrics
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import get_experiment
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    create_experiment("exp1", {"model_source": {"builder": "x:y"}})
+    run_dir = opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp1")
     for e in range(10):
-        log_metrics("exp1", e, {"loss": float(e)})
+        log_epoch(run_dir, e, {"loss": float(e)})
 
     full = get_experiment("exp1")
     assert full["n_epochs"] == 10 and len(full["metrics"]) == 10
@@ -63,12 +64,13 @@ def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path, monke
     """n_epochs is the count of distinct epoch values, not the row count: a bespoke loop logging
     train and val as separate rows under the same epoch still counts as one epoch. n_rows is the
     row count, and is what metrics_offset/metrics_limit actually page against."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, get_experiment, log_metrics
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import get_experiment
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    create_experiment("exp2", {"model_source": {"builder": "x:y"}})
-    log_metrics("exp2", 3, {"loss_train": 0.5})
-    log_metrics("exp2", 3, {"loss_val": 0.4})
+    run_dir = opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp2")
+    log_epoch(run_dir, 3, {"loss_train": 0.5})
+    log_epoch(run_dir, 3, {"loss_val": 0.4})
 
     result = get_experiment("exp2")
     assert result["n_epochs"] == 1

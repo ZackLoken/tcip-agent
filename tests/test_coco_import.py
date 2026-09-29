@@ -2,8 +2,8 @@
 
 The imported images train through the ordinary producer with the targets the document stated, a
 crowd region keeping its flag and a run-length mask arriving as rings; every fault found before
-writing is reported together and refuses with nothing written, and the writes after that are
-create-only one document at a time, the audit event naming what was written. The COCO documents
+writing is reported together and refuses with nothing written, and the writes after that commit
+as one unit or not at all, the audit event naming what was written. The COCO documents
 here are hand-written because they are the external input the door exists for; every image,
 registry and band group they refer to comes from the platform's own producers.
 """
@@ -212,13 +212,13 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
     root = _dataset(tmp_path)
     document = _document(tmp_path / "external.json")
     read_bytes = document.read_bytes()
-    real_put_blob = ts.put_blob
+    real_transaction = ts.transaction
 
-    def replacing(key, data, **kwargs):
+    def replacing(*keys, **kwargs):
         document.write_text(json.dumps({"images": [], "categories": []}), encoding="utf-8")
-        return real_put_blob(key, data, **kwargs)
+        return real_transaction(*keys, **kwargs)
 
-    monkeypatch.setattr(ts, "put_blob", replacing)
+    monkeypatch.setattr(ts, "transaction", replacing)
     assert "error" not in _import(document, root)
 
     (event,) = [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
@@ -377,10 +377,25 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
     assert not (_labels(root) / "tree_01.json").exists()
 
 
-def test_a_label_written_after_validation_is_never_overwritten(tmp_path: Path, monkeypatch):
-    """The import's writes are create-only, one document at a time: a person's label landing on
-    the second document between the validation pass and its write raises instead of being
-    replaced, the first document stays written, and the one audit event names both."""
+def _label_placed_before_the_writes(monkeypatch, label: Path, annotations) -> None:
+    """A person's label landing on ``label`` after the validation pass read the directory and
+    before the import's writes open."""
+    real_transaction = ts.transaction
+
+    def interleaved(*keys, **kwargs):
+        ts.put_blob(*json_io.encode_annotations(label, annotations, IMG, IMG, keep_empty=True))
+        monkeypatch.setattr(ts, "transaction", real_transaction)
+        return real_transaction(*keys, **kwargs)
+
+    monkeypatch.setattr(ts, "transaction", interleaved)
+
+
+def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
+    tmp_path: Path, monkeypatch,
+):
+    """The import's writes commit as one unit: a person's label landing on the second document
+    between the validation pass and the writes refuses the whole import, the label is kept, the
+    first document is never written, and no event is left."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = _dataset(tmp_path)
@@ -388,51 +403,56 @@ def test_a_label_written_after_validation_is_never_overwritten(tmp_path: Path, m
     person = [json_io.annotation_from_payload(
         {"subject": "leaf", "bbox": [1, 1, 5, 5]}, author="user:breeder", now="2025-09-16")]
     second = _labels(root) / "tree_02.json"
-    real_put_blob = ts.put_blob
+    _label_placed_before_the_writes(monkeypatch, second, person)
 
-    def interleaved(key, data, **kwargs):
-        if (_labels(root) / "tree_01.json").exists() and not second.exists():
-            real_put_blob(*json_io.encode_annotations(second, person, IMG, IMG))
-        return real_put_blob(key, data, **kwargs)
-
-    monkeypatch.setattr(ts, "put_blob", interleaved)
-    with pytest.raises(ts.VersionConflict):
+    with pytest.raises(ValueError, match="already exists"):
         import_coco_document(document, root, date=DATE)
 
     (kept,) = json_io.read_annotations(second)
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
-    (imported,) = json_io.read_annotations(_labels(root) / "tree_01.json")
-    assert imported.subject == SUBJECT
-    (event,) = [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
-    assert event["status"] == "failed"
-    assert [Path(p).name for p in event["arguments"]["written"]] == ["tree_01.json"]
-    assert str(second) in event["arguments"]["error"]
-    assert "changed since it was read" in event["arguments"]["error"]
+    assert not (_labels(root) / "tree_01.json").exists()
+    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
 
 
-def test_a_partial_import_and_a_partial_publish_record_one_key_set(tmp_path: Path, monkeypatch):
-    """The two producers of a partial-write record, the import and the bucket publisher, each
-    leave their failed line with the documents written and the error, and nothing else beyond
-    the one fact naming their own act (the document imported, the bucket published)."""
+def test_an_import_failing_while_it_publishes_leaves_no_document(tmp_path: Path, monkeypatch):
+    """A failure publishing the second document, after the first was published, puts the first
+    back: the import raises, no document of it remains, and no event is left."""
+    from tcip_mcp.pipelines.data.coco_import import import_coco_document
+    from tcip_store.file_backend import FileBackend
+
+    root = _dataset(tmp_path)
+    document = _document(tmp_path / "external.json")
+    real_apply = FileBackend._apply_staged
+    published: list[Path] = []
+
+    def failing_second(self, temp, path, *, durable):
+        if path.suffix == ".json" and path.parent == _labels(root):
+            published.append(path)
+            if len(published) == 2:
+                raise OSError("disk full")
+        return real_apply(self, temp, path, durable=durable)
+
+    monkeypatch.setattr(FileBackend, "_apply_staged", failing_second)
+
+    with pytest.raises(OSError, match="disk full"):
+        import_coco_document(document, root, date=DATE)
+
+    assert len(published) == 2, "the failure must land after one document was published"
+    assert not any(_labels(root).glob("*.json"))
+    assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]
+
+
+def test_a_partial_publish_records_the_documents_written_and_the_error(
+    tmp_path: Path, monkeypatch,
+):
+    """The bucket publisher's partial write leaves its failed line with the documents written and
+    the error, and nothing else beyond the one fact naming its own act."""
     pytest.importorskip("torch")
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.pipelines.data.coco_import import import_coco_document
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     root = _dataset(tmp_path)
-    second = _labels(root) / "tree_02.json"
-    real_put_blob = ts.put_blob
-
-    def interleaved(key, data, **kwargs):
-        if (_labels(root) / "tree_01.json").exists() and not second.exists():
-            real_put_blob(*json_io.encode_annotations(second, [], IMG, IMG, keep_empty=True))
-        return real_put_blob(key, data, **kwargs)
-
-    monkeypatch.setattr(ts, "put_blob", interleaved)
-    with pytest.raises(ts.VersionConflict):
-        import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)
-    monkeypatch.setattr(ts, "put_blob", real_put_blob)
 
     class Detector:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -454,24 +474,22 @@ def test_a_partial_import_and_a_partial_publish_record_one_key_set(tmp_path: Pat
         return real_write(json_path, result, **kwargs)
 
     monkeypatch.setattr(itools, "write_predictions_json", failing_second_write)
-    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    ckpt = foreign_checkpoint(tmp_path)
     with pytest.raises(OSError):
         itools.run_inference(ckpt, str(root / "images" / DATE),
                              output_dir=str(prediction_dir(root, "detector", DATE)), tile=False)
 
     failed = {row["tool"]: row for row in _rows(root) if row["status"] == "failed"}
-    imported = failed["coco_document_imported"]["arguments"]
     published = failed["prediction_bucket_published"]["arguments"]
-    assert set(imported) - {"document", "date"} == set(published) - {"predictions_dir"} == {
-        "written", "error"}
-    for arguments in (imported, published):
-        assert [Path(p).name for p in arguments["written"]] == ["tree_01.json"]
-        assert isinstance(arguments["error"], str) and arguments["error"]
+    assert set(published) - {"predictions_dir"} == {"written", "error"}
+    assert [Path(p).name for p in published["written"]] == ["tree_01.json"]
+    assert isinstance(published["error"], str) and published["error"]
 
 
 def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, monkeypatch):
     """An act that committed nothing leaves no line: a valid document whose images carry no
-    annotation writes nothing, and one whose first write fails has written nothing either."""
+    annotation writes nothing, and one whose first document was claimed has written nothing
+    either."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = _dataset(tmp_path)
@@ -480,16 +498,8 @@ def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, mo
 
     person = [json_io.annotation_from_payload(
         {"subject": "leaf", "bbox": [1, 1, 5, 5]}, author="user:breeder", now="2025-09-16")]
-    first = _labels(root) / "tree_01.json"
-    real_put_blob = ts.put_blob
-
-    def claimed_first(key, data, **kwargs):
-        if not first.exists():
-            real_put_blob(*json_io.encode_annotations(first, person, IMG, IMG))
-        return real_put_blob(key, data, **kwargs)
-
-    monkeypatch.setattr(ts, "put_blob", claimed_first)
-    with pytest.raises(ts.VersionConflict):
+    _label_placed_before_the_writes(monkeypatch, _labels(root) / "tree_01.json", person)
+    with pytest.raises(ValueError, match="already exists"):
         import_coco_document(_document(tmp_path / "external.json"), root, date=DATE)
     assert not (_labels(root) / "tree_02.json").exists()
     assert not [row for row in _rows(root) if row["tool"] == "coco_document_imported"]

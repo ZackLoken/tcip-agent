@@ -127,13 +127,20 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 |------|---------|
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard); runs `training_tools.preflight_config` (`smoke=True` also builds + contract-smokes the model), a library call, not a tool of its own |
 | `monitor_training(experiment_id=...)` | Check run progress, metrics, and TensorBoard URL |
-| `monitor_training(sweep_id=...)` | Check one sweep's manifest and per-trial state from disk, exactly one of `experiment_id`/`sweep_id` |
-| `list_experiments(launched_only=True)` | List all runs in session |
+| `monitor_training(sweep_id=...)` | Check one sweep's input, state and per-trial state from its directory, exactly one of `experiment_id`/`sweep_id` |
+| `list_experiments(launched_only=True)` | List every training run directory of the project |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
-| `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `canceled`; Ray's hard stop is only the fallback after the heartbeat window |
+| `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and ends canceled with no result, new trials start nothing, the sweep's final status records `canceled`; Ray's hard stop is only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
 | `tcip render-failure-cases` (logged command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
-| `create_experiment` | Track training run with full lineage |
+
+Every launch is a run directory, `.tcip/experiments/<experiment_id>/`, written as the run goes and
+never rewritten: `run.json`, written by the launcher before the run starts (the config as
+launched, its seed, environment, dataset identity, who launched it, the run it was relaunched from,
+and what the launch resolved: the data section, the partition it trains on and the objective it
+selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, error,
+and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
+once under its own name. A relaunch is a new directory naming its parent.
 
 ## TensorBoard
 
@@ -150,10 +157,10 @@ task/data; match them to the space and budget; the defaults are a starting point
 
 ```python
 run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
-        output_dir="runs/hpo_1", search_seed=17)
+        search_seed=17)
 ```
 - `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
-  on the sweep's manifest so a relaunch replays it; it is distinct from `data.split.seed`. The
+  in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.
 - `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, all
   installed by default. An uninstalled or unoffered pick errors clearly (never silently swapped),
@@ -163,12 +170,15 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
   completion. `grace_period`/`reduction_factor` tune the halving schedulers.
 - `warm_start=True` seeds the search with a known-good baseline; `max_concurrent` bounds
   parallel trials (default 1, safe for single-GPU training).
-- Ray persists trials under `output_dir` (also the TensorBoard logdir); auto-launches
-  TensorBoard. Returns `best_params`, `best_value`, `all_trials`, and `tensorboard` URL.
+- A sweep is its own directory, `.tcip/hpo/<study_name>/`: its `sweep.json` input (the objective
+  it resolved once included), a heartbeat, its final status once it ends, and one `trial_<id>/`
+  run directory per trial, each the same shape as a launched run's with the sampled point on its
+  `run.json` and the sweep's objective as its own. Ray's own store sits in the same directory
+  (also the TensorBoard logdir); auto-launches TensorBoard. Returns its trials and
+  `best_params`/`best_value`, read off the trial run directories.
 - `monitor_training(sweep_id=...)` answers the same "how is this sweep doing" question the web
-  Tuning tab reads, for a host with no browser open: the sweep's manifest plus every trial's own
-  params and whether it has logged metrics, from disk alone (no live jobstore, so a sweep just
-  launched over HTTP but not yet manifested reads as not found).
+  Tuning tab reads, for a host with no browser open: the sweep's input, every trial's own state,
+  params and value, and what they amount to, from its directory alone.
 - Above one draw (`split_draws`), on a launch that is not a relaunch, `trial_budget` states the
   most trials the sweep may launch, checked at the door against Ray's own variant count over the
   built search space; a stated `trial_budget` is checked wherever it is stated, at one draw and on
@@ -230,9 +240,9 @@ second membership source.
 drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
 `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
-samples build neither loader. The run's `split.json` then records the bound membership plus a
-`selection_binding` block (the selection's directory, its digest and whether the run redrew
-inside it, never a second copy of the sample list).
+samples build neither loader. The run's `run.json` then records the bound membership in its
+partition, with the selection it bound (the selection's directory, its digest and whether the run
+redrew inside it).
 
 `data.split.redraw_within_selection: true` beside `selection_dir` and `seed` admits `seed` (the
 one conflict key it lifts) and redraws train and val fresh inside the selection's own
@@ -243,7 +253,7 @@ samples to give both train and val one) refuses by name rather than retrying or 
 this flag on its own copy, so a sweep's seed grid redraws inside the selection instead of every
 trial training on its one recorded partition; `freeze_selection` still refuses a bound run,
 redrawn or not, naming the reproduction for a redrawn one (bind a later run to the same selection
-with the same seed and the flag, with the labels this run's own `split.json` recorded unchanged,
+with the same seed and the flag, with the labels this run's own `run.json` recorded unchanged,
 since the redraw reads per-stem annotation counts at run time) rather than a fresh freeze.
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the

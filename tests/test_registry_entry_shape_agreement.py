@@ -27,11 +27,19 @@ _ENTRY_INTERFACE_RE = re.compile(r"export interface RegisteredModel \{(.*?)\n\}"
 _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
 
-# Checkpoints of distinct size and content, so an entry can never be matched by accident.
+# Checkpoints of distinct content, so an entry can never be matched by accident.
 _RUNS = {
-    "currant_bud_detector_v1": b"weights-a",
-    "chestnut_leaf_area_seg_v2": b"weights-b-longer-payload",
+    "currant_bud_detector_v1": "weights-a",
+    "chestnut_leaf_area_seg_v2": "weights-b-longer-payload",
 }
+
+
+def _checkpoint(path: Path, content: str) -> Path:
+    """A checkpoint file the verified reader admits at ``path``, holding ``content``."""
+    pytest.importorskip("torch")
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    return checkpoint_file(path, content)
 
 
 def _doctor():
@@ -50,12 +58,10 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
     leak_dir.mkdir(parents=True)
     reg = ModelRegistry(str(root))
     for i, (name, content) in enumerate(_RUNS.items()):
-        ckpt = leak_dir / f"{name}.pt"
-        ckpt.write_bytes(content)
+        ckpt = _checkpoint(leak_dir / f"{name}.pt", content)
         reg.register_model(
             name, str(ckpt), {"data": {"scope": {"subject": "bud"}}},
             metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
-            metrics_source="caller",
         )
     return root, reg
 
@@ -97,27 +103,17 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A checkpoint copied to a path the registry never saw still resolves to the run that
-    produced it, matched on the content hash the registry stored: the binding a run's own
+    produced it, matched on the content hash its final status names: the binding a run's own
     completion recorded, not a caller-asserted tag."""
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+    pytest.importorskip("torch")
+    from tests._verified_checkpoint_fixtures import finished_run, registered_checkpoint
 
     root = tmp_path / "proj"
     root.mkdir()
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
-    other = tmp_path / "other_run.pt"
-    torch.save({"model_state_dict": {}, "note": "a different run entirely"}, other)
-    create_experiment("leaf_run", {"model_source": {"builder": "x:y"}})
-    assert "error" not in complete_run("leaf_run", str(other))
-    assert "error" not in register_model_from_experiment("leaf_run", str(other))
-
-    trained = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "note": "the checkpoint that produced the phenotype"},
-              trained)
-    create_experiment("bud_run3", {"model_source": {"builder": "x:y"}})
-    assert "error" not in complete_run("bud_run3", str(trained))
-    assert "error" not in register_model_from_experiment("bud_run3", str(trained))
+    finished_run(None, experiment_id="leaf_run")
+    trained = Path(registered_checkpoint(None, experiment_id="bud_run3"))
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()
@@ -149,9 +145,8 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"weights-a")
-    reg.register_model("currant_bud_detector_v1", str(ckpt), {}, metrics_source=None)
+    ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
+    reg.register_model("currant_bud_detector_v1", str(ckpt), {})
 
     index = root / ".tcip" / "models" / "registry.json"
     index.write_text(index.read_text(encoding="utf-8")[:-8], encoding="utf-8")
@@ -200,12 +195,14 @@ def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
     """
     root = tmp_path / "proj"
     root.mkdir()
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"weights-a")
-    entry = ModelRegistry(str(root)).register_model(
+    ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
+    ModelRegistry(str(root)).register_model(
         "currant_bud_detector_v1", str(ckpt), {"data": {"scope": {"subject": "bud"}}},
-        metrics={"val_map50": 0.5}, tags=["detector"], metrics_source="caller",
+        metrics={"val_map50": 0.5}, tags=["detector"],
     )
+    # The browser reads entries through the registry's own listing, the one reader every
+    # consumer goes through.
+    (entry,) = ModelRegistry(str(root)).list_models()
 
     declared = _declared_entry_fields()
     missing = sorted(name for name in declared if name not in entry)

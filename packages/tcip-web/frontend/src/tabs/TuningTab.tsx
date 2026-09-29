@@ -15,7 +15,7 @@ import { LaunchPicker } from "@/components/LaunchPicker";
 import { TabHeading } from "@/components/TabHeading";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
-import { TERMINAL_STATUSES } from "@/lib/runStatus";
+import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultSweepRequest } from "@/tabs/agentPrompts";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
@@ -47,21 +47,8 @@ function cellText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** A canceled sweep whose record carries no reason: shown identically in the row and the
- * detail pane, from this one wording. */
+/** The words for a canceled sweep whose record carries no reason. */
 const NO_CANCEL_REASON = "no reason recorded";
-
-/** Shown while the selected sweep's own detail answers with ``has_manifest: false``: the
- * pre-manifest window before ``run_hyperparameter_search`` writes a sweep's first manifest. The relaunch route
- * registers the job before it answers, so this is never a 404; it is the detail itself saying
- * the record is not written yet. A sweep refused before it ever wrote one is served by the
- * listing's own terminal status instead, and never reaches this. */
-const SWEEP_NO_RECORD_YET = "This sweep's record is not written yet.";
-
-/** The one sweep status Cancel is offered on, the same explicit-allowlist shape
- * TrainingTab's TRAINING_CANCELLABLE uses rather than inferring it from TERMINAL_STATUSES:
- * a sweep the backend derives as "interrupted" is done, not merely non-terminal. */
-const SWEEP_CANCELLABLE: ReadonlySet<string> = new Set(["running"]);
 
 export function TuningTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
@@ -195,15 +182,13 @@ export function TuningTab() {
     };
   }, [selectedId, rayAttempt]);
 
-  // Both three-valued: null while the detail hasn't answered for this selection yet, else the
-  // detail's own reading. The trial list below keys its own text on hasManifest the same way.
+  // Null while the detail hasn't answered for this selection yet, else the detail's own reading.
   const detailForSelection = detail && detail.sweep_id === selectedId ? detail : null;
-  const hasManifest = detailForSelection ? detailForSelection.has_manifest : null;
   const sweepNonTerminal =
-    detailForSelection === null || !TERMINAL_STATUSES.has(detailForSelection.status);
+    detailForSelection === null || !TERMINAL_STATES.has(detailForSelection.status);
 
-  // One TensorBoard over the whole sweep directory: this route's own 404 is how the
-  // pre-manifest window presents here, so it is retried silently, never shown as a failure.
+  // One TensorBoard over the whole sweep directory: a 404 while the sweep has not started is
+  // retried silently, never shown as a failure.
   const sweepTbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
     if (!selectedId) return { url: null, error: null, done: true };
     try {
@@ -255,7 +240,7 @@ export function TuningTab() {
   }, [trialMetrics]);
 
   const selectedTrial = trials.find((t) => t.trial_id === selectedTrialId) ?? null;
-  const sweepDraws = useMemo(() => sweepDrawsOf(detail?.result), [detail?.result]);
+  const sweepDraws = useMemo(() => sweepDrawsOf(detail?.outcome), [detail?.outcome]);
 
   function toggleSweep(sweepId: string) {
     setSelectedTrialId(null);
@@ -311,12 +296,12 @@ export function TuningTab() {
   }
 
   // Cancel while running, gone once "stop requested" except for an external sweep; "Run again"
-  // once terminal and relaunchable. Either disables with a pending label while in flight.
+  // once stopped. Either disables with a pending label in flight.
   function sweepAction(s: Sweep) {
     const pending = pendingActions[s.sweep_id];
     const actionError = actionErrors[s.sweep_id];
     const describedBy = actionError ? `sweep-action-error-${s.sweep_id}` : undefined;
-    if (SWEEP_CANCELLABLE.has(s.status)) {
+    if (!TERMINAL_STATES.has(s.status)) {
       if (s.cancel_requested && !s.external) return null;
       return (
         <button
@@ -334,24 +319,21 @@ export function TuningTab() {
         </button>
       );
     }
-    if (s.relaunchable) {
-      return (
-        <button
-          type="button"
-          aria-label={`Run again ${s.sweep_id}`}
-          aria-describedby={describedBy}
-          disabled={pending === "relaunch"}
-          className="tcip-btn text-[10px] shrink-0 mt-2 disabled:opacity-60"
-          onClick={(e) => {
-            e.stopPropagation();
-            void onRelaunchSweep(s.sweep_id);
-          }}
-        >
-          {pending === "relaunch" ? "Starting…" : "Run again"}
-        </button>
-      );
-    }
-    return null;
+    return (
+      <button
+        type="button"
+        aria-label={`Run again ${s.sweep_id}`}
+        aria-describedby={describedBy}
+        disabled={pending === "relaunch"}
+        className="tcip-btn text-[10px] shrink-0 mt-2 disabled:opacity-60"
+        onClick={(e) => {
+          e.stopPropagation();
+          void onRelaunchSweep(s.sweep_id);
+        }}
+      >
+        {pending === "relaunch" ? "Starting…" : "Run again"}
+      </button>
+    );
   }
 
   return (
@@ -456,19 +438,12 @@ export function TuningTab() {
                   Could not refresh this sweep's record: {detailError}
                 </div>
               )}
-              {!detail.has_manifest ? (
-                <div role="status" aria-live="polite" className="text-[11px] text-tcip-muted">
-                  {SWEEP_NO_RECORD_YET}
-                </div>
-              ) : detail.status === "canceled" ? (
+              {detail.status === "canceled" ? (
                 <div className="text-[11px] text-tcip-muted">
                   Canceled: {detail.error ?? NO_CANCEL_REASON}
                 </div>
-              ) : hasContent(detail.result) ? (
+              ) : detail.status === "completed" && hasContent(detail.outcome) ? (
                 <>
-                  {detail.error ? (
-                    <div className="text-[11px] text-tcip-fp">{detail.error}</div>
-                  ) : null}
                   {sweepDraws && (
                     <div className="text-[11px]">
                       <div className="tcip-heading mb-1">The spread across draws</div>
@@ -479,9 +454,11 @@ export function TuningTab() {
                           {cellText(sweepDraws.best.max)}, completed seeds{" "}
                           {sweepDraws.best.seeds_complete.map(cellText).join(", ")}
                         </div>
-                      ) : sweepDraws.bestReason ? (
-                        <div className="text-tcip-muted mb-1">{sweepDraws.bestReason}</div>
-                      ) : null}
+                      ) : (
+                        <div className="text-tcip-muted mb-1">
+                          No point completed every one of its draws.
+                        </div>
+                      )}
                       {sweepDraws.groups.length > 0 && (
                         <div className="overflow-auto">
                           <table className="w-full text-left">
@@ -501,15 +478,13 @@ export function TuningTab() {
                               {sweepDraws.groups.map((g, i) => (
                                 <tr key={i}>
                                   <td className="pr-2 font-mono">
-                                    {g.point
-                                      ? Object.entries(g.point)
-                                          .map(([k, v]) => `${k}=${cellText(v)}`)
-                                          .join(", ")
-                                      : "never answered"}
+                                    {Object.entries(g.point ?? {})
+                                      .map(([k, v]) => `${k}=${cellText(v)}`)
+                                      .join(", ")}
                                   </td>
                                   <td className="pr-2">
                                     {g.block.seeds_complete.length} of{" "}
-                                    {cellText(sweepDraws.splitDraws)}
+                                    {cellText(detail.input.split_draws)}
                                   </td>
                                   <td className="pr-2">
                                     {cellText(g.block.n_complete)} of {cellText(g.block.n)}
@@ -528,10 +503,10 @@ export function TuningTab() {
                     </div>
                   )}
                   <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
-                    {JSON.stringify(detail.result, null, 2)}
+                    {JSON.stringify(detail.outcome, null, 2)}
                   </pre>
                 </>
-              ) : !TERMINAL_STATUSES.has(detail.status) ? (
+              ) : !TERMINAL_STATES.has(detail.status) ? (
                 <div className="text-[11px] text-tcip-muted">
                   The best config appears here once the sweep finishes. Pick one of its trials to
                   follow that trial while it runs.
@@ -603,7 +578,7 @@ export function TuningTab() {
           <ul className="space-y-1">
             {sweeps.map((s) => {
               const expanded = selectedId === s.sweep_id;
-              const running = SWEEP_CANCELLABLE.has(s.status);
+              const running = !TERMINAL_STATES.has(s.status);
               const searchLine = [
                 s.n_trials != null
                   ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned${
@@ -682,9 +657,6 @@ export function TuningTab() {
                             </span>
                           )
                         )}
-                        {!s.relaunchable && s.reason && (
-                          <span className="block text-[10px] text-tcip-muted">{s.reason}</span>
-                        )}
                       </span>
                     </button>
                     {sweepAction(s)}
@@ -704,15 +676,13 @@ export function TuningTab() {
                       )}
                       <ul className="space-y-1">
                         {trials.length === 0 ? (
-                          // hasManifest === false: the detail pane already carries
-                          // SWEEP_NO_RECORD_YET; nothing renders here so it appears once.
-                          hasManifest === true ? (
+                          detailForSelection ? (
                             <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
-                          ) : hasManifest === null ? (
+                          ) : (
                             <li className="text-[10px] text-tcip-muted">
                               Reading this sweep's record…
                             </li>
-                          ) : null
+                          )
                         ) : (
                           trials.map((t) => (
                             <li key={t.trial_id}>

@@ -168,15 +168,16 @@ def test_refusal_unvalidated_stamp(
 def _row_gone_bucket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, experiment_id: str,
 ) -> tuple[dict, dict]:
-    """An earned bucket whose validated_by row's own experiment has since been deleted from the
-    store: the raw-write case verify_stamp_binding's own docstring accepts as a bound claim's
-    experiment going missing after the fact."""
-    from tcip_mcp.experiments import config_key
-    import tcip_store
+    """An earned bucket whose validated_by row's own run directory has since been deleted: the
+    raw-write case verify_stamp_binding's own docstring accepts as a bound claim's run going
+    missing after the fact."""
+    import shutil
+
+    from tcip_mcp.experiments import find_run
 
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id=experiment_id)
     validated_by = built["stamp"]["validated_by"]
-    tcip_store.delete(config_key(validated_by["experiment_id"]))
+    shutil.rmtree(find_run(validated_by["experiment_id"]))
     return built, validated_by
 
 
@@ -381,7 +382,7 @@ def test_parsed_marker_resolves_through_find_validation(
     """Coverage: parse_validation_reference has no production caller today; this proves the
     marker a rule-admitted accept writes parses back to the experiment and digest find_validation
     resolves its own row from."""
-    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.experiments import find_observation, find_validation
     from tcip_mcp.pipelines.resolution import parse_validation_reference
 
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id="exp-admit-parse")
@@ -396,7 +397,7 @@ def test_parsed_marker_resolves_through_find_validation(
     parsed = parse_validation_reference(marker)
     assert parsed is not None
     experiment_id, record_digest = parsed
-    row = find_validation(experiment_id, record_digest)
+    row = find_validation(find_observation(experiment_id), record_digest)
     assert row is not None
 
 

@@ -45,30 +45,26 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     """The evaluation dataset reads the subject the run's checkpoint records, so the ground truth
     it scores against holds that subject's objects and no others."""
     import tcip_mcp.pipelines.training.eval_runners as runners
-    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._producer_fixtures import admit_over
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import finished_run
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     scope = admit_over(images_dir, labels_dir, subject="leaf").scope
     data = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "num_channels": 3,
             "scope": asdict(scope)}
-    run = create_run({"data": data}, str(tmp_path / "runs"), id="auto-run-28")
-    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, data=data,
-                          filename="model_best.pt")
+    run_dir = finished_run(None, experiment_id="auto-run-28", data=data)
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, output_dir, **kw):
+    def _fake(ckpt, model, loader, device, **kw):
         captured["ds"] = loader.dataset
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run.id, str(images_dir), str(labels_dir))
+    res = evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
     assert "error" not in res, res
 
     dataset = captured["ds"]

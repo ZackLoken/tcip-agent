@@ -94,7 +94,7 @@ class TestFullClassificationPipeline:
 
         # --- Step 4: Create run and train 2 epochs ---
         from tcip_mcp.pipelines.training.generic_trainer import train
-        from tcip_mcp.pipelines.training.run_registry import create_run
+        from tests.tiny_trainer_fixtures import trainer_run
 
         config = {
             "model_source": model_source,
@@ -108,7 +108,8 @@ class TestFullClassificationPipeline:
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = create_run(config, output_dir, id="auto-run-32")
+        run = trainer_run(config, output_dir, has_val_loader=val_loader is not None,
+                          id="auto-run-32")
 
         rows: list[dict] = []
         completed_run = train(run, loader, val_loader=val_loader,
@@ -239,8 +240,8 @@ class TestDetectionPipelineRealData:
     def test_build_train_infer_export(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.training.generic_trainer import train
         from tcip_mcp.pipelines.training.collation import task_collate
-        from tcip_mcp.pipelines.training.run_registry import create_run
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tests.tiny_trainer_fixtures import trainer_run
         from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
         # --- Step 1: A bespoke detection model_source (small input sizes for speed) ---
@@ -289,10 +290,11 @@ class TestDetectionPipelineRealData:
             "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
             "scheduler": {"type": "cosine"},
             "early_stopping": {"enabled": False},
+            "evaluation": {"selection_metric": "loss"},
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = create_run(config, detection_output_dir, id="auto-run-33")
+        run = trainer_run(config, detection_output_dir, has_val_loader=False, id="auto-run-33")
         completed = train(run, loader, val_loader=None)
 
         assert completed.status == "completed"

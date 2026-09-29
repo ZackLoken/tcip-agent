@@ -2,77 +2,85 @@
 ``rank_registered_models`` lists rather than ranking when ``metric`` is left empty, since
 ``val_map50`` is a labeled comparability metric, not necessarily what governs a trait's
 phenotype; a stated metric that no model carries is a distinct error from an empty registry.
-Also covers lower-is-better ranking and registered metrics sourced from the checkpoint's own
-epoch rather than the last training epoch."""
+Also covers lower-is-better ranking, the metrics source a registration derives, and a completed
+run's checkpoint metrics sourced from the checkpoint's own epoch rather than the last one."""
+
+import pytest
+
+
+def _checkpoint(tmp_path, name: str) -> str:
+    """A checkpoint file of its own under ``tmp_path`` for ``name``; its path."""
+    pytest.importorskip("torch")
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    return str(checkpoint_file(tmp_path / f"{name}.pt", name))
+
+
+def _registered(tmp_path, *entries: tuple[str, dict | None]):
+    """A registry holding one foreign entry per ``(name, metrics)``, each over a checkpoint file
+    of its own."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    reg = ModelRegistry(str(tmp_path))
+    for name, metrics in entries:
+        reg.register_model(name, _checkpoint(tmp_path, name), {}, metrics=metrics, tags=[])
+    return reg
+
+
+def _named(reg, name: str) -> dict:
+    """The one entry ``reg`` lists under ``name``."""
+    (entry,) = [m for m in reg.list_models() if m["name"] == name]
+    return entry
 
 
 def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = str(tmp_path)
 
-    # Empty registry, no metric → an empty listing, not a refusal.
-    empty = rank_registered_models(project)
-    assert "error" not in empty
-    assert empty == {"models": [], "count": 0, "available_metrics": []}
+    # Empty registry, no metric: an empty listing, not a refusal.
+    assert rank_registered_models(project) == {"models": [], "count": 0, "available_metrics": []}
 
-    reg = ModelRegistry(project)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("a", str(ckpt), {}, metrics={"val_map50": 0.70}, tags=[],
-                       metrics_source="trainer")
-    reg.register_model("b", str(ckpt), {}, metrics={"val_map50": 0.90}, tags=[],
-                       metrics_source="trainer")
+    _registered(tmp_path, ("a", {"val_map50": 0.70}), ("b", {"val_map50": 0.90}))
 
-    # A populated registry with no metric → the listing, not a required-metric refusal.
+    # A populated registry with no metric: the listing, not a required-metric refusal.
     res = rank_registered_models(project)
-    assert "error" not in res
     assert res["count"] == 2
     assert {m["name"] for m in res["models"]} == {"a", "b"}
     assert res["available_metrics"] == [
         {"metric": "val_map50", "role": "comparability_only", "direction": "higher",
-         "sources": ["trainer"]}
+         "sources": ["caller"]}
     ]
 
     # An explicit, legitimate metric still succeeds: a rail must admit valid work.
-    res = rank_registered_models(project, metric="val_map50")
+    res = rank_registered_models(project, metric="val_map50", include_unverified=True)
     assert res["name"] == "b"
     assert res["ranking_basis"] == "val_map50"
-    assert res["higher_is_better"] is True
-    assert res["direction_source"] == "declared"
-    assert res["excluded_unverified"] == []
+    assert (res["higher_is_better"], res["direction_source"]) == (True, "declared")
 
-    # A declared metric no model carries → a distinct error that lists what's actually available.
-    res = rank_registered_models(project, metric="val_loss")
+    # A declared metric no model carries: a distinct error listing what's actually available.
+    res = rank_registered_models(project, metric="val_loss", include_unverified=True)
     assert "No registered model has metric" in res["error"]
     assert res["available_metrics"][0]["metric"] == "val_map50"
     assert res["n_models"] == 2
 
-    # A metric with no declared ranking direction → refused before ever looking for it.
+    # A metric with no declared ranking direction: refused before ever looking for it.
     res = rank_registered_models(project, metric="val_map99")
     assert "no declared ranking direction" in res["error"]
-    assert res["available_metrics"][0]["metric"] == "val_map50"
 
 
 def test_rank_registered_models_excludes_unverified_entries_by_default(tmp_path):
     """A caller-asserted metric is not silently trusted: it is ranked only when the caller
     explicitly says to consider unverified numbers."""
-    from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    project = str(tmp_path)
-    reg = ModelRegistry(project)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
-                       metrics_source="caller")
+    _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
 
-    res = rank_registered_models(project, metric="val_map50")
+    res = rank_registered_models(str(tmp_path), metric="val_map50")
     assert "unverified" in res["error"]
     assert res["excluded_unverified"] == [{"name": "asserted", "metrics_source": "caller"}]
 
-    res = rank_registered_models(project, metric="val_map50", include_unverified=True)
+    res = rank_registered_models(str(tmp_path), metric="val_map50", include_unverified=True)
     assert res["name"] == "asserted"
     assert res["unverified_included"] is True
     assert res["excluded_unverified"] == []
@@ -82,18 +90,12 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
     """The two ranking refusals a breeder can reach through the GUI (an undeclared direction,
     every carrier unverified) read as plain sentences: neither names this tool's own
     parameters, since a breeder using the rank control never calls it directly."""
-    from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    project = str(tmp_path)
-    reg = ModelRegistry(project)
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
-                       metrics_source="caller")
+    _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
 
-    no_direction = rank_registered_models(project, metric="val_map99")["error"]
-    all_unverified = rank_registered_models(project, metric="val_map50")["error"]
+    no_direction = rank_registered_models(str(tmp_path), metric="val_map99")["error"]
+    all_unverified = rank_registered_models(str(tmp_path), metric="val_map50")["error"]
 
     assert no_direction == (
         "'val_map99' has no declared ranking direction (evaluation.HIGHER_IS_BETTER_BY_METRIC "
@@ -104,162 +106,124 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
         "every registered model carrying 'val_map50' is unverified (metrics_source is not "
         "'trainer'); include unverified models to rank them, or register a verified run."
     )
-
     for text in (no_direction, all_unverified):
-        assert "higher_is_better" not in text
-        assert "include_unverified" not in text
-        assert "available_metrics" not in text
-        assert "rank_registered_models" not in text
+        for parameter in ("higher_is_better", "include_unverified", "available_metrics",
+                          "rank_registered_models"):
+            assert parameter not in text
 
 
-def test_register_model_refuses_nonexistent_checkpoint(tmp_path):
-    """register_model must refuse a phantom deliverable, not silently store a null-checksum
-    entry: the shared chokepoint both register_model_from_experiment and
-    model_tools.register_model's explicit mode route through."""
-    import pytest as _pytest
-
+def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
+    """A phantom deliverable is refused, never stored as a null-checksum entry."""
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    with _pytest.raises(FileNotFoundError):
-        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"), {}, metrics_source=None)
-    assert reg.get_model("ghost") is None
-
-
-def test_register_model_refuses_a_metrics_source_pairing_mismatch(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry
-
-    reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    import pytest as _pytest
-    with _pytest.raises(ValueError, match="metrics_source"):
-        reg.register_model("a", str(ckpt), {}, metrics={"val_map50": 0.5}, metrics_source=None)
-    with _pytest.raises(ValueError, match="metrics_source"):
-        reg.register_model("a", str(ckpt), {}, metrics=None, metrics_source="caller")
+    with pytest.raises(FileNotFoundError):
+        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"), {})
     assert reg.list_models() == []
 
 
+def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
+    """A registration names a checkpoint every later reader can load: bytes the verified reader
+    refuses are refused at the door and nothing is stored, and a readable checkpoint registers."""
+    from tcip_mcp.model_registry import ModelRegistry, UnregisteredCheckpoint
+
+    reg = ModelRegistry(str(tmp_path))
+    garbage = tmp_path / "garbage.pt"
+    garbage.write_bytes(b"not a checkpoint")
+
+    with pytest.raises(UnregisteredCheckpoint):
+        reg.register_model("garbage", str(garbage), {})
+    assert reg.list_models() == []
+
+    reg.register_model("real", _checkpoint(tmp_path, "real"), {})
+    assert [m["name"] for m in reg.list_models()] == ["real"]
+
+
+def test_a_foreign_registrations_source_is_read_off_whether_it_carries_metrics(tmp_path):
+    """The source is derived, never stated: ``caller`` for asserted metrics, ``None`` for none."""
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.tools.model_tools import register_model
+
+    register_model(name="a", checkpoint_path=_checkpoint(tmp_path, "a"),
+                   project_path=str(tmp_path), metrics={"val_map50": 0.5})
+    register_model(name="b", checkpoint_path=_checkpoint(tmp_path, "b"),
+                   project_path=str(tmp_path))
+
+    reg = ModelRegistry(str(tmp_path))
+    assert _named(reg, "a")["metrics_source"] == "caller"
+    assert _named(reg, "b")["metrics_source"] is None
+
+
 def test_best_model_lower_is_better_for_loss(tmp_path):
+    from tcip_mcp.model_registry import best_model
+
+    models = _registered(tmp_path, ("hi", {"val_loss": 0.9}), ("lo", {"val_loss": 0.2})
+                         ).list_models()
+
+    assert best_model(models, "val_loss", higher_is_better=False,
+                      include_unverified=True)["name"] == "lo"
+    # A metric no model has: None, cleanly distinguishable from "no models".
+    assert best_model(models, "nonexistent", higher_is_better=False,
+                      include_unverified=True) is None
+
+
+def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(tmp_path):
+    """An entry with no metrics (``metrics_source: null``) is not malformed: it is simply
+    excluded from ranking, like any other entry that does not carry the metric."""
+    from tcip_mcp.model_registry import best_model
+
+    models = _registered(tmp_path, ("empty", None), ("real", {"val_loss": 0.5})).list_models()
+
+    assert best_model(models, "val_loss", higher_is_better=False,
+                      include_unverified=True)["name"] == "real"
+
+
+def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epoch(
+    tmp_path, monkeypatch,
+):
+    """A run the default trainer completes names its best checkpoint, whose metrics are that
+    epoch's own, sourced ``trainer``; the registry lists it under the run's id."""
+    pytest.importorskip("torch")
+    from tcip_mcp.experiments import METRICS_FILE, read_rows
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import worker_run
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("hi", str(ckpt), {}, metrics={"val_loss": 0.9}, tags=[],
-                       metrics_source="trainer")
-    reg.register_model("lo", str(ckpt), {}, metrics={"val_loss": 0.2}, tags=[],
-                       metrics_source="trainer")
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
+    run_dir = worker_run(None, {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+                         "task": "regression"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},
+        "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 3}],
+        "mixed_precision": False, "device": "cpu",
+        "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
+    }, experiment_id="exp-best")
 
-    # higher_is_better=False ranks ascending → the lower val_loss is "best".
-    assert reg.best_model("val_loss", higher_is_better=False)["name"] == "lo"
-    # A metric no model has → None (cleanly distinguishable from "no models").
-    assert reg.best_model("nonexistent", higher_is_better=False) is None
-
-
-def test_best_model_treats_a_present_null_source_as_an_honest_empty_pairing(tmp_path):
-    """A stored ``metrics_source: null`` (an entry with no metrics) is not malformed: it is
-    simply excluded from ranking, like any other entry that does not carry the metric."""
-    from tcip_mcp.model_registry import ModelRegistry
-
-    reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    reg.register_model("empty", str(ckpt), {}, metrics=None, tags=[], metrics_source=None)
-    reg.register_model("real", str(ckpt), {}, metrics={"val_loss": 0.5}, tags=[],
-                       metrics_source="trainer")
-
-    assert reg.best_model("val_loss", higher_is_better=False)["name"] == "real"
-
-
-def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    import torch
-
-    from tcip_mcp.experiments import (
-        complete_run,
-        create_experiment,
-        log_metrics,
-        register_model_from_experiment,
-    )
-
-    create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
-    log_metrics("exp", 1, {"val_map50": 0.60})
-    log_metrics("exp", 2, {"val_map50": 0.40})  # last epoch is worse (overfit)
-
-    # model_best.pt carries the best epoch's metrics (epoch 1), not the last row (epoch 2).
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "epoch": 1, "metrics": {"val_map50": 0.60}}, ckpt)
-    assert "error" not in complete_run("exp", str(ckpt))
-
-    result = register_model_from_experiment("exp", str(ckpt))
-    assert result["metrics"]["val_map50"] == 0.60  # from checkpoint, not 0.40 (last jsonl row)
-    assert result["metrics"]["epoch"] == 1
-
-    from tcip_mcp.model_registry import ModelRegistry
-
-    m = ModelRegistry(str(tmp_path)).get_model("exp")
-    assert m["metrics_source"] == "trainer"  # config carries no training_source
-
-
-def test_register_model_from_experiment_twice_on_a_completed_record_is_idempotent(tmp_path, monkeypatch):
-    """_register_entry replaces by name, and the eviction rail admits a replace whose
-    experiment_id is this write's own, so a second register_model_from_experiment call on an
-    already-completed record, with the same
-    checkpoint path, succeeds again rather than refusing, the remedy _finalize_run's own
-    docstring names for a registration that fails after complete_run succeeded. complete_run is
-    used here only as the producer of a completed record to register against, not itself
-    under test."""
-    monkeypatch.chdir(tmp_path)
-    import torch
-
-    from tcip_mcp.experiments import (
-        complete_run, create_experiment, register_model_from_experiment, update_status,
-    )
-    from tcip_mcp.model_registry import ModelRegistry
-
-    create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
-    update_status("exp", "running")
-    ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_state_dict": {}, "metrics": {"val_map50": 0.60}}, ckpt)
-    complete_run("exp", str(ckpt))
-
-    first = register_model_from_experiment("exp", str(ckpt))
-    assert "error" not in first
-    second = register_model_from_experiment("exp", str(ckpt))
-    assert "error" not in second
-
-    entries = [e for e in ModelRegistry(str(tmp_path)).list_models() if e["name"] == "exp"]
-    assert len(entries) == 1
-    assert entries[0]["checkpoint_path"] == str(ckpt)
+    entry = _named(ModelRegistry(str(tmp_path)), "exp-best")
+    assert entry["metrics_source"] == "trainer"
+    best_epoch = entry["metrics"]["epoch"]
+    assert best_epoch in {row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]}
 
 
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(tmp_path):
-    """Config and metrics arrive from a caller, an agent's own dict or a checkpoint's stamp,
-    so the field that will not encode is named before anything reaches the registry.
-
-    A stringified measurement is the failure this closes: it reads as a recorded number to
-    every later reader, with nothing marking it as a repr of something else.
-    """
+    """Config and metrics arrive from a caller, so the field that will not encode is named
+    before anything reaches the registry: a stringified measurement would read as a recorded
+    number to every later reader."""
     from pathlib import Path
-
-    import pytest
 
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = _checkpoint(tmp_path, "m")
 
     with pytest.raises(TypeError) as config_refused:
-        reg.register_model("a", str(ckpt), {"weights": Path("model_best.pt")},
-                           metrics_source=None)
+        reg.register_model("a", str(ckpt), {"weights": Path("model_best.pt")})
     assert "config.weights" in str(config_refused.value)
 
     with pytest.raises(ValueError) as metrics_refused:
-        reg.register_model("a", str(ckpt), {}, metrics={"val_map50": float("inf")},
-                           metrics_source="caller")
+        reg.register_model("a", str(ckpt), {}, metrics={"val_map50": float("inf")})
     assert "metrics.val_map50" in str(metrics_refused.value)
 
     assert reg.list_models() == []
@@ -267,48 +231,13 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(t
 
 def test_an_ordinary_registry_payload_is_still_registered(tmp_path):
     """The refusal above must not cost a real deliverable its registry entry."""
-    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.model_registry import ModelRegistry, best_model
 
     reg = ModelRegistry(str(tmp_path))
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    entry = reg.register_model("a", str(ckpt), {"epochs": 3}, metrics={"val_map50": 0.70},
-                               metrics_source="trainer")
+    entry = reg.register_model("a", _checkpoint(tmp_path, "a"), {"epochs": 3},
+                               metrics={"val_map50": 0.70})
 
     assert entry["name"] == "a"
     assert [m["name"] for m in reg.list_models()] == ["a"]
-    assert reg.best_model("val_map50", higher_is_better=True)["metrics"]["val_map50"] == 0.70
-
-
-def test_register_model_tool_refuses_metrics_beside_experiment_id(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    import pytest as _pytest
-
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.model_tools import register_model
-
-    create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"weights")
-
-    with _pytest.raises(ValueError, match="experiment_id"):
-        register_model(experiment_id="exp", checkpoint_path=str(ckpt),
-                       metrics={"val_map50": 0.5})
-
-
-def test_register_model_tool_explicit_mode_sets_the_source_from_whether_metrics_were_passed(
-    tmp_path,
-):
-    from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.model_tools import register_model
-
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    register_model(name="a", checkpoint_path=str(ckpt), project_path=str(tmp_path),
-                   metrics={"val_map50": 0.5})
-    assert ModelRegistry(str(tmp_path)).get_model("a")["metrics_source"] == "caller"
-
-    register_model(name="b", checkpoint_path=str(ckpt), project_path=str(tmp_path))
-    assert ModelRegistry(str(tmp_path)).get_model("b")["metrics_source"] is None
+    assert best_model(reg.list_models(), "val_map50", higher_is_better=True,
+                      include_unverified=True)["metrics"]["val_map50"] == 0.70

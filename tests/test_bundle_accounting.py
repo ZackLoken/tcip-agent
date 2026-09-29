@@ -60,45 +60,32 @@ def test_a_state_record_is_claimed_under_the_state_root(tmp_path: Path):
     assert not accounting.unaccounted
 
 
-def test_an_experiment_member_and_a_run_only_launch_config_are_each_claimed(tmp_path: Path):
+def test_every_file_of_a_run_and_a_sweeps_trial_is_a_run_blob(tmp_path: Path):
+    """A run directory and a sweep's trial run directory travel whole as files, written by the
+    launcher's own writer and the envelope's own sink: none is a store record and none is left
+    unaccounted."""
+    from tcip_mcp.experiments import sweeps_dir
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.tools.bundle import BLOB_RUNS, blob_home
+    from tcip_mcp.tools.training_tools import open_run
+    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+
     root = tmp_path / "proj"
     _dataset_tree(root)
-    run_dir = root / ".tcip" / "experiments" / "exp1"
-    run_dir.mkdir(parents=True)
-    (run_dir / "config.json").write_text("{}", encoding="utf-8")
-    (run_dir / "metrics.jsonl").write_text('{"epoch": 1}\n', encoding="utf-8")
-    (run_dir / "launch_config.json").write_text("{}", encoding="utf-8")
+    config = detection_config(tmp_path / "ds")
+    run_dir = opened_run(root, config, experiment_id="exp1")
+    log_epoch(run_dir, 1, {"loss": 0.5})
+    trial_dir = sweeps_dir(root) / "study1" / "trial_0"
+    open_run(trial_dir, dict(config), resolve_run(config).record,
+             launched_by={"launcher": "process"}, trial_params={"lr": 0.1})
 
     accounting = account_for(root)
 
-    claimed = _plan_paths(accounting)
-    assert str(run_dir / "config.json") in claimed
-    assert str(run_dir / "metrics.jsonl") in claimed
-    assert str(run_dir / "launch_config.json") in claimed
-    assert not accounting.unaccounted
-
-
-def test_an_hpo_study_result_and_sweep_manifest_and_trial_members_are_claimed(tmp_path: Path):
-    root = tmp_path / "proj"
-    _dataset_tree(root)
-    hpo = root / ".tcip" / "hpo"
-    hpo.mkdir(parents=True)
-    (hpo / "study1.json").write_text("{}", encoding="utf-8")  # the unanchored study-result template
-    study_dir = hpo / "study1"
-    study_dir.mkdir()
-    (study_dir / "manifest.json").write_text("{}", encoding="utf-8")
-    trial_dir = study_dir / "trial_0"
-    trial_dir.mkdir()
-    (trial_dir / "resolved_config.json").write_text("{}", encoding="utf-8")
-    (trial_dir / "metrics.jsonl").write_text('{"iter": 1}\n', encoding="utf-8")
-
-    accounting = account_for(root)
-
-    claimed = _plan_paths(accounting)
-    assert str(hpo / "study1.json") in claimed
-    assert str(study_dir / "manifest.json") in claimed
-    assert str(trial_dir / "resolved_config.json") in claimed
-    assert str(trial_dir / "metrics.jsonl") in claimed
+    blobs = {str(p) for p in accounting.blobs}
+    for member in (run_dir / "run.json", run_dir / "metrics.jsonl", trial_dir / "run.json"):
+        assert str(member) in blobs
+        assert blob_home(accounting.tree, member) == BLOB_RUNS
+    assert str(run_dir / "run.json") not in _plan_paths(accounting)
     assert not accounting.unaccounted
 
 

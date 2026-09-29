@@ -165,7 +165,6 @@ def run_inference(
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
     selection_dir: str | None = None,
-    experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     split_seed: int = DEFAULT_CAL_SEED,
@@ -224,10 +223,11 @@ def run_inference(
     A bucket that already holds a prediction document from an earlier publish, with no verdict yet
     recorded against it, refuses this write outright (error names the document count and a
     suggested fresh bucket), whatever ``overwrite`` says; two runs racing into one bucket after
-    both resolve it clean are not guarded. A terminal (completed or failed) experiment's bucket the
-    lineage pointer already locks is unreachable through the suggested bucket too;
-    ``clear_prediction_bucket`` is the audited remedy that clears one for republication, moving it
-    into a dated archive.
+    both resolve it clean are not guarded. ``clear_prediction_bucket`` is the audited remedy that
+    clears one for republication, moving it into a dated archive.
+
+    The run that produced the checkpoint is the one whose completed final status names its sha256
+    (``model_registry.resolve_model_identity``); a foreign checkpoint names none.
 
     A bucket stamped validated names the validation record its claim was earned from. The gate for
     that record runs before any file is written, and the record is appended over the prediction
@@ -291,10 +291,6 @@ def run_inference(
             response carries ``n_excluded_training_stems`` and ``n_excluded_validation_stems``,
             the members the selection put elsewhere, beside
             ``n_excluded_incomplete_attribute``.
-        experiment_id: The run that produced the checkpoint, by its record id
-            (``tcip_mcp.experiments``), for provenance. Resolved best-effort (checkpoint's own
-            stamp, then the registry) when omitted. A known run whose training split can't be read
-            fails calibration's train-disjointness check.
         group_by: ``images_dir`` regime only. Grouping policy for the locked calibration/holdout
             split, ``"tile_prefix"`` or ``"stem"``; ignored when ``group_key_map`` is given.
             ``None`` resolves to ``"tile_prefix"`` without a ``selection_dir``; a value beside
@@ -380,8 +376,7 @@ def run_inference(
         from tcip_mcp.model_registry import resolve_model_identity
         from tcip_mcp.pipelines.block_calibration import reserved_calibration_region_available
 
-        block_identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
-        block_calibration_experiment_id = block_identity["experiment_id"]
+        block_calibration_experiment_id = resolve_model_identity(checkpoint)["experiment_id"]
         if block_calibration_experiment_id is None or not reserved_calibration_region_available(
             block_calibration_experiment_id
         ):
@@ -401,7 +396,6 @@ def run_inference(
             conf_threshold=conf_threshold, tile_size=tile_size, overlap=overlap,
             tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
             postprocess=postprocess, require_masks=require_masks,
-            experiment_id=block_calibration_experiment_id or experiment_id,
             allow_unvalidated_staging=allow_unvalidated_staging, trait=trait,
             resume=resume, overwrite=overwrite, dry_run=dry_run,
         )
@@ -412,7 +406,7 @@ def run_inference(
         tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
         calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
-        selection_dir=selection_dir, experiment_id=experiment_id,
+        selection_dir=selection_dir,
         group_by=group_by, group_key_map=group_key_map, split_seed=split_seed,
         split_holdout_ratio=split_holdout_ratio,
     )
@@ -454,7 +448,6 @@ def _run_inference_verified(
     trait: str | None,
     calibration_labels_dir: str | None,
     calibration_images_dir: str | None,
-    experiment_id: str | None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     split_seed: int = DEFAULT_CAL_SEED,
@@ -471,7 +464,7 @@ def _run_inference_verified(
     p = _prepare_pass(
         checkpoint, images_dir=images_dir, conf_threshold=conf_threshold, device=device, tile=tile, tile_size=tile_size,
         overlap=overlap, tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms,
-        max_dets=max_dets, postprocess=postprocess, experiment_id=experiment_id)
+        max_dets=max_dets, postprocess=postprocess)
     if isinstance(p, str):
         return {"error": p}
 
@@ -668,7 +661,7 @@ def _prepare_pass(
     checkpoint, *, images_dir: str | None,
     conf_threshold: float | None, device: str | None, tile: bool | None, tile_size: int | None,
     overlap: float | None, cross_tile_nms: float | None, max_dets: int | None, postprocess: str,
-    experiment_id: str | None, tile_batch_size: int,
+    tile_batch_size: int,
 ) -> "_PreparedPass | str":
     """Resolve a pass from a loaded checkpoint and what its caller stated (``None`` for anything
     unstated), over ``images_dir``'s logical images or, with ``images_dir`` ``None``, over no
@@ -692,7 +685,7 @@ def _prepare_pass(
     # An unset ``tile`` gets the checkpoint's own tiled-or-not regime, never a platform default.
     tiled = (getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
     # Identity before calibration: its train-disjointness gate needs the checkpoint's experiment.
-    identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
+    identity = resolve_model_identity(checkpoint)
 
     try:
         geometry = resolve_tile_geometry(
@@ -879,10 +872,10 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
 
 def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dict, draft, *,
                          producer: str, dataset_root: Path | None
-                         ) -> tuple[list[str], int, dict, bool | None]:
+                         ) -> tuple[list[str], int, dict]:
     """Write one prediction document per result as ``predictions`` yields it, then append the
-    record the gate earned over the documents as they landed, write the stamp last, link the bucket
-    into its run's lineage, and record the publication.
+    record the gate earned over the documents as they landed, write the stamp last (its
+    ``experiment_id`` the one link between the bucket and its run), and record the publication.
 
     ``predictions`` is a list or a stream that predicts, reports progress and stops on cancellation
     as it is consumed. The stamp names each written document's stem and its image's file name
@@ -894,11 +887,10 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
     the error, then propagates; a raise before any document lands committed nothing and leaves no
     line. A lost audit line (``AuditEntryNotWritten``) propagates as it is. A completed pass leaves
     the stamp's own ``stamp_written`` line, which names every document, and one
-    ``prediction_bucket_published`` line naming whether the lineage link landed (``None`` when the
-    run names no experiment). ``dataset_root`` is the bucket's (``bucket_dataset_root``), the root
-    both lines are recorded under.
+    ``prediction_bucket_published`` line. ``dataset_root`` is the bucket's
+    (``bucket_dataset_root``), the root both lines are recorded under.
 
-    Returns ``(written, dropped_nonpositive_boxes, stamp_body, lineage_linked)``.
+    Returns ``(written, dropped_nonpositive_boxes, stamp_body)``.
     """
     from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.pipelines.resolution import seal_validation, write_sidecar
@@ -934,76 +926,16 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
                 {"predictions_dir": str(out), "written": written, "error": str(exc)},
                 status="failed", scope=dataset_root)
         raise
-    exp_id = stamp_body["experiment_id"]
-    lineage_linked = None
-    if exp_id:
-        try:
-            from tcip_mcp.experiments import update_lineage
-
-            update_lineage(exp_id, predictions=str(out))
-            lineage_linked = True
-        except Exception:
-            logger.warning("could not link predictions into experiment lineage", exc_info=True)
-            lineage_linked = False
     record_event_or_raise(
-        "prediction_bucket_published",
-        {"predictions_dir": str(out), "lineage_linked": lineage_linked}, scope=dataset_root)
-    return written, dropped, stamp_body, lineage_linked
-
-
-def _clear_door_refusal_reason(recorded_path: str) -> str | None:
-    """Why ``clear_prediction_bucket`` would itself refuse ``recorded_path``, or ``None`` when the
-    door would reach it.
-    """
-    from tcip_mcp.dataset_layout import canonical_prediction_bucket
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, stamp_names_raster
-    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_count
-
-    canonical = canonical_prediction_bucket(recorded_path)
-    if canonical is None:
-        return "it is not a canonical bucket under a dataset root"
-    dataset_root = canonical[0]
-    stamp = read_operating_point_sidecar(Path(recorded_path))
-    if stamp is not None and stamp_names_raster(stamp):
-        return "its stamp names a whole-raster pass, out of that door's scope"
-    count = review_state_count(project_state_dir(dataset_root), bucket_key_of(Path(recorded_path)))
-    if count:
-        return "it carries review state"
-    return None
-
-
-def _frozen_pointer_refusal(experiment_id: str | None, out: Path) -> str | None:
-    """Why publishing into ``out`` is refused because ``experiment_id``'s lineage already points at
-    another bucket it froze, or ``None`` when nothing refuses (no experiment, or a pointer still
-    open). The reason names ``clear_prediction_bucket`` as the remedy only where that door would
-    reach the recorded bucket.
-    """
-    if not experiment_id:
-        return None
-    from tcip_mcp.experiments import lineage_key, pointer_frozen, read_member
-
-    frozen = pointer_frozen(experiment_id, "lineage", "predictions", str(out))
-    if frozen is None:
-        return None
-    # pointer_frozen refuses exactly when terminal and the recorded pointer differs: that
-    # recorded path already holds the experiment's own published documents.
-    recorded_path = (read_member(lineage_key(experiment_id), {}) or {}).get("predictions")
-    door_reason = _clear_door_refusal_reason(recorded_path) if recorded_path else None
-    if door_reason is None:
-        return (f"{frozen} {recorded_path!r} holds the experiment's own published documents; "
-                f"clear_prediction_bucket(predictions_dir={recorded_path!r}, reason=...) "
-                "clears it for re-publication into that recorded path.")
-    return (f"{frozen} {recorded_path!r} holds the experiment's own published documents, and "
-            f"clear_prediction_bucket refuses that bucket too, since {door_reason}; it stays as "
-            "published.")
+        "prediction_bucket_published", {"predictions_dir": str(out)}, scope=dataset_root)
+    return written, dropped, stamp_body
 
 
 def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: Path | None,
                    allow_unvalidated_staging: bool, claim_evidence: dict | None = None,
                    stamp_extras: dict | None = None, dry_run: bool = False) -> dict:
-    """Publish a run's predictions into ``out``: the tile gate, the count claim's own gate, the
-    frozen-lineage-pointer refusal, then the writes, the stamp, the lineage link and the
-    publication's line (:func:`_publish_predictions`).
+    """Publish a run's predictions into ``out``: the tile gate and the count claim's own gate,
+    then the writes, the stamp and the publication's line (:func:`_publish_predictions`).
 
     ``result`` is the run's own facts (:meth:`_PreparedPass.result`) with ``results`` a list or a
     stream that predicts as it is consumed; every gate runs before the first result is drawn.
@@ -1012,11 +944,9 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
     fields. ``out`` has already cleared the bucket-immutability resolver.
 
     Returns ``{"refusal": <the door's own error dict>}`` with the bucket untouched, or ``refusal``
-    ``None`` beside ``written``, ``dropped_boxes``, the ``op_stamp`` as written and
-    ``lineage_linked`` (``True``/``False`` for an attempted link, ``None`` when the run named no
-    experiment to link). ``dry_run`` stops once every gate has passed, drawing no result and
-    writing nothing, and returns ``refusal`` ``None`` beside the ``op_stamp`` the writes would
-    start from.
+    ``None`` beside ``written``, ``dropped_boxes`` and the ``op_stamp`` as written. ``dry_run``
+    stops once every gate has passed, drawing no result and writing nothing, and returns
+    ``refusal`` ``None`` beside the ``op_stamp`` the writes would start from.
     """
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate, operating_point_stamp, prediction_producer, tile_size_gate_flag,
@@ -1036,10 +966,6 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
     if refusal is not None:
         return {"refusal": refusal}
 
-    frozen = _frozen_pointer_refusal(result["experiment_id"], out)
-    if frozen is not None:
-        return {"refusal": {"error": frozen}}
-
     sha = result["checkpoint_sha256"]
     op_stamp = operating_point_stamp(
         result["operating_point"], slicing=result["slicing"], validated=draft is not None,
@@ -1052,11 +978,11 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
         gate_evidence_summary=result["gate_evidence_summary"], **(stamp_extras or {}))
     if dry_run:
         return {"refusal": None, "op_stamp": op_stamp}
-    written, dropped_boxes, op_stamp, lineage_linked = _publish_predictions(
+    written, dropped_boxes, op_stamp = _publish_predictions(
         out, result["results"], op_stamp, draft,
         producer=prediction_producer(result["checkpoint"], sha), dataset_root=dataset_root)
     return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
-            "op_stamp": op_stamp, "lineage_linked": lineage_linked}
+            "op_stamp": op_stamp}
 
 
 def bucket_location(out: Path | str, resolution, requested_output_dir: str) -> dict:
@@ -1086,7 +1012,6 @@ def _bucket_response(pub: dict, *, out: Path, resolution, dataset_root: Path | N
         "tile_size_validated": pub["op_stamp"]["tile_size_validated"],
         "verdict_guard_operative": dataset_root is not None,
         "dropped_nonpositive_boxes": pub["dropped_boxes"],
-        "lineage_linked": pub["lineage_linked"],
     }
     if dataset_root is None:
         response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
@@ -1212,83 +1137,34 @@ def _reconcile_document(source: Path, destination: Path, stem: str) -> tuple[boo
     return False, None
 
 
-def _cleared_artifact_matches(entry_path: str, dataset_root: Path, model: str, date: str | None) -> bool:
-    """Whether an artifact's recorded ``path`` resolves, through ``cleared_bucket_of``, to the
-    same dataset root, model and date as the source this clear (or resume) is scoped to."""
+def _is_cleared_destination_of(path: str, dataset_root: Path, model: str, date: str | None) -> bool:
+    """Whether ``path`` resolves, through ``cleared_bucket_of``, to the same dataset root, model
+    and date as the source this clear (or resume) is scoped to."""
     from tcip_mcp.dataset_layout import cleared_bucket_of
 
-    resolved = cleared_bucket_of(entry_path)
+    resolved = cleared_bucket_of(path)
     if resolved is None:
         return False
     entry_root, entry_model, _entry_stamp, entry_date = resolved
     return same_directory(entry_root, dataset_root) and (entry_model, entry_date) == (model, date)
 
 
-def _newest_cleared_artifact_for_source(
-    experiment_id: str, dataset_root: Path, model: str, date: str | None,
-) -> dict | None:
-    """The newest ``cleared:`` artifact on ``experiment_id`` whose path names a cleared bucket of
-    this source (``dataset_root``, ``model``, ``date``), by the artifacts' own ``recorded`` times,
-    or ``None`` when it names none.
-    """
-    from tcip_mcp.experiments import artifacts_key, read_member
-
-    artifacts = read_member(artifacts_key(experiment_id), {})
-    if not isinstance(artifacts, dict):
-        return None
-    best: tuple[str, str, str] | None = None  # (recorded, name, path)
-    for name, entry in artifacts.items():
-        if not name.startswith("cleared:") or not isinstance(entry, dict):
-            continue
-        path = entry.get("path")
-        if not path or not _cleared_artifact_matches(path, dataset_root, model, date):
-            continue
-        recorded = entry.get("recorded", "")
-        if best is None or recorded > best[0]:
-            best = (recorded, name, path)
-    return None if best is None else {"name": best[1], "path": best[2], "recorded": best[0]}
-
-
-def _find_cleared_candidate_with_no_source_stamp(
-    dataset_root: Path, model: str, date: str | None,
-) -> dict | None:
-    """When the source holds no ``operating_point`` stamp at all: the resume candidate the no-stamp
-    refusal names, found by walking the cleared archive. Every cleared bucket
-    :func:`~tcip_mcp.dataset_layout.cleared_bucket_of` resolves to this source's model and date is
-    read for its own stamp's experiment, and the newest ``cleared:`` artifact that experiment
-    records for it is the candidate; one carrying no stamp, or whose experiment records no artifact
-    for it, is never named.
-    """
+def _newest_cleared_for_source(dataset_root: Path, model: str, date: str | None) -> Path | None:
+    """The newest cleared destination of this source (``dataset_root``, ``model``, ``date``), by
+    the clear stamp its own directory name carries
+    (:func:`~tcip_mcp.dataset_layout.cleared_bucket_of`), or ``None`` when none exists. The
+    destination directory is created before a clear moves anything, so it is the record a resume
+    reads."""
     from tcip_mcp.dataset_layout import cleared_bucket_of, is_cleared_bucket, prediction_bucket_dirs
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_store import StoreError
 
-    best: tuple[str, str] | None = None  # (recorded, path)
+    best: tuple[str, Path] | None = None
     for cand in prediction_bucket_dirs(dataset_root, include_cleared=True):
-        if not is_cleared_bucket(cand):
+        resolved = cleared_bucket_of(cand) if is_cleared_bucket(cand) else None
+        if resolved is None or not _is_cleared_destination_of(str(cand), dataset_root, model, date):
             continue
-        resolved = cleared_bucket_of(cand)
-        if resolved is None:
-            continue
-        cand_root, cand_model, _cand_stamp, cand_date = resolved
-        if not (same_directory(cand_root, dataset_root) and (cand_model, cand_date) == (model, date)):
-            continue
-        try:
-            cand_stamp = store.read(sidecar_key(cand, "operating_point"), default=None)
-        except StoreError:
-            continue
-        if not isinstance(cand_stamp, dict):
-            continue
-        cand_exp_id = cand_stamp["experiment_id"]
-        if not cand_exp_id:
-            continue
-        newest = _newest_cleared_artifact_for_source(cand_exp_id, dataset_root, model, date)
-        if newest is None or not same_directory(newest["path"], cand):
-            continue
-        recorded = newest["recorded"]
-        if best is None or recorded > best[0]:
-            best = (recorded, str(cand))
-    return None if best is None else {"path": best[1]}
+        if best is None or resolved[2] > best[0]:
+            best = (resolved[2], cand)
+    return None if best is None else best[1]
 
 
 @mcp.tool()
@@ -1296,8 +1172,8 @@ def _find_cleared_candidate_with_no_source_stamp(
 def clear_prediction_bucket(
     predictions_dir: str, reason: str, cleared_bucket: str | None = None,
 ) -> dict:
-    """Move a terminal experiment's own recorded prediction bucket into a dated archive under
-    ``predictions/.cleared/``, so the path re-publishes.
+    """Move a published prediction bucket into a dated archive under ``predictions/.cleared/``,
+    so the path re-publishes.
 
     ``reason`` is required and non-empty, recorded as this door's own statement (never a ``user:``
     name minted from the string). The bucket cleared is ``resolve_output_path(predictions_dir)``,
@@ -1306,10 +1182,8 @@ def clear_prediction_bucket(
     Refuses, before any write, each with its own sentence: an empty reason; a bucket already under
     the cleared archive; a bespoke bucket; a bucket carrying no ``operating_point.json`` stamp (and
     no resumable clear on record); any stamp that will not decode; a stamp naming a whole-raster
-    pass; a stamp naming no experiment, one that is not terminal (``completed`` or ``failed``), or
-    one whose recorded ``lineage.predictions`` is not this path; a bucket with no document to
-    clear; an interrupted clear of this bucket already on record and unfinished; and a bucket
-    carrying review state.
+    pass; a bucket with no document to clear; an interrupted clear of this bucket already on
+    record and unfinished; and a bucket carrying review state.
 
     The review-state refusal is a preflight over the state present when this call resolved the
     bucket, bucket-wide, run only on a fresh call, never on a resume (``cleared_bucket`` given).
@@ -1320,13 +1194,12 @@ def clear_prediction_bucket(
     re-publication and leaves those documents where they landed.
 
     The move goes through the storage seam one key at a time (``operating_point`` first, then every
-    other stamp present, then the documents), the artifact recorded on the experiment before any
-    write, so a crash at any point leaves a state this door can finish: call again, naming
-    ``cleared_bucket`` as the archive path this call (or an earlier refusal) reports; a resume
-    creates the destination directory itself. A keyword-less call this door's own record shows as
-    interrupted refuses naming that remedy. A conditional write inside a reconcile step that lands
-    on a version another writer changed is refused naming that key, with everything already moved
-    standing.
+    other stamp present, then the documents), the destination directory created before any write
+    as the clear's own record (:func:`_newest_cleared_for_source`), so a crash at any point leaves
+    a state this door can finish: call again, naming ``cleared_bucket`` as the archive path this
+    call (or an earlier refusal) reports. A keyword-less call that record shows as interrupted
+    refuses naming that remedy. A conditional write inside a reconcile step that lands on a version
+    another writer changed is refused naming that key, with everything already moved standing.
 
     Values move by value (a stamp under the record codec, a document byte for byte), never
     re-validated. The moved ``operating_point`` stamp keeps its ``validated: true`` and
@@ -1337,15 +1210,11 @@ def clear_prediction_bucket(
     ``documents_moved_this_call``, ``stamps_moved_this_call``,
     ``review_state_landed_during_clear``, ``source_digest_before_call`` (the source's own document
     digest as this call found it), ``experiment_id``, ``checkpoint_sha256`` and ``validated_by``
-    (read from wherever the ``operating_point`` stamp sits), ``cleared_artifact_recorded`` and
-    ``reason``.
+    (read from wherever the ``operating_point`` stamp sits), and ``reason``.
     """
     from tcip_mcp.dataset_layout import (
         canonical_prediction_bucket, cleared_bucket_of, cleared_prediction_dir,
         current_cleared_stamp, is_cleared_bucket,
-    )
-    from tcip_mcp.experiments import (
-        _TERMINAL_STATES, lineage_key, read_member, record_artifact, status_key,
     )
     from tcip_mcp.pipelines.resolution import sidecar_key, stamp_names_raster
     from tcip_mcp.prediction_buckets import (
@@ -1380,12 +1249,12 @@ def clear_prediction_bucket(
     resuming = cleared_bucket is not None
     destination: Path
 
+    newest = _newest_cleared_for_source(dataset_root, model, date)
     if source_op.value is None and not resuming:
-        found = _find_cleared_candidate_with_no_source_stamp(dataset_root, model, date)
-        if found is not None:
+        if newest is not None:
             return {"error": f"{source} carries no operating_point.json; this is not a "
                              "published bucket. A candidate on record may finish it: call again "
-                             f"with cleared_bucket={found['path']!r}."}
+                             f"with cleared_bucket={str(newest)!r}."}
         return {"error": f"{source} carries no operating_point.json and no cleared bucket on "
                          "record names it; this is not a published bucket."}
 
@@ -1393,7 +1262,8 @@ def clear_prediction_bucket(
         assert cleared_bucket is not None  # resuming is exactly cleared_bucket is not None
         destination = resolve_output_path(cleared_bucket)
         resolved = cleared_bucket_of(destination)
-        if resolved is None or not _cleared_artifact_matches(str(destination), dataset_root, model, date):
+        if resolved is None or not _is_cleared_destination_of(
+                str(destination), dataset_root, model, date):
             return {"error": f"{cleared_bucket!r} does not name {source}'s own cleared "
                              "destination."}
         try:
@@ -1426,44 +1296,20 @@ def clear_prediction_bucket(
                          "regime keeps its own resume state under <bucket>/.tcip/ and is out of "
                          "scope for this door."}
 
-    experiment_id = live_stamp["experiment_id"]
-    if not experiment_id:
-        return {"error": f"{live_bucket}: operating_point.json names no experiment_id; "
-                         "clear_prediction_bucket clears only a bucket a run recorded against a "
-                         "specific experiment."}
-    state = (read_member(status_key(experiment_id), {}) or {}).get("state")
-    if state not in _TERMINAL_STATES:
-        return {"error": f"experiment {experiment_id!r} is {state!r}, not terminal (completed or "
-                         "failed); this door clears only a terminal experiment's own recorded "
-                         "bucket. A non-terminal experiment's bucket already republishes in "
-                         "place through run_inference's own <name>@r<n> redirect."}
-    lineage = read_member(lineage_key(experiment_id), {}) or {}
-    if lineage.get("predictions") != str(source):
-        return {"error": f"experiment {experiment_id!r}'s recorded lineage.predictions is "
-                         f"{lineage.get('predictions')!r}, not {str(source)!r}; this door clears "
-                         "only the bucket an experiment's own pointer names."}
-
     if resuming:
-        newest = _newest_cleared_artifact_for_source(experiment_id, dataset_root, model, date)
-        if newest is None:
-            return {"error": f"no cleared: artifact on experiment {experiment_id!r} names "
-                             f"{cleared_bucket!r} as {source}'s own cleared destination."}
-        if not same_directory(newest["path"], destination):
+        if newest is None or not same_directory(newest, destination):
             return {"error": f"{cleared_bucket!r} is not the newest cleared bucket on record for "
-                             f"{source}; the newest is {newest['name']!r}, naming "
-                             f"{newest['path']!r}. Call again with cleared_bucket="
-                             f"{newest['path']!r} to finish the interrupted clear."}
+                             f"{source}; the newest is {str(newest)!r}. Call again with "
+                             f"cleared_bucket={str(newest)!r} to finish the interrupted clear."}
     else:
         if not bucket_stems(source):
             return {"error": f"{source} holds no prediction document; nothing to clear. A "
                              "stamp-only bucket is already re-publishable in place through "
                              "run_inference."}
-        unfinished = _newest_cleared_artifact_for_source(experiment_id, dataset_root, model, date)
-        if unfinished is not None and not bucket_stems(Path(unfinished["path"])):
+        if newest is not None and not bucket_stems(newest):
             return {"error": f"an earlier clear of {source} is on record and unfinished "
-                             f"({unfinished['name']!r} names {unfinished['path']!r}, which holds "
-                             f"no document yet). Call again with "
-                             f"cleared_bucket={unfinished['path']!r} to finish it."}
+                             f"({str(newest)!r} holds no document yet). Call again with "
+                             f"cleared_bucket={str(newest)!r} to finish it."}
 
     if not resuming:
         count = review_state_count(review_state_dir, source_key)
@@ -1474,22 +1320,14 @@ def clear_prediction_bucket(
                              "state, not only its documents."}
 
     source_digest_before_call = bucket_content_digest(source)
-    cleared_artifact_recorded = True
 
     if not resuming:
         destination = cleared_prediction_dir(dataset_root, model, date, current_cleared_stamp())
-        if destination.exists():
+        try:
+            destination.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
             return {"error": f"{destination} already exists (a same-second collision with "
                              "another clear); wait a second and retry."}
-        from tcip_mcp.pipelines.resolution import bucket_relative_key
-
-        relative_key = bucket_relative_key(destination, dataset_root, document="cleared")
-        artifact = record_artifact(experiment_id, f"cleared:{relative_key}", str(destination))
-        if "error" in artifact:
-            return {"error": f"could not record the cleared artifact on {experiment_id!r}: "
-                             f"{artifact['error']}"}
-
-    destination.mkdir(parents=True, exist_ok=True)
 
     stamps_moved_this_call: list[str] = []
     documents_moved_this_call = 0
@@ -1561,10 +1399,9 @@ def clear_prediction_bucket(
         "stamps_moved_this_call": stamps_moved_this_call,
         "review_state_landed_during_clear": review_state_landed_during_clear,
         "source_digest_before_call": source_digest_before_call,
-        "experiment_id": experiment_id,
+        "experiment_id": live_stamp["experiment_id"],
         "checkpoint_sha256": live_stamp["checkpoint_sha256"],
         "validated_by": live_stamp["validated_by"],
-        "cleared_artifact_recorded": cleared_artifact_recorded,
         "reason": reason,
     }
 
@@ -1666,7 +1503,7 @@ def _export_predictions_raster(
     dataset_root: Path | None, device: str | None, conf_threshold: float | None,
     tile_size: int | None, overlap: float | None, tile_batch_size: int,
     cross_tile_nms: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
-    experiment_id: str | None, allow_unvalidated_staging: bool, trait: str | None = None,
+    allow_unvalidated_staging: bool, trait: str | None = None,
     resume: bool = False, overwrite: bool = False, dry_run: bool = False,
 ) -> dict:
     """One always-tiled pass over a raster read window by window
@@ -1694,7 +1531,7 @@ def _export_predictions_raster(
     p = _prepare_pass(
         checkpoint, images_dir=None, conf_threshold=conf_threshold, device=device, tile=True,
         tile_size=tile_size, overlap=overlap, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
-        postprocess=postprocess, experiment_id=experiment_id, tile_batch_size=tile_batch_size)
+        postprocess=postprocess, tile_batch_size=tile_batch_size)
     if isinstance(p, str):
         return {"error": p}
     # A tiled pass with no edge refuses in _prepare_pass, and a tiled pass carries its slicing.
@@ -1941,7 +1778,6 @@ def deliver_per_image_counts(
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
     selection_dir: str | None = None,
-    experiment_id: str | None = None,
     allow_unvalidated_staging: bool = False,
     predictions_dir: str | None = None,
 ) -> dict:
@@ -1962,7 +1798,7 @@ def deliver_per_image_counts(
       no predictor import. Reads an existing per-image prediction bucket's own
       ``operating_point.json`` stamp as its identity and validity source, counting real detections
       (a ``Point`` excluded) off each of its documents, sorted by stem. Every parameter meaningful
-      only to a live run (conf/device/tiling/cross-tile merge/max_dets/calibration/selection/experiment_id)
+      only to a live run (conf/device/tiling/cross-tile merge/max_dets/calibration/selection)
       refuses here by name; ``postprocess``/``tile_batch_size`` refuse only away from their own
       documented default. A bucket recording ``raster_path`` refuses naming
       ``deliver_orthomosaic_plant_counts``. A stamp recording a different, non-``None`` trait
@@ -1973,7 +1809,7 @@ def deliver_per_image_counts(
     every dimension clears. This tool builds no acknowledgment, so an unvalidated dimension always
     refuses here. A refused delivery still names what happened to a ``predictions_dir`` the live
     regime published before the CSV's own gate ran (``output_dir``, ``files``,
-    ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered: false``).
+    ``bucket_redirected``, beside ``csv_delivered: false``).
 
     Every row's image cell holds the source image's basename with its extension. The live regime
     without ``predictions_dir`` reads it off the pass's own per-image results; a bucket-reading
@@ -1985,9 +1821,10 @@ def deliver_per_image_counts(
     reads to it. Only the CSV's own delivery-gate refusal returns ``image_count`` and
     ``total_detections`` beside the error; an operationalization refusal, and every refusal the
     publisher raises before the CSV's own gate runs (a fabricated tile scale, an unearned count
-    claim, a frozen lineage pointer), carry neither.
+    claim), carry neither.
 
-    The live regime's ``checkpoint_sha256``/``experiment_id`` are the run's asserted identity; the
+    The live regime's ``checkpoint_sha256``/``experiment_id`` are the checkpoint's resolved
+    identity (``model_registry.resolve_model_identity``); the
     bucket regime's are the stamp's asserted identity, with no ``conf_source``. The CSV's own
     ``producer_model_sha256``/``producing_experiment_id`` columns, and this response's
     ``operating_point_validated``, are ``export_detection_csv``'s returned tail, corroborated
@@ -2029,8 +1866,6 @@ def deliver_per_image_counts(
             ``images_dir``).
         selection_dir: Live regime only. Restrict calibration to a selection's ``calibration``
             samples under the calibration labels directory (see ``run_inference``).
-        experiment_id: Live regime only. The run that produced the checkpoint, by its record id
-            (``tcip_mcp.experiments``), for provenance (see ``run_inference``).
         allow_unvalidated_staging: Live regime with ``predictions_dir`` only. Persist the bucket
             even when tile_size has no real basis, stamping ``tile_size_validated=false``; never a
             route to deliver the CSV itself unvalidated.
@@ -2066,7 +1901,7 @@ def deliver_per_image_counts(
                 ("cross_tile_nms", cross_tile_nms), ("max_dets", max_dets),
                 ("calibration_labels_dir", calibration_labels_dir),
                 ("calibration_images_dir", calibration_images_dir),
-                ("selection_dir", selection_dir), ("experiment_id", experiment_id),
+                ("selection_dir", selection_dir),
                 ("postprocess", postprocess), ("tile_batch_size", tile_batch_size),
             ) if value != defaults[name].default)
         if stated_live_only:
@@ -2139,7 +1974,6 @@ def deliver_per_image_counts(
         calibration_labels_dir=calibration_labels_dir,
         calibration_images_dir=calibration_images_dir,
         selection_dir=selection_dir,
-        experiment_id=experiment_id,
     )
     if "error" in result:
         return result

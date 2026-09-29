@@ -421,11 +421,11 @@ def import_coco(document: str, dataset_root: str, date: str) -> dict:
     file name (a ``.bandgroup`` capture by stem). Every fault found before writing is named
     together and refuses the import with nothing written: a malformed or unregistered category, a
     malformed record, a duplicate id or image, an image not in the capture, a frame that disagrees
-    with the image, or a per-image document already there. Documents are then written create-only
-    one at a time, so a label placed meanwhile raises on its document and leaves those written
-    before it, which the dataset's audit event names; an import that wrote no document leaves no
-    event. A crowd region keeps its flag and a run-length mask becomes rings. An image with no
-    annotations writes nothing.
+    with the image, or a per-image document already there. Documents are then written as one
+    store transaction, each checked absent under the locks, so a label placed meanwhile refuses
+    the whole import with nothing written; an import that wrote no document leaves no event. A
+    crowd region keeps its flag and a run-length mask becomes rings. An image with no annotations
+    writes nothing.
 
     Args:
         document: Absolute path to the COCO ``.json`` (an ``images``/``categories`` key).

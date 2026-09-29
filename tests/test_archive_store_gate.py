@@ -200,12 +200,12 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
 
 
-def test_a_render_cache_ray_stray_and_hash_cache_are_not_bundled_and_are_counted(tmp_path):
-    """The narrowed bundle: a render-cache sidecar, an unclaimed stray under .tcip/hpo standing
-    in for Ray's own experiment store (Ray is the real producer there; this suite's faked
-    tune_search never runs it, so the file is hand-placed), and image_hash_cache.json carry none
-    of them into the archive; the left-behind count covers the whole tree, an unbundled stray
-    outside .tcip included."""
+def test_a_render_cache_and_hash_cache_are_not_bundled_and_are_counted(tmp_path):
+    """The narrowed bundle: a render-cache sidecar and image_hash_cache.json carry into the
+    archive none of them; the left-behind count covers the whole tree, an unbundled stray outside
+    .tcip included. A sweep's directory travels whole, Ray's own experiment store in it
+    included (Ray is the real producer there; this suite's faked tune_search never runs it, so
+    the file is hand-placed)."""
     root = _project(tmp_path)
     (root / ".tcip" / "cache" / "img").mkdir(parents=True)
     (root / ".tcip" / "cache" / "img" / "abc123.jpg").write_bytes(b"\xff\xd8\xff")
@@ -222,9 +222,9 @@ def test_a_render_cache_ray_stray_and_hash_cache_are_not_bundled_and_are_counted
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
         names = zf.namelist()
     assert not any("cache" in name for name in names)
-    assert not any("experiment_state" in name for name in names)
+    assert any("experiment_state" in name for name in names)
     assert not any("an_unbundled_stray" in name for name in names)
-    assert result["left_behind"]["unaccounted"] >= 4
+    assert result["left_behind"]["unaccounted"] >= 3
 
 
 def test_the_tcip_bundle_carries_a_retrospective(tmp_path):

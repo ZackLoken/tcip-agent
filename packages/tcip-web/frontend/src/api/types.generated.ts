@@ -4,7 +4,7 @@
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.traits,
  * tcip_web.state.GuiVocabulary), plus a handful of
  * runtime constants (routes/images.py, tcip_mcp.web_client, tcip_mcp.dataset_layout,
- * tcip_web.jobstore). Do not edit by
+ * tcip_mcp.experiments, tcip_web.jobstore). Do not edit by
  * hand.
  */
 
@@ -26,9 +26,9 @@ export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
 
 export const PLATFORM_PANEL_EVENTS = ["labels_written", "annotate_focus", "review_focus", "active_project_changed", "canvas_state_request"] as const;
 
-export const TERMINAL_STATUSES = ["canceled", "completed", "failed", "interrupted"] as const;
+export const TERMINAL_STATES = ["canceled", "completed", "failed", "interrupted"] as const;
 
-export type JobStatus = "pending" | "running" | "completed" | "failed" | "canceled" | "interrupted";
+export type JobStatus = "pending" | "running" | "completed" | "failed" | "canceled";
 
 export interface GridGeometry {
   width: number;

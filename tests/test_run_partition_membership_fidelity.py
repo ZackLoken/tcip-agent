@@ -1,9 +1,9 @@
-"""What a run's persisted partition claims about a spatial-strip split.
+"""What a run's resolved record claims about a spatial-strip split.
 
-``split.json`` is the immutable record a reviewer reconstructs a metric from: which units trained,
-which validated, and which pixel regions each side occupied. These drive the real writer
-(``auto_train_val`` into ``persist_run_partition``) and read the result back, including through
-the geometric disjointness check that consumes it.
+The resolved data section's ``split.spatial_manifest`` is the immutable record a reviewer
+reconstructs a metric from: which units trained, which validated, and which pixel regions each
+side occupied. These drive the real writer (the launcher's own resolution and launch record) and
+read the result back, including through the geometric disjointness check that consumes it.
 """
 
 from __future__ import annotations
@@ -45,14 +45,14 @@ def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
 
 
 def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
-    from tcip_mcp.experiments import create_experiment, read_run_partition
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_run_partition
+    """The spatial manifest the run ``experiment_id`` over ``data_cfg`` resolved and recorded."""
+    from tcip_mcp.experiments import run_resolution
+    from tests._verified_checkpoint_fixtures import partition_side, resolved_run
 
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
-    assert val_ds is not None, "the fixture must produce a real validation side"
-    create_experiment(experiment_id, {})
-    persist_run_partition(experiment_id, data_cfg)
-    return read_run_partition(experiment_id)
+    resolved_run(None, data_cfg, experiment_id=experiment_id)
+    resolved = run_resolution(experiment_id)
+    assert partition_side(resolved["partition"], "train") == ["mosaic"]
+    return {"spatial": resolved["data"]["split"]["spatial_manifest"]}
 
 
 def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) -> None:
@@ -63,14 +63,10 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     data_cfg = _data_cfg(images_dir, labels_dir)
 
     split = _persisted_split("exp_membership", data_cfg)
-    manifest = data_cfg["split"]["spatial_manifest"]
 
-    assert split["group_by"] == "spatial_strip"
     train, val = split["spatial"]["train_identities"], split["spatial"]["val_identities"]
     assert train and val
     assert set(train).isdisjoint(val)
-    assert val == manifest["val_identities"]
-    assert train == manifest["train_identities"]
 
     # The two sides are not interchangeable: 0.65 of the axis trains against 0.25 validating, so
     # the recorded regions differ in width as well as in membership.
@@ -82,7 +78,7 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
 
 
 def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path) -> None:
-    """A four-way split's reserved calibration band reaches ``split.json`` as its own geometry,
+    """A four-way split's reserved calibration band reaches the resolved record as its own geometry,
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
     what was actually persisted there as clean while still catching one drawn from train."""
     from tcip_mcp.pipelines.raster_source import rects_overlap

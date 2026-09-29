@@ -54,8 +54,8 @@ def test_a_same_stem_non_png_entry_refuses(tmp_path: Path) -> None:
 
 def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: Path) -> None:
     """The head is sized for the classes this run's own masks hold, never a pinned two: masks
-    reaching id 2 derive three, and a caller stating any other count, more or fewer, refuses by
-    name."""
+    reaching id 2 derive three, and a caller stating any count, the derived one included, refuses
+    by name: the count is the masks' own, never an input compared against them."""
     images_dir, masks_dir = _dataset(tmp_path)
     three_classes = np.zeros((8, 8), dtype=np.uint8)
     three_classes[0:4, 0:4] = 1
@@ -65,8 +65,8 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(tmp_path: 
     _ds, data = run_over("semantic_seg", str(images_dir), str(masks_dir))
     assert data["num_classes"] == 3
 
-    for stated in (2, 5):
-        with pytest.raises(ValueError, match=f"num_classes={stated}"):
+    for stated in (2, 3, 5):
+        with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
             run_over("semantic_seg", str(images_dir), str(masks_dir),
                      stated={"num_classes": stated})
 

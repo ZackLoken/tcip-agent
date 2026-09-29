@@ -8,7 +8,6 @@ tests that exercise the detection/classification ``_validate`` path end-to-end.
 from __future__ import annotations
 
 import csv
-import json
 import math
 from functools import partial
 from pathlib import Path
@@ -39,8 +38,8 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     derive_operating_point_curve,
 )
 from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
+    evaluation_result,
     run_test_evaluation,
-    write_evaluation_result,
 )
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
@@ -49,7 +48,6 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
 from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests._trait_fixtures import confirm_bare  # noqa: E402
-from tests._verified_checkpoint_fixtures import SCOPED_DATA  # noqa: E402
 
 # A test naming trait="bud_opening" proposes it in its pinned root (conftest.seed_bud_trait_spec).
 _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -651,8 +649,8 @@ def test_effective_iou_type_resolution():
 
 
 def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
-    """test_results.json must record the iou_type evaluate() actually scored with
-    (instance_seg defaults to segm AP; recording 'bbox' would misreport mask AP)."""
+    """The result must record the iou_type evaluate() actually scored with (instance_seg
+    defaults to segm AP; recording 'bbox' would misreport mask AP)."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
     class _DummyModel:
@@ -661,42 +659,26 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
 
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
-    import tcip_store as ts
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, verified_checkpoint
 
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
-    from tcip_mcp.tools.model_tools import register_model
+    segmenter = verified_checkpoint(tmp_path, model_source={
+        "builder": "tests.bespoke_models:build_fixed_mask_instance_seg", "task": "instance_seg"})
+    detector = verified_checkpoint(tmp_path, model_source=dict(BUILT_DETECTOR))
 
-    def _checkpoint(task: str):
-        ckpt_path = tmp_path / f"{task}.pt"
-        torch.save({"config": {"model_source": {"builder": "x:y", "task": task},
-                               "data": dict(SCOPED_DATA)},
-                    "model_state_dict": {}}, str(ckpt_path))
-        result = register_model(name=f"iou-type-check-{task}", checkpoint_path=str(ckpt_path),
-                                config={}, project_path=str(tmp_path))
-        assert "error" not in result, result
-        return load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
-
-    segmenter, detector = _checkpoint("instance_seg"), _checkpoint("detection")
-
-    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu", str(tmp_path / "seg"))
+    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu")
     assert r["iou_type"] == "segm"
-    on_disk = ts.read(evaluation_results_key(tmp_path / "seg"))
-    assert on_disk["iou_type"] == "segm"
 
-    r = run_test_evaluation(detector, _DummyModel(), None, "cpu", str(tmp_path / "det"))
+    r = run_test_evaluation(detector, _DummyModel(), None, "cpu")
     assert r["iou_type"] == "bbox"
 
-    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu",
-                            str(tmp_path / "ovr"), iou_type="bbox")
+    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu", iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
 def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, monkeypatch):
-    """run_test_evaluation and run_full_frame_evaluation write through one shared
-    write_evaluation_result: both regimes' persisted records carry the same common identity
-    keys by name and presence, and neither carries the other's regime-specific fields."""
-    import tcip_store as ts
+    """run_test_evaluation and run_full_frame_evaluation compose through one shared
+    evaluation_result: both regimes' results carry the same common identity keys by name and
+    presence, and neither carries the other's regime-specific fields."""
     from PIL import Image
 
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -704,11 +686,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.training.eval_runners import (
-        evaluation_results_key, run_full_frame_evaluation,
-    )
-    from tcip_mcp.tools.model_tools import register_model
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     common_fields = {
         "model_path", "task", "model_sha256", "experiment_id", "iou_type",
@@ -725,20 +704,13 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         def to(self, device):
             pass
 
-    ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
-                           "data": dict(SCOPED_DATA)},
-                "model_state_dict": {}}, str(ckpt_path))
+    ckpt_path = registered_checkpoint(tmp_path)
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
-    reg = register_model(name="row4-writer-check", checkpoint_path=str(ckpt_path), config={},
-                        project_path=str(tmp_path))
-    assert "error" not in reg, reg
-    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
-    test_out = tmp_path / "test_eval"
-    run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(test_out),
-                        selection_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
-    test_result = ts.read(evaluation_results_key(test_out))
+    checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+    test_result = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu",
+                                      selection_dir=str(tmp_path / "manifest"),
+                                      evaluated_stem_count=3)
 
     images_dir, ff_labels = tmp_path / "ff_images", tmp_path / "ff_labels"
     images_dir.mkdir()
@@ -755,11 +727,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
             return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": []}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
-    ff_out = tmp_path / "ff_eval"
-    run_full_frame_evaluation(
-        stub_verified_checkpoint(str(tmp_path / "ff.pt")), str(images_dir),
-        str(ff_labels), str(ff_out), tile_size=32, overlap=0.0)
-    ff_result = ts.read(evaluation_results_key(ff_out))
+    ff_result = run_full_frame_evaluation(
+        checkpoint, str(images_dir), str(ff_labels), tile_size=32, overlap=0.0)
 
     for field in common_fields:
         assert field in test_result, f"{field} missing from the test-regime record"
@@ -768,11 +737,11 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     assert not (full_frame_only_fields & set(test_result))
 
 
-def test_write_evaluation_result_refuses_a_key_extra_shares_with_common(tmp_path):
+def test_evaluation_result_refuses_a_key_extra_shares_with_common():
     """A key present in both common and extra is a programming error, not a precedence rule:
     extra silently shadowing a common identity field (or the reverse) would defeat the
-    unification write_evaluation_result exists to enforce, so this refuses naming the key
-    rather than pick a winner."""
+    unification evaluation_result exists to enforce, so this refuses naming the key rather than
+    pick a winner."""
     common = {
         "model_path": "m.pt", "task": "detection", "model_sha256": "abc", "experiment_id": "e1",
         "iou_type": "bbox", "iou_threshold": 0.5, "conf_threshold": 0.3, "max_dets": 100,
@@ -780,89 +749,7 @@ def test_write_evaluation_result_refuses_a_key_extra_shares_with_common(tmp_path
     }
     extra = {"precision": 0.9, "task": "classification"}
     with pytest.raises(ValueError, match="task"):
-        write_evaluation_result(tmp_path / "eval_out", common, extra)
-
-
-def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch):
-    """A result document holds the same bytes wherever it was produced.
-
-    A text-mode writer emits CRLF on one platform and LF on another, so the same measurement
-    hashes differently depending on the machine that scored it. Bound to the file backend on
-    purpose: the CRLF risk is a text-mode file-write concern, and a database backend stores the
-    codec's own bytes in a column with no OS line-ending translation to go wrong.
-    """
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    import tcip_mcp.pipelines.training.evaluation as evaluation
-
-    ts.bind(FileBackend())
-
-    class _DummyModel:
-        def to(self, device):
-            pass
-
-    ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
-                           "data": dict(SCOPED_DATA)},
-                "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
-
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name="crlf-check", checkpoint_path=str(ckpt_path), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
-    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
-
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(tmp_path / "out"))
-
-    raw = Path(r["results_path"]).read_bytes()
-    assert b"\r\n" not in raw
-    assert b"\n" in raw
-
-
-def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch):
-    """``results_path`` names the readable test_results.json under the caller's output_dir, and its
-    contents are the same result the call returned. This is the only handle a caller keeps on a
-    finished evaluation, so a path that does not open, or opens onto different numbers, loses the
-    evaluation. Bound to the file backend on purpose: ``results_path`` is a real filesystem path,
-    and a database backend keeps the record in the database instead of at that path.
-    """
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-
-    import tcip_mcp.pipelines.training.evaluation as evaluation
-
-    ts.bind(FileBackend())
-
-    class _DummyModel:
-        def to(self, device):
-            pass
-
-    ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"config": {"model_source": {"builder": "x:y", "task": "detection"},
-                           "data": dict(SCOPED_DATA)},
-                "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(evaluation, "evaluate",
-                        lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
-
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name="results-path-check", checkpoint_path=str(ckpt_path), config={},
-                            project_path=str(tmp_path))
-    assert "error" not in result, result
-    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
-
-    out_dir = tmp_path / "runs" / "test"
-    r = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu", str(out_dir))
-
-    results_path = Path(r["results_path"])
-    assert results_path == out_dir / "test_results.json"
-    assert results_path.is_file()
-    assert json.loads(results_path.read_text()) == {k: v for k, v in r.items() if k != "results_path"}
+        evaluation_result(common, extra)
 
 
 # --------------------------------------------------------------------------
@@ -874,8 +761,8 @@ from torch.utils.data import DataLoader  # noqa: E402
 
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tcip_mcp.pipelines.training.collation import task_collate
-from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
+from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 IMG = 64
 
@@ -909,7 +796,8 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    run = create_run(_cfg(model_source, data), str(tmp_path / "out"), id="auto-run-23")
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", has_val_loader=True,
+                      id="auto-run-23")
     run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -948,7 +836,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
                     "task": "detection"}
     cfg = _cfg(model_source, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
-    run = create_run(cfg, str(tmp_path / "out"), id="auto-run-24")
+    run = trainer_run(cfg, tmp_path / "out", has_val_loader=True, id="auto-run-24")
     run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -975,7 +863,8 @@ def test_validate_classification_metrics(tmp_path):
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "task": "classification"}
-    run = create_run(_cfg(model_source, data), str(tmp_path / "out"), id="auto-run-25")
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", has_val_loader=True,
+                      id="auto-run-25")
     run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)

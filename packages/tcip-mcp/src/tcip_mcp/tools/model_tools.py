@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from tcip_mcp.server import mcp
-from tcip_mcp.model_registry import ModelRegistry
+from tcip_mcp.model_registry import ModelRegistry, best_model
 
 
 def _registry_root(project_path: str) -> str:
@@ -21,56 +21,24 @@ def register_model(
     project_path: str = "",
     metrics: dict | None = None,
     tags: list[str] | None = None,
-    experiment_id: str = "",
 ) -> dict:
-    """Register a trained model in the project model registry.
-
-    Two modes:
-      - Explicit: pass ``config`` (and optionally ``metrics``/``tags``) directly; the entry's
-        ``metrics_source`` becomes ``"caller"`` when ``metrics`` is non-empty, ``None`` otherwise.
-        Nothing here verifies a caller-asserted metric.
-      - From experiment: pass ``experiment_id`` alone to pull that experiment's config + the
-        checkpoint's own metrics, and bind the entry to the run through its ``experiment_id``
-        field, over the digest the run's own ``complete_run`` recorded at completion (no tag, no
-        lineage write here). Refuses by name: a run not completed with a recorded digest;
-        ``checkpoint_path`` bytes that are not the recorded ones (the recorded path or a
-        byte-identical copy only); a ``project_path`` other than the experiment's own root.
-        ``name`` then defaults to the experiment id. ``metrics``/``config``/``tags`` are refused
-        alongside ``experiment_id``; this mode always decides ``metrics_source`` from the
-        experiment itself.
+    """Register a foreign checkpoint in the project model registry: one no run of this project
+    produced (a run registers its own final weights on completion), or a second checkpoint of a
+    run under a name of its own. The entry's ``metrics_source`` is ``"caller"`` when ``metrics``
+    is non-empty, ``None`` otherwise; nothing here verifies a caller-asserted metric. Returns the
+    entry that owns the checkpoint's bytes: this one, or the completed run whose final status
+    names the same bytes.
 
     Args:
-        name: Model name (e.g. '<crop>_<trait>_v1'); defaults to the experiment id in experiment
-            mode.
+        name: Model name (e.g. '<crop>_<trait>_v1').
         checkpoint_path: Path to the .pt checkpoint.
-        config: Training configuration used (explicit mode; refused when ``experiment_id`` is set).
+        config: Training configuration used.
         project_path: Project root directory. Empty defaults to the platform state root.
-        metrics: Evaluation metrics (explicit mode; refused when ``experiment_id`` is set).
-        tags: Tags for filtering (explicit mode; refused when ``experiment_id`` is set).
-        experiment_id: Register from this run's record (one run's immutable record,
-            ``tcip_mcp.experiments``) instead of an explicit config.
+        metrics: Evaluation metrics.
+        tags: Tags for filtering.
     """
-    if experiment_id:
-        if config or metrics or tags:
-            raise ValueError(
-                "register_model: experiment_id registers from the experiment's own config and "
-                "checkpoint metrics; pass config/metrics/tags only in explicit mode (no "
-                "experiment_id), not alongside it."
-            )
-        from tcip_mcp.experiments import register_model_from_experiment as _reg
-        return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name or None)
-    # Record the model kind so the GUI + agent know how to run it; best-effort, a checkpoint
-    # that can't be sniffed still registers, and build_predictor re-sniffs at inference time.
-    kind = None
-    try:
-        from tcip_mcp.pipelines.inference.predictor import detect_kind
-        kind = detect_kind(checkpoint_path)
-    except Exception:
-        kind = None
     registry = ModelRegistry(_registry_root(project_path))
-    metrics_source = "caller" if metrics else None
-    return registry.register_model(name, checkpoint_path, config or {}, metrics, tags, kind=kind,
-                                    metrics_source=metrics_source)
+    return registry.register_model(name, checkpoint_path, config or {}, metrics, tags)
 
 
 def _labeled_available_metrics(models: list[dict]) -> list[dict]:
@@ -190,8 +158,8 @@ def rank_registered_models(
     excluded_unverified = [] if include_unverified else [
         {"name": m["name"], "metrics_source": m["metrics_source"]} for m in unverified
     ]
-    best = registry.best_model(metric, higher_is_better=resolved_direction,
-                               include_unverified=include_unverified, experiment_ids=experiment_ids)
+    best = best_model(models, metric, higher_is_better=resolved_direction,
+                      include_unverified=include_unverified)
     if best is None:
         carriers = [m for m in models if metric in m["metrics"]]
         if carriers and not include_unverified and all(m in unverified for m in carriers):

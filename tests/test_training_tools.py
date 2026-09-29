@@ -9,11 +9,18 @@ from pathlib import Path
 
 import pytest
 
-import tcip_store as ts
-
 # No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
 # test's pinned platform state root so trait="bud_opening" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+
+
+def _labeled(tmp_path: Path) -> dict:
+    """A data section over two labeled frames of ``bud`` under ``tmp_path``
+    (``_verified_checkpoint_fixtures.detection_images``)."""
+    from tests._verified_checkpoint_fixtures import detection_images
+
+    scope = {"subject": "bud", "id_map": {"bud": 0}}
+    return {**detection_images(tmp_path / "labeled", scope), "scope": scope}
 
 
 # --------------------------------------------------------------------------
@@ -24,14 +31,10 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
         # launch_training's own default stage shape: freeze_to + epochs, no lr.
         "batch_size": 2,
         "stages": [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}],
@@ -55,14 +58,10 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
     defaults in silence."""
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
     }
     nested_keys = {"batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 5}]}
     r = preflight_config({**cfg, "training": nested_keys})
@@ -100,16 +99,11 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     in a fraction of ``faster_rcnn``'s time over the same resnet18 backbone (single-stage, no
     region-proposal network), and nothing either smoke test asserts is faster-rcnn-specific.
     """
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     return {
         "model_source": {"builder": builder,
                          "builder_kwargs": {"min_size": 64, "max_size": 96, "detector": "fcos"},
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"},
-                 "num_channels": 3},
+        "data": {**_labeled(tmp_path), "num_channels": 3},
         "batch_size": 2,
     }
 
@@ -177,14 +171,10 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
         "batch_size": 2,
         "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}],
     }
@@ -222,6 +212,8 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
+        # One admitted image holds nothing out, so the run selects on its training loss.
+        "evaluation": {"selection_metric": "loss"},
     }
     r = preflight_config(cfg)
     assert r["valid"] is True  # informational only, never gating
@@ -256,6 +248,8 @@ def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
         "batch_size": 2,
+        # One admitted image holds nothing out, so the run selects on its training loss.
+        "evaluation": {"selection_metric": "loss"},
     }
     r = preflight_config(cfg)
     assert r["valid"] is True  # informational only, never gating
@@ -401,11 +395,14 @@ def test_preflight_admits_the_run_once(tmp_path):
     assert len(calls) == 1, calls
 
 
-@pytest.mark.parametrize("bad_document", [
-    '{"image": "bad", "width": 20, "height": 20, "annotations": 5}',
-    '{"image": "bad", "width": 20, "height": 20, "annotations": [7]}',
+@pytest.mark.parametrize(("bad_document", "refusal"), [
+    ('{"image": "bad", "width": 20, "height": 20, "annotations": 5}',
+     "not the list a label document holds"),
+    ('{"image": "bad", "width": 20, "height": 20, "annotations": [7]}',
+     "not an annotation object"),
 ])
-def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tmp_path, bad_document):
+def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
+        tmp_path, bad_document, refusal):
     """A document that decodes to a dict but whose annotations field is not a list, or whose
     record cannot be coerced, is exactly what the run's own admission (read_annotations) refuses
     at launch: preflight reads through the same call so it blocks here too, rather than passing a
@@ -434,21 +431,17 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tm
     }
     r = preflight_config(cfg)
     assert r["valid"] is False
-    assert any(i.startswith("data.labels_dir:") for i in r["issues"]), r["issues"]
+    assert any(refusal in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_config_training_source_shape_and_importability(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     base_cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
         "batch_size": 2,
     }
 
@@ -479,14 +472,10 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images"
-    lbls = tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     base_cfg: dict[str, object] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
         "batch_size": 2,
     }
 
@@ -533,25 +522,6 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_p
     assert any("evaluation" in i and "mapping" in i for i in r["issues"])
 
 
-def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch):
-    """A run's own row never touches the trait registry: naming a trait this platform's
-    registry does not carry (an evaluation.trait config field with no matching spec) must not
-    take down the whole run listing."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.run_registry import create_run, list_runs
-
-    run = create_run(
-        {"model_source": {"builder": "x:y", "task": "detection"}, "data": {},
-         "evaluation": {"trait": "no_such_trait_here"}},
-        str(tmp_path / "out"), id="auto-run-unregistered-trait",
-    )
-
-    # The registry is process-wide, so the listing may hold runs other tests created.
-    rows = [row for row in list_runs() if row["id"] == run.id]
-    assert len(rows) == 1
-    assert rows[0]["best_metric_name"] is None  # train() never ran, so nothing was stamped yet
-
-
 # preflight_config's reserve_calibration_fraction feasibility check: a training-launch-time
 # refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
 
@@ -576,13 +546,23 @@ def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128)
 
 
 def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path):
+    """A classification run never resolves to the within-image split a calibration region
+    reserves from, so the fraction is named as having no effect."""
+    from PIL import Image
+
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    rows = ["stem,label"]
+    for i in range(4):
+        Image.new("RGB", (32, 32), (20 * i, 30, 40)).save(images_dir / f"img{i}.png")
+        rows.append(f"img{i},{i % 2}")
+    (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
     cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                          "task": "classification"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "labels.csv"),
                  "split": {"reserve_calibration_fraction": 0.15}},
         "batch_size": 2,
     }
@@ -592,8 +572,7 @@ def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path)
 
 def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_path):
     """Two admitted members resolve to the group-balanced split, which reserves no calibration
-    region: the count in the issue is the run's own admitted membership, not a directory listing
-    of whatever else the images tree holds."""
+    region, so the fraction is named as having no effect."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
@@ -617,7 +596,7 @@ def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_pat
         "batch_size": 2,
     }
     r = preflight_config(cfg)
-    assert any("reserve_calibration_fraction" in i and "multi-member" in i for i in r["issues"])
+    assert any("reserve_calibration_fraction" in i and "has no effect" in i for i in r["issues"])
 
 
 def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_smoke(tmp_path):
@@ -638,9 +617,10 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
     r = preflight_config(cfg, smoke=True)
     assert any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
 
-    # Without smoke, this specific geometry check doesn't run (needs a real dataset build).
+    # The run's resolution builds its datasets whether or not the model is smoked, so the same
+    # geometry refuses without smoke too.
     r_no_smoke = preflight_config(cfg, smoke=False)
-    assert not any("reserve_calibration_fraction" in i for i in r_no_smoke["issues"])
+    assert any("reserve_calibration_fraction" in i for i in r_no_smoke["issues"])
 
 
 def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_name(tmp_path):
@@ -839,8 +819,44 @@ def _detection_base() -> dict:
     }
 
 
+def _trial(point: dict, report, base: dict, trial_dir, *, metric: str = "loss",
+           higher_is_better: bool = False) -> None:
+    """One HPO trial run as its sweep runs it, optimizing ``metric`` in its direction."""
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    _run_hpo_trial(point, report, base, Path(trial_dir),
+                   objective={"selection_metric": metric, "higher_is_better": higher_is_better},
+                   launched_by={"launcher": "process"})
+
+
+def _row(value: float, metric: str = "loss") -> dict:
+    """An epoch row stamping ``metric`` as the run's selection, the way the trainer stamps it."""
+    return {"selection_metric": metric, "selection": value}
+
+
+def _complete(run):
+    """End a stand-in training body the way a real one does: its final weights saved under
+    ``model_final``."""
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    run.saved["model_final"] = checkpoint_file(Path(run.output_dir) / "model_final.pt", "weights")
+    run.status = "completed"
+    return run
+
+
+def _trial_value(trial_dir, *, metric: str = "loss", higher_is_better: bool = False):
+    """The trial's result as its sweep projects it (``training_tools._trial_row``)."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.tools.training_tools import _trial_row
+
+    return _trial_row(observe(Path(trial_dir)), {"selection_metric": metric,
+                                                 "higher_is_better": higher_is_better})["value"]
+
+
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
-    """Stub dataset building + training + loaders so a trial runs instantly, no Ray."""
+    """Stub dataset building + training + loaders so a trial runs instantly, no Ray: the
+    resolution builds stand-in datasets and records no samples, and the child builds the same
+    stand-ins from that record."""
     import torch.utils.data as tud
     from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.data import split_construction as sc
@@ -848,64 +864,44 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
     ds = _FakeDataset()
 
-    def fake_auto_train_val(task, data_cfg, transforms):
+    def fake_auto_train_val(task, data_cfg, transforms, **_):
         if captured is not None:
             captured["transforms"] = transforms
             captured["data_cfg"] = data_cfg
         return ds, ds, None
 
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
+    monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
 
-def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch, tmp_path):
-    """Every epoch's composite plus the final best_metric are reported (lower=better),
-    so a min-mode scheduler sees the improving trace."""
+def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
+        monkeypatch, tmp_path):
+    """Every epoch's selection value is reported as the trial logs it, and the trial's result is
+    the best of those same rows (lower=better)."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         for epoch, value in enumerate([50.0, 40.0, 30.0]):
             if epoch_callback:
-                epoch_callback(epoch, {"val_objective": value})
-        run.best_metric = 30.0
-        run.status = "completed"
-        return run
+                epoch_callback(epoch, _row(value))
+        return _complete(run)
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
-    assert reported == [50.0, 40.0, 30.0, 30.0]  # per-epoch trace + final composite
+    _trial({"lr": 3e-4}, reported.append, _detection_base(), tmp_path / "trial_0")
+    assert reported == [50.0, 40.0, 30.0]
+    assert _trial_value(tmp_path / "trial_0") == 30.0
 
 
-def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch, tmp_path):
-    """Once a center-match trait sets which key governs checkpoint choice ('selection'),
-    HPO pruning must rank trials on that key, not the raw composite it can diverge from."""
+def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
+    """A crashed trial ends failed and carries no result, so it can never become the sweep's
+    best."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
-
-    def fake_train(run, train_loader, val_loader,
-                   epoch_callback=None, resume_from=""):
-        if epoch_callback:
-            epoch_callback(0, {"val_objective": 99.0, "selection": 12.0})
-        run.best_metric = 12.0
-        run.status = "completed"
-        return run
-
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
-    assert reported == [12.0, 12.0]  # the "selection" value, not 99.0
-
-
-def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
-    """A crashed trial reports +inf, the worst value under mode='min', so it can never become
-    the sweep's best."""
-    pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.experiments import observe
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
@@ -913,25 +909,24 @@ def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
-    assert reported == [float("inf")]
+    _trial({"lr": 3e-4}, reported.append, _detection_base(), tmp_path / "trial_0")
+    assert reported == []
+    assert observe(tmp_path / "trial_0").state == "failed"
+    assert _trial_value(tmp_path / "trial_0") is None
 
 
-def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(monkeypatch, tmp_path):
-    """A higher-is-better selection metric (accuracy) must report the trial's best epoch as the
-    highest reported value, not a minimize convention that would instead prefer the lowest."""
+def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
+        monkeypatch, tmp_path):
+    """A higher-is-better selection metric (accuracy) makes the trial's result its highest
+    reported value, not a minimize convention that would instead prefer the lowest."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         for epoch, value in enumerate([0.5, 0.9, 0.6]):
             if epoch_callback:
-                epoch_callback(epoch, {"selection": value})
-        # run.best_metric is left at its dataclass default (+inf), as a bespoke loop that never
-        # sets it would leave it; the trial's own tracking must supply the real final value.
-        run.status = "completed"
-        return run
+                epoch_callback(epoch, _row(value, metric="accuracy"))
+        return _complete(run)
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     base = {
@@ -942,18 +937,19 @@ def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(m
         "evaluation": {"selection_metric": "accuracy"},
     }
     reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, base, str(tmp_path / "trial_0"))
-    assert reported == [0.5, 0.9, 0.6, 0.9]  # per-epoch trace, then the highest, not +inf
+    _trial({"lr": 3e-4}, reported.append, base, tmp_path / "trial_0", metric="accuracy",
+           higher_is_better=True)
+    assert reported == [0.5, 0.9, 0.6]
+    assert _trial_value(tmp_path / "trial_0", metric="accuracy", higher_is_better=True) == 0.9
 
 
-def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direction(
+def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     monkeypatch, tmp_path,
 ):
-    """A trial that never reports a real value must report the losing side of the metric's own
-    direction (here, -inf, since accuracy is higher-is-better), so it can never be mistaken for
-    the sweep's best trial even under a maximize (mode='max') sweep."""
+    """A trial that fails carries no result, so the sweep's outcome under a maximize direction
+    is the one completed trial's, never the failed one's."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.tools.training_tools import sweep_outcome
 
     base = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
@@ -966,13 +962,13 @@ def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direc
     def fake_train_ok(run, train_loader, val_loader, task="classification",
                       epoch_callback=None, resume_from=""):
         if epoch_callback:
-            epoch_callback(0, {"selection": 0.7})
-        run.status = "completed"
-        return run
+            epoch_callback(0, _row(0.7, metric="accuracy"))
+        return _complete(run)
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_ok)
     real: list = []
-    _run_hpo_trial({"lr": 3e-4}, real.append, base, str(tmp_path / "trial_real"))
+    _trial({"lr": 3e-4}, real.append, base, tmp_path / "trial_real", metric="accuracy",
+           higher_is_better=True)
 
     def fake_train_fails(run, train_loader, val_loader, task="classification",
                          epoch_callback=None, resume_from=""):
@@ -980,24 +976,29 @@ def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direc
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
     failed: list = []
-    _run_hpo_trial({"lr": 3e-4}, failed.append, base, str(tmp_path / "trial_failed"))
+    _trial({"lr": 1e-2}, failed.append, base, tmp_path / "trial_failed", metric="accuracy",
+           higher_is_better=True)
 
-    assert failed == [float("-inf")]
-    assert failed[-1] < real[-1]  # strictly loses under mode='max' too
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.tools.training_tools import _trial_row
+
+    objective = {"selection_metric": "accuracy", "higher_is_better": True}
+    trials = [_trial_row(observe(tmp_path / name), objective)
+              for name in ("trial_failed", "trial_real")]
+    outcome = sweep_outcome(trials, {"objective": objective, "split_draws": 1})
+    assert (outcome["best_params"], outcome["best_value"]) == ({"lr": 3e-4}, 0.7)
 
 
 def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     """Trials train under the final run's regime: base_config augmentation reaches the train
     dataset, and the bespoke model_source is carried through. (Loss is owned by the builder.)"""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     captured: dict = {}
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         captured["model_source"] = run.config["model_source"]
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
@@ -1009,7 +1010,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         "batch_size": 2,
         "augmentation": {"horizontal_flip": 0.5},
     }
-    _run_hpo_trial({"lr": 3e-4}, [].append, base, str(tmp_path / "trial_0"))
+    _trial({"lr": 3e-4}, [].append, base, tmp_path / "trial_0")
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
 
@@ -1021,22 +1022,20 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     data section is built, so auto_train_val (and the drawn split behind it) actually reads the
     draw's own seed rather than the base config's unswept one."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     captured: dict = {}
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
-    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(tmp_path / "trial_0"))
+    _trial({"data.split.seed": 7}, [].append, _detection_base(), tmp_path / "trial_0")
     assert captured["data_cfg"]["split"]["seed"] == 7
 
 
-def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, transforms):
+def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, transforms, **_):
     """The exact reads split_construction.py's own auto_train_val performs on its multi-stem
     drawn path: setdefault the split block, then get its seed off that block. The single-source
     spatial-strip path (spatial_single_source_split) reads no seed at all; see
@@ -1048,17 +1047,15 @@ def _fake_auto_train_val_reading_seed_like_split_construction(task, data_cfg, tr
     return ds, ds, None
 
 
-def test_run_hpo_trial_dotted_seed_axis_reaches_the_resolved_config_snapshot(
-    monkeypatch, tmp_path,
-):
-    """data.split.seed, the split_draws grid axis, lands in the trial's own resolved-config
-    snapshot at the nested field auto_train_val reads it from."""
+def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypatch, tmp_path):
+    """data.split.seed, the split_draws grid axis, lands in the trial's launch record and in the
+    data section it resolved, at the nested field auto_train_val reads it from, beside the
+    sampled point itself."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.experiments import RUN_FILE, read_record
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
@@ -1067,26 +1064,25 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_resolved_config_snapshot(
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(trial_dir))
+    _trial({"data.split.seed": 7}, [].append, _detection_base(), trial_dir)
 
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["data"]["split"]["seed"] == 7
+    run = read_record(trial_dir / RUN_FILE)
+    assert run["config"]["data"]["split"]["seed"] == 7
+    assert run["trial_params"] == {"data.split.seed": 7}
+    assert run["resolved"]["data"]["split"]["seed"] == 7
 
 
-def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_snapshot(
+def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_record(
     monkeypatch, tmp_path,
 ):
-    """The tile geometry stamp_effective_data_geometry records off the same tiled dataset a
-    training body's auto_train_val returns must be present in resolved_config.json's own
-    data.tiling block, the record a caller reads back to know what the trial actually trained
-    on. Coverage, not a guard: the stamp lands on the plain merged dict the snapshot was written
-    from regardless of whether the tracker holds the data block, so this passes either way."""
+    """The tile geometry stamp_effective_data_geometry records off the tiled dataset a trial's
+    auto_train_val returns is in the trial's resolved data section, the record a caller reads
+    back to know what the trial actually trained on."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.experiments import RUN_FILE, read_record
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
@@ -1095,10 +1091,9 @@ def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_
     monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_reading_seed_like_split_construction)
 
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"data.split.seed": 7}, [].append, _detection_base(), str(trial_dir))
+    _trial({"data.split.seed": 7}, [].append, _detection_base(), trial_dir)
 
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["data"]["tiling"]["tile_size"] == 224
+    assert read_record(trial_dir / RUN_FILE)["resolved"]["data"]["tiling"]["tile_size"] == 224
 
 
 def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spatial_path(
@@ -1106,11 +1101,11 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 ):
     """The producer path: a real one-source tiled dataset through the real, unstubbed
     auto_train_val. Its single-source spatial-strip branch places every strip by declared order
-    alone, and the resolved-config snapshot carries the real spatial_manifest and tiling
+    alone, and the trial's launch record carries the real spatial_manifest and tiling
     auto_train_val wrote, with no seed inside the manifest it never read one for."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.experiments import RUN_FILE, read_record
     from tests.test_training_autoval import _big_single_source
 
     images_dir, labels_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
@@ -1125,7 +1120,6 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
@@ -1137,50 +1131,47 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"data.split.seed": 3}, [].append, base, str(trial_dir))
+    _trial({"data.split.seed": 3}, [].append, base, trial_dir)
 
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    resolved = read_record(trial_dir / RUN_FILE)["resolved"]
+    assert resolved["partition"]["seed"] is None
     assert resolved["data"]["split"]["spatial_manifest"]
     assert "seed" not in resolved["data"]["split"]["spatial_manifest"]
     assert resolved["data"]["tiling"]["tile_size"] == 128
 
 
-def test_run_hpo_trial_resolved_config_records_seed_actually_trained_under(monkeypatch, tmp_path):
-    """resolved_config.json's seed must match the seed the run actually trained under.
-    An unset seed is drawn fresh onto the run's own config, never copied back onto the
-    pre-run merged config the persisted record is built from."""
+def test_a_trials_launch_record_carries_the_seed_it_trained_under(monkeypatch, tmp_path):
+    """An unset seed is drawn onto the trial's launch record once, and the body trains under
+    that recorded seed."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.experiments import RUN_FILE, read_record
 
     captured: dict = {}
 
     def fake_train(run, train_loader, val_loader,
                    epoch_callback=None, resume_from=""):
         captured["seed"] = run.config.get("seed")
-        run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     trial_dir = tmp_path / "trial_0"
-    _run_hpo_trial({"lr": 3e-4}, [].append, _detection_base(), str(trial_dir))
+    _trial({"lr": 3e-4}, [].append, _detection_base(), trial_dir)
 
-    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["seed"] is not None
-    assert resolved["seed"] == captured["seed"]
+    recorded = read_record(trial_dir / RUN_FILE)["config"]["seed"]
+    assert recorded is not None and recorded == captured["seed"]
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
-    """A trial that trains one real epoch and then diverges must report the losing side as its
-    final value, not that epoch's real score, so it can never outrank a config that only scored
-    worse. Drives the real training body (nothing mocked).
+    """A trial that trains one real epoch and then diverges ends failed and carries no result,
+    not that epoch's real score, so it can never outrank a config that only scored worse. Drives
+    the real training body (nothing mocked).
 
     ``auto_val`` off, so the score ranked is the training loss over every admitted row: what is
     under test is how a diverged run ranks, and a drawn validation side would spend this model's
     one good forward on measuring rather than training.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -1199,11 +1190,11 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_
         "early_stopping": {"enabled": False},
     }
     reported: list = []
-    _run_hpo_trial({}, reported.append, base_config, str(tmp_path / "trial_0"))
+    _trial({}, reported.append, base_config, tmp_path / "trial_0", metric="loss")
 
     import math
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the run died
-    assert reported[-1] == float("inf")  # the losing side of 'loss' (lower=better)
+    assert _trial_value(tmp_path / "trial_0") is None
 
 
 # --------------------------------------------------------------------------
@@ -1246,121 +1237,6 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     assert out["worst_images"][0]["stem"] == "shaky"  # low confidence ranks worst
 
 
-# --------------------------------------------------------------------------
-# _ensure_experiment: experiments are immutable on relaunch
-# --------------------------------------------------------------------------
-
-def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
-    from tcip_mcp.experiments import (
-        config_key, create_experiment, lineage_key, log_metrics, read_metrics, status_key,
-        update_status,
-    )
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    # A completed experiment with recorded history.
-    create_experiment("exp1", {"a": 1}, data_source="imgs_v1")
-    update_status("exp1", "running")
-    log_metrics("exp1", 1, {"map50": 0.7})
-    update_status("exp1", "completed")
-    status_before = ts.read(status_key("exp1"))
-    metrics_before = read_metrics("exp1")
-
-    # Relaunching with the same experiment_id must not reuse it.
-    eid, out_dir = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="",
-                                      output_base=str(tmp_path / "out"),
-                                      launched_by={"launcher": "process"})
-    assert eid.startswith("exp1_run_") and eid != "exp1"
-    assert out_dir == str(tmp_path / "out" / eid)
-    assert ts.read(status_key("exp1")) == status_before      # untouched
-    assert read_metrics("exp1") == metrics_before             # untouched
-    assert ts.read(config_key("exp1")) == {"a": 1}
-
-    # The fresh experiment exists and points back at the original.
-    lineage = ts.read(lineage_key(eid))
-    assert lineage["parent_experiment"] == "exp1"
-    assert lineage["data_source"] == "imgs_v2"
-
-
-
-def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    # Agent pre-created the experiment (state 'created', no metrics): attach.
-    create_experiment("pre", {"a": 1})
-    eid, out_dir = _ensure_experiment("pre", {"a": 1}, None, resume_from="",
-                                      output_base=str(tmp_path / "out"),
-                                      launched_by={"launcher": "process"})
-    assert eid == "pre"
-    assert out_dir == str(tmp_path / "out" / "pre")
-
-    # A brand-new id is simply created.
-    eid2, out_dir2 = _ensure_experiment("new", {"a": 1}, None, resume_from="",
-                                        output_base=str(tmp_path / "out"),
-                                        launched_by={"launcher": "process"})
-    assert eid2 == "new"
-    assert out_dir2 == str(tmp_path / "out" / "new")
-
-
-def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, monkeypatch):
-    """A pristine pre-created experiment's config.json is refreshed with the config actually
-    launched (tiling/seed resolved after create_experiment ran), not left describing the config
-    as it stood before those were resolved."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import config_key, create_experiment
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    create_experiment("pre", {"a": 1})
-    effective_config = {"a": 1, "data": {"tiling": {"tile_size": 512}}, "seed": 99}
-    eid, _out_dir = _ensure_experiment("pre", effective_config, None, resume_from="",
-                                       output_base=str(tmp_path / "out"),
-                                       launched_by={"launcher": "process"})
-    assert eid == "pre"
-
-    config = ts.read(config_key("pre"))
-    assert config == effective_config
-
-
-def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_path, monkeypatch):
-    """resume_from must not reuse an id that already has recorded history: it mints a fresh
-    parented id instead, matching the non-resume collision behavior. Reusing it would discard the
-    resumed run's own metrics/lineage writes (refused by the terminal-state lock) and let
-    ModelRegistry.register_model replace the original's registry entry by name with no record of
-    what was superseded."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, lineage_key, log_metrics, update_status
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    create_experiment("res", {"a": 1})
-    update_status("res", "running")
-    log_metrics("res", 1, {"loss": 0.5})
-    eid, _out_dir = _ensure_experiment("res", {"a": 1}, None,
-                                       resume_from="ckpt/checkpoint_epoch_5.pt",
-                                       output_base=str(tmp_path / "out"),
-                                       launched_by={"launcher": "process"})
-    assert eid.startswith("res_run_") and eid != "res"
-
-    lineage = ts.read(lineage_key(eid))
-    assert lineage["parent_experiment"] == "res"
-
-
-def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monkeypatch):
-    """A resume_from target that is itself still pristine (never actually run) is unaffected:
-    pristine reuse doesn't depend on resume_from at all."""
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _ensure_experiment
-
-    create_experiment("pre2", {"a": 1})
-    eid, _out_dir = _ensure_experiment("pre2", {"a": 1}, None,
-                                       resume_from="ckpt/checkpoint_epoch_5.pt",
-                                       output_base=str(tmp_path / "out"),
-                                       launched_by={"launcher": "process"})
-    assert eid == "pre2"
-
-
 def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
     tmp_path, monkeypatch
 ):
@@ -1370,8 +1246,9 @@ def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(training_tools, "preflight_config",
-                        lambda config, smoke=False: {"valid": False, "issues": ["stub"]})
+    monkeypatch.setattr(training_tools, "_preflight",
+                        lambda config, *, smoke, overfit: ({"valid": False, "issues": ["stub"]},
+                                                           None))
 
     with pytest.raises(TypeError) as refused:
         training_tools.launch_training({"model_source": {"builder": Path("m.py")}})
@@ -1386,11 +1263,11 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
     monkeypatch.chdir(tmp_path)
     seen = []
 
-    def stub_preflight(config, smoke=False, overfit=False):
+    def stub_preflight(config, *, smoke, overfit):
         seen.append(config)
-        return {"valid": False, "issues": ["stub"]}
+        return {"valid": False, "issues": ["stub"]}, None
 
-    monkeypatch.setattr(training_tools, "preflight_config", stub_preflight)
+    monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
 
     result = training_tools.launch_training({"model_source": {"builder": "m:f"}})
 
@@ -1433,61 +1310,19 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
 
     def fake_search(*args, **kwargs):
         seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return {"best_params": {"lr": 0.01}, "best_value": 0.1, "n_trials": 1}
+        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
     base_config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "bud"}},
+        "data": _labeled(tmp_path),
     }
     result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
-    assert result["best_params"] == {"lr": 0.01}
+    assert result["status"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
-
-
-def test_run_hyperparameter_search_refuses_a_param_space_axis_naming_the_dotted_selection_metric(
-    tmp_path, monkeypatch,
-):
-    """run_hyperparameter_search fixes the sweep's selection metric and direction once from base_config and
-    reuses it for every trial; a param_space axis naming ``evaluation.selection_metric``
-    directly would let a trial's own resolution disagree, so it is refused by name before
-    the sweep is minted."""
-    from tcip_mcp.tools import training_tools
-
-    monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hyperparameter_search(
-        {"model_source": {"builder": "m:f", "task": "detection"}},
-        param_space={"evaluation.selection_metric": {
-            "type": "categorical", "choices": ["map", "iou_mean"],
-        }}, search_seed=0
-    )
-    assert "error" in result
-    assert "evaluation.selection_metric" in result["error"]
-
-
-def test_run_hyperparameter_search_refuses_a_param_space_axis_whose_choices_carry_selection_metric(
-    tmp_path, monkeypatch,
-):
-    """The same refusal catches an ``evaluation`` axis whose sampled value is itself a dict
-    naming ``selection_metric``, not only the dotted-key form."""
-    from tcip_mcp.tools import training_tools
-
-    monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hyperparameter_search(
-        {"model_source": {"builder": "m:f", "task": "detection"}},
-        param_space={"evaluation": {
-            "type": "categorical",
-            "choices": [{"selection_metric": "map"}, {"selection_metric": "iou_mean"}],
-        }}, search_seed=0
-    )
-    assert "error" in result
-    assert "evaluation" in result["error"]
 
 
 def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selection_metric(
@@ -1503,43 +1338,22 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
 
     def fake_search(*args, **kwargs):
         seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return {"best_params": {"lr": 0.01}, "best_value": 0.1, "n_trials": 1}
+        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
     result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1, search_seed=0)
 
-    assert result["best_params"] == {"lr": 0.01}
+    assert result["status"] == "completed", result
     assert seen == [{"lr": [0.1, 0.01]}]
-
-
-def test_run_hyperparameter_search_refuses_a_param_space_axis_that_changes_the_metrics_own_task_default(
-    tmp_path, real_hpo_base_config, monkeypatch,
-):
-    """A param_space axis with no selection_metric key anywhere can still split the sweep's
-    fixed metric from a trial's own: model_source.task changes resolve_selection_metric's
-    task-derived default (objective for detection, loss otherwise), so a categorical task axis
-    is refused exactly like a dotted or nested-dict selection_metric axis."""
-    from tcip_mcp.tools import training_tools
-
-    monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hyperparameter_search(
-        real_hpo_base_config,
-        param_space={"model_source.task": {
-            "type": "categorical", "choices": ["detection", "classification"],
-        }}, search_seed=0
-    )
-    assert "error" in result
-    assert "model_source.task" in result["error"]
 
 
 def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
-    """The axis-conflict check resolves each point's own selection metric rather than refusing
-    any evaluation-shaped axis outright: a categorical evaluation axis whose every choice
-    resolves to the same metric as base_config's own is admitted."""
+    """A categorical evaluation axis is admitted: every trial records the sweep's one
+    objective."""
     from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
 
@@ -1548,7 +1362,7 @@ def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_t
 
     def fake_search(*args, **kwargs):
         seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
-        return {"best_params": {}, "best_value": 0.1, "n_trials": 1}
+        return str(Path(kwargs["storage_path"]) / kwargs["study_name"])
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
@@ -1600,47 +1414,36 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path, m
     assert ds_id is None
 
 
-def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_record(
-    tmp_path, monkeypatch
-) -> None:
-    """A launched-but-heartbeat-stale record reads 'interrupted' here the identical way
-    list_experiments(launched_only=True)'s own derivation reads it (the runs list beside this
-    picker); a
-    never-launched pristine record reads its recorded 'created', not a heartbeat-derived
-    guess implying a crash that never happened."""
-    monkeypatch.chdir(tmp_path)
+def test_list_launchable_configs_state_agrees_with_the_runs_list(tmp_path, monkeypatch) -> None:
+    """A run whose process stopped touching its heartbeat reads 'interrupted' here the identical
+    way the runs list beside this picker reads it, and a completed run reads 'completed' in
+    both: one derivation off the run's own directory."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    import tcip_store
-    from tcip_mcp.experiments import create_experiment, status_key
+    from tcip_mcp import experiments
+    from tcip_mcp.experiments import list_experiments
     from tcip_mcp.tools.training_tools import list_launchable_configs
+    from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
 
-    create_experiment("exp-crashed", {"model_source": {"builder": "m:f", "task": "detection"},
-                                      "data": {"images_dir": "/d", "scope": {"subject": "bud"}}})
-    with tcip_store.transaction(status_key("exp-crashed")) as txn:
-        txn.write(status_key("exp-crashed"), {"state": "running", "started": None, "ended": None})
+    opened_run(None, detection_config(tmp_path / "crashed-data"), experiment_id="exp-crashed")
+    finished_run(None, experiment_id="exp-done")
+    monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
 
-    create_experiment("exp-pristine", {"model_source": {"builder": "m:f", "task": "detection"},
-                                       "data": {"images_dir": "/d"}})
-
-    rows = {r["experiment_id"]: r for r in list_launchable_configs()}
-    assert rows["exp-crashed"]["state"] == "interrupted"
-    assert rows["exp-pristine"]["state"] == "created"
+    picker = {r["experiment_id"]: r["state"] for r in list_launchable_configs()}
+    runs = {r["experiment_id"]: r["state"] for r in list_experiments()}
+    assert picker == runs == {"exp-crashed": "interrupted", "exp-done": "completed"}
 
 
-def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_losing_side(
+def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_no_result(
     tmp_path
 ) -> None:
-    """A trial that trains one real epoch and is then canceled mid-training (the run-level
-    sentinel written only once a genuine score is already on record) ends canceled, still
-    writes its resolved-config record, and reports the losing side as its final value, not
-    that epoch's real score, so a canceled trial can never outrank one that merely scored
-    worse."""
+    """A trial that trains one real epoch and is then canceled mid-training (the sweep's
+    cancellation requested only once a genuine score is already on record) ends canceled with
+    its launch record and carries no result, not that epoch's real score, so a canceled trial can
+    never outrank one that merely scored worse."""
     pytest.importorskip("torch")
     import math
 
-    import tcip_store
-    from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
-    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.experiments import RUN_FILE, observe, read_record, request_cancel
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -1653,21 +1456,22 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
                      "mixed_precision": False, "device": "cpu",
                      "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    trial_dir = tmp_path / "sweep" / "trial_cancel01"
-    trial_dir.mkdir(parents=True)
+    sweep_root = tmp_path / "sweep"
+    sweep_root.mkdir()
+    trial_dir = sweep_root / "trial_cancel01"
 
     reported: list = []
 
     def report(value: float) -> None:
-        # The sentinel is written only after the first real report, so a genuine score is
-        # already on record by the time the run-level cancel takes effect mid-training.
+        # The cancel is requested only after the first real report, so a genuine score is
+        # already on record by the time the sweep's cancel takes effect mid-training.
         reported.append(value)
         if len(reported) == 1:
-            (trial_dir / CANCEL_SENTINEL).touch()
+            request_cancel(sweep_root)
 
-    _run_hpo_trial({}, report, base_config, str(trial_dir))
+    _trial({}, report, base_config, trial_dir, metric="loss")
 
     assert math.isfinite(reported[0])  # epoch 1's real score, reported before the cancel
-    assert reported[-1] == float("inf")  # the losing side, not that real score
-    resolved = tcip_store.read(trial_config_key(trial_dir.parent, trial_dir.name))
-    assert resolved["trial_params"] == {}
+    assert observe(trial_dir).state == "canceled"
+    assert _trial_value(trial_dir) is None
+    assert read_record(trial_dir / RUN_FILE)["trial_params"] == {}

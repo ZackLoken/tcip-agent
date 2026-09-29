@@ -94,24 +94,6 @@ def _stop_leaked_tensorboards():
         tb.stop_tensorboard(key=entry["key"])
 
 
-@pytest.fixture(autouse=True)
-def _discard_leftover_launch_marks():
-    """Leave no pre-manifest sweep-launch mark behind for the next test.
-
-    A test that calls ``mark_sweep_launching`` directly, or drives a relaunch whose worker
-    never reaches ``run_hyperparameter_search``, can leave a study name in the process-global mark set; the next
-    test's ``cancel_hyperparameter_search`` call must not find it. Discarded through the same call ``run_hyperparameter_search``
-    and the relaunch worker use, not by reaching into the dict directly. The module is looked
-    up in ``sys.modules`` rather than imported, so a session that never touched it pays nothing.
-    """
-    yield
-    tt = sys.modules.get("tcip_mcp.tools.training_tools")
-    if tt is None:
-        return
-    for study_name in list(tt._LAUNCHING_SWEEPS):
-        tt.discard_sweep_launching(study_name)
-
-
 def pytest_collection_modifyitems(config, items):
     """Guardrail: fail loudly when far fewer tests collect than expected.
 
@@ -191,8 +173,7 @@ def _close_open_project():
 def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Pin every test's platform-state root to its own unique ``tmp_path``.
 
-    Without this, any unpinned write (audit, experiments, jobstore, the vision candidates
-    cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/``,
+    Without this, any unpinned write (audit, experiments, the vision candidates cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/``,
     shared across tests and, under xdist, across worker processes. Uses monkeypatch so it
     auto-restores; a test that manages the var itself (setenv/delenv in its body) overrides
     this and is unaffected.
@@ -224,19 +205,18 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 
 @pytest.fixture
 def real_hpo_base_config(tmp_path: Path) -> dict:
-    """A base config the sweep door's own structural preflight admits: an importable builder and
-    a data section whose directories exist and whose subject the admission over a per-image label
-    tree is scoped by, so a sweep test exercises the search itself rather than the door's refusal.
-    Held admitted by test_split_draws.test_real_hpo_base_config_is_admitted_by_preflight, which
-    runs it through preflight_config directly."""
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir(exist_ok=True)
-    lbls.mkdir(exist_ok=True)
+    """A base config the sweep door's own preflight admits: an importable builder and a data
+    section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
+    detection_images``), so a sweep test exercises the search itself rather than the door's
+    refusal. Held admitted by test_split_draws.test_real_hpo_base_config_is_admitted_by_preflight,
+    which runs it through preflight_config directly."""
+    from tests._verified_checkpoint_fixtures import detection_images
+
+    scope = {"subject": DATA_DIR_SUBJECT, "id_map": {DATA_DIR_SUBJECT: 0}}
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls),
-                 "scope": {"subject": DATA_DIR_SUBJECT}},
+        "data": {**detection_images(tmp_path / "hpo-data", scope), "scope": scope},
     }
 
 

@@ -2,8 +2,7 @@
 
 Every mutating door leaves one line per act it made, the decorator's or its library's, and a
 refusal made none: an undecorated door refused before it acts, a decorated door returning its
-error dict, and a library refusing a write (the registry's ownership rail, the experiment
-record's terminal lock) alike. A body that raises keeps its exception line. The admitting halves
+error dict, and a library refusing a write (the registry's ownership rail) alike. A body that raises keeps its exception line. The admitting halves
 (one row per act when the door does act) live beside each door's own tests.
 """
 
@@ -26,8 +25,7 @@ def _rows(tmp_path: Path) -> list[dict]:
 def _register_model(tmp_path: Path):
     from tcip_mcp.tools.model_tools import register_model
 
-    return register_model(name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1},
-                          experiment_id="exp-1")
+    return register_model(name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1})
 
 
 def _deliver_per_image_counts(tmp_path: Path):
@@ -120,60 +118,21 @@ def _calibrate_scale_for_no_such_trait(tmp_path: Path):
         "ruler", str(tmp_path / "labels"), str(tmp_path / "ref.csv"))
 
 
-def _terminal_status_refusal(tmp_path: Path):
-    from tcip_mcp.experiments import create_experiment, update_status
-
-    create_experiment("exp-closed", {"model_source": {"builder": "x:y"}})
-    update_status("exp-closed", "completed")
-    return update_status("exp-closed", "failed")
-
-
 DOORS = [_register_model, _deliver_per_image_counts, _import_coco, _build_plant_mapping,
          _redraw_calibration_holdout, _deliver_per_plant_csv, _deliver_orthomosaic_plant_counts,
          _deliver_phenology_milestones, _save_annotations_on_a_missing_image,
          _calibrate_count_over_an_unstamped_bucket, _calibrate_scalar_over_an_unregistered_checkpoint,
-         _calibrate_classifier_for_no_such_trait, _calibrate_scale_for_no_such_trait,
-         _terminal_status_refusal]
+         _calibrate_classifier_for_no_such_trait, _calibrate_scale_for_no_such_trait]
 
 
 @pytest.mark.parametrize("door", DOORS, ids=[d.__name__.lstrip("_") for d in DOORS])
 def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
     try:
         result = door(tmp_path)
-    except ValueError:
+    except (ValueError, FileNotFoundError):
         result = {"error": "raised"}
     assert "error" in result, result
     assert _rows(tmp_path) == []
-
-
-def _completed_run(tmp_path: Path, experiment_id: str) -> Path:
-    """A run completed through the experiment record's own producers, its weights on disk."""
-    from tcip_mcp.experiments import complete_run, create_experiment, update_status
-
-    weights = tmp_path / f"{experiment_id}.pt"
-    weights.write_bytes(f"{experiment_id} weights".encode())
-    create_experiment(experiment_id, {"model_source": {"builder": "x:y"}})
-    update_status(experiment_id, "running")
-    assert "error" not in complete_run(experiment_id, str(weights))
-    return weights
-
-
-def test_the_registrys_ownership_refusal_leaves_no_row(tmp_path: Path, monkeypatch):
-    """A second run registering a name the first run's completion bound is refused by the
-    registry's ownership rail: the one row is the first registration's."""
-    from tcip_mcp.experiments import register_model_from_experiment
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    first = register_model_from_experiment(
-        "exp-first", str(_completed_run(tmp_path, "exp-first")), name="shared")
-    assert "error" not in first, first
-    rows = _rows(tmp_path)
-    assert [r["tool"] for r in rows] == ["model_registered"]
-
-    refused = register_model_from_experiment(
-        "exp-second", str(_completed_run(tmp_path, "exp-second")), name="shared")
-    assert "exp-first" in refused["error"]
-    assert _rows(tmp_path) == rows
 
 
 def test_a_decorated_door_whose_body_raises_keeps_its_exception_row(tmp_path: Path, monkeypatch):

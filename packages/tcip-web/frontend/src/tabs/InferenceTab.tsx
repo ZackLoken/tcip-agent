@@ -102,7 +102,6 @@ function RefusedLaunchEntry({
 function statusBadgeClass(status: InferenceStatus): string {
   if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
   if (status === "failed" || status === "canceled") return "bg-tcip-fp/20 text-tcip-fp";
-  if (status === "interrupted") return "bg-tcip-border text-tcip-muted";
   return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
 }
 

@@ -186,10 +186,10 @@ def build_always_diverged_model(*, in_chans: int = 1, on_forward=None) -> Always
 
 
 class CancelSentinelAtCall:
-    """An ``AlwaysDivergedModel``-style ``on_forward`` callback that touches the run's own
-    ``.cancel_requested`` sentinel (the same file ``TrainRun.should_cancel()`` polls) on one named
-    forward-call count. Holds only ``output_dir`` (a plain string) and the call count, never the
-    run object itself, so it stays picklable through a checkpoint write."""
+    """An ``AlwaysDivergedModel``-style ``on_forward`` callback that requests the run's own
+    cancellation (``experiments.request_cancel``, what ``TrainRun.should_cancel()`` reads) on one
+    named forward-call count. Holds only ``output_dir`` (a plain string) and the call count, never
+    the run object itself, so it stays picklable through a checkpoint write."""
 
     def __init__(self, output_dir, at_call: int) -> None:
         self.output_dir = str(output_dir)
@@ -199,9 +199,22 @@ class CancelSentinelAtCall:
         if call_count == self.at_call:
             from pathlib import Path
 
+            from tcip_mcp.experiments import request_cancel
+
             path = Path(self.output_dir)
             path.mkdir(parents=True, exist_ok=True)
-            (path / ".cancel_requested").touch()
+            request_cancel(path)
+
+
+def trainer_run(config: dict, output_dir, *, has_val_loader: bool, id: str = "run"):
+    """A ``TrainRun`` over ``config`` writing into ``output_dir`` at the objective the launcher's
+    own producer resolves for it (``generic_trainer.resolve_objective``)."""
+    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+
+    return TrainRun(id=id, config=config,
+                    objective=resolve_objective(config, has_val_loader=has_val_loader),
+                    output_dir=str(output_dir))
 
 
 class TransientlyDivergedModel(nn.Module):

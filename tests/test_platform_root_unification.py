@@ -34,29 +34,21 @@ def test_adoption_repins_platform_root(tmp_path, monkeypatch):
 
 
 def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monkeypatch):
-    import tcip_store as ts
-    from tcip_mcp.model_registry import registry_index_key
-
     proj = _adopt(tmp_path, monkeypatch)
     clean_cwd = tmp_path / "cwd"
     clean_cwd.mkdir()
     monkeypatch.chdir(clean_cwd)  # so the "nothing leaked to cwd" check is meaningful
     from tcip_mcp import experiments
+    from tcip_mcp.model_registry import ModelRegistry
+    from tests._verified_checkpoint_fixtures import finished_run
 
-    experiments.create_experiment("exp_unify", {"model_source": {"builder": "x:y"}}, data_source="imgs")
-    # config_key resolves against the pinned platform root with no root override, so its
-    # existence proves the record landed under the adopted project, not wherever cwd is.
-    assert ts.exists(experiments.config_key("exp_unify"))
+    # No root named: the run lands under the pinned platform root, the adopted project.
+    run_dir = finished_run(None, experiment_id="exp_unify")
+    assert run_dir == experiments.experiments_dir(proj) / "exp_unify"
 
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"fake checkpoint")
-    assert "error" not in experiments.complete_run("exp_unify", str(ckpt))
-    # Auto-register path uses the experiments-module default (empty project_path) → platform root.
-    result = experiments.register_model_from_experiment("exp_unify", str(ckpt))
-    assert "error" not in result
-    assert ts.exists(registry_index_key(proj))
-    # A different project's registry is untouched: nothing leaked to the repo root / cwd.
-    assert not ts.exists(registry_index_key(Path.cwd()))
+    # The run's completion is its registration, read under the same project.
+    assert "exp_unify" in {m["name"] for m in ModelRegistry(str(proj)).list_models()}
+    assert list(clean_cwd.iterdir()) == []
 
 
 def test_viz_mirrors_the_platform_root_env_var_name():

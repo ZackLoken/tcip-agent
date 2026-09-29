@@ -48,7 +48,7 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
 )
-from tcip_mcp.web_client import REVIEW_PRIORITY_JOBS, current_root
+from tcip_mcp.web_client import current_root
 from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
@@ -1027,14 +1027,10 @@ class PriorityQueueJob:
     status: str = "pending"  # pending | running | completed | failed
     error: Optional[str] = None
     # [{image, score, calibration_member?}], highest first; calibration_member is present only
-    # when the checkpoint's run was bound to a selection that could be read.
+    # when the checkpoint's run was bound to a selection.
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
     reviewed_skipped: int = 0
-    # Set when the run's split record, or its named manifest, could not be read: no entry above
-    # carries calibration_member, and this names why, rather than a guess.
-    marks_unresolved: Optional[str] = None
-    thread: Optional[threading.Thread] = field(default=None, repr=False)
     # The platform root this job launched under, resolved on the request thread.
     platform_root: str = field(default_factory=_pq_current_root)
 
@@ -1043,36 +1039,12 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "error": job.error,
         "queue": job.queue, "total_candidates": job.total_candidates,
-        "reviewed_skipped": job.reviewed_skipped, "platform_root": job.platform_root,
-        "marks_unresolved": job.marks_unresolved,
+        "reviewed_skipped": job.reviewed_skipped,
     }
 
 
-def _pq_from_summary(s: dict) -> PriorityQueueJob:
-    return PriorityQueueJob(
-        job_id=s["job_id"],
-        checkpoint_path="",
-        images_dir="",
-        dataset_root="",
-        status=jobstore.rehydrated_status(s),
-        error=s["error"],
-        queue=s["queue"],
-        total_candidates=s["total_candidates"],
-        reviewed_skipped=s["reviewed_skipped"],
-        marks_unresolved=s["marks_unresolved"],
-        platform_root=s["platform_root"],
-    )
-
-
-_pq_registry = jobstore.JobRegistry(
-    REVIEW_PRIORITY_JOBS, to_summary=_pq_summary, from_summary=_pq_from_summary,
-)
-"""The dict-plus-lock live registry for this queue's own jobs (see ``jobstore.JobRegistry``),
-the shared home inference.py's and tuning.py's own registries adopt too."""
-
-
-def _pq_persist() -> None:
-    _pq_registry.persist()
+_pq_registry = jobstore.JobRegistry()
+"""This queue's own live jobs (``jobstore.JobRegistry``)."""
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
@@ -1084,21 +1056,9 @@ def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
     return _pq_registry.get(job_id)
 
 
-def rehydrate_for_current_root() -> None:
-    """Merge this root's persisted priority-queue jobs, not already live, into memory via
-    :func:`_pq_from_summary`.
-
-    A persisted non-terminal job is surfaced as ``interrupted``; its ranked queue is restored from
-    what :func:`_pq_summary` persisted. Bounds the dict afterwards the same way registering a job
-    does.
-    """
-    _pq_registry.rehydrate()
-
-
 def _pq_worker(job: PriorityQueueJob) -> None:
     try:
         job.status = "running"
-        _pq_persist()
         # The same MCP tool the agent calls: its scoring/filtering (build_predictor ->
         # require_composed_detector -> build_scorer -> score -> budget slice -> response shape) is
         # not re-derived here. It returns soft {"error": ...} dicts rather than raising, for every
@@ -1122,13 +1082,10 @@ def _pq_worker(job: PriorityQueueJob) -> None:
             job.queue = result["queue"]
             job.total_candidates = result["total_candidates"]
             job.reviewed_skipped = result["reviewed_skipped"]
-            job.marks_unresolved = result.get("marks_unresolved")
     except Exception as exc:
         logger.exception("priority-queue job %s failed", job.job_id)
         job.status = "failed"
         job.error = str(exc)
-    finally:
-        _pq_persist()
 
 
 class LaunchPriorityQueuePayload(BaseModel):
@@ -1161,9 +1118,7 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
         budget=payload.budget,
     )
     _pq_register(job)
-    t = threading.Thread(target=_pq_worker, args=(job,), daemon=True)
-    job.thread = t
-    t.start()
+    threading.Thread(target=_pq_worker, args=(job,), daemon=True).start()
     return {"status": "launched", "job_id": job.job_id}
 
 

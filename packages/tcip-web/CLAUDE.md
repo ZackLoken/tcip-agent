@@ -78,9 +78,11 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
   escape. The Results doors go further: they serve only the project the GUI has
   open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
   does not belong to it.
-- A path a route reads out of the platform's own records (a manifest directory an experiment
-  config names, say) is trusted for reading and never for writing; `assert_path_allowed` is for
-  a client-supplied path, not this kind.
+- A path a route reads out of the platform's own records (a selection directory a run's config
+  names, say) is trusted for reading and never for writing; `assert_path_allowed` is for a
+  client-supplied path, not this kind.
+- A job registry (`jobstore.JobRegistry`) holds this process's live jobs only; what survives a
+  restart is what each job's own directory or bucket records.
 - Under pytest, with starlette's `TestClient` module loaded, or on a request arriving from an
   in-process test transport (starlette's `TestClient` or httpx's `ASGITransport`), the app
   refuses to start unless `TCIP_WORKSPACE` is set (`app.WorkspaceUnsetUnderTest`); set it and

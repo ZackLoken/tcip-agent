@@ -14,6 +14,7 @@ import {
   type CoverageRecord,
   type DependencyWarning,
   type GridZoomPayload,
+  type JobStatus,
   type ReleaseResponse,
   type RemovalPreview,
   type RemovalResponse,
@@ -129,7 +130,7 @@ export interface ImageBandsResponse {
 export interface OverviewJob {
   job_id: string;
   path: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: JobStatus;
   progress: number;
   error: string | null;
 }
@@ -634,16 +635,15 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // calibration_member is present only when the run was bound to a selection that could be read.
+    // calibration_member is present only when the run was bound to a selection.
     priorityQueueJob: (jobId: string) =>
       call<{
         job_id: string;
-        status: "pending" | "running" | "completed" | "failed";
+        status: JobStatus;
         error: string | null;
         queue: { image: string; score: number; calibration_member?: boolean }[];
         total_candidates: number;
         reviewed_skipped: number;
-        marks_unresolved: string | null;
       }>(ROUTES.getReviewQueueByJobId(jobId)),
   },
 };

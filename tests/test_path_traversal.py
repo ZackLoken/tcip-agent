@@ -58,7 +58,7 @@ def test_training_stream_closes_on_run_id_traversal(tmp_path):
         ) as ws:
             ws.receive_json()
     assert ei.value.code == 1008
-    assert "is not a single name" in ei.value.reason
+    assert "is not a single directory name" in ei.value.reason
 
 
 def test_training_stream_refuses_a_project_root_outside_allowed_roots(
