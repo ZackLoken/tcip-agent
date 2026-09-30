@@ -526,7 +526,7 @@ def test_inspect_project_counts_canonical_images(project, tmp_path):
     assert "undated" in status["dates"]
 
 
-def test_ingest_after_import_admits_a_second_date(project, tmp_path):
+def test_ingest_after_import_admits_a_second_date(tmp_path):
     """The import door adopts a fresh root itself when the process is bound to the database
     backend, so a project it lands is usable at once: no operator ``tcip adopt-store``
     run sits between ``import_project`` and ``ingest_images``. Import, ingest is the admit case.
@@ -538,12 +538,14 @@ def test_ingest_after_import_admits_a_second_date(project, tmp_path):
 
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import archive_project, import_project
+    from tests._web_fixtures import new_project
 
     previous = _backend()
     backend = SqliteBackend()
     tcip_store.bind(backend)
     dest = tmp_path.parent / "reopened"
     try:
+        project = new_project(tmp_path)
         src1 = tmp_path / "raw1"
         _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
         first = ingest_images(project, source=str(src1))
@@ -561,9 +563,9 @@ def test_ingest_after_import_admits_a_second_date(project, tmp_path):
         _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
         second = ingest_images(dest, source=str(src2))
         assert "error" not in second
+        assert read_record(dest)["id"] == read_record(project)["id"]
     finally:
         tcip_store.bind(previous)
         backend.close()
 
     assert (dest / "images" / "2026-03-01" / "b.jpg").is_file()
-    assert read_record(dest)["id"] == read_record(project)["id"]

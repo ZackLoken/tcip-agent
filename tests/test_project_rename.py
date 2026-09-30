@@ -45,6 +45,7 @@ def _files(root: Path) -> dict[str, bytes]:
 def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_as_they_were(
     client, tmp_path,
 ):
+    from tcip_mcp import audit
     from tcip_mcp.experiments import list_experiments
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
@@ -56,6 +57,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     (project / "ds").mkdir()
     assert "error" not in register_dataset(project, str(project / "ds"), "currant")
     files, runs, datasets = _files(project), list_experiments(project), read_datasets(project)
+    audit_lines = ts.read_log(audit.audit_log_key(project)).records
 
     resp = client.post("/api/projects/rename", json={
         "id": project_id, "display_name": "Valley block, north half", "user": "tester"})
@@ -66,10 +68,12 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     assert read_record(project)["display_name"] == "Valley block, north half"
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == ["valley_block"]
     after = _files(project)
-    assert {k: v for k, v in after.items() if k != ".tcip/project.json"} == {
-        k: v for k, v in files.items() if k != ".tcip/project.json"}
+    rename_writes = {".tcip/project.json", ".tcip/audit.jsonl"}
+    assert {k: v for k, v in after.items() if k not in rename_writes} == {
+        k: v for k, v in files.items() if k not in rename_writes}
     assert list_experiments(project) == runs
     assert read_datasets(project) == datasets
+    assert ts.read_log(audit.audit_log_key(project)).records[:-1] == audit_lines
     (line,) = _renamed_lines(project)
     assert line["arguments"]["previous_display_name"] == "Valley block"
     listed = {p["id"]: p for p in client.get("/api/projects").json()["projects"]}
