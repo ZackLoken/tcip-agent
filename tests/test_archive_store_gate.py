@@ -28,9 +28,8 @@ _NEGATIVE = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü
 def bound(backend):
     """Bind one backend for a block, since these cases write as rows and archive as files.
 
-    The suite's own backend is put back on the way out rather than dropped: an audited call
-    after the block still has to reach the audit log, and a process with nothing bound is the
-    state the seam refuses outright.
+    The suite's own backend is put back on the way out rather than dropped, since a process with
+    nothing bound is the state the seam refuses outright.
     """
     from tcip_store.store import _backend
 
@@ -75,8 +74,7 @@ def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
     root = _project(tmp_path)
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
-
-    result = archive_project(root, str(tmp_path / "bundle.zip"))
+        result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
@@ -93,8 +91,7 @@ def test_a_project_whose_files_are_current_archives(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
-
-    result = archive_project(root, str(tmp_path / "bundle.zip"))
+        result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     assert (tmp_path / "bundle.zip").is_file()
@@ -154,7 +151,7 @@ def test_no_database_file_travels_in_the_bundle(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
-    archive_project(root, str(tmp_path / "bundle.zip"))
+        archive_project(root, str(tmp_path / "bundle.zip"))
 
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
         names = zf.namelist()
@@ -177,7 +174,7 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
-    archive_project(root, str(tmp_path / "bundle.zip"))
+        archive_project(root, str(tmp_path / "bundle.zip"))
 
     restored = tmp_path / "restored"
     with bound(FileBackend()):
