@@ -225,7 +225,7 @@ jobs:
 
       - name: Run and poll for the GUI
         run: |
-          docker run --network host -d --name tcip-web-ci tcip-web:ci
+          docker run --network host -d --name tcip-web-ci -e TCIP_WORKSPACE=/tmp/tcip-workspace tcip-web:ci
           for _ in $(seq 1 60); do
             code=$(curl -s -o response.txt -w "%{http_code}" http://127.0.0.1:8765/ || true)
             [ "$code" = "200" ] && break

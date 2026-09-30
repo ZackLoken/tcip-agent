@@ -1,5 +1,5 @@
-# Run with `docker run --network host`: the backend binds the host's loopback and no port is
-# published. A published port (`-p`) cannot serve this image either: it would arrive through a bridged, non-loopback address, which the backend's trust boundary refuses. The GUI's in-app agent terminal needs a Claude Code install this image does not carry.
+# Run with `docker run --network host -e TCIP_WORKSPACE=<workspace>`: the backend refuses to start
+# without a workspace, binds the host's loopback, and no port is published. A published port (`-p`) cannot serve this image either: it would arrive through a bridged, non-loopback address, which the backend's trust boundary refuses. The GUI's in-app agent terminal needs a Claude Code install this image does not carry.
 
 FROM node:22 AS frontend-builder
 WORKDIR /app
