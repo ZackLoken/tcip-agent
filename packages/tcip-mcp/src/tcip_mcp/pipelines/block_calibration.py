@@ -38,12 +38,12 @@ def _reserved_spatial_regions(resolved: dict) -> dict | None:
     return spatial
 
 
-def reserved_calibration_region_available(experiment_id: str) -> bool:
-    """Whether ``experiment_id``'s run (``experiments.run_resolution``) reserved a calibration
-    region in a within-image spatial split (:func:`_reserved_spatial_regions`)."""
+def reserved_calibration_region_available(experiment_id: str, *, project: Path) -> bool:
+    """Whether ``experiment_id``'s run of ``project`` (``experiments.run_resolution``) reserved a
+    calibration region in a within-image spatial split (:func:`_reserved_spatial_regions`)."""
     from tcip_mcp.experiments import run_resolution
 
-    return _reserved_spatial_regions(run_resolution(experiment_id)) is not None
+    return _reserved_spatial_regions(run_resolution(experiment_id, project=project)) is not None
 
 
 def _band_rects(
@@ -158,16 +158,17 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 
 def resolve_block_calibration_records(
-    p: Any, *, trait_name: str, experiment_id: str | None,
+    p: Any, *, project: Path, trait_name: str, experiment_id: str | None,
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
     calibration/test regions, every band predicted through the whole-mosaic export's own prepared
-    pass ``p`` (``inference_tools._PreparedPass``).
+    pass ``p`` (``inference_tools._PreparedPass``); ``experiment_id`` names a run of
+    ``project``.
 
     Returns ``(bundle, provenance, evidence)``: ``bundle`` is a
     :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle`; ``provenance`` carries the resolved
-    ``dataset_root``/``stem``/``training_raster_path``/``spatial_manifest`` plus
+    ``experiment_id``/``stem``/``spatial_manifest`` plus
     ``density_uniformity_flags``; ``evidence`` is the resolver this ran, the arguments it ran over
     (the dict passed to ``resolve_operating_point``, without the trait and the producing run) and
     the reserved regions they came from.
@@ -197,7 +198,7 @@ def resolve_block_calibration_records(
             "training run's split produced them."
         )
 
-    resolved = run_resolution(experiment_id)
+    resolved = run_resolution(experiment_id, project=project)
     spatial = _reserved_spatial_regions(resolved)
     if spatial is None:
         raise BlockCalibrationRefused(
@@ -390,12 +391,12 @@ def resolve_block_calibration_records(
         # No selection on this route; not-applicable regardless via the record's spatial_strip.
         "selection_dir": None, "calibration_labels_dir": str(labels_dir),
     }
-    bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)
+    bundle = resolve_operating_point(trait_name, project=project, experiment_id=experiment_id,
+                                     **resolver_inputs)
     attach_spatial_split_kind_provenance(bundle, spatial)
 
     provenance = {
-        "experiment_id": experiment_id, "dataset_root": str(dataset_root), "stem": stem,
-        "training_raster_path": str(training_source), "spatial_manifest": spatial,
+        "experiment_id": experiment_id, "stem": stem, "spatial_manifest": spatial,
         "density_uniformity_flags": density_flags, "block_scale_px": buffer_px,
         "block_scale_source": scale_source, "k_cal": k_cal, "k_test": k_test,
         "cal_gt_counts": cal_gt_counts, "test_gt_counts": test_gt_counts,

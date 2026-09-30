@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import asdict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
@@ -433,11 +434,11 @@ def _drawn_split(
                            group_by=resolved_group_by)
 
 
-def auto_train_val(task: str, data_cfg: dict, transforms, *,
+def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
                    contradicted_out: set[str] | None = None,
                    counts_out: dict[str, int] | None = None):
-    """Build ``(train_ds, val_ds, partition)`` for a run, deriving a leakage-free val split, and
-    resolve ``data_cfg`` in place: its ``scope``, sizes, and a within-image run's
+    """Build ``(train_ds, val_ds, partition)`` for a run of ``project``, deriving a leakage-free
+    val split, and resolve ``data_cfg`` in place: its ``scope``, sizes, and a within-image run's
     ``split.spatial_manifest``.
 
     ``partition`` is :func:`_partition_record`'s; a within-image spatial split's holds its one
@@ -491,7 +492,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms, *,
         from tcip_mcp.pipelines.data.selection import read_selection
         from tcip_mcp.pipelines.resolution import selection_digest
 
-        selection = read_selection(selection_dir)
+        selection = read_selection(selection_dir, project=project)
         # The bind's own refusals, stated once so the preflight that offered this selection and
         # the launch that binds it say the same thing.
         bind_issues = _selection_dependent_issues(selection, selection_dir, data_cfg)
@@ -523,7 +524,8 @@ def auto_train_val(task: str, data_cfg: dict, transforms, *,
         return _sample_loaders(
             task, data_cfg, bound, transforms, seed=seed, group_by=selection.group_by,
             selection={"selection_dir": selection_dir,
-                       "selection_sha256": selection_digest(selection), "redraw": redraw})
+                       "selection_sha256": selection_digest(selection, project),
+                       "redraw": redraw})
 
     # 2. Otherwise the producer names this run's membership off the ground truth its config points
     # at, and every branch of the resolution order below builds from the samples it made.
@@ -541,11 +543,11 @@ class ResolvedRun(NamedTuple):
     val_ds: Any
 
 
-def resolve_run(config: dict, *, objective: dict | None = None,
+def resolve_run(config: dict, *, project: Path, objective: dict | None = None,
                 contradicted_out: set[str] | None = None,
                 counts_out: dict[str, int] | None = None) -> ResolvedRun:
-    """Resolve ``config`` once: a copy of its data section through :func:`auto_train_val`, the
-    geometry its train dataset serves stamped on it
+    """Resolve ``config`` once for a run of ``project``: a copy of its data section through
+    :func:`auto_train_val`, the geometry its train dataset serves stamped on it
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.stamp_effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
     with or without a val side), or ``objective`` as given, a sweep's own for its trials.
@@ -558,11 +560,11 @@ def resolve_run(config: dict, *, objective: dict | None = None,
 
     data = copy.deepcopy(config.get("data") or {})
     train_ds, val_ds, partition = auto_train_val(
-        run_task(config), data, run_transforms(config),
+        project, run_task(config), data, run_transforms(config),
         contradicted_out=contradicted_out, counts_out=counts_out)
     stamp_effective_data_geometry(data, train_ds)
     if objective is None:
-        objective = resolve_objective(config, has_val_loader=val_ds is not None)
+        objective = resolve_objective(config, project=project, has_val_loader=val_ds is not None)
     return ResolvedRun({"data": data, "partition": partition, "objective": objective},
                        train_ds, val_ds)
 

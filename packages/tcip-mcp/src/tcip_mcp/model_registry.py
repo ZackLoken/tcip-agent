@@ -254,27 +254,23 @@ def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     return _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
 
 
-def load_registered_checkpoint(
-    checkpoint_path: str | Path, *, project_path: str | None = None,
-) -> VerifiedCheckpoint:
-    """Read a checkpoint's bytes once, hash them, and refuse unless the registry names that hash.
+def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) -> VerifiedCheckpoint:
+    """Read a checkpoint's bytes once, hash them, and refuse unless ``project``'s registry names
+    that hash.
 
     Refuses two forgeries: a checkpoint dropped at any path that nothing registered, and a
     checkpoint whose file is replaced (in place or by rename) between a caller checking its
     identity and a caller loading its weights. In order: the file is read into one ``bytes``
     object; the digest is taken over that exact object through :func:`_sha256_of_bytes` and
-    looked up among ``project_path``'s :func:`registered_entries` (``project_path`` unset:
-    :func:`~tcip_mcp.project_paths.platform_state_root`), none raising
+    looked up among ``project``'s :func:`registered_entries`, none raising
     :class:`UnregisteredCheckpoint` naming the path, the digest, the root searched and the remedy.
     Only then is the payload unpickled (:func:`_load_verified_payload`). A missing file raises
     ``FileNotFoundError`` before any read.
 
     The digest and the load are over one immutable byte string.
     """
-    from tcip_mcp.project_paths import platform_state_root
-
     ckpt = Path(checkpoint_path)
-    root = project_path or str(platform_state_root())
+    root = str(project)
     with open(ckpt, "rb") as f:
         data = f.read()
     digest = _sha256_of_bytes(data)
@@ -316,16 +312,17 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
     return superseded, entry
 
 
-def _audit_entry_write(superseded: dict | None, entry: dict) -> None:
-    """Emit ``model_registered`` for a written ``entry``, naming the entry of the same sha256 it
-    superseded. A failed append raises ``AuditEntryNotWritten``."""
+def _audit_entry_write(project_path: str, superseded: dict | None, entry: dict) -> None:
+    """Emit ``model_registered`` in the project's log for a written ``entry``, naming the entry of
+    the same sha256 it superseded. A failed append raises ``AuditEntryNotWritten``."""
     from tcip_mcp.audit import record_event_or_raise
 
     replaced = {} if superseded is None else {
         "superseded_name": superseded["name"], "superseded_tags": superseded["tags"],
     }
     record_event_or_raise("model_registered",
-                          {"name": entry["name"], "new_sha256": entry["sha256"], **replaced})
+                          {"name": entry["name"], "new_sha256": entry["sha256"], **replaced},
+                          scope=project_path)
 
 
 def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
@@ -401,7 +398,7 @@ class ModelRegistry:
         with tcip_store.transaction(key) as txn:
             superseded, stored = _write_registry_entry(txn, key, entry)
         if stored is entry:
-            _audit_entry_write(superseded, entry)
+            _audit_entry_write(self._project_path, superseded, entry)
         owner = next(e for e in registered_entries(self._project_path)
                      if e["sha256"] == entry["sha256"])
         return _resolve_entry_checkpoint(self._project_path, owner)

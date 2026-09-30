@@ -57,7 +57,7 @@ def _stage_classified_prediction(dataset_root: Path, *, value: str) -> dict:
     )
 
 
-def _stamp_classified_bucket(bucket: Path) -> None:
+def _stamp_classified_bucket(project: Path, bucket: Path) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[],
@@ -66,7 +66,7 @@ def _stamp_classified_bucket(bucket: Path) -> None:
         checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
         images_dir=None, raster_path=None, produced_at="2026-03-05T00:00:00+00:00",
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=project)
 
 
 def _bare_bucket(dataset_root: Path, *, value: str) -> Path:
@@ -99,7 +99,7 @@ def test_matches_resolves_the_classified_scope_with_no_request_side_statement(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -128,7 +128,7 @@ def test_a_scope_stated_beside_a_stamped_bucket_refuses(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -168,7 +168,7 @@ def test_a_same_geometry_value_disagreement_pairs_as_an_fp_and_fn(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -194,7 +194,7 @@ def test_accept_on_the_paired_fp_replaces_the_value_and_keeps_geometry_and_autho
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     matches = client.post("/api/review/matches", json={
@@ -245,7 +245,7 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
         img_w=IMG_W, img_h=IMG_H,
     )
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
     before = gt.read_bytes()
 
@@ -278,7 +278,7 @@ def test_accept_paired_to_a_foreign_subject_record_refuses(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt_dir = dataset_root / "annotations" / DATE
     write_annotations(
         str(gt_dir / f"{STEM}.json"),
@@ -312,7 +312,7 @@ def test_reject_on_a_true_positive_under_a_classified_scope_refuses(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
 
     matches = client.post("/api/review/matches", json={
@@ -347,7 +347,7 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt_dir = dataset_root / "annotations" / DATE
     write_annotations(str(gt_dir / f"{STEM}.json"), [], IMG_W, IMG_H, keep_empty=True)
     gt = gt_dir / f"{STEM}.json"
@@ -382,7 +382,7 @@ def test_edit_under_a_classified_scope_with_an_in_vocabulary_value_replaces_geom
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
 
     matches = client.post("/api/review/matches", json={
@@ -425,7 +425,7 @@ def test_edit_under_a_classified_scope_with_an_out_of_vocabulary_value_refuses(
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(bucket)
+    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
     before = gt.read_bytes()
 

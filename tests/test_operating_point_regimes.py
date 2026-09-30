@@ -69,21 +69,22 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
-        job_id="stamp1", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
+        job_id="stamp1", project=str(tmp_path), checkpoint_path=str(ckpt),
+        images_dir=str(images_dir), output_dir=str(out_dir), tile=False, conf=0.25,
+        cross_tile_nms=0.7, overlap=0.2, postprocess="nms",
     )
     _worker(job)
 
     assert job.status == "completed"
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.registry_paths import stored_path
 
     sidecar = read_operating_point_sidecar(out_dir)
     for key in ("operating_point", "scope", "validated", "tile_size_validated",
                 "shippable_issues", "checkpoint", "checkpoint_sha256", "experiment_id",
                 "images_dir", "raster_path", "produced_at"):
         assert key in sidecar, f"the GUI-produced stamp is missing {key!r}"
-    assert sidecar["images_dir"] == str(images_dir)
+    assert sidecar["images_dir"] == stored_path(images_dir, tmp_path)
     assert sidecar["raster_path"] is None
     assert sidecar["produced_at"]
 
@@ -106,7 +107,8 @@ def _records(counts: list[int]) -> list[dict]:
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never_came_from():
+def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never_came_from(
+        tmp_path):
     """A cap the caller states is an explicit override. Stamping the resolver's own density formula
     on it attributes a derivation to a number the resolver never derived, and the provenance is what
     a reviewer reconstructs the count from."""
@@ -114,7 +116,7 @@ def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never
 
     bundle = resolve_operating_point(
         "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]),
-        slicing=None, max_dets=250)
+        slicing=None, max_dets=250, project=tmp_path)
     cap = bundle.get("max_dets")
 
     assert cap.value == 250
@@ -129,7 +131,8 @@ def test_a_cap_the_resolver_derives_itself_still_says_how(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]), slicing=None)
+        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]), slicing=None,
+        project=tmp_path)
     cap = bundle.get("max_dets")
 
     assert cap.source == "derived"

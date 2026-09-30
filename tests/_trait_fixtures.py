@@ -102,25 +102,18 @@ def propose_and_confirm(project_root: Path, proposed: TraitEntry) -> TraitRevisi
     return confirm(project_root, propose(project_root, proposed))
 
 
-def confirm_entry(proposed: TraitEntry) -> TraitRevision:
-    """Propose and confirm ``proposed`` in this test's pinned platform state root."""
-    from tcip_mcp.project_paths import platform_state_root
-
-    return propose_and_confirm(platform_state_root(), proposed)
-
-
-def confirm_bare(name: str, **fields: Any) -> TraitRevision:
-    """Confirm a minimal trait delivering one dimension in this test's pinned platform state
-    root, stating nothing beyond ``fields``."""
-    return confirm_entry(entry(name, ("leaf_length",), **fields))
+def confirm_bare(project_root: Path, name: str, **fields: Any) -> TraitRevision:
+    """Confirm a minimal trait delivering one dimension at ``project_root``, stating nothing
+    beyond ``fields``."""
+    return propose_and_confirm(project_root, entry(name, ("leaf_length",), **fields))
 
 
-def latest(trait: str, project_root: Path | None = None) -> TraitEntry:
+def latest(trait: str, project_root: Path) -> TraitEntry:
     """The entry of ``trait``'s latest revision, confirmed or not, to build the next one from."""
     return traits.read_trait(trait, project_root).latest.entry
 
 
-def count_revision(project_root: Path | None = None) -> TraitRevision:
+def count_revision(project_root: Path) -> TraitRevision:
     """The count trait's latest confirmed revision, the one a count delivery ships under."""
     from tcip_mcp.operationalization import latest_confirmed
 

@@ -2,18 +2,14 @@
 
 A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) arrives on view/meta changes,
 and the full display-resolved geometry only when shapes change. State is split across two files
-under ``<project_root>/.tcip/state/``:
+under the open project's ``.tcip/state/``:
 
   - ``canvas_live.json``: the small meta document; overwritten atomically by every push.
   - ``canvas_shapes.json``: the geometry blob; written only by full pushes.
 
 Each document is replaced whole; the geometry is valid only when its ``(image_path, tab)`` identity
-matches the meta document. Both records declare ``durable=False``.
-
-The write destination is the ``canvas_open_binding`` record, never the payload: a push names only
-the generation it was built against, and this route reads the record fresh on every push and writes
-under its own ``root``. A push whose generation the record no longer carries, or whose record now
-reads as nothing open (:func:`tcip_mcp.web_client.binding_released_or_absent`), answers 409.
+matches the meta document. Both records declare ``durable=False``. A push names the project it was
+built for by id; one naming any project but the backend's open one answers 409 and writes nothing.
 """
 
 from __future__ import annotations
@@ -22,17 +18,13 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 import tcip_store as ts
 
-from tcip_mcp.web_client import (
-    binding_released_or_absent,
-    canvas_geometry_key,
-    canvas_meta_key,
-    canvas_open_binding_key,
-)
-from tcip_web.paths import assert_path_allowed
+from tcip_mcp.registry_paths import stored_path
+from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
+from tcip_web.state import store
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
@@ -40,8 +32,8 @@ router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 class CanvasStatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # The canvas_open_binding generation this body was built against; never a project_root.
-    binding_generation: int
+    # The id of the project the GUI built this push for.
+    project_id: str
     tab: str  # "annotate" | "review"
     image_path: str
     image: str
@@ -61,50 +53,28 @@ class CanvasStatePayload(BaseModel):
     shapes: Optional[list[dict]] = None
 
 
-def _guard_project_root(project_root: str) -> str:
-    """Confine the binding's own root and hand back the resolved spelling the writes use; 403 on
-    escape.
-    """
-    try:
-        return str(assert_path_allowed(project_root))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
-    binding = ts.read(canvas_open_binding_key(create=False), default=None)
-    current_generation = binding.get("generation") if binding is not None else None
-    released = binding is not None and bool(binding.get("released"))
-    if binding_released_or_absent(binding) or payload.binding_generation != current_generation:
-        error = (
-            "the GUI's open project was released" if released
-            else "the GUI's open project has changed since this push was built"
-        )
-        raise HTTPException(409, {
-            "error": error,
-            "generation": current_generation,
-            "project_name": binding.get("project_name") if binding is not None else None,
-        })
-    project_root = _guard_project_root(binding["root"])
+    project = store.admit(payload.project_id)
+    root = str(project)
+    image_path = stored_path(payload.image_path, project)
     now = time.time()
 
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        ts.replace(canvas_geometry_key(project_root), {
-            "image_path": payload.image_path,
+        ts.replace(canvas_geometry_key(root), {
+            "image_path": image_path,
             "tab": payload.tab,
             "shapes": payload.shapes,
             "received_at": now,
         })
 
-    ts.replace(canvas_meta_key(project_root), {
+    ts.replace(canvas_meta_key(root), {
         "received_at": now,
         "received_at_iso": datetime.now(timezone.utc).isoformat(),
-        "project_root": project_root,
         "tab": payload.tab,
-        "image_path": payload.image_path,
+        "image_path": image_path,
         "image": payload.image,
         "img_width": payload.img_width,
         "img_height": payload.img_height,

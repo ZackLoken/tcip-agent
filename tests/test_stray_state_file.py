@@ -4,7 +4,7 @@ name over everything else the accounting classifies: a claimed store's own file,
 checkpoint read as a blob, the storage backend's own bookkeeping, the state root's own database
 home, a directory, a link or junction on any segment, a traversal attempt, a Windows
 drive-relative path naming another drive, and a state root whose accounting itself refuses. A
-project_root spelled in another case reaches the same verdicts.
+project path spelled in another case reaches the same verdicts.
 """
 
 from __future__ import annotations
@@ -20,11 +20,9 @@ from tcip_mcp.tools.phenology_tools import register_plant_registry
 from tcip_mcp.tools.project_tools import delete_stray_state_file, initialize_project
 
 
-def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
-    res = initialize_project(str(root), site="orchard block")
+    res = initialize_project(str(root), "proj", "orchard block")
     assert "error" not in res, res
     return root
 
@@ -41,7 +39,7 @@ def _state(root: Path) -> Path:
 def test_admits_valid_work_deletes_each_stray_and_the_doctor_stops_naming_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     notes = state / "notes.json"
     notes.write_text("{}", encoding="utf-8")
@@ -60,14 +58,14 @@ def test_admits_valid_work_deletes_each_stray_and_the_doctor_stops_naming_them(
     for relative_path, path in (("notes.json", notes), (str(Path("probe") / "output.txt"), output)):
         size_before = path.stat().st_size
         res = delete_stray_state_file(
-            project_root=str(root), relative_path=relative_path, reason="clearing a leftover file")
+            root, relative_path=relative_path, reason="clearing a leftover file")
         assert "error" not in res, res
         assert res["relative_path"] == relative_path
         assert res["size_bytes"] == size_before
         assert res["reason"] == "clearing a leftover file"
         assert not path.exists()
 
-    log = read_audit_log(scope=str(root), tool="delete_stray_state_file")
+    log = read_audit_log(root, tool="delete_stray_state_file")
     assert log["count"] == 2
     assert all(e["arguments"]["reason"] == "clearing a leftover file" for e in log["entries"])
 
@@ -83,14 +81,14 @@ def test_admits_valid_work_deletes_each_stray_and_the_doctor_stops_naming_them(
 def test_refuses_a_plant_registry_file_naming_the_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     csv_path = tmp_path / "plants.csv"
     csv_path.write_text(
         "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
         "P1,acc-9,-90.058,43.197\n",
         encoding="utf-8",
     )
-    reg = register_plant_registry(name="reg", csv_paths=[str(csv_path)], crop="black locust",
+    reg = register_plant_registry(root, name="reg", csv_paths=[str(csv_path)], crop="black locust",
                                   site="block")
     assert "error" not in reg, reg
 
@@ -103,7 +101,7 @@ def test_refuses_a_plant_registry_file_naming_the_store(
     else:
         assert target_on_disk.is_file()
 
-    res = delete_stray_state_file(project_root=str(root), relative_path=relative_path, reason="x")
+    res = delete_stray_state_file(root, relative_path=relative_path, reason="x")
     assert "error" in res
     if is_database_backend():
         assert "does not exist" in res["error"]
@@ -122,12 +120,12 @@ def test_refuses_image_status_json_naming_the_store(
 
     from tcip_mcp.dataset_layout import replace_image_status_store
 
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     replace_image_status_store(root, {"bud/2026-03-04": {"a_1.jpg": {
         "status": "negative", "recorded_by": "user:breeder", "recorded_at": "2026-03-04T00:00:00Z"}}})
 
     res = delete_stray_state_file(
-        project_root=str(root), relative_path="image_status.json", reason="x")
+        root, relative_path="image_status.json", reason="x")
     assert "error" in res
     assert "image_status" in res["error"]
 
@@ -135,13 +133,13 @@ def test_refuses_image_status_json_naming_the_store(
 def test_refuses_the_state_roots_own_database_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / ".tcip").mkdir(exist_ok=True)
     (state / ".tcip" / "store.db").write_bytes(b"not a real database, just bytes")
 
     res = delete_stray_state_file(
-        project_root=str(root), relative_path=str(Path(".tcip") / "store.db"), reason="x")
+        root, relative_path=str(Path(".tcip") / "store.db"), reason="x")
 
     assert "error" in res
     assert "database home" in res["error"]
@@ -150,12 +148,12 @@ def test_refuses_the_state_roots_own_database_home(
 def test_refuses_a_lock_file_as_bookkeeping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "something.lock").write_text("x", encoding="utf-8")
 
     res = delete_stray_state_file(
-        project_root=str(root), relative_path="something.lock", reason="x")
+        root, relative_path="something.lock", reason="x")
 
     assert "error" in res
     assert "backend's own artifact" in res["error"]
@@ -167,54 +165,54 @@ def test_refuses_a_lock_file_as_bookkeeping(
 def test_refuses_a_relative_traversal_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str,
 ) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     _state(root)
 
     res = delete_stray_state_file(
-        project_root=str(root), relative_path=relative_path, reason="x")
+        root, relative_path=relative_path, reason="x")
 
     assert "error" in res
     assert "carrying a .. segment" in res["error"]
 
 
 def test_refuses_an_absolute_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     _state(root)
 
     absolute = str((tmp_path / "elsewhere.json").resolve())
-    res = delete_stray_state_file(project_root=str(root), relative_path=absolute, reason="x")
+    res = delete_stray_state_file(root, relative_path=absolute, reason="x")
 
     assert "error" in res
 
 
 def test_refuses_a_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "adir").mkdir()
 
-    res = delete_stray_state_file(project_root=str(root), relative_path="adir", reason="x")
+    res = delete_stray_state_file(root, relative_path="adir", reason="x")
 
     assert "error" in res
     assert "directory" in res["error"]
 
 
 def test_refuses_an_absent_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     _state(root)
 
     res = delete_stray_state_file(
-        project_root=str(root), relative_path="does-not-exist.json", reason="x")
+        root, relative_path="does-not-exist.json", reason="x")
 
     assert "error" in res
     assert "does not exist" in res["error"]
 
 
 def test_refuses_an_empty_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "notes.json").write_text("{}", encoding="utf-8")
 
-    res = delete_stray_state_file(project_root=str(root), relative_path="notes.json", reason="  ")
+    res = delete_stray_state_file(root, relative_path="notes.json", reason="  ")
 
     assert "error" in res
     assert "non-empty reason" in res["error"]
@@ -227,12 +225,12 @@ def test_a_state_root_the_accounting_refuses_is_an_error_dict_and_a_warn_finding
     """An AnchorMisplaced selection.json at the tree root, the same misplacement
     bundle's own tests provoke, is caught and answered rather than left to escape as a
     traceback: an error dict from the tool, a warn finding from the doctor."""
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "notes.json").write_text("{}", encoding="utf-8")
     (root / "selection.json").write_text("{}", encoding="utf-8")
 
-    res = delete_stray_state_file(project_root=str(root), relative_path="notes.json", reason="x")
+    res = delete_stray_state_file(root, relative_path="notes.json", reason="x")
     assert "error" in res
     assert "accounting refused" in res["error"]
 
@@ -253,7 +251,7 @@ def test_a_file_two_stores_claim_equally_refuses_naming_a_store(
     from tcip_mcp.tools import bundle as bundle_module
     from tcip_store.adoption import AdoptionPlan, PlanEntry
 
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     colliding = state / "colliding.json"
     colliding.write_text("{}", encoding="utf-8")
@@ -291,12 +289,12 @@ def test_refuses_a_registered_checkpoint_under_the_state_root_as_a_blob(
     from tcip_mcp.tools.model_tools import register_model
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     checkpoint = checkpoint_file(state / "weights.pt", "a registered checkpoint")
 
     res = register_model(name="m1", checkpoint_path=str(checkpoint),
-                         config={"arch": "probe"}, project_path=str(root))
+                         config={"arch": "probe"}, project=root)
     assert "error" not in res, res
 
     assert checkpoint not in stray_state_files(root)
@@ -315,7 +313,7 @@ def test_refuses_a_link_and_leaves_the_file_it_points_at_in_place(
     the link would delete something neither of them names."""
     import os
 
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     real = state / "real.json"
     real.write_text("{}", encoding="utf-8")
@@ -329,7 +327,7 @@ def test_refuses_a_link_and_leaves_the_file_it_points_at_in_place(
     assert refusal is not None and "link or junction" in refusal
     assert target == link
 
-    res = delete_stray_state_file(project_root=str(root), relative_path="link.json", reason="x")
+    res = delete_stray_state_file(root, relative_path="link.json", reason="x")
     assert "error" in res and "link or junction" in res["error"]
     assert real.is_file(), "the link's target must survive a refused delete"
     assert os.path.lexists(link)
@@ -344,7 +342,7 @@ def test_refuses_a_drive_relative_path_naming_another_drive(
     own drive, so it normalizes outside the state root and is refused there. This is the one
     input that reaches that refusal, which would otherwise read as handling for a case nothing
     can produce."""
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     other_drive = "Z:" if str(root)[:1].upper() != "Z" else "Y:"
 
     _target, refusal = stray_state_file_refusal(str(root), f"{other_drive}notes.json")
@@ -359,7 +357,7 @@ def test_a_differently_cased_project_root_reaches_the_same_verdicts(
     """coverage of the normalization rule the module docstring states: every membership test
     compares normcase, so a project_root spelled in another case classifies a stray and a claimed
     file exactly as the canonical spelling does."""
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "notes.json").write_text("{}", encoding="utf-8")
     shouted = str(root).upper()
@@ -378,7 +376,7 @@ def test_the_doctor_names_a_stray_under_a_relative_project_root(
     """guard. The doctor's finding is built from the state root the listing itself resolved, never
     from the spelling the operator typed, so `tcip doctor .` or a root reached through a link
     reports the stray instead of raising out of a read-only diagnostic."""
-    root = _project(tmp_path, monkeypatch)
+    root = _project(tmp_path)
     state = _state(root)
     (state / "notes.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)

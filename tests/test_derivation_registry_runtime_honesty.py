@@ -50,16 +50,18 @@ def test_every_count_objective_label_the_calibration_path_can_stamp_is_registere
                 "and must record the same implementation")
 
 
-def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamped_number():
+def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamped_number(
+    tmp_path,
+):
     """The IoU threshold a match criterion reports carries a derivation label; the callable that
     label resolves to, run on the same GT, has to return that same number. A registry entry that
     names a different-but-importable derivation passes every static check while pointing an
     auditor at code that never produced the value."""
-    confirm_bare("leaf", localization="iou_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     boxes = [(0, 0, 60, 60), (500, 0, 60, 60)]
-    result = resolve_match_criterion("leaf", gt_only(boxes), class_id=0)
+    result = resolve_match_criterion(trait, gt_only(boxes), class_id=0)
     assert result["kind"] == "iou_match"
 
     label = result["derived_from"]
@@ -85,17 +87,19 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
     assert live[label + operating_point.REVIEW_VERDICT_LABEL_SUFFIX] == live[existing]
 
 
-def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance():
+def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance(
+    tmp_path,
+):
     """Same demand on the center-match branch, where the reported tolerance is the derived
     fraction scaled by the GT's own average characteristic size: both sides of the comparison run
     the real implementations, so the label is checked against the computation rather than against
     a number copied out of one of them."""
-    confirm_bare("leaf", localization="center_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="center_match").entry
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size, resolve_match_criterion
 
     boxes = [(0, 0, 20, 20), (40, 0, 20, 20), (80, 0, 20, 20)]
     per_image = gt_only(boxes)
-    result = resolve_match_criterion("leaf", per_image, class_id=0)
+    result = resolve_match_criterion(trait, per_image, class_id=0)
     assert result["kind"] == "center_match"
 
     label = result["derived_from"]

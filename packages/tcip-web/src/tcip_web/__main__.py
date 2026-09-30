@@ -1,13 +1,13 @@
 """Entry point: ``python -m tcip_web``.
 
-Reads ``TCIP_WEB_HOST`` / ``TCIP_WEB_PORT`` for network binding (default 127.0.0.1:8765) and writes
-the chosen port to ``.tcip/state/web_port.txt`` so MCP tools in other processes can discover the
-backend.
+Resolves the workspace ``TCIP_WORKSPACE`` names once, reads ``TCIP_WEB_HOST`` / ``TCIP_WEB_PORT``
+for network binding (default 127.0.0.1:8765), publishes the chosen port under the workspace so MCP
+tools in other processes can discover the backend, and serves the app configured with that
+workspace.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 import socket
 
@@ -16,8 +16,6 @@ from tcip_store import replace
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import backend_port_key
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -37,34 +35,29 @@ def _pick_port(host: str, requested: int) -> int:
     return requested
 
 
-def _write_port_file(port: int) -> None:
-    """Publish the bound port for MCP tools in other processes; a failure is logged, never raised."""
-    from tcip_mcp import workspace
-
-    try:
-        replace(backend_port_key(workspace.workspace_root(create=False)), str(port))
-    except Exception:
-        logger.exception(
-            "Could not publish port %s: MCP tools will fall back to TCIP_WEB_PORT or %s",
-            port, DEFAULT_PORT,
-        )
-
-
 def main() -> None:
-    # The port handoff is written here, before uvicorn imports the app (which binds its own
-    # storage backend at import; the served app pins the platform-state root later).
+    """Resolve the workspace once, publish the port under it, and serve the app configured with
+    it and the image roots. Refuses what :func:`~tcip_mcp.workspace.workspace_from_environment`
+    refuses."""
+    from tcip_mcp.workspace import workspace_from_environment
+
+    workspace = workspace_from_environment()
     instance = bind_default()
     # A non-loopback host binds, and the app's trust boundary then serves this machine's own
     # connections and refuses network ones until the operator opts in (tcip_web.trust_boundary).
     host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = _pick_port(host, requested)
-    _write_port_file(port)
+    replace(backend_port_key(workspace), str(port))
     # The app's import below binds its own instance; this one holds only the port write's
     # connection and is closed so the process ends up holding one backend's connections.
     instance.close()
-    reload = os.environ.get("TCIP_WEB_RELOAD", "0") == "1"
-    uvicorn.run("tcip_web.app:app", host=host, port=port, reload=reload)
+    from tcip_web.app import app
+    from tcip_web.paths import image_roots_from_environment
+    from tcip_web.state import store
+
+    store.configure(workspace, image_roots_from_environment())
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

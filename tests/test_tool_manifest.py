@@ -1,7 +1,7 @@
 """Guards against MCP tool-registry drift.
 
 Two failure modes this catches:
-  1. A tool that is decorated `@mcp.tool()` but never actually registers (import
+  1. A tool that is decorated `@tool()` but never actually registers (import
      error, decorator mistake, duplicate name).
   2. A document that hard-codes a tool count, which goes stale the next time a
      tool is added or retired.
@@ -21,12 +21,13 @@ TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 
 
 def _decorated_tool_names() -> set[str]:
-    """Function names decorated with `@mcp.tool(...)` across tools/*.py (via AST).
+    """Function names decorated with `@tool(...)` (``tcip_mcp.server.tool``) across tools/*.py
+    (via AST).
 
-    MCPServer registers a tool under its function name by default, and every tool in this repo
-    uses a bare `@mcp.tool()` except `serve_domain_knowledge`, whose description is composed from the
-    knowledge documents at import time; either form is still matched by `target.attr == "tool"`,
-    so the function name is the tool name regardless.
+    The server registers a tool under its function name, and every tool in this repo uses a bare
+    `@tool()` except `serve_domain_knowledge`, whose description is composed from the knowledge
+    documents at import time; either form is matched by the decorator's name, so the function
+    name is the tool name regardless.
     """
     names: set[str] = set()
     for py in TOOLS_DIR.glob("*.py"):
@@ -36,7 +37,7 @@ def _decorated_tool_names() -> set[str]:
                 continue
             for dec in node.decorator_list:
                 target = dec.func if isinstance(dec, ast.Call) else dec
-                if isinstance(target, ast.Attribute) and target.attr == "tool":
+                if isinstance(target, ast.Name) and target.id == "tool":
                     names.add(node.name)
     return names
 
@@ -192,6 +193,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "force_redraw_cal_holdout_split", "push_panel_data", "update_trait_spec_fields",
         "compute_phenology", "check_training_status", "init_project", "set_active_project",
         "write_class_map",
+        # Deleted: a server acts on the project it was started for, never one it switches to.
+        "activate_project",
         # Merged away: list_experiments(launched_only=True) serves the launched-runs view.
         "list_training_runs",
         # Merged away: rank_registered_models(metric="") serves the listing view.

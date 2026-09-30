@@ -34,7 +34,8 @@ from typing import Any, BinaryIO
 
 from tcip_store import LOG_JSON, RECORD_JSON, BadKey, DecodeError, check_json_value
 
-from tcip_mcp.project_paths import resolve_state
+from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
+from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,42 @@ SWEEP_FILE = "sweep.json"
 TRIAL_DIR_PREFIX = "trial_"
 """The name every trial run directory of a sweep starts with."""
 
+DATA_PATHS: PathFields = (
+    ("images_dir",), ("labels_dir",), ("plant_csv_paths", "[]"), ("split", "selection_dir"))
+"""The fields of a run's data section that name a path."""
+
+_PARAMETER_PATHS: PathFields = tuple(
+    (".".join(("data", *(step for step in field if step != "[]"))),
+     *(step for step in field if step == "[]"))
+    for field in DATA_PATHS)
+"""The same fields in a flat map of sweep parameters, each named by its dotted config path."""
+
+_SPACE_PATHS: PathFields = tuple((name, "choices", "[]", *rest) for name, *rest in _PARAMETER_PATHS)
+
+_REFERENCE_IDENTITY: PathFields = within(("reference_identity",), (
+    ("label_dirs", "*", "path"), ("label_csvs", "*", "path"), ("reference_buckets", "*", "path"),
+    ("scope_roots", "*"), ("label_stems", "*", "path"), ("stated_values", "selection_dir")))
+"""The locations a claim's reference identity records (``resolution._reference_identity``)."""
+
+RECORD_PATHS: dict[str, PathFields] = {
+    RUN_FILE: (
+        *within(("config", "data"), DATA_PATHS), *within(("resolved", "data"), DATA_PATHS),
+        *within(("resolved", "partition", "samples", "[]"), SAMPLE_PATHS),
+        ("resolved", "partition", "ground_truth_digests", "{}"),
+        ("resolved", "partition", "selection", "selection_dir"),
+        ("resume_from",), *within(("calibrated",), _REFERENCE_IDENTITY),
+        *within(("trial_params",), _PARAMETER_PATHS)),
+    SWEEP_FILE: (
+        *within(("base_config", "data"), DATA_PATHS),
+        *within(("baseline_params",), _PARAMETER_PATHS),
+        *within(("param_space",), _SPACE_PATHS)),
+    FINAL_STATUS_FILE: (("checkpoint", "path"),),
+    VALIDATIONS_FILE: (
+        ("dataset_root",), ("covered_buckets", "{}"), *_REFERENCE_IDENTITY),
+}
+"""The fields of each record of a run or sweep directory that name a path, each stored against
+the project the directory lies under (:func:`project_of_run`)."""
+
 FINAL_STATES = ("completed", "failed", "canceled")
 """The states a final status names."""
 TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})
@@ -63,16 +100,23 @@ HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "
 from ``$TCIP_HEARTBEAT_STALE_SECONDS``."""
 
 
-def experiments_dir(root: Path | str | None = None) -> Path:
-    """The directory every run directory of a project sits in: under ``root`` when given, else
-    under the pinned platform root."""
-    return resolve_state(EXPERIMENTS_DIR) if root is None else Path(root) / EXPERIMENTS_DIR
+def experiments_dir(project: Path | str) -> Path:
+    """The directory every run directory of ``project`` sits in."""
+    return Path(project) / EXPERIMENTS_DIR
 
 
-def sweeps_dir(root: Path | str | None = None) -> Path:
-    """The directory every HPO sweep directory of a project sits in: under ``root`` when given,
-    else under the pinned platform root."""
-    return resolve_state(SWEEPS_DIR) if root is None else Path(root) / SWEEPS_DIR
+def sweeps_dir(project: Path | str) -> Path:
+    """The directory every HPO sweep directory of ``project`` sits in."""
+    return Path(project) / SWEEPS_DIR
+
+
+def project_of_run(run_dir: Path) -> Path:
+    """The project a run directory, a sweep directory or a sweep's trial directory lies under:
+    the parent of the ``.tcip`` directory on its path. Refuses a directory under no ``.tcip``."""
+    for parent in Path(run_dir).parents:
+        if parent.name == ".tcip":
+            return parent.parent
+    raise ValueError(f"{run_dir} lies under no project's .tcip directory")
 
 
 def run_name(name: str) -> str:
@@ -86,16 +130,16 @@ def run_name(name: str) -> str:
     return name
 
 
-def experiment_dir(experiment_id: str, *, root: Path | str | None = None) -> Path:
+def experiment_dir(experiment_id: str, *, project: Path | str) -> Path:
     """One run's directory. Refuses an id that is not a single directory name (:func:`run_name`)."""
-    return experiments_dir(root) / run_name(experiment_id)
+    return experiments_dir(project) / run_name(experiment_id)
 
 
-def find_run(experiment_id: str, *, root: Path | str | None = None) -> Path | None:
+def find_run(experiment_id: str, *, project: Path | str) -> Path | None:
     """The run directory ``experiment_id`` names, or ``None`` for an id that is not a single
     directory name or names no directory holding a launch record."""
     try:
-        run_dir = experiment_dir(experiment_id, root=root)
+        run_dir = experiment_dir(experiment_id, project=project)
     except BadKey:
         return None
     return run_dir if (run_dir / RUN_FILE).is_file() else None
@@ -139,7 +183,19 @@ def open_run_directory(run_dir: Path, compose: Callable[[Path], dict]) -> None:
     create_run_directory(run_dir)
     for log in (METRICS_FILE, VALIDATIONS_FILE):
         (run_dir / log).touch(exist_ok=False)
-    write_once(run_dir / RUN_FILE, compose(run_dir))
+    write_record(run_dir / RUN_FILE, compose(run_dir))
+
+
+def write_record(path: Path, value: Any) -> None:
+    """Publish the run or sweep record ``value`` at ``path`` once (:func:`write_once`), each path
+    :data:`RECORD_PATHS` names for its file stored against the directory's project."""
+    write_once(path, recorded_paths(value, RECORD_PATHS[path.name], project_of_run(path)))
+
+
+def read_run_record(path: Path) -> Any:
+    """The run or sweep record at ``path`` (:func:`read_record`), each path :data:`RECORD_PATHS`
+    names for its file resolved against the directory's project."""
+    return runtime_paths(read_record(path), RECORD_PATHS[path.name], project_of_run(path))
 
 
 def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
@@ -179,8 +235,8 @@ def write_final_status(directory: Path, state: str, error: str | None, **outcome
     if state not in FINAL_STATES:
         raise ValueError(f"{state!r} is not a final state; a final status names one of "
                          f"{list(FINAL_STATES)}.")
-    write_once(directory / FINAL_STATUS_FILE,
-               {"state": state, "ended": now_iso(), "error": error, **outcome})
+    write_record(directory / FINAL_STATUS_FILE,
+                 {"state": state, "ended": now_iso(), "error": error, **outcome})
 
 
 def append_row(path: Path, row: dict) -> None:
@@ -308,13 +364,11 @@ class RunObservation:
 
     @property
     def checkpoint(self) -> dict | None:
-        """The checkpoint a completed training run's final status selects, ``path`` made
-        absolute, or ``None`` for a run that has not completed and for a calibration run, which
-        trains nothing."""
+        """The checkpoint a completed training run's final status selects, or ``None`` for a run
+        that has not completed and for a calibration run, which trains nothing."""
         if self.final is None or self.state != "completed" or self.record["config"] is None:
             return None
-        checkpoint = self.final["checkpoint"]
-        return {**checkpoint, "path": str(self.directory / checkpoint["path"])}
+        return self.final["checkpoint"]
 
 
 def observe(directory: Path, record_file: str = RUN_FILE) -> RunObservation:
@@ -324,9 +378,9 @@ def observe(directory: Path, record_file: str = RUN_FILE) -> RunObservation:
     holds its two logs from the moment it opened; one missing either refuses with
     ``FileNotFoundError`` naming each. A completed run's checkpoint is read, and refused when
     absent, by whatever loads it: an archive may carry a run without its weights."""
-    record = read_record(directory / record_file)
+    record = read_run_record(directory / record_file)
     final_path = directory / FINAL_STATUS_FILE
-    final = read_record(final_path) if final_path.exists() else None
+    final = read_run_record(final_path) if final_path.exists() else None
     alive = last_alive(directory, record_file)
     if final is not None:
         state = final["state"]
@@ -342,38 +396,52 @@ def observe(directory: Path, record_file: str = RUN_FILE) -> RunObservation:
     return observation
 
 
-def run_dirs(root: Path | str | None = None) -> list[Path]:
-    """Every run directory of the project under ``root`` (default: the pinned platform root) that
-    holds a launch record, sorted by id."""
-    parent = experiments_dir(root)
+def run_dirs(project: Path | str) -> list[Path]:
+    """Every run directory of ``project`` that holds a launch record, sorted by
+    id."""
+    parent = experiments_dir(project)
     if not parent.is_dir():
         return []
     return sorted(d for d in parent.iterdir() if (d / RUN_FILE).is_file())
 
 
-def run_observations(root: Path | str | None = None) -> list[RunObservation]:
-    """Every run of the project under ``root`` (:func:`run_dirs`), each observed once."""
-    return [observe(d) for d in run_dirs(root)]
+def run_observations(project: Path | str) -> list[RunObservation]:
+    """Every run of ``project`` (:func:`run_dirs`), each observed once."""
+    return [observe(d) for d in run_dirs(project)]
 
 
-def training_runs(root: Path | str | None = None) -> list[RunObservation]:
-    """Every run of the project under ``root`` that trains a model (:func:`run_observations`); a
+def training_runs(project: Path | str) -> list[RunObservation]:
+    """Every run of ``project`` that trains a model (:func:`run_observations`); a
     calibration run, whose launch record carries no config, is not one."""
-    return [obs for obs in run_observations(root) if obs.record["config"] is not None]
+    return [obs for obs in run_observations(project) if obs.record["config"] is not None]
 
 
-def find_observation(experiment_id: str, *,
-                     root: Path | str | None = None) -> RunObservation | None:
+def live_run_conflict(project: Path) -> str | None:
+    """The refusal a run or HPO sweep of ``project`` still running answers with, or
+    ``None``."""
+    for run in run_observations(project):
+        if run.state == "running":
+            return (f"experiment {run.directory.name!r} is running; ask the agent to cancel it "
+                    "(cancel_training) or wait for it to finish")
+    sweeps = sweeps_dir(project)
+    for sweep in sorted(sweeps.iterdir()) if sweeps.is_dir() else []:
+        if (sweep / SWEEP_FILE).is_file() and observe(sweep, SWEEP_FILE).state == "running":
+            return (f"HPO sweep {sweep.name!r} is running; ask the agent to cancel it "
+                    "(cancel_hyperparameter_search) or wait for it to finish")
+    return None
+
+
+def find_observation(experiment_id: str, *, project: Path | str) -> RunObservation | None:
     """The run ``experiment_id`` names (:func:`find_run`), observed, or ``None``."""
-    run_dir = find_run(experiment_id, root=root)
+    run_dir = find_run(experiment_id, project=project)
     return observe(run_dir) if run_dir is not None else None
 
 
-def run_resolution(experiment_id: str) -> dict:
+def run_resolution(experiment_id: str, *, project: Path | str) -> dict:
     """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`): its
     ``data`` section, its ``partition`` and its ``objective``. Refuses (``ValueError``) an id
     naming no run directory and one naming a calibration run, which resolved nothing."""
-    observation = find_observation(experiment_id)
+    observation = find_observation(experiment_id, project=project)
     if observation is None:
         raise ValueError(f"no run directory records {experiment_id!r}, so nothing it resolved "
                          "can be read.")
@@ -423,13 +491,14 @@ def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:
 
 
 def get_experiment(
-    experiment_id: str, *, metrics_limit: int | None = None, metrics_offset: int = 0,
+    experiment_id: str, *, project: Path | str, metrics_limit: int | None = None,
+    metrics_offset: int = 0,
 ) -> dict[str, Any]:
     """One run's directory read whole: its launch record, its final status (``None`` until
     written), its state, its metrics rows paginated by ``metrics_offset`` and ``metrics_limit``
     over the row list (``n_rows`` bounds the paging, ``n_epochs`` counts distinct epochs), and its
     validations. ``{"error": ...}`` for an id naming no run."""
-    observation = find_observation(experiment_id)
+    observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     rows = read_rows(observation.metrics_log)[0]
@@ -443,20 +512,20 @@ def get_experiment(
         "n_rows": len(rows),
         "metrics": rows[metrics_offset:end],
         "metrics_offset": metrics_offset,
-        "validations": read_rows(observation.validations_log)[0],
+        "validations": [row for _, row in validations(observation)],
     }
 
 
-def list_experiments() -> list[dict[str, Any]]:
-    """Every run directory of the project: its id, state, creation time, and whether it trains a
-    model (``has_model_source``: its launch record carries a config, which a calibration run's
-    does not)."""
+def list_experiments(project: Path | str) -> list[dict[str, Any]]:
+    """Every run directory of ``project``: its id, state, creation time, and whether it
+    trains a model (``has_model_source``: its launch record carries a config, which a calibration
+    run's does not)."""
     return [{
         "experiment_id": obs.directory.name,
         "state": obs.state,
         "created": obs.record["created"],
         "has_model_source": obs.record["config"] is not None,
-    } for obs in run_observations()]
+    } for obs in run_observations(project)]
 
 
 def _split_summary(resolved: dict) -> dict[str, Any]:
@@ -473,7 +542,7 @@ def _split_summary(resolved: dict) -> dict[str, Any]:
     return {"case": "drawn", "seed": partition["seed"]}
 
 
-def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
+def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> dict[str, Any]:
     """Side-by-side comparison of training runs.
 
     Per run: ``state``, ``n_epochs``/``n_rows``, ``last_logged_metrics`` (the log's last row, not
@@ -493,7 +562,7 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
 
     comparisons: list[dict[str, Any]] = []
     for eid in experiment_ids:
-        observation = find_observation(eid)
+        observation = find_observation(eid, project=project)
         if observation is None:
             comparisons.append({"experiment_id": eid, "error": f"Experiment not found: {eid}"})
             continue
@@ -541,12 +610,12 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
             "same_dataset_fingerprint": same_dataset}
 
 
-def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
+def get_experiment_lineage(experiment_id: str, *, project: Path | str) -> dict[str, Any]:
     """A training run's data-to-model chain read off its records: the data section it resolved,
     its dataset identity, the run it was relaunched from and the checkpoint it resumed from, and
     the checkpoint its completion selected. ``{"error": ...}`` for an id naming no training
     run."""
-    observation = find_observation(experiment_id)
+    observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     run = observation.record
@@ -594,13 +663,14 @@ def _content_digest(value: dict[str, Any]) -> str:
 
 
 def validation_digest(body: dict[str, Any]) -> str:
-    """The content identity of a validation row, recomputed from the row a reader holds."""
+    """The content identity of a validation row as stored."""
     return _content_digest(body)
 
 
 def append_validation(run_dir: Path, body: dict[str, Any]) -> str:
-    """Append one earned claim to ``run_dir``'s validations and record the append, returning the
-    row's :func:`validation_digest`. Refuses (``ValueError``) a row missing any of
+    """Append one earned claim to ``run_dir``'s validations, its paths stored as
+    :data:`RECORD_PATHS` names them, and record the append, returning the stored row's
+    :func:`validation_digest`. Refuses (``ValueError``) a row missing any of
     :data:`_VALIDATION_FIELDS` and a directory holding no run."""
     missing = [field for field in _VALIDATION_FIELDS if field not in body]
     if missing:
@@ -608,36 +678,45 @@ def append_validation(run_dir: Path, body: dict[str, Any]) -> str:
                          "record is required and none has a default.")
     if not (run_dir / RUN_FILE).is_file():
         raise ValueError(f"Experiment not found: {run_dir.name}")
+    body = recorded_paths(body, RECORD_PATHS[VALIDATIONS_FILE], project_of_run(run_dir))
     append_row(run_dir / VALIDATIONS_FILE, body)
     digest = validation_digest(body)
     from tcip_mcp.audit import record_event_or_raise
 
     record_event_or_raise("experiment_validation_recorded",
                           {"experiment_id": run_dir.name, "document": body["document"],
-                           "trait": body["trait"], "record_digest": digest})
+                           "trait": body["trait"], "record_digest": digest},
+                          scope=project_of_run(run_dir))
     return digest
 
 
+def validations(observation: RunObservation) -> list[tuple[str, dict[str, Any]]]:
+    """Each row of the observed run's validations with its :func:`validation_digest`, recomputed
+    over the row as stored, and its paths resolved against the run's project."""
+    project = project_of_run(observation.directory)
+    return [(validation_digest(row), runtime_paths(row, RECORD_PATHS[VALIDATIONS_FILE], project))
+            for row in read_rows(observation.validations_log)[0]]
+
+
 def find_validation(observation: RunObservation, digest: str) -> dict[str, Any] | None:
-    """The row of the observed run's validations whose own recomputed identity is ``digest``, or
-    ``None`` when no row has it."""
-    for row in read_rows(observation.validations_log)[0]:
-        if validation_digest(row) == digest:
-            return row
-    return None
+    """The row of the observed run's validations (:func:`validations`) whose identity is
+    ``digest``, or ``None`` when no row has it."""
+    return next((row for row_digest, row in validations(observation) if row_digest == digest),
+                None)
 
 
-def open_calibration_run(calibrated: dict[str, Any]) -> Path:
-    """Open a fresh run directory (:func:`open_run_directory`) for one calibration of a checkpoint
-    no run of this project produced, and record its creation. Its launch record carries no config
-    and ``calibrated``: the ``document``, ``checkpoint_sha256``, ``reference_identity`` and
-    ``trait`` the claim is earned for, and what it was ``derived_from``."""
-    run_dir = experiment_dir(f"calibration_{mint_experiment_id()}")
+def open_calibration_run(calibrated: dict[str, Any], *, project: Path) -> Path:
+    """Open a fresh run directory (:func:`open_run_directory`) of ``project`` for one
+    calibration of a checkpoint no run of this project produced, and record its creation. Its
+    launch record carries no config and ``calibrated``: the ``document``, ``checkpoint_sha256``,
+    ``reference_identity`` and ``trait`` the claim is earned for, and what it was
+    ``derived_from``."""
+    run_dir = experiment_dir(f"calibration_{mint_experiment_id()}", project=project)
     open_run_directory(run_dir, lambda _: {"created": now_iso(), "config": None,
                                            "launched_by": None, "calibrated": calibrated})
     from tcip_mcp.audit import record_event_or_raise
 
     record_event_or_raise("calibration_experiment_created",
                           {"experiment_id": run_dir.name, "document": calibrated["document"],
-                           "trait": calibrated["trait"]})
+                           "trait": calibrated["trait"]}, scope=project)
     return run_dir

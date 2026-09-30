@@ -2,9 +2,9 @@
 
 Covers the two-file scheme (meta heartbeats never touch the geometry blob; geometry is valid
 only when its (image_path, tab) identity matches the meta), the display-resolved shape renderer
-(crop-to-viewport math, two-pass draw, malformed-shape tolerance), the canvas_open_binding
-write-authority fence on the push route, and the MCP tool end (missing binding, a binding naming
-another project, identity-stale shapes, ages, tag/creator counts).
+(crop-to-viewport math, two-pass draw, malformed-shape tolerance), the push route answering a push
+built for any project but the backend's open one as a mismatch, and the MCP tool end (no state
+pushed, identity-stale shapes, ages, tag/creator counts).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import tcip_store  # noqa: E402
+from tcip_mcp.project_record import read_record  # noqa: E402
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
 from tcip_web.app import app  # noqa: E402
 
@@ -27,62 +28,9 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _select(client: TestClient, root: Path, **over) -> dict:
-    """Mint a real canvas_open_binding for ``root`` through the real select route."""
-    body = {"project_root": str(root), "dataset_root": str(root)}
-    body.update(over)
-    r = client.post("/api/dataset/select", json=body)
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
-def _write_binding_raw(workspace: Path, *, generation: int, root: Path,
-                       project_name: str | None = None) -> None:
-    """Write a canvas_open_binding record as a plain file, bypassing the store seam entirely.
-
-    For a test that must not import the store's registration at all. The path is computed
-    through the generic ``RootedFileLocator`` primitive, the same one the registered store's own
-    locator wraps, never hand-spelled, so the layout is stated once.
-    """
-    import json
-
-    from tcip_store.file_backend import RootedFileLocator
-
-    locator = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-    doc = workspace / locator.relative_path(str(workspace), ("canvas_open_binding",))
-    doc.parent.mkdir(parents=True, exist_ok=True)
-    doc.write_text(json.dumps({
-        "generation": generation, "root": str(root), "project_name": project_name,
-        "issued_at": "2026-01-01T00:00:00+00:00",
-    }), encoding="utf-8")
-
-
-def _mint_binding(root: Path, *, generation: int = 1, project_name: str | None = None) -> None:
-    """Write a canvas_open_binding record directly through the seam, standing in for the one
-    production writer, ``_write_canvas_binding`` (``routes/dataset.py``), for an MCP-only test
-    with no HTTP round trip to mint one through.
-
-    Not a call to that writer itself: it derives ``project_name`` from
-    ``workspace.workspace_project_name(root)``, which names a project only for a root that is
-    exactly one workspace project's own directory, so a foreign-binding test that needs an
-    arbitrary ``project_name`` on a root outside the workspace (the shape a mismatch test wants)
-    has no way to reach that name through the real writer.
-    """
-    from tcip_mcp.web_client import canvas_open_binding_key
-
-    key = canvas_open_binding_key()
-    stored = tcip_store.read_versioned(key, default=None)
-    tcip_store.replace(key, {
-        "generation": generation,
-        "root": str(root),
-        "project_name": project_name,
-        "issued_at": "2026-01-01T00:00:00+00:00",
-    }, expect=stored.version)
-
-
-def _payload(image_path: str, generation: int, shapes=None, **over) -> dict:
+def _payload(project: Path, image_path: str, shapes=None, **over) -> dict:
     body = {
-        "binding_generation": generation,
+        "project_id": read_record(project)["id"],
         "tab": "annotate",
         "image_path": image_path,
         "image": Path(image_path).name,
@@ -99,13 +47,17 @@ def _payload(image_path: str, generation: int, shapes=None, **over) -> dict:
     return body
 
 
-def _meta(root: Path) -> dict:
-    return tcip_store.read(canvas_meta_key(str(root)))
+def _meta(root: Path) -> dict | None:
+    return tcip_store.read(canvas_meta_key(str(root)), default=None)
 
 
 def _shapes_doc(root: Path) -> dict:
     return tcip_store.read(canvas_geometry_key(str(root)))
 
+
+A_IMG, B_IMG = "C:/img/a.jpg", "C:/img/b.jpg"
+"""Images outside every project; a push stores each as its resolved absolute path."""
+A_STORED, B_STORED = str(Path(A_IMG).resolve()), str(Path(B_IMG).resolve())
 
 SHAPES = [
     {"kind": "polygon", "points": [[10, 10], [60, 10], [60, 60]], "color": "#00FF00",
@@ -117,195 +69,91 @@ SHAPES = [
 ]
 
 
-# ── route: the write destination is the binding's own root ──────────────────
+def _other_project(tmp_path: Path) -> Path:
+    from tcip_mcp.tools.project_tools import initialize_project
 
-def test_full_push_writes_geometry_and_meta(client, tmp_path):
-    sel = _select(client, tmp_path)
-    r = client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
+    other = tmp_path.parent / "other_project"
+    assert "error" not in initialize_project(str(other), "Other project", "south block")
+    return other
+
+
+# ── route: a push lands only under the project it was built for, while that one is open ─────
+
+def test_full_push_writes_geometry_and_meta(client, opened_project):
+    image = str(opened_project / "images" / "a.jpg")
+    r = client.post("/api/canvas/state", json=_payload(opened_project, image, shapes=SHAPES))
     assert r.status_code == 200 and r.json()["shapes_written"] is True
-    assert len(_shapes_doc(tmp_path)["shapes"]) == 3
-    assert _shapes_doc(tmp_path)["image_path"] == "C:/img/a.jpg"
-    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
+    assert len(_shapes_doc(opened_project)["shapes"]) == 3
+    assert _shapes_doc(opened_project)["image_path"] == "images/a.jpg"
+    assert _meta(opened_project)["image_path"] == "images/a.jpg"
 
 
-def test_cut_armed_flag_rides_the_meta_push(client, tmp_path):
+def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_nothing(
+    client, opened_project, tmp_path,
+):
+    """The backend compares the project a push names with the one it has open: a push built for
+    another project answers 409 naming the open one, and nothing lands under either."""
+    other = _other_project(tmp_path)
+
+    r = client.post("/api/canvas/state",
+                    json=_payload(other, A_IMG, shapes=SHAPES))
+
+    assert r.status_code == 409
+    assert r.json()["detail"]["open_project_id"] == read_record(opened_project)["id"]
+    assert _meta(opened_project) is None
+    assert _meta(other) is None
+
+
+def test_a_push_naming_the_open_project_is_admitted(client, opened_project, tmp_path):
+    """The admitting half: the same push, built for the project the backend has open, lands."""
+    _other_project(tmp_path)
+
+    r = client.post("/api/canvas/state",
+                    json=_payload(opened_project, A_IMG, shapes=SHAPES))
+
+    assert r.status_code == 200, r.text
+    assert _meta(opened_project)["image_path"] == A_STORED
+
+
+def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(client, project):
+    r = client.post("/api/canvas/state", json=_payload(project, A_IMG, shapes=SHAPES))
+
+    assert r.status_code == 409
+    assert r.json()["detail"]["open_project_id"] is None
+    assert _meta(project) is None
+
+
+def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(client, opened_project):
+    """The write destination is the open project, never anything the client names: a body that
+    names a root refuses outright (extra='forbid') rather than being silently ignored."""
+    body = _payload(opened_project, A_IMG, shapes=SHAPES)
+    r = client.post("/api/canvas/state", json={**body, "project_root": str(opened_project)})
+    assert r.status_code == 422
+
+
+def test_cut_armed_flag_rides_the_meta_push(client, opened_project):
     """A client fact like dirty or mode: the completed-cut and refusal cases both leave the flag
     set but clear the mirrored pending segment, so the meta document has to carry the flag itself
     for the mirror to read as armed rather than disarmed."""
-    sel = _select(client, tmp_path)
     r = client.post(
         "/api/canvas/state",
-        json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES, cut_armed=True),
+        json=_payload(opened_project, A_IMG, shapes=SHAPES, cut_armed=True),
     )
     assert r.status_code == 200
-    assert _meta(tmp_path)["cut_armed"] is True
+    assert _meta(opened_project)["cut_armed"] is True
 
 
-def test_heartbeat_updates_meta_without_touching_geometry(client, tmp_path):
-    sel = _select(client, tmp_path)
-    client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
-    before = tcip_store.read_versioned(canvas_geometry_key(str(tmp_path))).version
-    hb = _payload("C:/img/a.jpg", sel["generation"], shapes=None,
+def test_heartbeat_updates_meta_without_touching_geometry(client, opened_project):
+    client.post("/api/canvas/state",
+                json=_payload(opened_project, A_IMG, shapes=SHAPES))
+    before = tcip_store.read_versioned(canvas_geometry_key(str(opened_project))).version
+    hb = _payload(opened_project, A_IMG, shapes=None,
                   viewport={"x": 40, "y": 10, "w": 80, "h": 50, "scale": 2.0})
     r = client.post("/api/canvas/state", json=hb)
     assert r.json()["shapes_written"] is False
-    assert _meta(tmp_path)["viewport"]["x"] == 40                       # meta moved
-    after = tcip_store.read_versioned(canvas_geometry_key(str(tmp_path))).version
-    assert after == before                                              # geometry blob untouched
-
-
-def test_push_lands_under_the_bindings_root_never_a_client_named_one(client, tmp_path):
-    """Payload-authority proof: the write destination is the canvas_open_binding record's own
-    root, never anything the client names; a body that still names project_root refuses outright
-    (extra='forbid') rather than being silently ignored."""
-    other = tmp_path.parent / "elsewhere"
-    other.mkdir()
-    sel = _select(client, tmp_path)
-
-    body = _payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES)
-    r = client.post("/api/canvas/state", json=body)
-    assert r.status_code == 200
-    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
-    assert not (other / ".tcip" / "state" / "canvas_live.json").exists()
-
-    r2 = client.post("/api/canvas/state", json={**body, "project_root": str(other)})
-    assert r2.status_code == 422
-
-
-def test_push_answers_409_on_a_stale_generation_and_nothing_lands_under_the_old_root(client, tmp_path):
-    """The binding round trip through real producers: a stale generation after a second select of
-    a different root answers 409 with the current generation, and nothing stale-checked lands
-    under the old root."""
-    first = _select(client, tmp_path)
-    second_root = tmp_path.parent / "proj2"
-    second_root.mkdir()
-    second = _select(client, second_root)
-    assert second["generation"] == first["generation"] + 1
-
-    stale = _payload("C:/img/a.jpg", first["generation"], shapes=SHAPES)
-    r = client.post("/api/canvas/state", json=stale)
-    assert r.status_code == 409
-    detail = r.json()["detail"]
-    assert detail["generation"] == second["generation"]
-    assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
-
-    # A push carrying the current generation still lands correctly (no ordering claim beyond
-    # this: a push accepted before a generation bump legitimately finishes under the old root).
-    fresh = _payload("C:/img/b.jpg", second["generation"], shapes=SHAPES)
-    r2 = client.post("/api/canvas/state", json=fresh)
-    assert r2.status_code == 200
-    assert _meta(second_root)["image_path"] == "C:/img/b.jpg"
-
-
-def test_select_refuses_a_project_root_pending_removal_and_the_binding_is_unchanged(
-    client, tmp_path,
-):
-    """A select naming a pending project's root is refused ahead of the binding write: the
-    generation an earlier, ordinary select left in force is untouched by the refused one. The
-    guard's excluded-roots check refuses the pending root first, so the answer is its 403
-    carrying the pending door's own message; the route's 409 is only the race between the
-    guard's marker read and the route's own."""
-    import tcip_store as ts
-    from tcip_mcp import workspace
-
-    (tmp_path / ".tcip").mkdir()
-    first = _select(client, tmp_path)
-
-    ts.replace(
-        workspace.pending_removal_key(tmp_path),
-        {"requested_at": "20260304T120000Z", "requested_by": "user:tester",
-         "archive_path": "archive.zip", "holding_dir": "holding",
-         "external_roots": [], "dependent_projects": []},
-        expect=ts.Version.ABSENT,
-    )
-
-    resp = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
-    )
-    assert resp.status_code == 403
-    assert "20260304T120000Z" in resp.json()["detail"]
-
-    from tcip_mcp.web_client import read_canvas_binding
-
-    current = read_canvas_binding()
-    assert current["generation"] == first["generation"]
-
-
-def test_push_answers_409_after_a_release_even_with_the_records_own_generation(client, tmp_path):
-    """A reconnecting browser adopts whatever generation the canvas_open_binding record now
-    carries (``StateStore.refresh_binding_generation_from_record``), released or not: a push
-    naming that generation must still be refused, since a released record names nothing open
-    even though its generation matches exactly."""
-    (tmp_path / ".tcip").mkdir()
-    _select(client, tmp_path)
-
-    resp = client.post("/api/projects/project/release-binding", json={"user": "tester"})
-    assert resp.status_code == 200, resp.text
-
-    from tcip_mcp.web_client import read_canvas_binding
-
-    released = read_canvas_binding()
-    assert released["released"] is True
-
-    push = client.post(
-        "/api/canvas/state",
-        json=_payload("C:/img/a.jpg", released["generation"], shapes=SHAPES),
-    )
-    assert push.status_code == 409
-    assert "released" in push.json()["detail"]["error"]
-    assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
-
-
-def test_push_lands_after_a_release_and_a_fresh_select(client, tmp_path):
-    """coverage: the refusal above is only half the push route's own predicate; a select after
-    the release issues a fresh, unreleased binding a push must still be admitted against."""
-    (tmp_path / ".tcip").mkdir()
-    _select(client, tmp_path)
-
-    resp = client.post("/api/projects/project/release-binding", json={"user": "tester"})
-    assert resp.status_code == 200, resp.text
-
-    reselect = _select(client, tmp_path)
-
-    from tcip_mcp.web_client import read_canvas_binding
-
-    current = read_canvas_binding()
-    assert not current.get("released")
-
-    push = client.post(
-        "/api/canvas/state",
-        json=_payload("C:/img/a.jpg", reselect["generation"], shapes=SHAPES),
-    )
-    assert push.status_code == 200
-    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
-
-
-def test_push_answers_409_on_no_binding_at_all(client, tmp_path):
-    """The refusal's other half: a push before any select has ever run names a missing record,
-    not a generation mismatch."""
-    r = client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", 1, shapes=SHAPES))
-    assert r.status_code == 409
-    detail = r.json()["detail"]
-    assert detail["generation"] is None
-    assert detail["project_name"] is None
-    assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
-
-
-def test_push_lands_under_a_non_workspace_root_bound_with_a_null_project_name(
-    client, tmp_path_factory, monkeypatch,
-):
-    """A registered dataset root or TCIP_IMAGE_ROOTS entry binds by root all the same, with no
-    workspace name: the binding-by-root-with-null-name case."""
-    outside = tmp_path_factory.mktemp("outside")
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(outside))
-
-    sel = _select(client, outside)
-    assert sel["generation"] >= 1
-
-    r = client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
-    assert r.status_code == 200
-    assert _meta(outside)["image_path"] == "C:/img/a.jpg"
+    assert _meta(opened_project)["viewport"]["x"] == 40                    # meta moved
+    after = tcip_store.read_versioned(canvas_geometry_key(str(opened_project))).version
+    assert after == before                                                 # geometry untouched
 
 
 def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
@@ -318,23 +166,30 @@ def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
     written; that is bootstrap infrastructure a root incurs regardless of what it stores, not
     something this push depends on, and it would trip the same patch for an unrelated reason.
     """
+    import asyncio
     import os as _os
 
     from tcip_store.file_backend import FileBackend
 
+    from tcip_mcp.tools.project_tools import initialize_project
+    from tcip_web.state import store
+
     tcip_store.bind(FileBackend())
-    sel = _select(client, tmp_path)  # the select's own binding write may fsync; only the push must not
+    project = tmp_path
+    assert "error" not in initialize_project(str(project), "Test project", "north orchard")
+    asyncio.run(store.open_project(project))
 
     def _boom(*_a, **_kw):
         raise AssertionError("fsync should not be called for canvas state")
 
     monkeypatch.setattr(_os, "fsync", _boom)
-    r = client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
+    r = client.post("/api/canvas/state",
+                    json=_payload(project, A_IMG, shapes=SHAPES))
     assert r.status_code == 200
-    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
+    assert _meta(project)["image_path"] == A_STORED
 
 
-def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(client, tmp_path):
+def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(opened_project):
     """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
 
     The push runs on its own thread while another thread holds the key, and is observed still
@@ -345,10 +200,9 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(client, tm
 
     import tcip_store as ts
 
-    from tcip_web.routes.canvas import CanvasStatePayload, canvas_meta_key, push_canvas_state
+    from tcip_web.routes.canvas import CanvasStatePayload, push_canvas_state
 
-    sel = _select(client, tmp_path)
-    key = canvas_meta_key(str(tmp_path))
+    key = canvas_meta_key(str(opened_project))
     holding = threading.Event()
     release = threading.Event()
 
@@ -361,7 +215,7 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(client, tm
     holder.start()
     assert holding.wait(10)
 
-    payload = CanvasStatePayload(**_payload("C:/img/a.jpg", sel["generation"]))
+    payload = CanvasStatePayload(**_payload(opened_project, A_IMG))
     pushing = threading.Thread(target=lambda: push_canvas_state(payload))
     pushing.start()
     pushing.join(0.5)
@@ -372,17 +226,18 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(client, tm
     pushing.join(10)
     assert waiting, "the push wrote while another writer held the record's lock"
     assert not pushing.is_alive()
-    assert ts.read(key)["image_path"] == "C:/img/a.jpg"
+    assert ts.read(key)["image_path"] == A_STORED
 
 
-def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, tmp_path):
-    sel = _select(client, tmp_path)
-    client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
-    client.post("/api/canvas/state", json=_payload("C:/img/b.jpg", sel["generation"], shapes=None))
+def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, opened_project):
+    client.post("/api/canvas/state",
+                json=_payload(opened_project, A_IMG, shapes=SHAPES))
+    client.post("/api/canvas/state",
+                json=_payload(opened_project, B_IMG, shapes=None))
     # The geometry file still holds a.jpg's shapes, but its identity no longer matches the meta:
     # the reader must treat it as stale (a.jpg's polygons never render under b.jpg).
-    assert _shapes_doc(tmp_path)["image_path"] == "C:/img/a.jpg"
-    assert _meta(tmp_path)["image_path"] == "C:/img/b.jpg"
+    assert _shapes_doc(opened_project)["image_path"] == A_STORED
+    assert _meta(opened_project)["image_path"] == B_STORED
 
 
 # ── renderer: origin/scale placement + two-pass draw + tolerance ────────────
@@ -493,299 +348,120 @@ def test_render_tolerates_malformed_shapes(tmp_path):
 
 # ── MCP tool ────────────────────────────────────────────────────────────────
 
-def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str | None = None,
+def _write_state(project: Path, img: str, shapes=SHAPES, *, shapes_image: str | None = None,
                  tab: str = "annotate", shapes_tab: str | None = None,
                  cut_armed: bool | None = None) -> None:
+    """The two documents the push route writes, in the shape it writes them: the image path
+    spelled against the project the way the route stores it."""
     import time
-    root = str(tmp_path)
+
+    from tcip_mcp.registry_paths import stored_path
+
+    root = str(project)
+    stored = stored_path(img, project)
     if shapes is not None:
         tcip_store.replace(canvas_geometry_key(root), {
-            "image_path": shapes_image or img, "tab": shapes_tab or tab,
-            "shapes": shapes, "received_at": time.time(),
+            "image_path": stored_path(shapes_image, project) if shapes_image else stored,
+            "tab": shapes_tab or tab, "shapes": shapes, "received_at": time.time(),
         })
     tcip_store.replace(canvas_meta_key(root), {
-        "received_at": time.time(), "project_root": root, "tab": tab,
-        "image": Path(img).name, "image_path": img,
+        "received_at": time.time(), "tab": tab,
+        "image": Path(img).name, "image_path": stored,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
         "cut_armed": cut_armed,
         "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
     })
 
 
-def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_path, monkeypatch):
-    """No binding record exists: the message names the workspace root it consulted and that
-    opening a project in the GUI creates one. Nothing else is written, so this also covers the
-    case where neither a binding nor any canvas state is present."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+def test_capture_live_canvas_with_no_state_pushed_names_what_pushes_one(project):
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    from tcip_mcp.workspace import workspace_root
 
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert "error" in res
-    assert "no current canvas binding" in res["error"].lower()
-    assert str(workspace_root(create=False)) in res["error"]
+    assert "no canvas state has been pushed" in res["error"].lower()
 
 
-def test_capture_live_canvas_binding_present_but_no_state_pushed_yet(tmp_path, monkeypatch):
-    """The binding already names this same pinned root, so the message must not suggest
-    activate_project toward a project it has already confirmed is the open one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    _mint_binding(tmp_path)
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert "no live canvas state" in res["error"].lower()
-    assert "activate_project" not in res["error"]
-
-
-def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)
-    _mint_binding(tmp_path)
+def test_capture_live_canvas_renders_pushed_state(project):
+    img = _make_image(project)
+    _write_state(project, img)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert "error" not in res
     assert Path(res["image_path"]).is_file()
+    assert res["source_image"] == img
     assert res["classes"][0]["name"] == "bud"
     assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
     assert res["shape_counts_by_creator"] == {"user:breeder": 1, "derived:user:breeder": 1}
     assert res["state_age_seconds"] >= 0
     assert res["shapes_missing"] is False
-    assert res["project_root"] == str(tmp_path)
-    assert "divergence" not in res
 
 
-def test_capture_live_canvas_names_the_armed_cut(tmp_path, monkeypatch):
+def test_capture_live_canvas_names_the_armed_cut(project):
     """The mirror's armed state must be readable beside the mode it names, not just implied by
     the pending-segment polyline (which a completed cut or a refusal both clear while the flag
     stays set)."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img, cut_armed=True)
-    _mint_binding(tmp_path)
+    img = _make_image(project)
+    _write_state(project, img, cut_armed=True)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert res["cut_armed"] is True
 
 
-def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monkeypatch):
+def test_capture_live_canvas_renders_exactly_the_viewport_region(project):
     """The tool reads the visible rectangle and renders that, so the artifact is the region the
     human sees rather than the whole frame."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)
-    _mint_binding(tmp_path)
-    live = tcip_store.read(canvas_meta_key(str(tmp_path)))
+    img = _make_image(project)
+    _write_state(project, img)
+    live = tcip_store.read(canvas_meta_key(str(project)))
     live["viewport"] = {"x": 50, "y": 0, "w": 100, "h": 100}
-    tcip_store.replace(canvas_meta_key(str(tmp_path)), live)
+    tcip_store.replace(canvas_meta_key(str(project)), live)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert res["cropped_to_viewport"] is True
     assert Image.open(res["image_path"]).size == (100, 100)
 
 
-def test_capture_live_canvas_full_frame_downscales_to_max_edge(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)
-    _mint_binding(tmp_path)
+def test_capture_live_canvas_full_frame_downscales_to_max_edge(project):
+    img = _make_image(project)
+    _write_state(project, img)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False, crop_to_viewport=False, max_edge=100)
+    res = capture_live_canvas(project, project.parent, refresh=False, crop_to_viewport=False, max_edge=100)
     assert res["cropped_to_viewport"] is False
     assert Image.open(res["image_path"]).size == (100, 50)
 
 
-def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
-    tmp_path, monkeypatch,
-):
+def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(project):
     """A raster PIL has no true-color mode for is composited in memory for the render: the capture
     path writes no throwaway preview file beside the artifact."""
     import numpy as np
     import tifffile
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    images = tmp_path / "images"
+    images = project / "images"
     images.mkdir()
     rng = np.random.default_rng(3)
     src = images / "capture.tif"
     tifffile.imwrite(str(src), rng.integers(0, 4096, size=(100, 200, 6)).astype(np.uint16))
-    _write_state(tmp_path, str(src))
-    _mint_binding(tmp_path)
+    _write_state(project, str(src))
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert "error" not in res
     assert Image.open(res["image_path"]).mode == "RGB"
-    assert not (tmp_path / ".tcip" / "artifacts" / "viz" / "_band_previews").exists()
+    assert not (project / ".tcip" / "artifacts" / "viz" / "_band_previews").exists()
 
 
-def test_capture_live_canvas_identity_stale_shapes_do_not_render(tmp_path, monkeypatch):
+def test_capture_live_canvas_identity_stale_shapes_do_not_render(project):
     """Geometry left over from a previous image must not render under the current one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img, shapes_image="C:/img/other.jpg")  # stale identity
-    _mint_binding(tmp_path)
+    img = _make_image(project)
+    _write_state(project, img, shapes_image="C:/img/other.jpg")  # stale identity
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
+    res = capture_live_canvas(project, project.parent, refresh=False)
     assert "error" not in res
     assert res["shapes_missing"] is True
     assert res["shape_counts_by_tag"] == {}
     assert Path(res["image_path"]).is_file()    # still renders the image + viewport
-
-
-def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_path, monkeypatch):
-    """The reader pinned to A must not render A's own stale documents as live once the binding
-    names B.
-
-    The binding is written as a plain file at the exact path its store's locator places it at,
-    bypassing the store seam, so this test imports no part of the store's registration.
-    """
-    from tcip_store.file_backend import FileBackend
-
-    tcip_store.bind(FileBackend())
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)  # A's own (this reader's) stale documents: a "hit"
-
-    workspace = tmp_path.parent
-    _write_binding_raw(workspace, generation=7, root=workspace / "elsewhere")
-
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert "divergence" in res
-
-
-def test_capture_live_canvas_miss_case_also_answers_divergence(tmp_path, monkeypatch, tmp_path_factory):
-    """The divergence is the default answer on a miss (this reader has nothing of its own) just
-    as much as on a hit."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="currant_bud_valley")
-
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert res["divergence"]["bound_project"] == "currant_bud_valley"
-    assert res["divergence"]["bound_root"] == str(other)
-
-
-def test_capture_live_canvas_render_last_known_renders_labeled_not_live(
-    tmp_path, monkeypatch, tmp_path_factory,
-):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)
-    other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="currant_bud_valley")
-
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    refused = capture_live_canvas(refresh=False)
-    assert "error" in refused
-
-    rendered = capture_live_canvas(refresh=False, render_last_known=True)
-    assert "error" not in rendered
-    assert Path(rendered["image_path"]).is_file()
-    assert rendered["divergence"]["bound_project"] == "currant_bud_valley"
-    assert "not live" in rendered["summary"]
-
-
-def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_divergence(
-    tmp_path, monkeypatch, tmp_path_factory,
-):
-    """render_last_known=True with nothing ever pushed under this pinned root: the message must
-    not drop the divergence already in hand, nor tell the caller to activate_project toward a
-    nameless root activate_project cannot converge."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name=None)
-
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False, render_last_known=True)
-    assert "error" in res
-    assert "activate_project" not in res["error"]
-    assert res["divergence"]["bound_root"] == str(other)
-    assert "reselect this project in the GUI" in res["divergence"]["converge"]
-
-
-def test_capture_live_canvas_unreadable_binding_store_is_reported_distinctly(tmp_path, monkeypatch):
-    """An unreadable binding store must not read as absent (which would suggest the wrong
-    remedy, 'open a project') nor escape the audited tool as a raw exception."""
-    import tcip_store as ts
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    real_read = ts.read
-
-    def _boom(key, **kwargs):
-        if key.store == "canvas_open_binding":
-            raise ts.DecodeError("corrupt binding record")
-        return real_read(key, **kwargs)
-
-    monkeypatch.setattr(ts, "read", _boom)
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert "could not read the canvas-open binding" in res["error"].lower()
-
-
-def test_capture_live_canvas_binding_oserror_is_reported_distinctly(tmp_path, monkeypatch):
-    """A permission or path-shape fault on the binding record is an OSError, not a StoreError:
-    the softener widens to catch it too, rather than letting it escape the audited tool raw."""
-    import tcip_store as ts
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    real_read = ts.read
-
-    def _boom(key, **kwargs):
-        if key.store == "canvas_open_binding":
-            raise PermissionError("simulated permission fault")
-        return real_read(key, **kwargs)
-
-    monkeypatch.setattr(ts, "read", _boom)
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert "could not read the canvas-open binding" in res["error"].lower()
-
-
-def test_capture_live_canvas_generation_fence_retries_once_then_answers_divergence(
-    tmp_path, monkeypatch,
-):
-    """A project switch mid-call (the binding moves between the two reads the fence takes) must
-    not produce a false live result: it retries once, and if the mismatch persists, answers with
-    the divergence rather than the render it just produced.
-
-    Minted through the seam (``_mint_binding``), not a raw file, so it runs on whichever
-    backend the leg bound rather than being pinned to the file backend.
-    """
-    import tcip_store as ts
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    img = _make_image(tmp_path)
-    _write_state(tmp_path, img)
-    _mint_binding(tmp_path, generation=1)
-
-    real_read = ts.read
-    reads = {"n": 0}
-    elsewhere = str(tmp_path.parent / "elsewhere")
-
-    def _patched(key, **kwargs):
-        if key.store == "canvas_open_binding":
-            reads["n"] += 1
-            if reads["n"] % 2 == 0:  # every "after the render" read: the binding has moved
-                return {"generation": 2, "root": elsewhere, "project_name": None,
-                        "issued_at": "2026-01-01T00:00:00+00:00"}
-        return real_read(key, **kwargs)
-
-    monkeypatch.setattr(ts, "read", _patched)
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-    res = capture_live_canvas(refresh=False)
-    assert "error" in res
-    assert "divergence" in res
-    assert reads["n"] == 4  # exactly one retry: two reads per attempt, two attempts

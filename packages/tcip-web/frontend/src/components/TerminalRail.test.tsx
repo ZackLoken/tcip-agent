@@ -275,6 +275,7 @@ describe("TerminalRail", () => {
 
     it("does not show the starter hint when a project is already open", async () => {
       const dataset = useStore.getState().gui.dataset;
+      useStore.setState({ openProject: { id: "a1", path: "/workspace/demo_trait_site" } });
       useStore.getState().patchGui({
         dataset: { ...dataset, dataset_root: "/workspace/demo_trait_site", date: "2026-05-01" },
       });
@@ -284,21 +285,19 @@ describe("TerminalRail", () => {
         expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
       } finally {
         // Restore, so a later test in this file can't inherit "a project is open".
+        useStore.setState({ openProject: null });
         useStore.getState().patchGui({ dataset });
       }
     });
 
     it("does not show the starter hint for a project open with no dated images yet", async () => {
-      const dataset = useStore.getState().gui.dataset;
-      useStore.getState().patchGui({
-        dataset: { ...dataset, dataset_root: "/workspace/demo_trait_site", date: null },
-      });
+      useStore.setState({ openProject: { id: "a1", path: "/workspace/demo_trait_site" } });
       try {
         render(<TerminalRail />);
         await screen.findByTestId("terminal-host");
         expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
       } finally {
-        useStore.getState().patchGui({ dataset });
+        useStore.setState({ openProject: null });
       }
     });
   });

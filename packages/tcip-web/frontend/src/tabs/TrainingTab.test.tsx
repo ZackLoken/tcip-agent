@@ -522,13 +522,11 @@ describe("TrainingTab chart placeholder", () => {
 
 describe("TrainingTab chart accessibility", () => {
   it("names the chart as an image built from the run and its metrics, with the same values behind a table disclosure", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-chart", status: "running" })],
     });
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 2, loss: 0.3 } });
       return () => {};
@@ -553,14 +551,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("names the table's own container from the as-table toggle", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-controls", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
@@ -575,14 +571,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("leaves aria-controls unset while the table disclosure is closed, since nothing is rendered to name", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-controls-closed", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
@@ -602,9 +596,7 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("marks the metrics placeholder as a live region so its swap to the chart is announced", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-waiting-live", status: "running" })],
     });
@@ -617,14 +609,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("names the table's first column the same words as the chart's own axis label", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-axis-label", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       return () => {};
     });
@@ -638,14 +628,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("prefers a row's own epoch over its step for the derived ordinal, even when both are present", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-both-ordinals", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "metric",
         experiment_id: experimentId,
@@ -664,14 +652,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("renders the unset glyph, not the array index, for a row with no epoch or step ordinal", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-no-ordinal", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { loss: 0.5 } });
       return () => {};
     });
@@ -687,14 +673,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("renders the unset glyph for a non-finite metric value, not an empty cell", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-nonfinite", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 1, loss: 0.5 } });
       onMessage({ type: "metric", experiment_id: experimentId, row: { epoch: 2, loss: null } });
       return () => {};
@@ -711,14 +695,12 @@ describe("TrainingTab chart accessibility", () => {
   });
 
   it("excludes bookkeeping fields the shared metric-key filter defines, not only epoch and step", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-bookkeeping", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "metric",
         experiment_id: experimentId,
@@ -738,14 +720,12 @@ describe("TrainingTab chart accessibility", () => {
 
 describe("TrainingTab chart default series", () => {
   it("plots both loss lines plus the merged selection line for a validated run selecting on loss, with every key still in the table", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-validated", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "metric",
         experiment_id: experimentId,
@@ -776,14 +756,12 @@ describe("TrainingTab chart default series", () => {
   });
 
   it("plots every numeric key and says so when the log carries neither a loss key nor selection", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-no-loss-key", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "metric",
         experiment_id: experimentId,
@@ -805,14 +783,12 @@ describe("TrainingTab chart default series", () => {
 
 describe("TrainingTab status toast", () => {
   it("does not toast on selecting a run already known to be terminal, only rediscovering its status", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-old-done", status: "completed" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "status",
         experiment_id: experimentId,
@@ -831,14 +807,12 @@ describe("TrainingTab status toast", () => {
   });
 
   it("toasts a transition to terminal observed while watching a live run", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-live-done", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "status",
         experiment_id: experimentId,
@@ -858,14 +832,12 @@ describe("TrainingTab status toast", () => {
   });
 
   it("toasts a stream error once, then still charts a metric the reconnect delivers", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ experiment_id: "train-just-launched", status: "running" })],
     });
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
-    vi.mocked(openTrainingStream).mockImplementation((_root, experimentId, onMessage) => {
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       onMessage({
         type: "status",
         experiment_id: experimentId,
@@ -898,9 +870,7 @@ describe("TrainingTab status toast", () => {
 
 describe("TrainingTab stream lifecycle", () => {
   it("closes the stream and clears the detail panel when the selected run leaves the next poll", async () => {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-    }));
+    useStore.setState({ openProject: { id: "p1", path: "/proj" } });
     const listRuns = vi.spyOn(trainingApi, "listRuns");
     listRuns.mockResolvedValueOnce({
       runs: [run({ experiment_id: "train-vanishing", status: "running" })],
@@ -1215,9 +1185,7 @@ describe("dataPickerFor", () => {
 
 describe("TrainingTab compare", () => {
   function setProjectRoot(root: string | null) {
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: root } },
-    }));
+    useStore.setState({ openProject: root ? { id: "p1", path: root } : null });
   }
 
   // The comparison's own columns repeat a marked run's id in its detail region (table headers),
@@ -1248,7 +1216,7 @@ describe("TrainingTab compare", () => {
     await screen.findByText("run-a");
     fireEvent.click(within(rowFor("run-a")).getByText("run-a"));
     await waitFor(() =>
-      expect(openTrainingStream).toHaveBeenCalledWith("/proj", "run-a", expect.any(Function)),
+      expect(openTrainingStream).toHaveBeenCalledWith("run-a", expect.any(Function)),
     );
 
     fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));

@@ -22,9 +22,9 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
 )
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED  # noqa: E402
 from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE  # noqa: E402
-from tests._trait_fixtures import BUD_OPENING, confirm_entry, entry  # noqa: E402
+from tests._trait_fixtures import BUD_OPENING, entry, propose_and_confirm  # noqa: E402
 
-# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's pinned root.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -61,7 +61,7 @@ def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
     return min(sweep["curve"], key=lambda c: abs(c["conf"] - conf))
 
 
-def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses():
+def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses(tmp_path):
     """Direction 1: a nearest-neighbor comparator reads a validated-looking zero bias off a
     holdout whose bias, at the conf that will actually ship, is catastrophic.
 
@@ -84,7 +84,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert old["conf"] == pytest.approx(0.05)         # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(0.0)  # ...which misleadingly reads as unbiased
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
@@ -95,7 +95,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]  # ...a comparator would not have
 
 
-def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail():
+def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail(tmp_path):
     """Direction 2: a nearest-neighbor comparator would unfairly refuse a reference the exact
     evaluation correctly admits.
 
@@ -118,7 +118,7 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
     assert old["conf"] == pytest.approx(0.89)          # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(2.0)  # ...which reads as an over-tolerance bias
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
@@ -149,10 +149,10 @@ def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_pe
     return records
 
 
-def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
+def test_tp_zero_bias_zero_holdout_fails_the_localization_floor(tmp_path):
     cal = _tp_zero_bias_zero_records("c")
     hold = _tp_zero_bias_zero_records("h")
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.0)
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
@@ -162,7 +162,7 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     assert "localization_quality_floor_failed" in conf.gate_evidence["failures"]
 
 
-def test_dispersion_gate_skipped_when_unauthored_gates_when_authored():
+def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(tmp_path):
     n_images, objects_per_image = 10, 50
     # One image drops 10 objects, none elsewhere -> mean bias -1.0, but the p90 tail is 1.0 (driven
     # by that single bad image among many good ones): exactly the "one bad plant among many"
@@ -176,8 +176,8 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored():
 
     strict = entry("bud_opening", BUD_OPENING.delivers, count_objective=COUNT_UNBIASED,
                    count_error_tolerance=0.5, count_bias_tolerance_frac=1.0)
-    confirm_entry(strict)
-    b_strict = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    propose_and_confirm(tmp_path, strict)
+    b_strict = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
     strict_sweep = b_strict.get("conf").gate_evidence
     assert strict_sweep["holdout_bias"]["count_error_p90"] == pytest.approx(1.0)
@@ -185,15 +185,15 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored():
 
     # The same fixture, under a trait that has never authored count_error_tolerance (BUD_OPENING), the
     # dispersion term is skipped entirely, not gated on a platform-invented number.
-    confirm_entry(BUD_OPENING)
-    b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    propose_and_confirm(tmp_path, BUD_OPENING)
+    b_default = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").gate_evidence
     assert default_sweep["count_error_tolerance"] is None
     assert "count_error_dispersion_too_high" not in default_sweep["failures"]
 
 
-def test_count_bias_tolerance_frac_source_platform_default_vs_trait():
+def test_count_bias_tolerance_frac_source_platform_default_vs_trait(tmp_path):
     """TraitEntry.count_bias_tolerance_frac, when unauthored (None, BUD_OPENING's own state), resolves to
     the platform's interim default fraction and stamps that provenance; a trait that authors its own
     value stamps ``"trait"`` instead, mirroring classifier_agreement_floor's own kappa_floor_source."""
@@ -203,8 +203,8 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait():
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
 
-    confirm_entry(BUD_OPENING)
-    b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    propose_and_confirm(tmp_path, BUD_OPENING)
+    b_default = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").gate_evidence
     assert default_sweep["count_bias_tolerance_frac"] == pytest.approx(0.01)
@@ -212,8 +212,8 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait():
 
     authored = entry("bud_opening", BUD_OPENING.delivers, count_objective=COUNT_UNBIASED,
                      count_bias_tolerance_frac=0.2)
-    confirm_entry(authored)
-    b_trait = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    propose_and_confirm(tmp_path, authored)
+    b_trait = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                       holdout_records=hold, staged_conf_floor=0.01)
     trait_sweep = b_trait.get("conf").gate_evidence
     assert trait_sweep["count_bias_tolerance_frac"] == pytest.approx(0.2)
@@ -222,34 +222,34 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait():
 
 # ── Reference-sufficiency and equivalence criterion ─────────────────────────
 
-def test_all_negative_calibration_or_holdout_refused():
+def test_all_negative_calibration_or_holdout_refused(tmp_path):
     real = _records("c")
     all_negative = [{"width": 400, "height": 400, "image_id": f"n_{i}", "gt": [], "dt": []}
                     for i in range(3)]
 
-    b1 = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=all_negative,
+    b1 = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=all_negative,
                                  holdout_records=real, staged_conf_floor=0.0)
     assert "insufficient_calibration_gt" in b1.get("conf").gate_evidence["failures"]
 
-    b2 = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=real,
+    b2 = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=real,
                                  holdout_records=all_negative, staged_conf_floor=0.0)
     assert "insufficient_holdout_gt" in b2.get("conf").gate_evidence["failures"]
 
 
-def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
+def test_single_image_holdout_fails_the_non_degeneracy_floor_alone(tmp_path):
     hold_one = [_records("h", shift=3.0)[0]]
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=hold_one, staged_conf_floor=0.3)
     sweep = b.get("conf").gate_evidence
     assert sweep["holdout_bias"]["n_images"] == 1
     assert "insufficient_holdout_images" in sweep["failures"]
 
 
-def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy():
+def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy(tmp_path):
     # n=2 clears the non-degeneracy floor but the mean+SE equivalence criterion still correctly
     # refuses it: a bare mean check would have passed this, since the per-image biases [+1, -1]
     # cancel exactly in the mean.
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
     sweep = b.get("conf").gate_evidence
     assert sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
@@ -257,7 +257,7 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     assert "count_bias_exceeds_tolerance" in sweep["failures"]
 
 
-def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_refuses_it(monkeypatch):
+def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_refuses_it(tmp_path, monkeypatch):
     """Padding a reference with zero-verdict, unadjudicated records must not make its own
     statistics easier to pass by silently diluting the variance denominator; wired here with a
     synthetic adjudication-coverage predicate standing in for a real one.
@@ -283,7 +283,7 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     from tests._trait_fixtures import with_fields
 
     loosened = with_fields(BUD_OPENING, count_bias_tolerance_frac=1.0)
-    confirm_entry(loosened)
+    propose_and_confirm(tmp_path, loosened)
 
     hold_real = _records("h", shift=3.0)  # n=2, real per-image variance ([+1, -1])
     padding = [{"width": 400, "height": 400, "image_id": f"h_pad_{i}", "gt": [], "dt": [],
@@ -291,9 +291,9 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
 
     # Padded or not, the same real disagreement gets the same verdict: the padding carries no
     # evidence about count bias and so cannot buy any statistical confidence.
-    b_padded = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+    b_padded = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                        holdout_records=hold_real + padding, staged_conf_floor=0.3)
-    b_bare = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+    b_bare = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                      holdout_records=hold_real, staged_conf_floor=0.3)
     assert b_padded.get("conf").gate_evidence["holdout_bias"]["n_images"] == 10
     assert b_padded.get("conf").gate_evidence["holdout_bias"]["n_present"] == 2
@@ -306,7 +306,7 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     # filter-then-recompute on a shrunk sample), and the failure now names the coverage requirement
     # rather than leaving the illegitimacy to be inferred from the numbers.
     covered = lambda r: not r.get("padded")  # noqa: E731
-    b_covered = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+    b_covered = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3,
                                         adjudication_covered=covered)
     sweep = b_covered.get("conf").gate_evidence
@@ -318,50 +318,50 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
 
 # ── Pick-then-label and registry-driven objective ───────────────────────────
 
-def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypatch):
+def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
     f1_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=DETECTION_F1)
-    confirm_entry(f1_trait)
+    propose_and_confirm(tmp_path, f1_trait)
 
-    b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records())
+    b = OP.resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)  # F1-max pick for this fixture (recall-max, low conf)
     assert conf.derived_from == "F1-max center-match curve"
 
 
-def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monkeypatch):
+def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
     presence_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=PRESENCE)
-    confirm_entry(presence_trait)
+    propose_and_confirm(tmp_path, presence_trait)
 
-    b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records())
+    b = OP.resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)
     assert conf.derived_from == "F1-max center-match curve"  # same label as DETECTION_F1, deliberately
 
 
-def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
+def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
 
     f1_trait = entry("bud_opening", BUD_OPENING.delivers, count_objective=DETECTION_F1)
-    confirm_entry(f1_trait)
+    propose_and_confirm(tmp_path, f1_trait)
 
-    b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records(),
+    b = OP.resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records(),
                                    validated_reference=VALIDATED_REVIEW_CONFIRMED)
     assert b.get("conf").derived_from == "F1-max center-match curve over review verdicts"
 
 
 # ── Cap-saturation provenance (non-gating) ───────────────────────────────────
 
-def test_current_detections_cap_reads_the_in_model_value():
+def test_current_detections_cap_reads_the_in_model_value(tmp_path):
     from types import SimpleNamespace
     m = SimpleNamespace(detector=SimpleNamespace(roi_heads=SimpleNamespace(detections_per_img=250)))
     assert _current_detections_cap(m) == 250
 
 
-def test_cap_hit_stamped_by_records_from_detector():
+def test_cap_hit_stamped_by_records_from_detector(tmp_path):
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target = {"boxes": torch.zeros((3, 4)), "labels": torch.zeros(3, dtype=torch.long), "image_id": "x"}
@@ -377,17 +377,17 @@ def test_cap_hit_stamped_by_records_from_detector():
     assert "cap_hit" not in unknown_cap
 
 
-def test_cap_saturated_frac_excludes_records_with_no_flag():
+def test_cap_saturated_frac_excludes_records_with_no_flag(tmp_path):
     assert _cap_saturated_frac([{"cap_hit": True}, {"cap_hit": False}, {"no_flag": True}]) == pytest.approx(0.5)
     assert _cap_saturated_frac([{"no_flag": True}]) is None
     assert _cap_saturated_frac([]) is None
     assert _cap_saturated_frac(None) is None
 
 
-def test_cap_saturation_is_surfaced_but_never_gates():
+def test_cap_saturation_is_surfaced_but_never_gates(tmp_path):
     cal = [dict(r, cap_hit=True) for r in _records("c")]  # every calibration record hit the cap
     hold = _records("h", shift=3.0)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.3)
     sweep = b.get("conf").gate_evidence
     assert sweep["calibration_cap_saturated_frac"] == pytest.approx(1.0)
@@ -396,8 +396,8 @@ def test_cap_saturation_is_surfaced_but_never_gates():
 
 # ── Cross-cutting: named-failure architecture ───────────────────────────────
 
-def test_passed_holdout_is_exactly_the_absence_of_named_failures():
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
+def test_passed_holdout_is_exactly_the_absence_of_named_failures(tmp_path):
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
     sweep = b.get("conf").gate_evidence
     assert sweep["passed_holdout"] == (not sweep["failures"])
@@ -450,7 +450,7 @@ def _rotating_noise_pattern(n: int, *, low: int = 1, high: int = 5, offset: int 
     return miss, fp
 
 
-def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at_n_equals_40():
+def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at_n_equals_40(tmp_path):
     n, obj = 40, 100
     miss, fp = _rotating_noise_pattern(n)
     cal = dense_records(n_images=n, objects_per_image=obj, id_prefix="c",
@@ -460,7 +460,7 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
 
     # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
@@ -473,7 +473,7 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
     assert conf.gate_evidence["failures"] == []
 
 
-def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equivalence():
+def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equivalence(tmp_path):
     """The identical per-image miss/fp pattern as the n=40 fixture above, truncated to its first 10
     images: same detector, same per-image behavior, just fewer held-out images. The SE term grows
     enough that abs(mean) + 1.645*SE no longer clears bud_opening's tolerance, so this correctly refuses:
@@ -488,7 +488,7 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
     hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                          miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.gate_evidence["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)  # same clean mean...
@@ -496,7 +496,7 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
     assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
 
 
-def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_admit_refuse():
+def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_admit_refuse(tmp_path):
     """The tests above vary image count at a fixed density (100 objects/image); this fixes n=40
     (already proven sufficient above) and varies density instead, the axis the relative tolerance
     actually introduces. The identical per-image noise pattern (mean bias exactly 0.0, std ~2.0255,
@@ -516,7 +516,7 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
                             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
         hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                              miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
-        return resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+        return resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
 
     sparse = _run(30)
@@ -533,7 +533,7 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
 
 # ── Mandatory end-to-end integration fixture ────────────────────────────────
 
-def test_integration_dense_realistic_reference_reaches_held_out_validation():
+def test_integration_dense_realistic_reference_reaches_held_out_validation(tmp_path):
     """A realistic dense bud reference (perfect recall, a varying handful of low-conf spurious
     detections per image) must reach VALIDATED_HELD_OUT with every gate in this module applied
     together: the spurious detections are filtered out at the count-unbiased operating point,
@@ -560,7 +560,7 @@ def test_integration_dense_realistic_reference_reaches_held_out_validation():
 
     # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
@@ -595,7 +595,7 @@ def _mixed_reference(id_prefix: str, *, n_loaded: int, n_negative: int, objects_
     return loaded + negatives
 
 
-def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
+def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it(tmp_path):
     """A detector that finds two buds that are not there on every image that carries buds is
     over the trait's tolerance, and a holdout padded with correctly-empty images does not make it
     less so. The tolerance is 1.0 (0.01 of this reference's 100-objects-per-image typical count) and
@@ -604,7 +604,7 @@ def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
     hold = _mixed_reference("h", n_loaded=10, n_negative=40, objects_per_image=100,
                             fp_per_loaded=2, shift=5.0)
 
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.gate_evidence["holdout_bias"]
@@ -616,7 +616,7 @@ def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
     assert conf.validated_against == "false"
 
 
-def test_the_same_overcount_without_the_negatives_fails_identically():
+def test_the_same_overcount_without_the_negatives_fails_identically(tmp_path):
     """The negatives are not what the refusal rests on: the identical loaded images alone, with no
     negatives beside them, reach the same verdict. Without this, the refusal above could be an
     artifact of the negatives rather than the over-count they were hiding."""
@@ -624,7 +624,7 @@ def test_the_same_overcount_without_the_negatives_fails_identically():
     hold = _mixed_reference("h", n_loaded=10, n_negative=0, objects_per_image=100,
                             fp_per_loaded=2, shift=5.0)
 
-    conf = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    conf = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                    holdout_records=hold, slicing=None,
                                    staged_conf_floor=0.01).get("conf")
     assert conf.gate_evidence["holdout_bias"]["count_bias_mean_present"] == pytest.approx(2.0)
@@ -632,7 +632,7 @@ def test_the_same_overcount_without_the_negatives_fails_identically():
     assert conf.validated_against == "false"
 
 
-def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives():
+def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives(tmp_path):
     """The rail must admit valid work: the same mixed reference, with a detector that is genuinely
     unbiased on the images that carry buds, validates. A reference holding four times as many
     confirmed negatives as loaded images is ordinary, not a reason to refuse."""
@@ -640,7 +640,7 @@ def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives():
     hold = _mixed_reference("h", n_loaded=10, n_negative=40, objects_per_image=100,
                             fp_per_loaded=0, shift=5.0)
 
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.gate_evidence["holdout_bias"]["n_present"] == 10
@@ -649,7 +649,7 @@ def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives():
     assert b.is_shippable is True
 
 
-def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
+def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard(tmp_path):
     """Presence is "carries GT or a surviving detection", so a confirmed negative the detector fires
     on is counted: its false positives are exactly the kind of miscount this gate exists to catch,
     and dropping it would let a hallucinating detector shed the evidence against it."""
@@ -662,7 +662,7 @@ def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
                               miss_pattern=[0] * 10, fp_pattern=[3] * 10, score=0.9, fp_score=0.9)
         return loaded + noisy
 
-    conf = resolve_operating_point("bud_opening", dataset_hash="h1",
+    conf = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
                                    calibration_records=_hallucinating("c"),
                                    holdout_records=_hallucinating("h", shift=5.0),
                                    slicing=None, staged_conf_floor=0.01).get("conf")
@@ -672,7 +672,7 @@ def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
     assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
 
 
-def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
+def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence(tmp_path):
     """Reference sufficiency counts the images that carry something, not the reference's total size:
     ninety-nine correctly-empty images beside one loaded image are one image worth of evidence about
     count bias."""
@@ -680,7 +680,7 @@ def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
     hold = _mixed_reference("h", n_loaded=1, n_negative=99, objects_per_image=100,
                             fp_per_loaded=0, shift=5.0)
 
-    conf = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    conf = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                    holdout_records=hold, slicing=None,
                                    staged_conf_floor=0.01).get("conf")
     assert conf.gate_evidence["holdout_bias"]["n_images"] == 100

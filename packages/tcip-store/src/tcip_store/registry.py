@@ -354,7 +354,8 @@ class _TextCodec:
         return text.encode(self.encoding)
 
     def decode(self, data: bytes) -> Any:
-        return data.decode(self.encoding)
+        text = data.decode(self.encoding)
+        return text.removesuffix("\n") if self.trailing_newline else text
 
 
 def text_codec(*, encoding: str = "utf-8", trailing_newline: bool = False) -> Codec:

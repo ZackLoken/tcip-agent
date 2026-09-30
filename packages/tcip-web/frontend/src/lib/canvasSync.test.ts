@@ -795,7 +795,7 @@ describe("createCanvasPusher", () => {
   afterEach(() => vi.useRealTimers());
 
   const body = (): CanvasStateBody => ({
-    binding_generation: 1,
+    project_id: "a1b2c3d4e5f6",
     tab: "annotate",
     image_path: "/p/img.jpg",
     image: "img.jpg",
@@ -1006,7 +1006,7 @@ describe("canvas state request", () => {
       { debounceMs: 5000, maxWaitMs: 10000 },
     );
     const body = (): CanvasStateBody => ({
-      binding_generation: 1,
+      project_id: "a1b2c3d4e5f6",
       tab: "annotate",
       image_path: "/p/img.jpg",
       image: "img.jpg",

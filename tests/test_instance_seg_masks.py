@@ -157,11 +157,11 @@ def _image(directory: Path, name: str = "img.png", size: int = 128) -> str:
 
 
 def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
-    """Register the module-scoped checkpoint against one test's own pinned platform state root."""
+    """Register the module-scoped checkpoint in one test's own project."""
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="instance-seg-test-model", checkpoint_path=ckpt_path,
-                            config={}, project_path=str(project_root))
+                            config={}, project=project_root)
     assert "error" not in result, result
 
 
@@ -171,7 +171,7 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
     assert pred.task == "instance_seg"
     img = _image(tmp_path / "images")
@@ -192,7 +192,7 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
+    r = run_inference_verified(tmp_path, instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["slicing"] is not None
@@ -210,7 +210,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
+    r = run_inference_verified(tmp_path, instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
                                device="cpu", tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["slicing"] is not None
@@ -224,7 +224,7 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
-    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
                       device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["slicing"] is not None
@@ -244,7 +244,7 @@ def test_deliver_per_image_counts_instance_seg_refuses_a_bare_tiled_pass(instanc
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    r = deliver_per_image_counts(instance_seg_ckpt, str(images_dir), str(out_path),
+    r = deliver_per_image_counts(tmp_path, instance_seg_ckpt, str(images_dir), str(out_path),
                         trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE)
     assert "error" in r
     assert not out_path.exists()
@@ -272,7 +272,7 @@ def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_mask
     # bucket it published ahead of that refusal is what the bucket-regime reads below promote.
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     published = deliver_per_image_counts(
-        instance_seg_ckpt, str(images_dir), str(tmp_path / "seed.csv"), trait=fx.COUNT_TRAIT,
+        tmp_path, instance_seg_ckpt, str(images_dir), str(tmp_path / "seed.csv"), trait=fx.COUNT_TRAIT,
         device="cpu", tile_size=TILE, predictions_dir=str(bucket))
     assert "error" in published
     assert bucket.is_dir()
@@ -284,15 +284,15 @@ def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_mask
     op = dict(sidecar.get("operating_point") or {})
     op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
     stamp = {**sidecar, "validated": True, "trait": fx.COUNT_TRAIT, "operating_point": op}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", producing_experiment_id=None)
+    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=tmp_path / "ds", producing_experiment_id=None)
 
     csv_a = tmp_path / "a.csv"
-    reread_a = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_a),
+    reread_a = deliver_per_image_counts(tmp_path, predictions_dir=str(bucket), output_path=str(csv_a),
                              trait=fx.COUNT_TRAIT)
     assert "error" not in reread_a, reread_a
 
     csv_b = tmp_path / "b.csv"
-    reread_b = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_b),
+    reread_b = deliver_per_image_counts(tmp_path, predictions_dir=str(bucket), output_path=str(csv_b),
                              trait=fx.COUNT_TRAIT)
     assert "error" not in reread_b, reread_b
 
@@ -322,7 +322,7 @@ def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instan
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
-    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
                       tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
     assert "error" not in r
     op = read_operating_point_sidecar(r["output_dir"])
@@ -346,7 +346,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
-    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
+    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
                       tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert (Path(r["output_dir"]) / "img.json").is_file()
@@ -367,7 +367,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
                               [Annotation(subject="stem", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
                                   tile_size=TILE, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"

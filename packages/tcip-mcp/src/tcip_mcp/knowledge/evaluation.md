@@ -54,10 +54,9 @@ run is a diagnostic only (matches training-time val mAP, not the shipped full-fr
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
 to report for gating. An untiled checkpoint has no regime split; its one run already is the
 delivery metric (see `evaluate_model`'s own docstring for the full precedence). Either a run id or
-a bare checkpoint path resolves to a file that must be registered under the process's platform
-state root (`register_model`, explicit mode for a foreign or bespoke checkpoint); `evaluate_model`
-refuses
-before loading an unregistered one.
+a bare checkpoint path resolves to a file that must be registered in the project this server was
+started for (`register_model`, explicit mode for a foreign or bespoke checkpoint); `evaluate_model`
+refuses before loading an unregistered one.
 
 The full-frame result records `postprocess` and an `operating_point` mapping in the vocabulary a
 bucket stamp carries: `conf`, `max_dets` and `cross_tile_nms` read `explicit` when the caller

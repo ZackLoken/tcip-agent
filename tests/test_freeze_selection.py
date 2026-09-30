@@ -30,29 +30,29 @@ BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 
 def _real_drawn_experiment(
-    root: Path, experiment_id: str, *, date: str = DATES[0], subject: str = SUBJECT,
-    attribute: str | None = None, auto_val: bool = True,
+    project: Path, root: Path, experiment_id: str, *, date: str = DATES[0],
+    subject: str = SUBJECT, attribute: str | None = None, auto_val: bool = True,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
-    own resolution, recorded in ``experiment_id``'s launch record; a run with ``auto_val`` off
-    selects on its training loss. Returns the resolved ``data`` section."""
+    own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
+    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` section."""
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
-    opened_run(None, {
+    opened_run(project, {
         "model_source": {"task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": subject, "attribute": attribute}, "auto_val": auto_val},
         **({} if auto_val else {"evaluation": {"selection_metric": "loss"}}),
     }, experiment_id=experiment_id)
-    return run_resolution(experiment_id)["data"]
+    return run_resolution(experiment_id, project=project)["data"]
 
 
-def _damage_resolved(experiment_id: str, change) -> None:
-    """Rewrite what a run's launch record says it resolved, on disk past its one writer,
-    ``change`` applied to it."""
+def _damage_resolved(project: Path, experiment_id: str, change) -> None:
+    """Rewrite what a run's launch record under ``project`` says it resolved, on disk past its
+    one writer, ``change`` applied to it."""
     from tcip_store import RECORD_JSON
 
-    path = experiment_dir(experiment_id) / RUN_FILE
+    path = experiment_dir(experiment_id, project=project) / RUN_FILE
     record = read_record(path)
     change(record["resolved"])
     path.write_bytes(RECORD_JSON.encode(record))
@@ -66,16 +66,16 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     from tcip_mcp.tools.training_tools import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-src")
+    _real_drawn_experiment(tmp_path, root, "exp-src")
 
-    result = freeze_selection("exp-src")
+    result = freeze_selection(tmp_path, "exp-src")
 
     assert "error" not in result, result
     selection_dir = result["selection_dir"]
     assert selection_dir == str(root / "splits" / "frozen-exp-src")
     assert "calibration" in result["note"] and "refuse" in result["note"]
 
-    frozen = read_selection(selection_dir)
+    frozen = read_selection(selection_dir, project=tmp_path)
     assert frozen.counts()["calibration"] == 0
     assert frozen.counts()["train"] and frozen.counts()["val"]
     assert {Path(s.ground_truth).stem for s in frozen.samples} <= set("abcdef")
@@ -89,7 +89,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     }
     assert selection_compatibility(second_cfg, frozen, selection_dir) == []
 
-    resolution = resolve_run(second_cfg)
+    resolution = resolve_run(second_cfg, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 
@@ -104,22 +104,22 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(tm
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(root, "exp-elsewhere")
+    data_cfg = _real_drawn_experiment(tmp_path, root, "exp-elsewhere")
     trained_images = Path(data_cfg["images_dir"])
 
     other = root / "images" / "other"
     other.mkdir(parents=True)
     for image in trained_images.iterdir():
         Image.new("RGB", (16, 16), (200, 10, 10)).save(other / image.name)
-    run_dir = experiment_dir("exp-elsewhere")
+    run_dir = experiment_dir("exp-elsewhere", project=tmp_path)
     launch = read_record(run_dir / RUN_FILE)
     launch["config"]["data"]["images_dir"] = str(other)
     (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(launch))
 
-    result = freeze_selection("exp-elsewhere", output_path=str(tmp_path / "frozen"))
+    result = freeze_selection(tmp_path, "exp-elsewhere", output_path=str(tmp_path / "frozen"))
 
     assert "error" not in result, result
-    frozen = read_selection(tmp_path / "frozen")
+    frozen = read_selection(tmp_path / "frozen", project=tmp_path)
     assert frozen.samples
     for sample in frozen.samples:
         assert Path(sample.source).parent == trained_images
@@ -133,12 +133,12 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
     from tcip_mcp.tools.training_tools import selection_compatibility
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-empty-attribute", attribute="")
+    _real_drawn_experiment(tmp_path, root, "exp-empty-attribute", attribute="")
 
-    result = freeze_selection("exp-empty-attribute")
+    result = freeze_selection(tmp_path, "exp-empty-attribute")
     assert "error" not in result, result
 
-    frozen = read_selection(result["selection_dir"])
+    frozen = read_selection(result["selection_dir"], project=tmp_path)
     assert frozen.scope.attribute is None
 
     second_cfg: dict[str, Any] = {
@@ -147,7 +147,7 @@ def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Pat
     }
     assert selection_compatibility(second_cfg, frozen, result["selection_dir"]) == []
 
-    resolution = resolve_run(second_cfg)
+    resolution = resolve_run(second_cfg, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 
@@ -176,15 +176,15 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Pa
     assert {s.member for s in train} == {s.member for s in train[:1]}, (
         "both dates must contribute the same member name for this to bite")
 
-    _real_drawn_experiment(root, "exp-two-scope")
-    _damage_resolved("exp-two-scope", lambda resolved: resolved.update(
+    _real_drawn_experiment(tmp_path, root, "exp-two-scope")
+    _damage_resolved(tmp_path, "exp-two-scope", lambda resolved: resolved.update(
         partition=_partition_record(train + val, seed=0, group_by="stem", selection=None)))
 
-    result = freeze_selection("exp-two-scope", output_path=str(tmp_path / "frozen"))
+    result = freeze_selection(tmp_path, "exp-two-scope", output_path=str(tmp_path / "frozen"))
 
     assert "error" not in result, result
     assert (result["train"], result["val"]) == (len(train), len(val))
-    frozen = read_selection(tmp_path / "frozen")
+    frozen = read_selection(tmp_path / "frozen", project=tmp_path)
     assert len(frozen.samples) == len(train) + len(val)
     assert {s.ground_truth for s in frozen.samples} == {
         s.ground_truth for s in train + val}
@@ -202,7 +202,7 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
-    resolved_run(None, {
+    resolved_run(tmp_path, {
         "images_dir": str(images_dir), "labels_dir": str(labels_dir),
         "scope": {"subject": SUBJECT},
         "split": {"group_key_map":
@@ -210,10 +210,10 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
                   | {member_identity(DATES[0], s): "g2" for s in ("d", "e", "f")}}},
         experiment_id="exp-explicit-map")
 
-    result = freeze_selection("exp-explicit-map")
+    result = freeze_selection(tmp_path, "exp-explicit-map")
     assert "error" not in result, result
 
-    frozen = read_selection(result["selection_dir"])
+    frozen = read_selection(result["selection_dir"], project=tmp_path)
     assert frozen.group_by == "explicit_map"
     assert {s.group for s in frozen.samples} <= {"g1", "g2"}
     by_group = {s.group: s.side for s in frozen.samples}
@@ -226,7 +226,7 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(tmp
 def test_freeze_selection_refuses_an_id_naming_no_run(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    result = freeze_selection("exp-no-run")
+    result = freeze_selection(tmp_path, "exp-no-run")
     assert "error" in result and "no run directory" in result["error"]
 
 
@@ -234,11 +234,11 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
     from tcip_mcp.tools.data_tools import draw_splits
 
     selection_dir = tmp_path / f"src-{experiment_id}"
-    drawn = draw_splits(str(root), output_path=str(selection_dir), subject=SUBJECT,
+    drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
                         seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in drawn, drawn
 
-    resolved_run(None, {"split": {"selection_dir": str(selection_dir), **split_extra}},
+    resolved_run(tmp_path, {"split": {"selection_dir": str(selection_dir), **split_extra}},
                  experiment_id=experiment_id)
 
 
@@ -251,14 +251,14 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _bound_run(root, tmp_path, "exp-bound", **split_extra)
-    frozen = freeze_selection("exp-bound", output_path=str(tmp_path / "frozen"))
+    frozen = freeze_selection(tmp_path, "exp-bound", output_path=str(tmp_path / "frozen"))
     assert "error" not in frozen, frozen
 
-    resolved_run(None, {"split": {"selection_dir": frozen["selection_dir"]}},
+    resolved_run(tmp_path, {"split": {"selection_dir": frozen["selection_dir"]}},
                  experiment_id="exp-rebound")
 
     def _sides(experiment_id: str) -> dict:
-        samples = partition_samples(run_resolution(experiment_id)["partition"])
+        samples = partition_samples(run_resolution(experiment_id, project=tmp_path)["partition"])
         return {side: sorted(s.ground_truth for s in samples if s.side == side)
                 for side in ("train", "val")}
 
@@ -273,11 +273,11 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-spatial")
-    _damage_resolved("exp-spatial",
+    _real_drawn_experiment(tmp_path, root, "exp-spatial")
+    _damage_resolved(tmp_path, "exp-spatial",
                      lambda resolved: resolved["data"]["split"].update(spatial_manifest={}))
 
-    result = freeze_selection("exp-spatial")
+    result = freeze_selection(tmp_path, "exp-spatial")
     assert "error" in result and "spatial" in result["error"]
 
 
@@ -290,7 +290,7 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Pa
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(root, "exp-moved")
+    data_cfg = _real_drawn_experiment(tmp_path, root, "exp-moved")
 
     moved = Path(data_cfg["labels_dir"]) / "a.json"
     json_io.write_annotations(moved, [
@@ -298,7 +298,7 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(tmp_path: Pa
         Annotation(subject=SUBJECT, geometry=BBox(30, 30, 50, 50)),
     ], 64, 64, keep_empty=True)
 
-    result = freeze_selection("exp-moved")
+    result = freeze_selection(tmp_path, "exp-moved")
     assert "error" in result and "changed since" in result["error"]
     assert "'a'" in result["error"]
 
@@ -310,13 +310,13 @@ def test_freeze_selection_reads_a_member_replaced_by_another_extension_as_moved(
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    data_cfg = _real_drawn_experiment(root, "exp-renamed")
+    data_cfg = _real_drawn_experiment(tmp_path, root, "exp-renamed")
 
     document = Path(data_cfg["labels_dir"]) / "a.json"
     document.with_suffix(".txt").write_bytes(document.read_bytes())
     document.unlink()
 
-    result = freeze_selection("exp-renamed")
+    result = freeze_selection(tmp_path, "exp-renamed")
     assert "error" in result and "changed since" in result["error"]
     assert "'a'" in result["error"]
 
@@ -325,9 +325,9 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-no-val", auto_val=False)
+    _real_drawn_experiment(tmp_path, root, "exp-no-val", auto_val=False)
 
-    result = freeze_selection("exp-no-val")
+    result = freeze_selection(tmp_path, "exp-no-val")
     assert "error" in result and "validation" in result["error"]
 
 
@@ -337,11 +337,11 @@ def test_freeze_selection_refuses_a_resolved_scope_missing_id_map(tmp_path: Path
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-no-id-map")
-    _damage_resolved("exp-no-id-map",
+    _real_drawn_experiment(tmp_path, root, "exp-no-id-map")
+    _damage_resolved(tmp_path, "exp-no-id-map",
                      lambda resolved: resolved["data"]["scope"].update(id_map=None))
 
-    result = freeze_selection("exp-no-id-map")
+    result = freeze_selection(tmp_path, "exp-no-id-map")
     assert "error" in result and "id_map" in result["error"]
 
 
@@ -351,7 +351,7 @@ def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-stale-labels")
+    _real_drawn_experiment(tmp_path, root, "exp-stale-labels")
 
     labels_dir = root / "annotations" / DATES[0]
     json_io.write_annotations(
@@ -359,7 +359,7 @@ def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):
         keep_empty=True,
     )
 
-    result = freeze_selection("exp-stale-labels")
+    result = freeze_selection(tmp_path, "exp-stale-labels")
     assert "error" in result and "changed" in result["error"]
 
 
@@ -367,10 +367,10 @@ def test_freeze_selection_refuses_when_a_selection_already_exists_at_the_output(
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-first")
-    first = freeze_selection("exp-first")
+    _real_drawn_experiment(tmp_path, root, "exp-first")
+    first = freeze_selection(tmp_path, "exp-first")
     assert "error" not in first, first
 
-    _real_drawn_experiment(root, "exp-second")
-    second = freeze_selection("exp-second", output_path=first["selection_dir"])
+    _real_drawn_experiment(tmp_path, root, "exp-second")
+    second = freeze_selection(tmp_path, "exp-second", output_path=first["selection_dir"])
     assert "error" in second and "already exists" in second["error"]

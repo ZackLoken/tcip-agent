@@ -76,7 +76,7 @@ def test_every_file_of_a_run_and_a_sweeps_trial_is_a_run_blob(tmp_path: Path):
     run_dir = opened_run(root, config, experiment_id="exp1")
     log_epoch(run_dir, 1, {"loss": 0.5})
     trial_dir = sweeps_dir(root) / "study1" / "trial_0"
-    open_run(trial_dir, dict(config), resolve_run(config).record,
+    open_run(trial_dir, dict(config), resolve_run(config, project=root).record,
              launched_by={"launcher": "process"}, trial_params={"lr": 0.1})
 
     accounting = account_for(root)

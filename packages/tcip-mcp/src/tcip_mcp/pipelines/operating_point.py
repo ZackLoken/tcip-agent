@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import statistics
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from tcip_store import non_finite_state, stored_number
@@ -432,7 +433,7 @@ def _scoped_side_disjointness(
 
 
 def _train_disjointness(
-    experiment_id: str | None, cal_ids: set, hold_ids: set, *,
+    experiment_id: str | None, cal_ids: set, hold_ids: set, *, project: Path,
     cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
     hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
     calibration_labels_dir: str | None = None,
@@ -475,7 +476,7 @@ def _train_disjointness(
                 "group_check": None}
     from tcip_mcp.experiments import run_resolution
 
-    resolved = run_resolution(experiment_id)
+    resolved = run_resolution(experiment_id, project=project)
     cal_hold_stems = sorted(cal_ids | hold_ids)
     partition = resolved["partition"]
     spatial = resolved["data"]["split"].get("spatial_manifest")
@@ -573,13 +574,12 @@ _UNRESOLVABLE_SELECTION_SHAPE = {
 
 def _resolve_label_movement(
     scoped: Sequence[Any], at_run: Mapping[str, str], cal_ids: set,
-    calibration_labels_dir: str | None, selection_sha256: str | None,
-    recorded_sha256: str | None,
+    selection_sha256: str | None, recorded_sha256: str | None,
 ) -> dict:
-    """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's samples
-    under the scope the calibration read (``scoped``, each carrying its digest at draw time), the
-    digests its ground truth had when the run read it (``at_run``, by path), the digest of the
-    selection that run bound (``recorded_sha256``) and the calibration's own labels directory.
+    """The four label-movement keys, from a bound run's samples under the scope the calibration
+    read (``scoped``, each carrying its digest at draw time), the digests its ground truth had
+    when the run read it (``at_run``, by path) and the digest of the selection that run bound
+    (``recorded_sha256``).
 
     All four keys ``None`` when no scoped sample carries a draw-time digest (an unbound run
     calibrated under a caller-named selection).
@@ -597,7 +597,6 @@ def _resolve_label_movement(
             "labels_moved_run_to_now": None,
             "calibration_labels_moved": None,
             "selection_redrawn": None,
-            "calibration_labels_dir": calibration_labels_dir,
         }
     labels_moved_draw_to_run = sorted(
         s.member for s in drawn if at_run[s.ground_truth] != s.ground_truth_digest)
@@ -613,12 +612,11 @@ def _resolve_label_movement(
             selection_sha256 != recorded_sha256
             if selection_sha256 is not None and recorded_sha256 is not None else None
         ),
-        "calibration_labels_dir": calibration_labels_dir,
     }
 
 
 def _selection_disjointness(
-    experiment_id: str | None, cal_ids: set, hold_ids: set, *,
+    experiment_id: str | None, cal_ids: set, hold_ids: set, *, project: Path,
     selection_dir: str | None = None,
     calibration_labels_dir: str | None = None, selection_sha256: str | None = None,
 ) -> dict:
@@ -636,10 +634,8 @@ def _selection_disjointness(
     training run.
 
     Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and on
-    the applicable path the four label-movement keys plus ``calibration_labels_dir``
-    (:func:`_resolve_label_movement`): the four movement keys ``null``, ``calibration_labels_dir``
-    preserved from the caller, and ``reason`` naming why, when no scoped sample carries a
-    draw-time digest.
+    the applicable path the four label-movement keys (:func:`_resolve_label_movement`): all four
+    ``null``, and ``reason`` naming why, when no scoped sample carries a draw-time digest.
     """
     if experiment_id is None:
         if selection_dir is not None:
@@ -655,7 +651,7 @@ def _selection_disjointness(
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    resolved_record = run_resolution(experiment_id)
+    resolved_record = run_resolution(experiment_id, project=project)
     partition = resolved_record["partition"]
     selection_binding = partition["selection"]
     if selection_dir is None and selection_binding is None:
@@ -688,8 +684,7 @@ def _selection_disjointness(
     cal_hold_stems = sorted(cal_ids | hold_ids)
     resolved = _scoped_side_disjointness(partition["group_by"], scoped, "val", cal_hold_stems)
     moved = _resolve_label_movement(
-        scoped, partition["ground_truth_digests"], cal_ids, calibration_labels_dir,
-        selection_sha256,
+        scoped, partition["ground_truth_digests"], cal_ids, selection_sha256,
         selection_binding["selection_sha256"] if selection_binding is not None else None)
     reason = None
     if moved["labels_moved_draw_to_run"] is None:
@@ -714,7 +709,6 @@ def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None
         "group_by": locked.get("group_by"), "group_key_map": locked.get("group_key_map"),
         "seed": locked.get("seed"), "holdout_ratio": locked.get("holdout_ratio"),
         "identity_hash": locked.get("identity_hash"),
-        "selection_dir": locked.get("selection_dir"),
     }
     if locked.get("policy_divergence"):
         conf.gate_evidence["split_policy_divergence"] = locked["policy_divergence"]
@@ -741,6 +735,7 @@ def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) 
 def resolve_operating_point(
     trait_name: str,
     *,
+    project: Path,
     dataset_hash: str | None,
     calibration_records: list[dict] | None = None,
     holdout_records: list[dict] | None = None,
@@ -762,8 +757,9 @@ def resolve_operating_point(
     calibration_labels_dir: str | None = None,
     selection_sha256: str | None = None,
 ) -> ResolvedBundle:
-    """Resolve the operating point for (trait, dataset). Pure over records: callers pass the model
-    pass output (``records_over_loader`` produces it).
+    """Resolve the operating point for (trait, dataset) of ``project``, whose trait and runs it
+    reads. Pure over records: callers pass the model pass output (``records_over_loader`` produces
+    it).
 
     ``cal_rects``/``hold_rects`` are optional, forwarded verbatim to :func:`_train_disjointness`: a
     block-calibration caller supplies them to get the geometric containment check.
@@ -813,7 +809,7 @@ def resolve_operating_point(
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
-    trait = latest_confirmed(trait_name).entry
+    trait = latest_confirmed(trait_name, project).entry
     # "not yet authored for this trait" falls back to the platform's interim default fraction,
     # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
     count_bias_tolerance_frac = (
@@ -906,10 +902,10 @@ def resolve_operating_point(
             # checkpoint's own training split, or the "held-out" bias check is measured partly on
             # data the model already trained on.
             td = _train_disjointness(
-                experiment_id, cal_ids, hold_ids, cal_rects=cal_rects, hold_rects=hold_rects,
-                calibration_labels_dir=calibration_labels_dir)
+                experiment_id, cal_ids, hold_ids, project=project, cal_rects=cal_rects,
+                hold_rects=hold_rects, calibration_labels_dir=calibration_labels_dir)
             sd = _selection_disjointness(
-                experiment_id, cal_ids, hold_ids, selection_dir=selection_dir,
+                experiment_id, cal_ids, hold_ids, project=project, selection_dir=selection_dir,
                 calibration_labels_dir=calibration_labels_dir,
                 selection_sha256=selection_sha256)
 
@@ -1201,6 +1197,7 @@ def _classification_kappa(items: list[dict]) -> float | None:
 def resolve_classifier_operating_point(
     trait_name: str,
     *,
+    project: Path,
     calibration_items: list[dict] | None = None,
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
@@ -1209,7 +1206,7 @@ def resolve_classifier_operating_point(
     calibration_labels_dir: str | None = None,
 ) -> dict:
     """Classification-mode calibration gate for the positive-class call of ``trait_name``, read
-    through its latest confirmed revision (``operationalization.latest_confirmed``):
+    through its latest confirmed revision in ``project`` (``operationalization.latest_confirmed``):
     :func:`_content_overlap` and :func:`_train_disjointness` as the detection path runs them, with
     a derived compensating-error floor (:func:`_classification_kappa`) in place of the
     localization-quality floor.
@@ -1233,7 +1230,7 @@ def resolve_classifier_operating_point(
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
-    trait = latest_confirmed(trait_name).entry
+    trait = latest_confirmed(trait_name, project).entry
     if not calibration_items or not holdout_items:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False,
@@ -1269,10 +1266,10 @@ def resolve_classifier_operating_point(
     content = _content_overlap(
         [_content_record(iid, its) for iid, its in cal_by_image.items()],
         [_content_record(iid, its) for iid, its in hold_by_image.items()])
-    td = _train_disjointness(experiment_id, cal_ids, hold_ids,
+    td = _train_disjointness(experiment_id, cal_ids, hold_ids, project=project,
                              calibration_labels_dir=calibration_labels_dir)
-    sd = _selection_disjointness(
-        experiment_id, cal_ids, hold_ids, calibration_labels_dir=calibration_labels_dir)
+    sd = _selection_disjointness(experiment_id, cal_ids, hold_ids, project=project,
+                                 calibration_labels_dir=calibration_labels_dir)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
@@ -1381,6 +1378,7 @@ def resolve_classifier_operating_point(
 def _resolve_scalar_operating_point(
     trait_name: str,
     *,
+    project: Path,
     criterion: str,
     criteria: dict[str, Callable[[Any, Any], float | None]],
     true_key: str,
@@ -1401,8 +1399,9 @@ def _resolve_scalar_operating_point(
 
     The criterion score is computed on holdout only. A holdout of fewer than 2 items still gets a
     score attempt and fails through ``insufficient_holdout_items``/``criterion_undefined``.
+    ``project`` is the one whose trait and runs it reads.
     """
-    trait = latest_confirmed(trait_name).entry
+    trait = latest_confirmed(trait_name, project).entry
     if not calibration_items or not holdout_items:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False,
@@ -1416,10 +1415,10 @@ def _resolve_scalar_operating_point(
     disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
     # Reuses the shared train-disjointness primitive (stems/groups, no bbox). `_content_overlap`
     # fingerprints bbox content, which ordinal/regression items (one scalar each) carry none of.
-    td = _train_disjointness(experiment_id, cal_ids, hold_ids,
+    td = _train_disjointness(experiment_id, cal_ids, hold_ids, project=project,
                              calibration_labels_dir=calibration_labels_dir)
-    sd = _selection_disjointness(
-        experiment_id, cal_ids, hold_ids, calibration_labels_dir=calibration_labels_dir)
+    sd = _selection_disjointness(experiment_id, cal_ids, hold_ids, project=project,
+                                 calibration_labels_dir=calibration_labels_dir)
 
     import torch
 
@@ -1473,6 +1472,7 @@ def _resolve_scalar_operating_point(
 def resolve_ordinal_operating_point(
     trait_name: str,
     *,
+    project: Path,
     criterion: str,
     num_ranks: int,
     calibration_items: list[dict] | None = None,
@@ -1506,7 +1506,7 @@ def resolve_ordinal_operating_point(
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
     return _resolve_scalar_operating_point(
-        trait_name, criterion=criterion,
+        trait_name, project=project, criterion=criterion,
         criteria={criterion: lambda pred, gt: ORDINAL_CRITERIA[criterion](pred, gt, num_ranks)},
         true_key="true_rank", pred_key="predicted_rank", floor_field="ordinal_agreement_floor",
         default_floor=_DEFAULT_ORDINAL_AGREEMENT_FLOOR,
@@ -1519,6 +1519,7 @@ def resolve_ordinal_operating_point(
 def resolve_regression_operating_point(
     trait_name: str,
     *,
+    project: Path,
     criterion: str,
     calibration_items: list[dict] | None = None,
     holdout_items: list[dict] | None = None,
@@ -1552,7 +1553,7 @@ def resolve_regression_operating_point(
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
     return _resolve_scalar_operating_point(
-        trait_name, criterion=criterion, criteria=REGRESSION_CRITERIA,
+        trait_name, project=project, criterion=criterion, criteria=REGRESSION_CRITERIA,
         true_key="true_value", pred_key="predicted_value", floor_field="regression_skill_floor",
         default_floor=_DEFAULT_REGRESSION_SKILL_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,

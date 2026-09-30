@@ -1,41 +1,20 @@
 /**
- * GuiState's active_tab/dataset/view/mode/active_subject/review fields mirror state.py's
- * GuiState by hand (TabName and Mode instead derive from the generated GuiVocabulary
- * interface). The label schema below mirrors routes/{annotate,review,classes}.py.
+ * The GUI state's shape is generated from the backend's own model (types.generated.ts). The
+ * label schema below mirrors routes/{annotate,review,classes}.py.
  */
 
-import type { ActionPayload, GuiVocabulary } from "@/api/types.generated";
+import type { ActionPayload, GuiState } from "@/api/types.generated";
 
-export type TabName = GuiVocabulary["active_tab"];
+export type { DatasetSelection, GuiState, ReviewFilters, ViewState } from "@/api/types.generated";
 
-export type Mode = GuiVocabulary["mode"];
+export type TabName = GuiState["active_tab"];
 
-export interface DatasetSelection {
-  project_root: string | null;
-  dataset_root: string | null;
-  subject: string | null;
-  date: string | null;
-  image_list: string[];
-  current_image_index: number;
-  // Resolved by the backend, never composed here: images/<date>/, annotations/<date>/ and
-  // predictions/<model>/<date>/. One file per image holds every subject, so none carries one.
-  images_dir: string | null;
-  annotations_dir: string | null;
-  predictions_dir: string | null;
-}
+export type Mode = GuiState["mode"];
 
-export interface ViewState {
-  scale: number;
-  offset_x: number;
-  offset_y: number;
-}
-
-export interface ReviewFilters {
-  iou_threshold: number;
-  conf_threshold: number;
-  filter_type: "all" | "tp" | "fp" | "fn";
-  filter_class: string; // a subject name or "all"
-  detection_idx: number;
+/** The project the backend has open, as its state envelope names it. */
+export interface OpenProject {
+  id: string;
+  path: string;
 }
 
 /** Per-image review completion status (from ReviewEngine.get_image_review_status). */
@@ -43,16 +22,6 @@ export type ReviewImageStatus = "not_started" | "started" | "completed";
 
 /** Image-level Reviewed/Unreviewed navigation filter (drives which images the Review tab walks). */
 export type ReviewStatusFilter = "all" | "reviewed" | "unreviewed";
-
-export interface GuiState {
-  active_tab: TabName;
-  dataset: DatasetSelection;
-  view: ViewState;
-  mode: Mode;
-  // The subject a new shape is authored for. Client-owned.
-  active_subject: string | null;
-  review: ReviewFilters;
-}
 
 /* ── Label schema (name-based, one unified file per image) ───────────────── */
 

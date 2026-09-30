@@ -125,7 +125,7 @@ describe("StateSocket state_snapshot dispatch", () => {
     vi.restoreAllMocks();
   });
 
-  it("carries the envelope's generation and epoch into one mergeSnapshot call", () => {
+  it("carries the envelope's open project and epoch into one mergeSnapshot call", () => {
     const mergeSnapshot = vi
       .spyOn(useStore.getState(), "mergeSnapshot")
       .mockImplementation(() => {});
@@ -134,11 +134,12 @@ describe("StateSocket state_snapshot dispatch", () => {
     lastSocket().open();
 
     const state = { active_tab: "annotate", dataset: { dataset_root: "/w/p" } };
+    const project = { id: "a1b2c3d4e5f6", path: "/w/p" };
     lastSocket().message(
-      JSON.stringify({ type: "state_snapshot", state, version: 4, generation: 2, epoch: "e1" }),
+      JSON.stringify({ type: "state_snapshot", state, version: 4, project, epoch: "e1" }),
     );
 
-    expect(mergeSnapshot).toHaveBeenCalledWith(state, 4, 2, "e1");
+    expect(mergeSnapshot).toHaveBeenCalledWith(state, 4, project, "e1");
     socket.close();
   });
 

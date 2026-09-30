@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
 from tcip_web import jobstore
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import allowed_path
 from tcip_web.routes._coverage_models import StatsSource
 
 router = APIRouter(prefix="/api/images", tags=["images"])
@@ -162,11 +162,9 @@ _stats_lock = threading.Lock()
 
 
 def _render_cache_dir() -> Path:
-    from tcip_mcp.project_paths import resolve_state_or
-
-    base = resolve_state_or(
-        Path(".tcip") / "cache" / "img", Path(tempfile.gettempdir()) / "tcip-img-cache"
-    )
+    """This machine's render cache, under the system temp directory: a cache of any served image,
+    whichever project or root it lies under."""
+    base = Path(tempfile.gettempdir()) / "tcip-img-cache"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -220,10 +218,7 @@ def _evict_lru(cache_dir: Path) -> None:
 
 def _checked(path: str) -> Path:
     """Resolve + allow-list check an absolute client-supplied image path."""
-    try:
-        src = assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    src = allowed_path(path)
     if not src.is_file():
         raise HTTPException(404, f"not a file: {path}")
     return src

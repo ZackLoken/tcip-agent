@@ -100,7 +100,7 @@ def test_golden_pick_count_unbiased_and_f1_max():
     assert by_conf[0.0]["count_bias_mean"] == pytest.approx(0.5)
 
 
-def test_golden_resolve_operating_point_validated_conf():
+def test_golden_resolve_operating_point_validated_conf(tmp_path):
     # resolve_operating_point fails closed without an asserted staged_conf_floor, and needs a
     # dense, realistic reference to exercise the holdout gate: a sparse 2-image fixture's
     # per-image variance trips the equivalence criterion, which
@@ -110,7 +110,7 @@ def test_golden_resolve_operating_point_validated_conf():
     cal, hold = good_cal_holdout()
     # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
@@ -177,20 +177,20 @@ def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | No
     json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
 
 
-def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "bud",
+def _write_id_map_sidecar(project: Path, d: Path, id_map: dict, *, subject: str = "bud",
                           attribute: str | None = "opening") -> None:
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     write_sidecar(d, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}},
-                 "operating_point")
+                 "operating_point", project=project)
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
     _write_preds(d1, "P1_a", ["closed", "closed", "closed", "open"])  # 1/4 -> 0.25
-    _write_id_map_sidecar(d1, _ID_MAP)
+    _write_id_map_sidecar(tmp_path, d1, _ID_MAP)
     _write_preds(d2, "P1_b", ["open", "open", "open", "closed"])  # 3/4 -> 0.75
-    _write_id_map_sidecar(d2, _ID_MAP)
+    _write_id_map_sidecar(tmp_path, d2, _ID_MAP)
     mapping = {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -239,13 +239,13 @@ def _stamp(bundle, *, validated: bool, issues: list[str]) -> dict:
             "validated": bool(validated), "shippable_issues": issues}
 
 
-def test_golden_stamp_shape_calibrated_validated():
+def test_golden_stamp_shape_calibrated_validated(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = good_cal_holdout()
     # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 slicing=None, staged_conf_floor=0.01)
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
@@ -290,17 +290,17 @@ def test_golden_stamp_shape_raw_uncalibrated_is_false():
     assert conf["has_gate_evidence"] is False
 
 
-def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
+def test_golden_validated_flag_path_calibrated_no_holdout_is_false(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # Calibrated but never held-out-measured -> validated=false, not shippable.
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
-                                calibration_records=_sweep_records("c"))
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                dataset_hash="h1", calibration_records=_sweep_records("c"))
     assert b.get("conf").validated_against == "false"
     assert b.is_shippable is False
 
 
-def test_golden_content_shared_holdout_is_false():
+def test_golden_content_shared_holdout_is_false(tmp_path):
     """A byte-identical-content holdout can't function as an
     independent check: the same fixture pair the two goldens above use (identical GT content,
     differing only by ``image_id`` prefix, ``_sweep_records("c")``/``_sweep_records("h")`` with no
@@ -308,8 +308,8 @@ def test_golden_content_shared_holdout_is_false():
     """
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1",
-                                calibration_records=_sweep_records("c"),
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                dataset_hash="h1", calibration_records=_sweep_records("c"),
                                 holdout_records=_sweep_records("h"))
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -322,7 +322,7 @@ def test_golden_content_shared_holdout_is_false():
 # 4. consolidated inference operating-point defaults
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_golden_consolidated_operating_point_defaults():
+def test_golden_consolidated_operating_point_defaults(tmp_path):
     # operating_point.py must not carry a second, divergent copy of the inference operating-point
     # knobs (a second copy would let the same model+images give a different count by entry door).
     from tcip_mcp.pipelines import operating_point as OP
@@ -351,7 +351,8 @@ def test_golden_consolidated_operating_point_defaults():
 
     # The consolidated fallbacks flow through a resolved bundle with no calibration/overrides.
     # tile_size has no fallback to flow through at all here (no explicit/derived basis): None.
-    b = OP.resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None)
+    b = OP.resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                   dataset_hash=None)
     assert b.get("cross_tile_nms")._raw == R.DEFAULT_NMS_IOU  # 0.3, was 0.5
     assert b.get("max_dets")._raw == R.DEFAULT_MAX_DETS        # 1000, was 300
     assert b.get("tile_size")._raw is None
@@ -426,10 +427,9 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
         json_io.write_annotations(str(labels_dir / "a.json"),
                                   [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
                                   64, 64)
-        monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
         ckpt = foreign_checkpoint(tmp)
 
-        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir))
+        TT.evaluate_model(tmp, str(ckpt), str(images_dir), str(labels_dir))
     finally:
         runners.run_test_evaluation = orig_diag
 
@@ -473,8 +473,6 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         def predict_sliced(self, path, **kw):
             return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-
     # Checkpoints are built (a real bespoke model, through the unpatched build_model) before the
     # model/predictor stubs below go in, so the fixture's own checkpoint save is never stubbed.
     def _prepare(root_name, name):
@@ -493,7 +491,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     def _run(dataset, **kw):
         images_dir, labels_dir, ckpt = dataset
-        r = TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), **kw)
+        r = TT.evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir), **kw)
         assert "error" not in r, r
         return r
 
@@ -576,7 +574,7 @@ def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> No
         txn.write(key, stamp)
 
 
-def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
+def _write_op_sidecar(project: Path, d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, subject: str = "bud",
                       attribute: str | None = None,
                       checkpoint_sha256: str | None = None,
@@ -592,7 +590,7 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     if checkpoint_sha256 is None and validated and experiment_id:
-        checkpoint_sha256 = record_producing_run(experiment_id)
+        checkpoint_sha256 = record_producing_run(project, experiment_id)
     stamp = {
         "validated": validated,
         "trait": "bud_opening",
@@ -602,14 +600,14 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
         "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
     }
     if validated:
-        write_bound_sidecar(d, stamp, dataset_root=dataset_root,
+        write_bound_sidecar(project, d, stamp, dataset_root=dataset_root,
                             experiment_id=f"exp-record-{d.name}",
                             producing_experiment_id=experiment_id)
     else:
         _write_stamp_bypassing_claim_rail(d, stamp, "operating_point")
 
 
-def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
+def _write_classifier_sidecar(project: Path, d: Path, *, dataset_root: Path, validated: bool,
                               trait: str | None = "bud_opening") -> None:
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
@@ -619,7 +617,7 @@ def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
         "trait": trait,
     }
     if validated and trait:
-        write_bound_sidecar(d, stamp, document="classifier_operating_point",
+        write_bound_sidecar(project, d, stamp, document="classifier_operating_point",
                             dataset_root=dataset_root, experiment_id=f"exp-classifier-{d.name}",
                             producing_experiment_id="exp-golden", trait=trait)
     else:
@@ -635,9 +633,9 @@ def _pheno_setup(tmp_path: Path, *, classified: bool, op_validated: bool | None 
     _write_preds(d1, "P1_a", ["bud"] if not classified else ["closed"], attribute=attribute)
     _write_preds(d2, "P1_b", ["open"] if classified else ["bud"], attribute=attribute)
     if op_validated is not None:
-        _write_op_sidecar(d1, dataset_root=root, validated=op_validated, id_map=id_map,
+        _write_op_sidecar(tmp_path, d1, dataset_root=root, validated=op_validated, id_map=id_map,
                           attribute=attribute)
-        _write_op_sidecar(d2, dataset_root=root, validated=op_validated, id_map=id_map,
+        _write_op_sidecar(tmp_path, d2, dataset_root=root, validated=op_validated, id_map=id_map,
                           attribute=attribute)
     else:
         # count-operating-point sidecar still needs an id_map for the coverage rule even when its
@@ -660,8 +658,8 @@ def test_golden_deliver_phenology_milestones_refuses_without_opening_class(tmp_p
     mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=False, op_validated=True)  # bare detector
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -675,8 +673,8 @@ def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_p
     mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True)  # no operating_point.json sidecars
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -692,8 +690,8 @@ def test_golden_deliver_phenology_milestones_refuses_on_a_present_but_unvalidate
     mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=False)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -708,11 +706,11 @@ def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_pa
     # The positive-state fraction is now produced, so a fully-validated call (classifier + count
     # operating point both validated on disk) delivers a real phenology CSV.
     mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=True)
-    _write_classifier_sidecar(d1, dataset_root=tmp_path / "ds", validated=True)
+    _write_classifier_sidecar(tmp_path, d1, dataset_root=tmp_path / "ds", validated=True)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -726,7 +724,7 @@ def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_pa
     with out_csv.open(newline="", encoding="utf-8") as f:
         rows = list(_csv.DictReader(f))
     assert rows
-    assert all(row["producer_model_sha256"] == producer_checkpoint_sha256("exp-golden") for row in rows)
+    assert all(row["producer_model_sha256"] == producer_checkpoint_sha256(tmp_path, "exp-golden") for row in rows)
     assert all(row["producing_experiment_id"] == "exp-golden" for row in rows)
     # And the record that answered for the claim, so a reader can reach the evidence from the CSV.
     assert all(row["validation_record"] for row in rows)

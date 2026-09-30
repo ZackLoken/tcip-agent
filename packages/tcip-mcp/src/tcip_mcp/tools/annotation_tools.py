@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_annotation import Annotation, compute_matches
 from tcip_annotation.json_io import (
@@ -19,8 +20,11 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 
 def _dims_for(image_path: str) -> tuple[int, int]:
@@ -74,9 +78,11 @@ def read_annotations(image_path: str) -> dict:
     return result
 
 
-@mcp.tool()
+@tool()
 @audited(scope_arg="image_path")
 def save_annotations(
+    project: Path,
+    workspace: Path,
     image_path: str,
     annotations: list[dict] | None = None,
     date: str | None = None,
@@ -131,14 +137,10 @@ def save_annotations(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_annotations(str(out_path), typed, w, h, keep_empty=True)
 
-    try:
-        from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
+    from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
 
-        post_panel_event("annotate", PANEL_EVENT_LABELS_WRITTEN,
-                         {"image_path": image_path, "stem": img.stem, "written": [str(out_path)]})
-    except Exception:
-        pass
-
+    post_panel_event(project, workspace, "annotate", PANEL_EVENT_LABELS_WRITTEN,
+                     {"image_path": image_path, "stem": img.stem, "written": [str(out_path)]})
     return {"written": [str(out_path)], "count": len(typed)}
 
 
@@ -190,7 +192,7 @@ def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annota
            for m in matches["fn"]])
 
 
-def _apply_governing_criterion(out: dict, records: list, *, trait: str | None,
+def _apply_governing_criterion(out: dict, records: list, *, trait: TraitEntry | None,
                                iou_threshold: float, conf_threshold: float) -> dict:
     """Override the human-facing TP/FP/FN + P/R/F1 with the trait's derived criterion.
 
@@ -218,7 +220,7 @@ def _evaluate_image(
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
     detail: bool = False,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Match predictions against ground truth for a single image (COCOeval).
 
@@ -260,7 +262,7 @@ def _evaluate_folder(
     folder_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Aggregate detection metrics across all images in a dataset.
 
@@ -360,7 +362,7 @@ def score_predictions(
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
     detail: bool = False,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Score on-disk predictions against on-disk ground truth (COCOeval).
 
@@ -382,9 +384,9 @@ def score_predictions(
             entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,
             ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and the
             provenance it holds) beside its ``tag``, ``iou`` and indices.
-        trait: When set, the trait's derived localization criterion governs the reported TP/FP/FN
-            count; map50 stays a labeled comparability metric. Absent -> the IoU convention
-            governs.
+        trait: The trait's confirmed entry; when set, its derived localization criterion
+            governs the reported TP/FP/FN count; map50 stays a labeled comparability metric.
+            Absent -> the IoU convention governs.
     """
     from tcip_store import StoreError
 
@@ -399,11 +401,11 @@ def score_predictions(
     return {"error": f"Path not found: {path}"}
 
 
-@mcp.tool()
+@tool()
 @audited(scope_arg="dataset_root")
 def write_subject_registry(
-    dataset_root: str, subjects: dict, output_path: str = "", allow_removals: bool = False,
-    allow_type_changes: bool = False,
+    project: Path, dataset_root: str, subjects: dict, output_path: str = "",
+    allow_removals: bool = False, allow_type_changes: bool = False,
 ) -> dict:
     """Author the dataset's nested subject registry, a thin wrapper over ``subject_registry``.
 

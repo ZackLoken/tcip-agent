@@ -1,9 +1,8 @@
 """GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame.
 
-Both refuse before posting anything when the GUI's currently open project (the
-``canvas_open_binding`` record) does not name the caller's own stated project; once the binding
-agrees, delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`) as a soft
-miss with ``delivered: false`` if no GUI answers there.
+Delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`), which delivers only
+when the backend has this server's project open, and answers ``delivered: false`` naming what it
+has open otherwise, or when no GUI answers there.
 """
 
 from __future__ import annotations
@@ -17,32 +16,7 @@ from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.server import mcp
-
-
-def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
-    """Refuse driving the GUI, naming what the GUI has open, the root this call named, and the step
-    that converges them (``web_client.binding_divergence``), under
-    ``web_client.gui_binding_matches``. No binding at all, or one naming another project, refuses
-    every time; ``delivered`` is always ``False``.
-    """
-    from tcip_mcp.web_client import binding_divergence
-
-    divergence = binding_divergence(binding, compared_root)
-    if binding is None:
-        opened = "The GUI has no project open"
-    elif divergence["bound_project"]:
-        opened = f"The GUI has {divergence['bound_project']!r} open"
-    else:
-        opened = f"The GUI has the root {divergence['bound_root']} open"
-    return {
-        "error": f"{opened}; this call named {compared_root}. {divergence['converge']}.",
-        "bound_project": divergence["bound_project"],
-        "bound_root": divergence["bound_root"],
-        "compared_root": compared_root,
-        "converge": divergence["converge"],
-        "delivered": False,
-    }
+from tcip_mcp.server import tool
 
 
 def _logical_image_names(images_dir) -> list[str]:
@@ -54,68 +28,44 @@ def _logical_image_names(images_dir) -> list[str]:
     return [logical_image_name(src) for src in list_logical_images(images_dir).values()]
 
 
-@mcp.tool()
+@tool()
 @audited
-def push_panel_event(
-    panel: str,
-    event_type: str,
-    data: dict,
-    *,
-    project_root: str,
-) -> dict:
-    """Push structured data to a TCIP GUI panel via the tcip-web backend, for ``project_root``.
+def push_panel_event(project: Path, workspace: Path, panel: str, event_type: str,
+                     data: dict) -> dict:
+    """Push structured data to a TCIP GUI panel via the tcip-web backend serving ``workspace``,
+    which delivers it only while it has this project open.
 
-    Refuses before posting anything when the GUI's currently open project (the
-    ``canvas_open_binding`` record) does not name ``project_root``: a mismatch, or no binding at
-    all, refuses every time, naming what the GUI has open, the root this call named, and the step
-    that converges them. No override. The comparison is against ``project_root`` as the caller
-    states it, never this process's own pinned platform-state root.
-
-    Once the binding agrees, sends an HTTP POST to the running FastAPI server (see
-    :mod:`tcip_mcp.web_client`); the backend broadcasts to any connected browsers via WebSocket. If
-    the backend itself is not running, returns ``{"status": "no_subscribers"}``.
+    Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
+    broadcasts to any connected browsers via WebSocket, or answers ``delivered: false`` naming the
+    project it has open instead. If the backend itself is not running, returns ``{"status":
+    "no_subscribers"}``.
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
             review_focus. See ``web_client.VALID_PANELS`` for the current set.
-            ``active_project_changed`` is not sendable through this tool; ``activate_project``
-            posts it through ``web_client.post_panel_event``.
         event_type: Any event type the panel understands, not confined to
             ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the one
             example the browser renders directly: ``data['text']`` shows as a quiet note above that
             tab.
         data: Arbitrary JSON data payload.
-        project_root: The project this push means to drive the GUI for, compared against the
-            ``canvas_open_binding`` record. Required.
     """
-    from tcip_mcp.web_client import (
-        VALID_PANELS, GuiBindingUnreadable, gui_binding_matches, post_panel_event,
-    )
+    from tcip_mcp.web_client import VALID_PANELS, post_panel_event
 
     if panel not in VALID_PANELS:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
 
-    try:
-        matches, binding = gui_binding_matches(project_root)
-    except GuiBindingUnreadable as exc:
-        return {"error": str(exc), "delivered": False, "panel": panel, "event_type": event_type}
-    if not matches:
-        refusal = _binding_refusal(binding, project_root)
-        refusal.setdefault("panel", panel)
-        refusal.setdefault("event_type", event_type)
-        return refusal
-
-    result = post_panel_event(panel, event_type, data)
+    result = post_panel_event(project, workspace, panel, event_type, data)
     result.setdefault("panel", panel)
     result.setdefault("event_type", event_type)
     return result
 
 
-@mcp.tool()
+@tool()
 @audited
 def focus_human_attention(
+    project: Path,
+    workspace: Path,
     tab: str,
-    project_root: str,
     dataset_root: str,
     subject: str,
     date: str,
@@ -131,20 +81,14 @@ def focus_human_attention(
 
     ``tab='annotate'`` lands the Annotate tab on the first frame annotated for ``subject`` in the
     right mode (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's
-    predictions (emits ``review_focus``). Once the GUI's open project agrees with ``project_root``
-    (see below), a backend that is not running still answers ``delivered: false`` rather than
-    raising. On both tabs, an image elsewhere on the date whose label or prediction document will
-    not read is named by file name in the result's ``unreadable``; only the landed-on or explicitly
-    named frame's own unreadable document refuses, naming that document's path.
-
-    Refuses before resolving anything when the GUI's currently open project (the
-    ``canvas_open_binding`` record) does not name ``project_root``. No override; a mismatch, or no
-    binding at all, refuses every time, naming what the GUI has open, the root this call named, and
-    the step that converges them.
+    predictions (emits ``review_focus``). A backend with another project open, or none running,
+    answers ``delivered: false`` rather than raising. On both tabs, an image elsewhere on the date
+    whose label or prediction document will not read is named by file name in the result's
+    ``unreadable``; only the landed-on or explicitly named frame's own unreadable document refuses,
+    naming that document's path.
 
     Args:
         tab: Which GUI surface to drive, 'annotate' or 'review'.
-        project_root: Project root (== dataset_root for workspace projects).
         dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus
             ``predictions/``).
         subject: Annotation subject (e.g. "fruit").
@@ -159,23 +103,14 @@ def focus_human_attention(
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
         conf_threshold: Review only, confidence cutoff for showing predictions.
     """
-    from tcip_mcp.web_client import GuiBindingUnreadable, gui_binding_matches
-
-    try:
-        matches, binding = gui_binding_matches(project_root)
-    except GuiBindingUnreadable as exc:
-        return {"error": str(exc), "delivered": False}
-    if not matches:
-        return _binding_refusal(binding, project_root)
-
     if tab == "annotate":
-        return _focus_annotate(project_root, dataset_root, subject, date, mode=mode,
+        return _focus_annotate(project, workspace, dataset_root, subject, date, mode=mode,
                                image_index=image_index)
     if tab == "review":
         if not model_name:
             return {"error": "tab='review' requires model_name"}
         return _focus_review(
-            project_root, dataset_root, subject, date, model_name,
+            project, workspace, dataset_root, subject, date, model_name,
             image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
             iou_threshold=iou_threshold, conf_threshold=conf_threshold,
         )
@@ -202,7 +137,8 @@ _TASK_MODE = {"segment": "polygon", "detect": "box", "point": "point"}
 
 
 def _focus_annotate(
-    project_root: str,
+    project: Path,
+    workspace: Path,
     dataset_root: str,
     subject: str,
     date: str,
@@ -264,11 +200,11 @@ def _focus_annotate(
         return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
 
     payload = {
-        "project_root": project_root, "dataset_root": dataset_root,
+        "dataset_root": dataset_root,
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
         "active_subject": subject,
     }
-    result = post_panel_event("app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
+    result = post_panel_event(project, workspace, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
@@ -279,7 +215,8 @@ def _focus_annotate(
 
 
 def _focus_review(
-    project_root: str,
+    project: Path,
+    workspace: Path,
     dataset_root: str,
     subject: str,
     date: str,
@@ -298,10 +235,12 @@ def _focus_review(
     not read is named instead (by image file name) in the result's ``unreadable``, the same
     stance ``_focus_annotate`` takes."""
     from tcip_mcp.dataset_layout import image_dir, label_filename, prediction_dir
-    from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, post_panel_event
+    from typing import get_args
+
+    from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, ReviewFilterType, post_panel_event
     from tcip_mcp.workspace import is_valid_name
 
-    if filter_type not in ("all", "tp", "fp", "fn"):
+    if filter_type not in get_args(ReviewFilterType):
         return {"error": f"filter_type must be all|tp|fp|fn, got {filter_type!r}"}
     for label, val in (("model_name", model_name), ("date", date)):
         if not is_valid_name(val):
@@ -344,12 +283,12 @@ def _focus_review(
         return {"error": unreadable[target_name]}
 
     payload = {
-        "project_root": project_root, "dataset_root": dataset_root,
+        "dataset_root": dataset_root,
         "subject": subject, "date": date, "model_name": model_name,
         "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
     }
-    result = post_panel_event("app", PANEL_EVENT_REVIEW_FOCUS, payload)
+    result = post_panel_event(project, workspace, "app", PANEL_EVENT_REVIEW_FOCUS, payload)
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),

@@ -48,7 +48,8 @@ file. Don't extend or edit that fence file without calling it out explicitly.
 Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
 the version it declares to `--version`, probed once per process on the resolved CLI only and never
 on a `TCIP_TERMINAL_CMD` override) on the create and restart routes, with one
-`agent_terminal_started` platform audit line per launch. Which agent harness that program is comes
+`agent_terminal_started` line in the open project's audit log per launch (none when no project is
+open). The MCP server that terminal starts is started for the open project. Which agent harness that program is comes
 from the harness's own MCP handshake, not from here. The child is spawned with
 `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads it and stamps
 it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside the harness name
@@ -71,22 +72,25 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
 
 ## Conventions specific to this package
 
-- Path access from routes goes through `assert_path_allowed`, which is always on: the allow-set is
-  derived from the workspace, every workspace project and its registered dataset roots, plus the
-  additive `TCIP_IMAGE_ROOTS` list, and containment is by filesystem identity. Every route uses the
+- Path access from routes goes through `allowed_path`, the one adapter over `assert_path_allowed`
+  that answers a refusal as 403, which is always on: the allow-set is derived from the workspace the
+  backend was started with, every workspace project and its registered dataset roots, plus the
+  additive image roots read from `TCIP_IMAGE_ROOTS` at startup, and containment is by filesystem
+  identity. Every route uses the
   resolved path the guard returns, never the client's string. Never route around a 403 on
-  escape. The Results doors go further: they serve only the project the GUI has
-  open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
-  does not belong to it.
+  escape. Every route that acts on a project acts on the one the backend has open
+  (`StateStore.open_root()`, set by `/api/projects/open` from a project's id, 409 while none is
+  open) and takes no project from the request; the Results doors also refuse evidence that does not
+  belong to it.
 - A path a route reads out of the platform's own records (a selection directory a run's config
   names, say) is trusted for reading and never for writing; `assert_path_allowed` is for a
   client-supplied path, not this kind.
 - A job registry (`jobstore.JobRegistry`) holds this process's live jobs only; what survives a
   restart is what each job's own directory or bucket records.
-- Under pytest, with starlette's `TestClient` module loaded, or on a request arriving from an
-  in-process test transport (starlette's `TestClient` or httpx's `ASGITransport`), the app
-  refuses to start unless `TCIP_WORKSPACE` is set (`app.WorkspaceUnsetUnderTest`); set it and
-  `TCIP_STATE_ROOT` to scratch directories before starting one.
+- The workspace and image roots are read once, in `python -m tcip_web`'s `main`, which writes the
+  port record under that workspace and hands both to `StateStore.configure` before serving; an
+  unset `TCIP_WORKSPACE` refuses there. A test or script configures the store itself, with a
+  scratch workspace.
 - Reviews save the one label shape, the per-image JSON document (see
   `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option.
 - The GUI follows minimalist design without dropping functionality: prefer nesting related

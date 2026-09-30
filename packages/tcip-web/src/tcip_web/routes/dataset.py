@@ -1,36 +1,19 @@
-"""Dataset discovery + selection routes.
-
-The frontend hits these to:
-  * discover what's available under a project root,
-  * read and persist the ``GuiState.dataset`` selection,
-  * persist the browser's current image position within that selection.
-
-Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
-
-    <dataset_root>/
-        images/<date>/*.JPG
-        annotations/<date>/<stem>.json          # ground truth, one file per image (all subjects)
-        predictions/<model>/<date>/<stem>.json  # model outputs
-        subjects.json                           # the nested subject/attribute registry
-"""
+"""Dataset routes: what a dataset root holds (its dates, subjects and models, through
+:mod:`tcip_mcp.dataset_layout`), the ``GuiState.dataset`` selection, and the current image position
+within it."""
 
 from __future__ import annotations
 
-import asyncio
 from collections import OrderedDict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import tcip_store as ts
 
-from tcip_mcp import workspace
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_root,
-    image_dir,
     image_root,
     list_dates,
     list_models,
@@ -41,23 +24,13 @@ from tcip_mcp.dataset_layout import (
     subjects_path,
     subjects_with_labels,
 )
-from tcip_mcp.pipelines.image_utils import (
-    AmbiguousImageStem, list_logical_images, logical_image_name,
-)
-from tcip_mcp.web_client import binding_released_or_absent, canvas_open_binding_key
+from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
 from tcip_web.label_annotations_cache import cached_label_annotations
-from tcip_web.paths import assert_path_allowed
-from tcip_web.state import DatasetSelection, store
+from tcip_mcp.web_client import selection_for
+from tcip_web.paths import allowed_path, assert_path_allowed
+from tcip_web.state import store
 
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
-
-
-def _guarded(path: str) -> Path:
-    """Confine a client-supplied root and hand back the resolved path every later read uses."""
-    try:
-        return assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
 
 
 # Whether this server process has selected a dataset yet. Resuming the persisted image index
@@ -145,7 +118,7 @@ def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
 @router.get("/tree")
 def get_dataset_tree(dataset_root: str) -> DatasetTree:
     """Return the high-level tree (dates, subjects, models) for a dataset."""
-    root = _guarded(dataset_root)
+    root = allowed_path(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
@@ -189,120 +162,23 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
 
 
 class SelectionRequest(BaseModel):
-    project_root: str
     dataset_root: str
     subject: Optional[str] = None
     date: Optional[str] = None
     model_name: Optional[str] = None
 
 
-def _write_canvas_binding(root: Path) -> int:
-    """Record ``root`` as the GUI's open root; return the generation now in force.
-
-    One read-modify-write transaction: the generation bumps when ``root`` changed or the current
-    record was released, never on a same-project re-select.
-    """
-    key = canvas_open_binding_key()
-    root_str = str(root)
-    project_name = workspace.workspace_project_name(root)
-    with ts.transaction(key) as txn:
-        current = txn.read(key, default=None)
-        same_root = not binding_released_or_absent(current) and (
-            ts.canonical_path(current["root"]) == ts.canonical_path(root_str)
-        )
-        if same_root:
-            generation = current["generation"]
-        else:
-            generation = (current["generation"] + 1) if current is not None else 1
-        txn.write(key, {
-            "generation": generation,
-            "root": root_str,
-            "project_name": project_name,
-            "issued_at": datetime.now(timezone.utc).isoformat(),
-        })
-    return generation
-
-
-def _pending_marker_message(project_root: str, marker: "workspace.PendingMarker") -> str:
-    """One sentence naming ``project_root`` and, from ``marker``, which kind is pending and what
-    completes at the next backend start.
-    """
-    record = marker.record
-    if marker.kind == "removal":
-        return (
-            f"{project_root!r} is pending removal (requested {record['requested_at']}); it "
-            "moves to the workspace's holding directory at the next backend start, or through "
-            "tcip complete-removals"
-        )
-    return (
-        f"{project_root!r} is pending rename to {record['new_name']!r} (requested "
-        f"{record['requested_at']}); it renames at the next backend start, or through "
-        "tcip complete-renames"
-    )
-
-
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
-    """Set the active dataset for the GUI; broadcasts a state delta.
-
-    A ``project_root`` pending removal or pending rename is refused before the binding write, with
-    the pending door's own message, so a refused select changes no binding and bumps no generation.
-    """
-    try:
-        project_root = _guarded(req.project_root)
-    except HTTPException as exc:
-        if exc.status_code == 403:
-            pending = workspace.pending_marker_or_none(
-                Path(req.project_root).expanduser().resolve()
-            )
-            if pending is not None:
-                raise HTTPException(403, _pending_marker_message(req.project_root, pending)) from exc
-        raise
-    pending = workspace.pending_marker_or_none(project_root)
-    if pending is not None:
-        raise HTTPException(409, _pending_marker_message(req.project_root, pending))
-    root = _guarded(req.dataset_root)
+    """Set the dataset the GUI looks at inside the open project; broadcasts a state delta.
+    Answers 409 while no project is open."""
+    store.open_root()
+    root = allowed_path(req.dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
 
-    # Recorded before anything else, off the event loop (a cross-process lock, a possible
-    # fsync), so a busy binding store refuses the whole select rather than half-adopting it.
-    try:
-        generation = await asyncio.to_thread(_write_canvas_binding, project_root)
-    except ts.StoreBusy as exc:
-        raise HTTPException(
-            503, f"could not record which project the GUI has open: {exc}"
-        ) from exc
-
-    # Rehydrate any persisted GUI state for this project first (so backend state
-    # survives a restart), then apply the fresh selection on top via mutate().
-    store.open_project(project_root)
-
-    image_list: list[str] = []
-    if req.date:
-        date_dir = image_dir(root, req.date)
-        if date_dir.is_dir():
-            # Sorted display names, band groups folded to one entry per capture, through the
-            # one naming primitive gui_tools' own by-name callers resolve the same capture under.
-            try:
-                image_list = sorted(
-                    logical_image_name(src) for src in list_logical_images(date_dir).values()
-                )
-            except AmbiguousImageStem as exc:
-                raise HTTPException(400, str(exc)) from exc
-
-    # Canonical layout (see tcip_mcp.dataset_layout): the single source of truth shared with the
-    # agent tools, so agent writes land where the GUI reads. The browser composes none of these.
-    images_dir = str(image_dir(root, req.date)) if req.date else None
-    annotations_dir = str(annotation_dir(root, req.date)) if req.date else None
-    predictions_dir = (
-        str(prediction_dir(root, req.model_name, req.date)) if req.model_name and req.date else None
-    )
-
-    # Re-selecting the same (root, subject, date) within a session resumes at the persisted
-    # position instead of clobbering it back to image 0. The first select of a fresh process
-    # (the auto-open on app load) starts at image 0 rather than resurfacing a prior session's
-    # position.
+    # Re-selecting the same (root, subject, date) in a session resumes at the held position;
+    # the first select of a fresh process starts at image 0.
     global _selected_this_session
     prev = store.state.dataset
     same_identity = (
@@ -311,25 +187,14 @@ async def select_dataset(req: SelectionRequest) -> dict:
         and prev.date == req.date
         and prev.subject == req.subject
     )
-    index = prev.current_image_index if same_identity else 0
-    index = max(0, min(index, len(image_list) - 1)) if image_list else 0
     _selected_this_session = True
-
-    selection = DatasetSelection(
-        project_root=str(project_root),
-        dataset_root=str(root),
-        subject=req.subject,
-        date=req.date,
-        image_list=image_list,
-        current_image_index=index,
-        images_dir=images_dir,
-        annotations_dir=annotations_dir,
-        predictions_dir=predictions_dir,
-    )
-    # Adopted here, immediately before the mutate it names and with no await between: an
-    # exception raised while gathering the selection above leaves both still naming the old root.
-    store.set_binding_generation(generation)
+    try:
+        selection = selection_for(root, req.subject, req.date, req.model_name,
+                                  prev.current_image_index if same_identity else 0)
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
     await store.mutate({"dataset": selection})
+    annotations_dir = selection.annotations_dir
 
     # Advisory only (never rejects): does the resolved (subject, date) actually have any labels /
     # the (model, date) any predictions? Empty label files count as present (confirmed
@@ -363,9 +228,6 @@ async def select_dataset(req: SelectionRequest) -> dict:
     return {
         "status": "ok",
         "selection": selection.model_dump(mode="json"),
-        # The canvas-open binding's current generation, for the client to adopt in the same
-        # store update as the selection: see CanvasStatePayload.binding_generation.
-        "generation": generation,
         "annotations_present": annotations_present,
         "predictions_present": predictions_present,
         "label_problem": label_problem,

@@ -23,7 +23,7 @@ describe("results api error handling (asJson)", () => {
     stubFetch(200, {
       models: [{ name: "m", checkpoint_path: "/w.pt", tags: ["best"] }],
     });
-    const res = await resultsApi.registeredModels("/proj");
+    const res = await resultsApi.registeredModels();
     expect(res.models).toHaveLength(1);
     expect(res.models[0].checkpoint_path).toBe("/w.pt");
   });
@@ -32,13 +32,12 @@ describe("results api error handling (asJson)", () => {
     // A 404 error body ({detail}) must not be returned as-is: a caller reading `.models`/
     // `.rows` off it would get undefined and crash on the next render.
     stubFetch(404, { detail: "no plant mapping" });
-    await expect(resultsApi.registeredModels("/proj")).rejects.toThrow("no plant mapping");
+    await expect(resultsApi.registeredModels()).rejects.toThrow("no plant mapping");
   });
 });
 
 describe("downloadCsv refusal decoding", () => {
   const REQUEST = {
-    project_root: "C:/proj",
     mapping_name: "valley",
     predictions_by_date: {},
     trait: "stage_50per_date",

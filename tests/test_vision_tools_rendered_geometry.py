@@ -40,13 +40,12 @@ def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
 
 
 @pytest.fixture
-def split_instance_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def split_instance_dataset(tmp_path: Path) -> Path:
     """A dataset whose one image carries a two-region ground-truth mask and a two-region
     predicted mask, each region far from the others."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, Polygon
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
@@ -80,8 +79,8 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     """
     from tcip_mcp.tools.vision_tools import visualize
 
-    result = visualize("annotations", str(split_instance_dataset / "images" / "split.png"),
-                       task="segment")
+    result = visualize(split_instance_dataset, "annotations",
+                       str(split_instance_dataset / "images" / "split.png"), task="segment")
     assert "error" not in result, result
     assert result["count"] == 1                     # one instance, drawn as its several regions
 
@@ -98,8 +97,8 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     """The prediction render covers every ring too: a split predicted mask must look split."""
     from tcip_mcp.tools.vision_tools import visualize
 
-    result = visualize("predictions", str(split_instance_dataset / "images" / "split.png"),
-                       task="segment")
+    result = visualize(split_instance_dataset, "predictions",
+                       str(split_instance_dataset / "images" / "split.png"), task="segment")
     assert "error" not in result, result
     assert result["count"] == 1
 
@@ -128,12 +127,11 @@ def _mask_center(arr: np.ndarray, channel: int) -> tuple[float, float]:
 
 
 @pytest.fixture
-def mislocalized_prediction_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     """One image whose single prediction sits nowhere near its single ground-truth box."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")
@@ -165,6 +163,7 @@ def test_a_failure_case_draws_ground_truth_from_the_label_tree(
 
     root = mislocalized_prediction_dataset
     result = render_failure_cases(
+        root,
         predictions_dir=str(root / "predictions" / "live"),
         labels_dir=str(root / "annotations"),
         images_dir=str(root / "images"),

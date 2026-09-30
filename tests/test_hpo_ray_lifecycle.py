@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from collections import Counter
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -183,42 +183,38 @@ def _patch_aiohttp_availability(monkeypatch, available: bool) -> None:
     monkeypatch.setattr(hpo, "find_spec", fake_find_spec)
 
 
-def _run_one_search() -> str:
-    from pathlib import Path
-
+def _run_one_search(project) -> str:
     from tcip_mcp.pipelines.training.hpo import tune_search
 
-    # The autouse fixture pins TCIP_STATE_ROOT to each test's own tmp dir; storing there
-    # keeps every fake sweep inside the test's isolated platform state root.
     return tune_search(
-        objective_fn=lambda config, report: None,
+        project=project, objective_fn=lambda config, report: None,
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
         num_samples=1,
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"), seed=0
+        storage_path=str(project / ".tcip" / "hpo"), seed=0
     )
 
 
 @pytest.fixture(autouse=True)
-def _isolated_lifecycle_state(monkeypatch, tmp_path):
-    """Start every test from an idle, unowned cluster and its own platform state root."""
+def _isolated_lifecycle_state(tmp_path, monkeypatch):
+    """Start every test from an idle, unowned cluster."""
     import tcip_mcp.pipelines.training.hpo as hpo
 
-    monkeypatch.setattr(hpo, "_active_searches", 0, raising=False)
-    monkeypatch.setattr(hpo, "_ray_started_here", False, raising=False)
-    monkeypatch.setattr(hpo, "_ray_runtime_pythonpath", None, raising=False)
+    monkeypatch.setattr(hpo, "_active_searches", Counter())
+    monkeypatch.setattr(hpo, "_ray_started", False)
+    monkeypatch.setattr(hpo, "_ray_dashboard_url", None)
+    monkeypatch.setattr(hpo, "_ray_runtime_pythonpath", None)
     monkeypatch.setattr(hpo, "_external_cluster_warned", False, raising=False)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
 
-def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(monkeypatch):
+def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(tmp_path, monkeypatch):
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    threads = [threading.Thread(target=_run_one_search) for _ in range(2)]
+    threads = [threading.Thread(target=_run_one_search, args=(tmp_path,)) for _ in range(2)]
     threads[0].start()
     assert entered[0].wait(timeout=30)
     threads[1].start()
@@ -237,20 +233,20 @@ def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(monkeypatch)
     assert ray.shutdown_calls == 1
 
 
-def test_a_cluster_this_process_did_not_start_is_never_shut_down(monkeypatch):
+def test_a_cluster_this_process_did_not_start_is_never_shut_down(tmp_path, monkeypatch):
     entered = [threading.Event()]
     release = [threading.Event()]
     release[0].set()
     ray = _install_fake_ray(monkeypatch, entered, release)
     ray.live = True  # something else in this process already brought Ray up
 
-    _run_one_search()
+    _run_one_search(tmp_path)
 
     assert ray.init_calls == 0
     assert ray.shutdown_calls == 0
 
 
-def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(monkeypatch):
+def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(tmp_path, monkeypatch):
     from tcip_store import store
 
     from tcip_mcp.pipelines.training.hpo import ray_dashboard_key, read_ray_dashboard
@@ -260,29 +256,29 @@ def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(mo
     release = [threading.Event()]
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    sweep = threading.Thread(target=_run_one_search)
+    sweep = threading.Thread(target=_run_one_search, args=(tmp_path,))
     sweep.start()
     assert entered[0].wait(timeout=30)
 
     assert ray.init_kwargs["include_dashboard"] is True
     assert ray.init_kwargs["dashboard_host"] == "127.0.0.1"
 
-    published = read_ray_dashboard()
+    published = read_ray_dashboard(tmp_path)
     assert published is not None
     # The frontend needs a URL it can fetch; ray.init reports a bare host:port.
     assert published["url"] == f"http://{DASHBOARD_HOST_PORT}"
     assert published["pid"] == os.getpid()
-    assert datetime.fromisoformat(published["started_at"])
+    assert set(published) == {"url", "pid"}
 
     release[0].set()
     sweep.join(timeout=30)
     assert not sweep.is_alive()
 
-    assert not store.exists(ray_dashboard_key())
-    assert read_ray_dashboard() is None
+    assert not store.exists(ray_dashboard_key(tmp_path))
+    assert read_ray_dashboard(tmp_path) is None
 
 
-def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(monkeypatch):
+def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(tmp_path, monkeypatch):
     """A URL outlives the process that wrote it; the cluster it names does not."""
     from tcip_store import store
 
@@ -291,16 +287,53 @@ def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(monkeypatc
     dead = subprocess.Popen([sys.executable, "-c", ""])
     dead.wait(timeout=60)
 
-    state = {"url": f"http://{DASHBOARD_HOST_PORT}", "pid": dead.pid,
-             "started_at": "2026-01-01T00:00:00+00:00"}
-    store.replace(ray_dashboard_key(), state)
-    assert read_ray_dashboard() is None
+    state = {"url": f"http://{DASHBOARD_HOST_PORT}", "pid": dead.pid}
+    store.replace(ray_dashboard_key(tmp_path), state)
+    assert read_ray_dashboard(tmp_path) is None
 
-    store.replace(ray_dashboard_key(), {**state, "pid": os.getpid()})
-    assert read_ray_dashboard() == {**state, "pid": os.getpid()}
+    store.replace(ray_dashboard_key(tmp_path), {**state, "pid": os.getpid()})
+    assert read_ray_dashboard(tmp_path) == {**state, "pid": os.getpid()}
 
 
-def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(monkeypatch):
+def test_a_dashboard_record_with_an_empty_url_is_reported_not_served(tmp_path):
+    from tcip_store import store
+
+    from tcip_mcp.pipelines.training.hpo import ray_dashboard_key, read_ray_dashboard
+
+    store.replace(ray_dashboard_key(tmp_path), {"url": "", "pid": os.getpid()})
+    with pytest.raises(ValueError, match="not a url and a pid"):
+        read_ray_dashboard(tmp_path)
+
+
+def test_a_finished_sweep_leaves_the_dashboard_of_a_sweep_of_its_project_still_running(
+    tmp_path, monkeypatch,
+):
+    """The recorded dashboard lives while any sweep of its project runs: the first of two to
+    finish leaves it, and the last clears it."""
+    from tcip_mcp.pipelines.training.hpo import read_ray_dashboard
+
+    _patch_aiohttp_availability(monkeypatch, True)
+    entered = [threading.Event(), threading.Event()]
+    release = [threading.Event(), threading.Event()]
+    _install_fake_ray(monkeypatch, entered, release)
+
+    threads = [threading.Thread(target=_run_one_search, args=(tmp_path,)) for _ in range(2)]
+    threads[0].start()
+    assert entered[0].wait(timeout=30)
+    threads[1].start()
+    assert entered[1].wait(timeout=30)
+
+    release[0].set()
+    threads[0].join(timeout=30)
+    assert not threads[0].is_alive()
+    assert read_ray_dashboard(tmp_path) is not None
+
+    release[1].set()
+    threads[1].join(timeout=30)
+    assert read_ray_dashboard(tmp_path) is None
+
+
+def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(tmp_path, monkeypatch):
     """A trial worker Ray spawns starts from its own defaults, not this interpreter's
     sys.path; a bespoke model_source/training_source/dataset_source importable here must stay
     importable there, the same guarantee the launch subprocess gets."""
@@ -309,7 +342,7 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
     release[0].set()
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    _run_one_search()
+    _run_one_search(tmp_path)
 
     env_vars = ray.init_kwargs["runtime_env"]["env_vars"]
     pythonpath_entries = env_vars["PYTHONPATH"].split(os.pathsep)
@@ -317,7 +350,7 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
         assert entry in pythonpath_entries
 
 
-def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(monkeypatch):
+def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(tmp_path, monkeypatch):
     """A bare ray[tune] install (this package's own declared minimum) has no aiohttp; asking
     ray.init for a dashboard it can't serve raises there, which must not stop a sweep from
     running on that install."""
@@ -329,12 +362,12 @@ def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(monke
     release[0].set()
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    _run_one_search()
+    _run_one_search(tmp_path)
 
     assert ray.init_calls == 1
     assert ray.shutdown_calls == 1
     assert ray.init_kwargs["include_dashboard"] is False
-    assert read_ray_dashboard() is None
+    assert read_ray_dashboard(tmp_path) is None
 
 
 def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gone_stale(
@@ -349,14 +382,14 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
     release = [threading.Event(), threading.Event()]
     _install_fake_ray(monkeypatch, entered, release)
 
-    first = threading.Thread(target=_run_one_search)
+    first = threading.Thread(target=_run_one_search, args=(tmp_path,))
     first.start()
     assert entered[0].wait(timeout=30)
 
     monkeypatch.syspath_prepend(str(tmp_path / "bespoke_source"))
 
     with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
-        second = threading.Thread(target=_run_one_search)
+        second = threading.Thread(target=_run_one_search, args=(tmp_path,))
         second.start()
         assert entered[1].wait(timeout=30)
         release[1].set()
@@ -372,7 +405,7 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
 
 
 def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
-    monkeypatch, caplog,
+    tmp_path, monkeypatch, caplog,
 ):
     """The companion of the stale-path warning: entering a second sweep against a cluster
     this module started, with the import path unchanged, raises no warning."""
@@ -382,12 +415,12 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     release = [threading.Event(), threading.Event()]
     _install_fake_ray(monkeypatch, entered, release)
 
-    first = threading.Thread(target=_run_one_search)
+    first = threading.Thread(target=_run_one_search, args=(tmp_path,))
     first.start()
     assert entered[0].wait(timeout=30)
 
     with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
-        second = threading.Thread(target=_run_one_search)
+        second = threading.Thread(target=_run_one_search, args=(tmp_path,))
         second.start()
         assert entered[1].wait(timeout=30)
         release[1].set()
@@ -402,21 +435,21 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     )
 
 
-def test_sequential_sweeps_each_start_and_stop_their_own_cluster(monkeypatch):
+def test_sequential_sweeps_each_start_and_stop_their_own_cluster(tmp_path, monkeypatch):
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     for event in release:
         event.set()
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    _run_one_search()
-    _run_one_search()
+    _run_one_search(tmp_path)
+    _run_one_search(tmp_path)
 
     assert ray.init_calls == 2
     assert ray.shutdown_calls == 2
 
 
-def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monkeypatch):
+def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(tmp_path, monkeypatch):
     """Windows' console-signal shutdown path raises ``OSError: [WinError 6] The handle is
     invalid`` on a daemon started without a console; a console-free process must kill every
     daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
@@ -434,7 +467,7 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
 
     escaped: BaseException | None = None
     try:
-        _run_one_search()
+        _run_one_search(tmp_path)
     except BaseException as exc:
         escaped = exc
 
@@ -446,7 +479,7 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
     assert ray.shutdown_calls == 1
 
 
-def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(monkeypatch):
+def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(tmp_path, monkeypatch):
     """Coverage of the attached-console path: asserts nothing is killed ahead of
     ``ray.shutdown()``, which signals each daemon through the terminate path, and that
     ``ray.shutdown()`` still ran."""
@@ -459,7 +492,7 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
     ray.no_console = False
     monkeypatch.setattr(hpo, "_has_attached_console", lambda: True, raising=False)
 
-    _run_one_search()
+    _run_one_search(tmp_path)
 
     for process_infos in ray._private.worker.global_worker.node.all_processes.values():
         for process_info in process_infos:
@@ -468,12 +501,10 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
     assert ray.shutdown_calls == 1
 
 
-def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(monkeypatch):
+def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_path, monkeypatch):
     """The cluster asks Ray for the sweep's CPUs, every concurrent trial's together, never for
     the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
     one-at-a-time sweep needs one."""
-    from pathlib import Path
-
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     entered = [threading.Event(), threading.Event()]
@@ -483,14 +514,14 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(monke
     ray = _install_fake_ray(monkeypatch, entered, release)
 
     tune_search(
-        objective_fn=lambda config, report: None,
+        project=tmp_path, objective_fn=lambda config, report: None,
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
         num_samples=1, search_alg="random", scheduler=None, max_concurrent=3,
         resources_per_trial={"cpu": 0.5, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"), seed=0
+        storage_path=str(tmp_path / ".tcip" / "hpo"), seed=0
     )
     assert ray.init_kwargs["num_cpus"] == 2
 
-    _run_one_search()
+    _run_one_search(tmp_path)
     assert ray.init_calls == 2, "the first sweep's cluster was shut down, so this one started its own"
     assert ray.init_kwargs["num_cpus"] == 1

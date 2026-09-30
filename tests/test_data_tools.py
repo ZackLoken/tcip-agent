@@ -131,7 +131,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     out = tmp_path / "manifests"
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
     # groups, exactly the manifest floor (one each for train/val, two for calibration).
-    result = draw_splits(str(data_dir), output_path=str(out), subject="bud",
+    result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     assert result["total_stems"] == 4
@@ -139,7 +139,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     assert sum(result["splits"].values()) == 4
     assert result["stratified"] is True
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=data_dir)
     assert drawn.counts() == {k: v for k, v in result["splits"].items()}
     assert all(drawn.counts()[side] for side in ("train", "val", "calibration"))
     assert drawn.scope.subject == "bud"
@@ -158,7 +158,7 @@ def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data
     ts.put_blob(
         subject_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
     )
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
+    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result, result
     assert "schema_version" in result["error"]
@@ -167,7 +167,7 @@ def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
     """A stats-only call (no output_path) may pass any calibration_ratio; only writing a
     selection requires a non-zero one."""
-    result = draw_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
     assert "error" not in result, result
     assert result["splits"]["calibration"] > 0
 
@@ -178,7 +178,7 @@ def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
+    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -194,7 +194,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
+    result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -215,7 +215,7 @@ def test_draw_splits_writes_nothing_when_a_confirmed_negative_will_not_read(
     bad.write_bytes(b"{not json")
     out = tmp_path / "selection"
 
-    result = draw_splits(str(data_dir), output_path=str(out), subject="bud",
+    result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -229,7 +229,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(data_di
     bad = data_dir / "annotations" / "2-11-26" / "img_001.json"
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir))
+    result = draw_splits(data_dir, str(data_dir))
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -242,7 +242,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratificatio
     bad = data_dir / "annotations" / "2-11-26" / "img_003.json"
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir))
+    result = draw_splits(data_dir, str(data_dir))
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -267,7 +267,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
-    result = draw_splits(str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -292,7 +292,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
-    result = draw_splits(str(root))
+    result = draw_splits(tmp_path, str(root))
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -385,7 +385,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
     _add_extra_leaf_groups(images_dir, labels_dir, 3)
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -431,7 +431,7 @@ def test_place_logical_image_leaves_an_existing_destination_alone_without_writin
 def test_draw_splits_stats_only_carries_dataset_hash(data_dir: Path):
     """A stats-only call's answer identifies the labels it partitioned, the same as a manifest
     call's own per-date record."""
-    result = draw_splits(str(data_dir))
+    result = draw_splits(data_dir, str(data_dir))
     assert "error" not in result
     assert result["dataset_hash"]
     assert result["dataset_hashes_by_date"] == {"2-11-26": result["dataset_hash"]}
@@ -458,7 +458,7 @@ def test_draw_splits_stats_only_over_two_dates_names_both_hashes_and_no_single_h
                 [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
             )
 
-    result = draw_splits(str(root))
+    result = draw_splits(tmp_path, str(root))
 
     assert "error" not in result, result
     assert result["dataset_hash"] is None
@@ -466,13 +466,13 @@ def test_draw_splits_stats_only_over_two_dates_names_both_hashes_and_no_single_h
     assert result["dataset_hashes_by_date"]["2-11-26"] != result["dataset_hashes_by_date"]["2-12-01"]
 
 def test_draw_splits_bad_ratios(data_dir: Path):
-    result = draw_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.5)
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.5)
     assert "error" in result
 
 
 def test_draw_splits_train_val_calibration_not_summing_to_one_names_all_three(data_dir: Path):
     """The sum-check message names all three standing constraints, not just the raw sum."""
-    result = draw_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.2)
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.2)
     assert "error" in result
     assert "calibration_ratio" in result["error"]
     assert "train_ratio" in result["error"] and "val_ratio" in result["error"]
@@ -484,7 +484,7 @@ def test_draw_splits_manifest_write_refuses_a_zero_calibration_ratio(tmp_path: P
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="bud")
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud")
 
     assert "error" in result
     assert "calibration_ratio" in result["error"]
@@ -495,11 +495,11 @@ def test_draw_splits_selection_carries_all_three_split_sides(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" not in result, result
-    counts = read_selection(out).counts()
+    counts = read_selection(out, project=tmp_path).counts()
     assert set(counts) == {"train", "val", "calibration"}
     assert all(counts.values())
 
@@ -513,7 +513,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     root = _multi_source_dataset(tmp_path / "ds", prefixes=("srcA", "srcB", "srcC"))
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
                          stratify_foreground=False)
 
@@ -528,7 +528,7 @@ def test_draw_splits_manifest_write_refuses_a_zero_ratio_on_any_side_by_name(tmp
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
                          train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.25)
 
     assert "error" in result
@@ -570,7 +570,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
                           recorded_by="user:tester")
 
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf", seed=1,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -618,7 +618,7 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
 
     for seed in range(1, 21):
         out = tmp_path / f"m{seed}"
-        result = draw_splits(str(root), output_path=str(out), subject="leaf", seed=seed,
+        result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=seed,
                              train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.1,
                              stratify_foreground=False)
         assert "error" not in result, (seed, result)
@@ -647,13 +647,13 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
     seen: dict[str, str] = {}
-    for sample in read_selection(out).samples:
+    for sample in read_selection(out, project=tmp_path).samples:
         g = default_group_key(Path(sample.ground_truth).stem)
         assert seen.get(g, sample.side) == sample.side, f"group {g} spans splits"
         seen[g] = sample.side
@@ -668,13 +668,13 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
         "2-11-26/x_0_0": "gA", "2-11-26/y_0_0": "gA", "2-11-26/z_0_0": "gB",
         "2-11-26/w_0_0": "gC", "2-11-26/v_0_0": "gD",
     }
-    result = draw_splits(str(root), output_path=str(out), seed=1,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
                          group_by="tile_prefix", group_key_map=group_key_map, subject="bud")
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     by_stem = {Path(s.ground_truth).stem: s for s in drawn.samples}
     assert by_stem["x_0_0"].side == by_stem["y_0_0"].side  # gA never straddles
     assert by_stem["x_0_0"].group == by_stem["y_0_0"].group == "gA"
@@ -686,7 +686,7 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     ``GROUP_KEY_FNS.get(group_by, default_group_key)`` and mis-group a dataset silently."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result
     assert not out.exists() or not (out / "selection.json").is_file()
@@ -697,7 +697,7 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(tmp_path: Path
     samples; draw_splits refuses to write one rather than guessing what a run would admit."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out),
+    result = draw_splits(tmp_path, str(root), output_path=str(out),
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result and "subject" in result["error"]
     assert not out.exists()
@@ -734,12 +734,12 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     identity a second date could collide with."""
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     shared = [s for s in drawn.samples if Path(s.ground_truth).stem == "shared"]
     assert len(shared) == 2
     assert {Path(s.source).parent.name for s in shared} == {"2-11-26", "2-12-01"}
@@ -782,11 +782,11 @@ def _two_subject_dataset(root: Path) -> Path:
 def test_draw_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Path):
     root = _two_subject_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {
         "leaf_a", "leaf_b", "leaf_c", "leaf_d"}
 
@@ -830,11 +830,11 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 def test_draw_splits_attribute_scoped_selection_holds_only_assessed_samples(tmp_path: Path):
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf", attribute="condition",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", attribute="condition",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert drawn.scope.attribute == "condition"
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {
         "assessed_a", "assessed_b", "assessed_c", "assessed_d"}
@@ -868,7 +868,7 @@ def test_draw_splits_refuses_two_dated_label_dirs_sharing_a_flat_images_root(tmp
     root = _two_date_flat_images_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -901,7 +901,7 @@ def test_draw_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_
     )
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -928,7 +928,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_directories_and_the_unp
     )
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -959,7 +959,7 @@ def _dated_labels_flat_images_dataset(root: Path, stems: tuple[str, ...]) -> Pat
 def test_draw_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Path):
     root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0", "p1", "p2", "p3", "p4"))
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result
     assert result["total_stems"] == 5
@@ -990,13 +990,13 @@ def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
         )
 
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" not in result
     assert result["total_stems"] == 5
     assert result["admission_counts"]["annotated"] == 5
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {"a", "b", "c", "loose1", "loose2"}
     assert {str(Path(s.ground_truth).parent.relative_to(root)) for s in drawn.samples} == {
         str(Path("annotations") / "2-11-26"), "annotations"}
@@ -1059,10 +1059,10 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(tmp_path: Pa
     )
 
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="leaf",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
 
     assert all(Path(s.ground_truth).parent.name == "2-11-26" for s in drawn.samples)
     assert "orphan" not in {Path(s.ground_truth).stem for s in drawn.samples}
@@ -1087,43 +1087,47 @@ def test_doctor_check_data_quality_admits_a_confirmed_negative_under_dated_label
     assert _quality_findings(root) == []
 
 
-def _one_sample_selection(source: str = "images/a.jpg", label: str = "annotations/a.json",
-                          group: str = "a", side: str = "train") -> Selection:
-    return Selection(
-        samples=(Sample(member=Path(label).stem, source=source, ground_truth=label, group=group,
-                        side=side, confirmation_bucket="leaf/2-11-26"),),
+def _write_one_sample_selection(root: Path, out: Path) -> None:
+    """A one-sample selection of the project ``root`` written under ``out``, its source and
+    label under ``root``."""
+    write_selection(out, Selection(
+        samples=(Sample(member="a", source=str(root / "images" / "a.jpg"),
+                        ground_truth=str(root / "annotations" / "a.json"), group="a",
+                        side="train", confirmation_bucket="leaf/2-11-26"),),
         scope=ClassScope(subject="leaf", id_map={"leaf": 0}), seed=1, group_by="stem",
-    )
+    ), project=root)
 
 
 def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
-    """The reader accepts exactly what the writer wrote, through the platform's own producer."""
+    """The reader accepts exactly what the writer wrote, through the platform's own producer,
+    each path stored under the project and read back where it lies."""
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
 
-    drawn = read_selection(out)
+    assert ts.read(selection_key(out))["samples"][0]["source"] == "images/a.jpg"
+    drawn = read_selection(out, project=tmp_path)
 
     assert drawn.scope == ClassScope(subject="leaf", id_map={"leaf": 0})
     assert drawn.seed == 1
-    assert [s.identity for s in drawn.samples] == ["images/a.jpg"]
+    assert [s.identity for s in drawn.samples] == [str(tmp_path.resolve() / "images" / "a.jpg")]
 
 
 def test_read_selection_refuses_an_absent_record_by_name(tmp_path: Path):
     with pytest.raises(ValueError, match="no selection recorded"):
-        read_selection(tmp_path / "nothing")
+        read_selection(tmp_path / "nothing", project=tmp_path)
 
 
 def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(tmp_path: Path):
     """A sample naming no ground truth binds nothing: a selection's samples each name their own
     rather than sharing a directory the reader could reconstruct one from."""
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"][0].pop("ground_truth")
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match=r"carries no \['ground_truth'\]"):
-        read_selection(out)
+        read_selection(out, project=tmp_path)
 
 
 def test_read_selection_refuses_a_label_document_sample_with_no_confirmation_bucket(
@@ -1134,30 +1138,30 @@ def test_read_selection_refuses_a_label_document_sample_with_no_confirmation_buc
     document and no bucket names nothing to re-check it against. A mask or a table row is
     admitted by existing, so neither carries one and neither is refused for it."""
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"][0].pop("confirmation_bucket")
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="no confirmation_bucket"):
-        read_selection(out)
+        read_selection(out, project=tmp_path)
 
 
 def test_read_selection_refuses_an_empty_sample_list(tmp_path: Path):
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"] = []
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="lists no samples"):
-        read_selection(out)
+        read_selection(out, project=tmp_path)
 
 
 def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     """The same pixels on train and calibration would be trained on and measured on at once."""
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"].append(
         {"member": "a", "source": "images/a.jpg", "ground_truth": "annotations/a.json",
@@ -1166,14 +1170,14 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="on more than one side"):
-        read_selection(out)
+        read_selection(out, project=tmp_path)
 
 
 def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     """Crops of one parent, or captures of one subject, share a group key: splitting them across
     sides leaks one side into the other, so the reader refuses the partition outright."""
     out = tmp_path / "m"
-    write_selection(out, _one_sample_selection())
+    _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
     document["samples"].append(
         {"member": "a_0_1", "source": "images/a_0_1.jpg",
@@ -1182,4 +1186,4 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="group"):
-        read_selection(out)
+        read_selection(out, project=tmp_path)

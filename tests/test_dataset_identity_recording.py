@@ -53,10 +53,10 @@ def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
     first = _config(*_make_dataset(tmp_path / "first"))
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
-    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is True
+    assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is True
     opened_run(tmp_path, _config(*_make_dataset(tmp_path / "second", shade=200)),
                experiment_id="c")
-    assert compare_experiments(["a", "c"])["same_dataset_fingerprint"] is False
+    assert compare_experiments(["a", "c"], project=tmp_path)["same_dataset_fingerprint"] is False
 
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path):
@@ -66,7 +66,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(tmp_path
     opened_run(tmp_path, _config(*_make_dataset(tmp_path / "first")), experiment_id="a")
     opened_run(tmp_path, _config(*_make_dataset(tmp_path / "loose", images="frames")),
                experiment_id="b")
-    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is None
+    assert compare_experiments(["a", "b"], project=tmp_path)["same_dataset_fingerprint"] is None
 
 
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
@@ -74,7 +74,7 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     _make_dataset(tmp_path)
-    reg = register_dataset(str(tmp_path), crop="currant")
+    reg = register_dataset(tmp_path, str(tmp_path), crop="currant")
     ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
     assert ds_id == reg["id"] and fp == reg["fingerprint"]
     # bespoke / imageless run -> no fabricated identity
@@ -89,7 +89,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(tmp_path, monkeypatc
     from tcip_mcp.tools.project_tools import register_dataset
 
     _make_dataset(tmp_path)
-    register_dataset(str(tmp_path), crop="currant")
+    register_dataset(tmp_path, str(tmp_path), crop="currant")
 
     def _raise(_root):
         raise OSError("simulated I/O error mid-scan")
@@ -107,22 +107,22 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(tmp_pa
     pytest.importorskip("torch")
     from types import SimpleNamespace
 
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import RUN_FILE, read_record, sweeps_dir
     from tcip_mcp.pipelines.training import subprocess_worker
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     base_images, base_labels = _make_dataset(tmp_path / "base")
-    register_dataset(str(tmp_path / "base"), crop="currant")
+    register_dataset(tmp_path / "base", str(tmp_path / "base"), crop="currant")
     other_images, other_labels = _make_dataset(tmp_path / "other", shade=200)
-    other = register_dataset(str(tmp_path / "other"), crop="currant")
+    other = register_dataset(tmp_path / "other", str(tmp_path / "other"), crop="currant")
     monkeypatch.setattr(subprocess_worker, "run_directory",
                         lambda *a, **k: SimpleNamespace(status="failed"))
-    trial_dir = tmp_path / "sweep" / "trial_a"
-    trial_dir.parent.mkdir()
+    trial_dir = sweeps_dir(tmp_path) / "sweep" / "trial_a"
+    trial_dir.parent.mkdir(parents=True)
 
     _run_hpo_trial({"data.images_dir": str(other_images), "data.labels_dir": str(other_labels)},
-                   [].append, _config(base_images, base_labels), trial_dir,
+                   [].append, _config(base_images, base_labels), trial_dir, project=tmp_path,
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    launched_by={"launcher": "process"})
 
@@ -153,8 +153,8 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
     monkeypatch.setattr(subprocess, "Popen", _StubChild)
 
     images_dir, labels_dir = _make_dataset(tmp_path)
-    registered = register_dataset(str(tmp_path), crop="currant")
-    launched = launch_training({
+    registered = register_dataset(tmp_path, str(tmp_path), crop="currant")
+    launched = launch_training(tmp_path, {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"min_size": 64, "max_size": 64},
                          "task": "detection"},
@@ -165,5 +165,5 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(tmp_path, mon
     })
     assert "error" not in launched, launched
 
-    dataset = read_record(experiment_dir("exp-identity") / RUN_FILE)["dataset"]
+    dataset = read_record(experiment_dir("exp-identity", project=tmp_path) / RUN_FILE)["dataset"]
     assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}

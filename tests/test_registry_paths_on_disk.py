@@ -7,9 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_archive_then_import_lands_a_registry_naming_the_restored_files(
-    tmp_path: Path, monkeypatch,
-):
+def test_archive_then_import_lands_a_registry_naming_the_restored_files(tmp_path: Path):
     """The real archive and import round trip: a foreign entry stays relative and the restored
     run's own entry names the checkpoint under the destination."""
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
@@ -18,17 +16,15 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     from tests._verified_checkpoint_fixtures import checkpoint_file, finished_run
 
     src = tmp_path / "src_project"
-    initialize_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
-    finished_run(None, experiment_id="exp1")
+    initialize_project(str(src), "Source project", "north orchard")
+    finished_run(src, experiment_id="exp1")
     foreign = src / ".tcip" / "models" / "foreign.pt"
     foreign.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_file(foreign, "a foreign checkpoint's own weights")
-    register_model(name="foreign", checkpoint_path=str(foreign), config={},
-                   project_path=str(src))
+    register_model(src, name="foreign", checkpoint_path=str(foreign), config={})
 
     zip_path = tmp_path / "export.zip"
-    assert "error" not in archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in archive_project(src, str(zip_path), include_models=True)
     dest = tmp_path / "restored"
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported

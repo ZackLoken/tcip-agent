@@ -213,7 +213,7 @@ def test_a_v99_manifest_refuses_the_enumeration_rather_than_dissolving_the_group
 def test_a_version_one_identity_reads_back_through_register_dataset(tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    result = register_dataset(str(tmp_path), "chestnut", str(tmp_path))
+    result = register_dataset(tmp_path, str(tmp_path), "chestnut")
     assert "error" not in result, result
     identity = require_dataset_identity(tmp_path)
     assert identity["crop"] == "chestnut"
@@ -244,7 +244,7 @@ def test_a_version_refused_identity_refuses_the_re_register_rather_than_overwrit
                 "schema_version": 2}
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
-    result = register_dataset(str(tmp_path), "chestnut", str(tmp_path))
+    result = register_dataset(tmp_path, str(tmp_path), "chestnut")
     assert "error" in result
 
     # Nothing was overwritten: the newer document is still exactly what was stored.

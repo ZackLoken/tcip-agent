@@ -31,12 +31,12 @@ TRAIT = with_fields(BUD_OPENING, name=SUBJECT, majority_label="opening",
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
-def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
+def seed_bud_trait_spec(tmp_path: Path):
     propose_and_confirm(tmp_path, TRAIT)
 
 
@@ -239,7 +239,7 @@ def test_promotion_over_a_producer_written_stamp_promotes(
         checkpoint=None, checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at=None,
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
     _seed_accepted_verdict(dataset_root, bucket)
 
     resp = client.post("/api/review/validate_reference", json={

@@ -76,7 +76,7 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(checkpoint, str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out), tile=False)
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())
@@ -104,7 +104,7 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(checkpoint, str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out), tile=False)
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())

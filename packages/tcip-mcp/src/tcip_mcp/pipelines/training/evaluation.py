@@ -15,7 +15,7 @@ import io
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -24,6 +24,9 @@ from tcip_store import stored_number, stored_numbers
 
 # Every box handed to pycocotools goes through this, both sides of a match on the one stored grid.
 from tcip_annotation.json_io import xywh
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
 
@@ -444,14 +447,14 @@ def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tup
     return len(matched), len(dt) - len(matched) - ignored, len(objects) - len(matched)
 
 
-def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
+def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
                             class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
     """The localization criterion that governs a trait's phenotype count + model selection.
 
-    Reads the ``localization`` kind of the trait's latest confirmed revision (refusing as
-    ``operationalization.latest_confirmed`` does) and derives its per-dataset tolerance from the GT
-    in hand. Returns ``{kind, tolerance |
-    iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait), it is IoU
+    Reads the ``localization`` kind of ``trait``, the entry of the trait's latest confirmed
+    revision, and derives its per-dataset tolerance from the GT in hand. Returns ``{kind,
+    tolerance | iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait), it is
+    IoU
     matching at ``iou_threshold``, the labeled comparability convention (AP@0.5), which governs
     nothing on its own; a count trait's derived center-match tolerance is what the phenotype and
     checkpoint selection rest on.
@@ -462,21 +465,19 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     would derive on every call; divergence surfaces a warning (``kind_diverged`` in the returned
     dict).
     """
-    if not trait_name:
+    if trait is None:
         return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
                 "derived_from": "comparability convention (AP@0.5)", "trait": None}
     from tcip_mcp.pipelines.derivations import (
         derive_iou_match_threshold, derive_localization_kind, derive_localization_tolerance_frac,
     )
-    from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.traits import CENTER_MATCH
 
-    spec = latest_confirmed(trait_name).entry
     boxes_per_image = [[a["bbox"] for a in gt_objects(rec)
                         if class_id is None or a["category_id"] == class_id]
                        for rec in per_image]
 
-    kind = spec.localization
+    kind = trait.localization
     kind_source = "recorded"
     kind_diverged = False
     live_derived_kind = derive_localization_kind(boxes_per_image)
@@ -487,7 +488,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
                 "trait %r: recorded localization kind %r diverges from what this call's own GT "
                 "would derive (%r), not switched (observation, not permission); propose a "
                 "revision with propose_trait if this data is now representative.",
-                trait_name, kind, live_derived_kind)
+                trait.name, kind, live_derived_kind)
     elif live_derived_kind is not None:
         kind = live_derived_kind
         kind_source = "data_derived_at_runtime"
@@ -498,7 +499,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
                derived_from="achievable IoU under annotation jitter (GT characteristic size)")
     else:
         raise ValueError(
-            f"trait {trait_name!r} states no localization kind and no GT in this call derives "
+            f"trait {trait.name!r} states no localization kind and no GT in this call derives "
             "one, so no match criterion resolves. Evaluate against a labeled reference, or "
             "propose the kind in a trait revision with propose_trait.")
 
@@ -518,15 +519,15 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
             frac_source = derived("localization_tolerance_frac", frac,
                                   derived_from="GT nearest-neighbor spacing (p10 + margin)").derived_from
         else:
-            frac = spec.localization_tolerance_frac
+            frac = trait.localization_tolerance_frac
             frac_source = default(
                 "localization_tolerance_frac", frac,
                 derived_from=f"trait default (underivable: no same-class neighbor in this GT), "
-                             f"{spec.localization_tolerance}",
+                             f"{trait.localization_tolerance}",
             ).derived_from
         result = {"kind": "center_match",
                   "tolerance": float(frac * gt_class_avg_size(per_image, class_id=class_id)),
-                  "derived_from": frac_source, "trait": trait_name,
+                  "derived_from": frac_source, "trait": trait.name,
                   "kind_source": kind_source, "kind_diverged": kind_diverged}
         return result
     derived_threshold = derive_iou_match_threshold(boxes_per_image)
@@ -540,7 +541,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
         threshold_source = f"caller/default (underivable: no valid GT boxes), trait localization={kind}"
         default("iou_threshold", derived_threshold, derived_from=threshold_source)
     result = {"kind": "iou_match", "iou_threshold": float(derived_threshold),
-              "derived_from": threshold_source, "trait": trait_name,
+              "derived_from": threshold_source, "trait": trait.name,
               "kind_source": kind_source, "kind_diverged": kind_diverged}
     return result
 
@@ -1089,14 +1090,15 @@ def evaluate(
     model, loader, device, task: str, *, dims: Mapping[str, int],
     conf_threshold: float = 0.25, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored.
 
-    ``trait``: when set, a count trait's derived localization criterion (traits.py, e.g. a
+    ``trait``: the trait's confirmed entry; when set, a count trait's derived localization
+        criterion (traits.py, e.g. a
         center-match at half the class-average size) governs the reported detection count and the
         f1 the selection composite optimizes; map50 stays a labeled comparability metric. Absent ->
         the IoU@``iou_threshold`` convention governs.

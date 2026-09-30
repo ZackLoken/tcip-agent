@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
@@ -35,8 +36,13 @@ logger = logging.getLogger(__name__)
 # Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
 # refcounted rather than owned by whichever sweep happened to start first.
 _ray_lifecycle = threading.Lock()
-_active_searches = 0
-_ray_started_here = False
+# The live sweeps, counted per project: the cluster lives while any runs, and a project's
+# recorded dashboard while any of that project's runs.
+_active_searches: Counter[Path] = Counter()
+# The dashboard of the cluster this module started, while it runs; None otherwise.
+_ray_dashboard_url: str | None = None
+# Whether the running cluster is one this module started.
+_ray_started = False
 # The PYTHONPATH this module handed ray.init() for the still-running cluster; None until it starts one.
 _ray_runtime_pythonpath: str | None = None
 _external_cluster_warned = False
@@ -237,18 +243,17 @@ register_store(
 )
 
 
-def ray_dashboard_key() -> Key:
-    """Where a running cluster's dashboard URL is written down, under the platform root.
+def ray_dashboard_key(project: Path) -> Key:
+    """Where a running cluster's dashboard URL is written down, under the project whose sweep
+    started the cluster.
 
     ``last_writer_wins``: the whole document is composed from what ``ray.init()`` just
     returned and written in one shot, never merged into.
     """
-    from tcip_mcp.project_paths import platform_state_root
-
-    return Key(RAY_DASHBOARD_STORE, str(platform_state_root().resolve()), ("ray_dashboard",))
+    return Key(RAY_DASHBOARD_STORE, str(project.resolve()), ("ray_dashboard",))
 
 
-def _publish_ray_dashboard(dashboard_url: str | None) -> None:
+def _publish_ray_dashboard(project: Path, dashboard_url: str | None) -> None:
     """Record the dashboard of the cluster this process just started.
 
     ``ray.init()`` reports the dashboard as a bare ``host:port``; what is written down is a
@@ -258,53 +263,47 @@ def _publish_ray_dashboard(dashboard_url: str | None) -> None:
     if not dashboard_url:
         logger.info("Ray started without a dashboard; no URL to publish")
         return
-    from datetime import datetime, timezone
-
     from tcip_store import StoreError, store
 
     try:
-        store.replace(ray_dashboard_key(), {
-            "url": f"http://{dashboard_url}",
-            "pid": os.getpid(),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        })
+        store.replace(ray_dashboard_key(project),
+                      {"url": f"http://{dashboard_url}", "pid": os.getpid()})
     except (OSError, StoreError):
         # A dashboard URL nobody could record is a missing convenience, never a reason to
         # sink the sweep the cluster was started for.
         logger.warning("could not record the Ray dashboard URL", exc_info=True)
 
 
-def _clear_ray_dashboard() -> None:
-    """Drop the recorded dashboard so a torn-down cluster's URL is never served."""
+def _clear_ray_dashboard(project: Path) -> None:
+    """Drop the dashboard recorded under ``project`` so a torn-down cluster's URL is never
+    served."""
     from tcip_store import StoreError, store
 
     try:
-        store.delete(ray_dashboard_key())
+        store.delete(ray_dashboard_key(project))
     except (OSError, StoreError):
         logger.warning("could not clear the recorded Ray dashboard URL", exc_info=True)
 
 
-def read_ray_dashboard() -> dict | None:
-    """The live Ray dashboard's ``{url, pid, started_at}``, or ``None`` if none is up.
-
-    A recorded URL whose initiating process is gone is stale, since that process's exit takes the
-    cluster with it. An unreadable record is reported and then answered as absent.
+def read_ray_dashboard(project: Path) -> dict | None:
+    """The live Ray dashboard recorded under ``project``: ``{url, pid}``, or ``None`` when none is
+    recorded or the recording process is gone, since that process's exit takes the cluster with
+    it. A record that will not read raises the store's own error, and one that is not exactly a
+    non-empty url and a pid raises ``ValueError``.
     """
     import psutil
 
-    from tcip_store import DecodeError, store
+    from tcip_store import store
 
-    try:
-        state = store.read(ray_dashboard_key(), default=None)
-    except DecodeError:
-        logger.warning("the recorded Ray dashboard does not decode", exc_info=True)
+    state = store.read(ray_dashboard_key(project), default=None)
+    if state is None:
         return None
-    if not isinstance(state, dict) or not state.get("url"):
-        return None
-    pid = state.get("pid")
-    if not isinstance(pid, int) or not psutil.pid_exists(pid):
-        return None
-    return state
+    if (not isinstance(state, dict) or set(state) != {"url", "pid"}
+            or not isinstance(state["url"], str) or not state["url"]
+            or not isinstance(state["pid"], int)):
+        raise ValueError(f"the Ray dashboard recorded under {project} is not a url and a pid: "
+                         f"{state!r}")
+    return state if psutil.pid_exists(state["pid"]) else None
 
 
 def _has_attached_console() -> bool:
@@ -376,16 +375,18 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
 
 @contextmanager
-def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
-    """Keep Ray up for the duration of one sweep, shutting it down only when the last concurrent
-    sweep leaves and only if this module is what started it. The lock covers both the
-    check-then-init and the decrement-then-shutdown sequences.
+def _ray_session(ray: Any, num_cpus: int, project: Path) -> Generator[None]:
+    """Keep Ray up for the duration of one sweep of ``project``, shutting it down only when the
+    last concurrent sweep leaves and only if this module is what started it. The lock covers both
+    the check-then-init and the decrement-then-shutdown sequences.
 
     ``num_cpus`` is the CPU count the cluster is started with when this call starts it: the sweep's
     own request, every concurrent trial's CPUs together. A sweep that joins a cluster a sibling
-    started runs on the sibling's size.
+    started runs on the sibling's size. The dashboard of a cluster this module started is recorded
+    under ``project`` while a sweep of ``project`` runs, and cleared when the last one leaves.
     """
-    global _active_searches, _ray_started_here, _ray_runtime_pythonpath, _external_cluster_warned
+    global _ray_dashboard_url, _ray_started, _ray_runtime_pythonpath
+    global _external_cluster_warned
 
     from tcip_mcp.pipelines.model_build import child_pythonpath
 
@@ -400,11 +401,10 @@ def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
                                dashboard_host="127.0.0.1", log_to_driver=False,
                                ignore_reinit_error=True, configure_logging=False,
                                runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
-            _ray_started_here = True
+            _ray_started = True
             _ray_runtime_pythonpath = pythonpath
-            if include_dashboard:
-                _publish_ray_dashboard(context.dashboard_url)
-        elif _ray_started_here:
+            _ray_dashboard_url = context.dashboard_url if include_dashboard else None
+        elif _ray_started:
             if child_pythonpath() != _ray_runtime_pythonpath:
                 logger.warning(
                     "the running Ray cluster's workers keep the import path captured at "
@@ -417,16 +417,22 @@ def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
                 "Ray was already initialized outside this module; no import-path "
                 "propagation was applied to its workers"
             )
-        _active_searches += 1
+        if _ray_started:
+            _publish_ray_dashboard(project, _ray_dashboard_url)
+        _active_searches[project] += 1
     try:
         yield
     finally:
         with _ray_lifecycle:
-            _active_searches -= 1
-            if _active_searches == 0 and _ray_started_here:
-                _ray_started_here = False
+            _active_searches[project] -= 1
+            if not _active_searches[project]:
+                del _active_searches[project]
+                if _ray_started:
+                    _clear_ray_dashboard(project)
+            if not _active_searches and _ray_started:
+                _ray_started = False
+                _ray_dashboard_url = None
                 _ray_runtime_pythonpath = None
-                _clear_ray_dashboard()
                 if not _has_attached_console():
                     _kill_ray_daemons_before_shutdown(ray)
                 ray.shutdown()
@@ -565,6 +571,7 @@ def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
     *,
+    project: Path,
     metric: str = "objective",
     mode: str = "min",
     num_samples: int = 20,
@@ -588,6 +595,8 @@ def tune_search(
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
             ``report(value)`` for each step it wants the searcher/scheduler to see.
+        project: the project the sweep belongs to, where a cluster this sweep starts records its
+            dashboard.
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
@@ -684,7 +693,7 @@ def tune_search(
                 var, value, run_kwargs["storage_path"],
             )
     try:
-        with _ray_session(ray, cluster_cpus):
+        with _ray_session(ray, cluster_cpus, project):
             tuner = tune.Tuner(
                 trainable,
                 param_space=space,

@@ -17,7 +17,7 @@ FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 STATUS_DECLARATION = FRONTEND_SRC / "api" / "subjects.ts"
 PATH_DECLARATION = FRONTEND_SRC / "lib" / "paths.ts"
 
-_STATUS_UNION_RE = re.compile(r"export type ImageStatus = ([^;]+);")
+_STATUS_UNION_RE = re.compile(r"const IMAGE_STATUSES = \[([^\]]+)\] as const;")
 _FINISHED_STATUSES_RE = re.compile(
     r"export const FINISHED_STATUSES: readonly ImageStatus\[\] = \[([^\]]+)\];"
 )
@@ -48,9 +48,10 @@ def _frontend_sources(include_tests: bool) -> list[Path]:
 
 
 def test_the_browsers_image_statuses_are_the_ones_the_store_records() -> None:
-    """The union the browser types against is the store's vocabulary, in the same order."""
+    """The list the browser's ImageStatus type is drawn from is the store's vocabulary, in the
+    same order."""
     match = _STATUS_UNION_RE.search(STATUS_DECLARATION.read_text(encoding="utf-8"))
-    assert match is not None, "the ImageStatus union is no longer where this test reads it"
+    assert match is not None, "the IMAGE_STATUSES list is no longer where this test reads it"
     declared = tuple(re.findall(r'"([^"]+)"', match.group(1)))
     assert declared == _statuses()
 

@@ -52,10 +52,11 @@ def grouped_dataset(tmp_path: Path) -> Path:
 # ── routes/dataset.py ────────────────────────────────────────────────────────────────────
 
 
-def test_dataset_select_route_folds_the_group(client: TestClient, grouped_dataset: Path):
+def test_dataset_select_route_folds_the_group(
+    client: TestClient, grouped_dataset: Path, opened_project: Path,
+):
     resp = client.post("/api/dataset/select", json={
-        "project_root": str(grouped_dataset), "dataset_root": str(grouped_dataset),
-        "date": "2026-05-01",
+        "dataset_root": str(grouped_dataset), "date": "2026-05-01",
     })
     assert resp.status_code == 200
     images = resp.json()["selection"]["image_list"]
@@ -247,7 +248,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms", platform_root=str(tmp_path),
+        overlap=0.2, postprocess="nms", project=str(tmp_path),
     )
     _worker(job)
 

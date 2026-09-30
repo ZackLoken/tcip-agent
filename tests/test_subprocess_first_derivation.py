@@ -37,12 +37,12 @@ def _seed_dataset(root: Path) -> tuple[Path, Path, Path, Path]:
     return images_dir, labels_dir, val_images, val_labels
 
 
-def _wait_terminal(run_id: str, seconds: float) -> str:
+def _wait_terminal(project: Path, run_id: str, seconds: float) -> str:
     from tcip_mcp.tools import training_tools
 
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        status = training_tools.monitor_training(run_id)
+        status = training_tools.monitor_training(project, run_id)
         if status.get("status") in ("completed", "failed", "canceled"):
             return str(status.get("status"))
         time.sleep(0.5)
@@ -56,7 +56,6 @@ def test_the_subprocess_derives_an_unstated_kind_and_leaves_the_trait_entry_alon
     record still holds the one revision the test confirmed."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.tools import training_tools
     from tcip_mcp.traits import read_trait
 
@@ -65,7 +64,7 @@ def test_the_subprocess_derives_an_unstated_kind_and_leaves_the_trait_entry_alon
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     images_dir, labels_dir, val_images, val_labels = _seed_dataset(tmp_path / "ds")
-    proposed = propose_and_confirm(platform_state_root(), entry("leaf", ("leaf_length",)))
+    proposed = propose_and_confirm(tmp_path, entry("leaf", ("leaf_length",)))
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -77,10 +76,10 @@ def test_the_subprocess_derives_an_unstated_kind_and_leaves_the_trait_entry_alon
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(cfg)
+    res = training_tools.launch_training(tmp_path, cfg)
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
 
-    assert _wait_terminal(res["experiment_id"], 180) == "completed"
+    assert _wait_terminal(tmp_path, res["experiment_id"], 180) == "completed"
 
-    assert read_trait("leaf").revisions == (proposed,)
+    assert read_trait("leaf", tmp_path).revisions == (proposed,)

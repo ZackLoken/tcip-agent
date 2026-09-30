@@ -32,6 +32,7 @@ import type {
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
@@ -76,7 +77,7 @@ function dateKey(date: string): number {
 
 export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
-  const projectRoot = dataset.project_root;
+  const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = dataset.dataset_root;
   // An acknowledged export is refused server-side with no user set; read reactively so the
   // acknowledged-export buttons disable themselves before a breeder types a reason for nothing.
@@ -176,7 +177,7 @@ export function ResultsTab() {
     setTrait("");
     setTraitError(null);
     void resultsApi
-      .traits(projectRoot)
+      .traits()
       .then((res) => {
         setTraitRecords(res.traits);
         setUnreadableTraits(res.unreadable);
@@ -206,7 +207,7 @@ export function ResultsTab() {
   useEffect(() => {
     if (!projectRoot) return;
     void resultsApi
-      .deliveryEvents(projectRoot)
+      .deliveryEvents()
       .then((res) => {
         setDeliveryEvents(res.records);
         setDeliveryEventsError(null);
@@ -273,7 +274,6 @@ export function ResultsTab() {
         if (dir) predsMap[d] = dir;
       }
       const request = {
-        project_root: projectRoot,
         mapping_name: mappingName,
         predictions_by_date: predsMap,
         trait,
@@ -328,7 +328,6 @@ export function ResultsTab() {
     if (unvalidated && !ackReason.trim()) return;
     try {
       const body: ExportCsvPayload = {
-        project_root: lastRequest.project_root,
         mapping_name: lastRequest.mapping_name,
         predictions_by_date: lastRequest.predictions_by_date,
         trait: lastRequest.trait,
@@ -398,7 +397,6 @@ export function ResultsTab() {
               canopy_subject: countCanopySubject || undefined,
             };
       const body: ExportCountCsvPayload = {
-        project_root: projectRoot,
         delivery,
         filename: countFilename.trim(),
         user: useStore.getState().user || undefined,

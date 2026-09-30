@@ -21,8 +21,8 @@ from tcip_mcp.pipelines.resolution import (
     derived,
 )
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, the one the
+# validate_reference route serves once it is open.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -345,7 +345,7 @@ def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexi
 
 
 @pytest.fixture
-def client():
+def client(opened_project):
     pytest.importorskip("torch")  # resolve_operating_point imports evaluation which imports torch
     from fastapi.testclient import TestClient
 
@@ -388,12 +388,13 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     from tcip_mcp.pipelines.resolution import verify_stamp_binding
 
     pointer = sc["validated_by"]
-    row = find_validation(find_observation(pointer["experiment_id"]), pointer["record_digest"])
+    row = find_validation(find_observation(pointer["experiment_id"], project=tmp_path),
+                          pointer["record_digest"])
     assert row is not None
     assert row["trait"] == "bud_opening"
     assert row["reference_identity"]["stated_values"]["review_image_count"] == 6
     assert row["train_disjointness"] == {"checked": False, "group_check": None}
-    binding = verify_stamp_binding(sc, pred_dir, document="operating_point")
+    binding = verify_stamp_binding(sc, pred_dir, project=tmp_path, document="operating_point")
     assert binding.ok is True
     assert binding.train_disjointness == {"checked": False, "group_check": None}
 
@@ -565,7 +566,8 @@ def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_vers
     from tcip_mcp.experiments import find_observation, find_validation
 
     pointer = sc["validated_by"]
-    row = find_validation(find_observation(pointer["experiment_id"]), pointer["record_digest"])
+    row = find_validation(find_observation(pointer["experiment_id"], project=tmp_path),
+                          pointer["record_digest"])
     assert row is not None
     assert "schema_version" not in row
     assert row["claim"]["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}

@@ -64,7 +64,7 @@ def curated_manifest_key(output_dir: str | Path) -> Key:
     ``last_writer_wins``: written once, whole, at the end of the materialization that
     produced the directory it describes.
     """
-    return Key(CURATED_MANIFEST_STORE, str(Path(output_dir).absolute()), _CURATED_MANIFEST_PARTS)
+    return Key(CURATED_MANIFEST_STORE, str(Path(output_dir)), _CURATED_MANIFEST_PARTS)
 
 
 def curated_manifest_path(output_dir: str | Path) -> Path:
@@ -267,7 +267,6 @@ def materialize_dataset(
     output_dir: str,
     *,
     scope: "ClassScope",
-    review_state_path: str = "",
     include_hard_negatives: bool = True,
     copy_files: bool = True,
     only_completed: bool = False,
@@ -357,7 +356,7 @@ def materialize_dataset(
         manifest_images.append({
             "image": record_name, "status": status, "n_boxes": len(info["positives"]),
             "rejected_count": info["rejected_count"],
-            "rejected_subjects": info["rejected_subjects"], "label": str(label_path),
+            "rejected_subjects": info["rejected_subjects"],
         })
 
     # Training trusts a human-confirmed negative, never a bare empty file (a label may be emptied mid-work).
@@ -392,9 +391,6 @@ def materialize_dataset(
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
-        "review_state": review_state_path,
-        "source_images_dir": str(source_images_dir),
-        "output_dir": str(out),
         "producer_model": producer_model,
         "subject": neg_subject,
         "attribute": scope.attribute,

@@ -300,7 +300,7 @@ def _classification_run(tmp_path, *, num_channels: int | None):
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
     if num_channels is not None:
         data_cfg["num_channels"] = num_channels
-    train_ds, _val_ds, _partition = auto_train_val("classification", data_cfg, None)
+    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "classification", data_cfg, None)
     return data_cfg, train_ds, str(images_dir / "img0.png")
 
 
@@ -331,9 +331,9 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     torch.save({"config": config, "model_state_dict": build_model(config, dims).state_dict()},
                str(ckpt))
     assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
-                                         config={}, project_path=str(tmp_path))
+                                         config={}, project=tmp_path)
     predictor = build_predictor(
-        load_registered_checkpoint(str(ckpt), project_path=str(tmp_path)), device="cpu")
+        load_registered_checkpoint(str(ckpt), project=tmp_path), device="cpu")
 
     assert predictor.in_chans == 1
     assert predictor.predict(image)  # the three-band source reads at the recorded one channel

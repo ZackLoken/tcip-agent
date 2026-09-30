@@ -27,15 +27,14 @@ def tool():
     return _load()
 
 
-def test_the_two_variables_point_under_the_given_root(tool, tmp_path, monkeypatch):
-    # The ambient test rail may itself bind TCIP_WORKSPACE under this very tmp_path; a root
-    # this test controls directly must not accidentally trip that unrelated refusal.
+def test_the_workspace_and_port_point_under_the_given_root(tool, tmp_path, monkeypatch):
+    """The ambient test rail may itself bind TCIP_WORKSPACE under this very tmp_path; a root this
+    test controls directly must not accidentally trip that unrelated refusal."""
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
-    env = tool.build_environ(root, "my_project", 8799)
+    env = tool.build_environ(root, 8799)
 
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
-    assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
     assert env["TCIP_WEB_PORT"] == "8799"
     assert env["PYTHONUNBUFFERED"] == "1"
 
@@ -47,7 +46,7 @@ def test_pythonpath_carries_the_repository_root(tool, tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "existing"))
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, "my_project", 8799)
+    env = tool.build_environ(root, 8799)
 
     parts = env["PYTHONPATH"].split(os.pathsep)
     assert str(tool.REPO_ROOT) == parts[0]
@@ -57,12 +56,12 @@ def test_pythonpath_carries_the_repository_root(tool, tmp_path, monkeypatch):
 def test_a_root_under_the_repository_is_refused(tool):
     root = tool.REPO_ROOT / "scratch_harness"
     with pytest.raises(SystemExit, match="is under the repository"):
-        tool.build_environ(root, "my_project", 8799)
+        tool.build_environ(root, 8799)
 
 
 def test_the_repository_root_itself_is_refused(tool):
     with pytest.raises(SystemExit, match="is under the repository"):
-        tool.build_environ(tool.REPO_ROOT, "my_project", 8799)
+        tool.build_environ(tool.REPO_ROOT, 8799)
 
 
 def test_a_root_under_the_callers_own_active_workspace_is_refused(tool, tmp_path, monkeypatch):
@@ -71,16 +70,16 @@ def test_a_root_under_the_callers_own_active_workspace_is_refused(tool, tmp_path
     root = active_workspace / "harness"
 
     with pytest.raises(SystemExit, match="own TCIP_WORKSPACE"):
-        tool.build_environ(root, "my_project", 8799)
+        tool.build_environ(root, 8799)
 
 
 def test_a_root_outside_both_is_admitted(tool, tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "elsewhere"))
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, "my_project", 8799)
+    env = tool.build_environ(root, 8799)
 
-    assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
+    assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
 def test_a_root_containing_the_callers_own_active_workspace_is_refused(tool, tmp_path, monkeypatch):
@@ -91,7 +90,7 @@ def test_a_root_containing_the_callers_own_active_workspace_is_refused(tool, tmp
     monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
 
     with pytest.raises(SystemExit, match="own TCIP_WORKSPACE"):
-        tool.build_environ(root, "my_project", 8799)
+        tool.build_environ(root, 8799)
 
 
 def test_a_root_that_already_carries_its_own_tcip_state_is_refused(tool, tmp_path, monkeypatch):
@@ -100,7 +99,7 @@ def test_a_root_that_already_carries_its_own_tcip_state_is_refused(tool, tmp_pat
     (root / ".tcip").mkdir(parents=True)
 
     with pytest.raises(SystemExit, match="already looks like a workspace"):
-        tool.build_environ(root, "my_project", 8799)
+        tool.build_environ(root, 8799)
 
 
 def test_a_root_whose_child_already_carries_tcip_state_is_refused(tool, tmp_path, monkeypatch):
@@ -109,7 +108,7 @@ def test_a_root_whose_child_already_carries_tcip_state_is_refused(tool, tmp_path
     (root / "existing_project" / ".tcip").mkdir(parents=True)
 
     with pytest.raises(SystemExit, match="already looks like a workspace"):
-        tool.build_environ(root, "my_project", 8799)
+        tool.build_environ(root, 8799)
 
 
 def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, monkeypatch):
@@ -118,9 +117,9 @@ def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, m
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, "my_project", 8799)
+    env = tool.build_environ(root, 8799)
 
-    assert env["TCIP_STATE_ROOT"] == str(root / "workspace" / "my_project")
+    assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
 def test_stop_refuses_outright_on_a_non_windows_host(tool, tmp_path, monkeypatch):

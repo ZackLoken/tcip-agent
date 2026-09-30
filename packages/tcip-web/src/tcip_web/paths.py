@@ -1,8 +1,8 @@
 r"""Path confinement for client-supplied paths.
 
 :func:`assert_path_allowed` resolves a client-supplied path and returns it. The allow-set is always
-non-empty: the workspace root, every workspace project's registered dataset roots, and the additive
-``TCIP_IMAGE_ROOTS`` list. Containment is decided by filesystem identity (the same device and file
+non-empty: the backend's workspace root, every workspace project's registered dataset roots, and
+the additive image roots the backend was started with. Containment is decided by filesystem identity (the same device and file
 as an allowed root, walking the candidate's resolved ancestors), never by comparing spellings, so a
 case variant, a substituted or mapped drive, a junction, or an extended ``\\\\?\\`` prefix neither
 admits an outside path nor refuses an inside one. Any error while resolving or comparing refuses.
@@ -10,8 +10,7 @@ admits an outside path nor refuses an inside one. Any error while resolving or c
 Two directory names are excluded regardless of containment, by name: ``.imports`` (the import
 door's private staging tree) and ``.removed`` (the workspace's holding directory a removed project
 moves into); a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry under a directory of either name
-is refused too. A workspace project pending removal or pending rename is excluded by identity
-(:func:`allowed_roots`).
+is refused too.
 """
 
 from __future__ import annotations
@@ -19,62 +18,43 @@ from __future__ import annotations
 import os
 from pathlib import Path, PurePosixPath
 
+from tcip_mcp.registry_paths import nearest_containing_ancestor
 from tcip_web.trust_boundary import exposed_arrival
 
 __all__ = [
-    "allowed_image_roots", "allowed_roots", "assert_path_allowed", "assert_project_root_allowed",
-    "exposed_arrival", "safe_join", "within",
+    "allowed_optional", "allowed_path", "allowed_roots", "assert_path_allowed", "exposed_arrival", "image_roots_from_environment",
+    "safe_join", "within",
 ]
 
 
-def allowed_image_roots() -> list[Path]:
+def image_roots_from_environment() -> tuple[Path, ...]:
     """The additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list), resolved; empty when unset.
+    Read once, at the backend's start.
 
     These are added on top of the derived allow-set (:func:`allowed_roots`), the recovery path for
     a legitimate root the platform does not manage. Setting it never narrows anything.
     """
     raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
-    if not raw:
-        return []
-    return [Path(r).resolve() for r in raw.split(os.pathsep) if r.strip()]
+    return tuple(Path(r).resolve() for r in raw.split(os.pathsep) if r.strip())
 
 
-def _workspace_projects(workspace: Path) -> list[Path]:
-    try:
-        return sorted(p for p in workspace.iterdir() if (p / ".tcip").is_dir())
-    except OSError:
-        return []
-
-
-def allowed_roots() -> tuple[list[Path], list[Path]]:
-    """Every root a client-supplied path may resolve under, and every root refused by identity
-    despite sitting inside one, derived at call time.
-
-    The roots: the workspace root, then each workspace project's registered dataset roots, then
-    ``TCIP_IMAGE_ROOTS``. The platform-state root (``TCIP_STATE_ROOT``) is not a member on its own.
-
-    The excluded roots: the resolved root of every workspace project carrying a pending-removal or
-    pending-rename marker (``tcip_mcp.workspace.pending_marker_or_none``). A pending project's own
-    root, and its registered datasets, still belong to the roots list above; only opening a path
-    under it is refused.
+def allowed_roots() -> list[Path]:
+    """Every root a client-supplied path may resolve under: the backend's workspace root, each
+    workspace project and its registered dataset roots, then the backend's additive image roots.
 
     A project whose dataset registry will not decode raises.
     """
-    from tcip_mcp import workspace as _workspace
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
-    from tcip_mcp.workspace import workspace_root
+    from tcip_mcp.workspace import project_dirs
     from tcip_store import DecodeError
 
-    workspace = workspace_root()
-    roots: list[Path] = [workspace]
-    excluded: list[Path] = []
-    for project in _workspace_projects(workspace):
+    from tcip_web.state import store
+
+    roots: list[Path] = [store.workspace]
+    for project in project_dirs(store.workspace):
         # A project reached through a junction or symlink resolves outside the workspace and is
         # admitted as itself, not only through the workspace it is listed from.
-        resolved_project = project.resolve()
-        roots.append(resolved_project)
-        if _workspace.pending_marker_or_none(resolved_project) is not None:
-            excluded.append(resolved_project)
+        roots.append(project.resolve())
         try:
             entries = read_datasets(project)
         except DecodeError as exc:
@@ -83,7 +63,7 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
                 f"roots cannot be admitted: {exc}"
             ) from exc
         roots.extend(dataset_entry_path(project, e) for e in entries)
-    roots.extend(allowed_image_roots())
+    roots.extend(store.image_roots)
     seen: set[str] = set()
     unique: list[Path] = []
     for root in roots:
@@ -91,7 +71,7 @@ def allowed_roots() -> tuple[list[Path], list[Path]]:
         if key not in seen:
             seen.add(key)
             unique.append(root)
-    return unique, excluded
+    return unique
 
 
 def _existing_anchor(resolved: Path) -> Path | None:
@@ -111,11 +91,9 @@ def _existing_anchor(resolved: Path) -> Path | None:
 
 
 def _contained(anchor: Path, root: Path) -> bool:
-    """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity."""
-    for ancestor in (anchor, *anchor.parents):
-        if os.path.samefile(ancestor, root):
-            return True
-    return False
+    """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity; an
+    ancestor that cannot be compared raises."""
+    return nearest_containing_ancestor(anchor, root, tolerant=False) is not None
 
 
 def within(resolved: Path, root: Path) -> bool:
@@ -141,29 +119,16 @@ def assert_path_allowed(path: str | Path) -> Path:
 
     A path that does not exist yet (a file about to be written) is judged by its nearest existing
     ancestor. An ``.imports`` or ``.removed`` staging tree is never admitted, by name
-    (:func:`_excluded_by_name`); a path under a workspace project pending removal or pending rename
-    is refused by identity (:func:`allowed_roots`' excluded roots), ahead of the ordinary
-    containment check. Raises :class:`ValueError` naming the roots checked on refusal, and on any
-    resolution or comparison error.
+    (:func:`_excluded_by_name`). Raises :class:`ValueError` naming the roots checked on refusal,
+    and on any resolution or comparison error.
     """
     try:
         resolved = Path(path).resolve()
         anchor = _existing_anchor(resolved)
     except (OSError, RuntimeError) as exc:
         raise ValueError(f"path {path!s} cannot be examined: {exc}") from exc
-    roots, excluded = allowed_roots()
+    roots = allowed_roots()
     if anchor is not None and not _excluded_by_name(resolved):
-        for root in excluded:
-            try:
-                if root.exists() and _contained(anchor, root):
-                    raise ValueError(
-                        f"path {resolved} is under {root}, a workspace project pending "
-                        "removal or rename"
-                    )
-            except OSError as exc:
-                raise ValueError(
-                    f"path {resolved} could not be compared against {root}: {exc}"
-                ) from exc
         for root in roots:
             try:
                 if root.exists() and _contained(anchor, root):
@@ -175,15 +140,24 @@ def assert_path_allowed(path: str | Path) -> Path:
     raise ValueError(
         f"path {resolved} is outside the allowed roots "
         f"({', '.join(str(r) for r in roots)}); register the dataset to a workspace project "
-        "or add its root to TCIP_IMAGE_ROOTS"
+        "or start the backend with its root in TCIP_IMAGE_ROOTS"
     )
 
 
-def assert_project_root_allowed(project_root: str | Path) -> Path:
-    """Confine a client-supplied ``project_root`` through :func:`assert_path_allowed`; raises
-    :class:`ValueError` on refusal.
-    """
-    return assert_path_allowed(project_root)
+def allowed_path(path: str | Path) -> Path:
+    """:func:`assert_path_allowed` for a route: its refusal answered as HTTP 403 naming it."""
+    from fastapi import HTTPException
+
+    try:
+        return assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def allowed_optional(path: str | None) -> str | None:
+    """:func:`allowed_path`'s resolved spelling of an optional client-supplied path, or ``None``
+    when none is given."""
+    return str(allowed_path(path)) if path else None
 
 
 def safe_join(root: Path | str, *parts: str) -> Path:

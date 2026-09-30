@@ -69,16 +69,18 @@ this project would need, and be honest about what failed.
 
 `tcip distill-learnings` gathers one project's (or, with `--workspace`, every project's)
 reports and retrospectives into a worksheet of recurring themes; it only reads, nothing is
-written, applied, or promoted. After reviewing a worksheet, call `record_distillation_pass(project_path)` per project covered:
-the one audited write in this loop, kept out of the script. It only resets that
-project's distillation-backlog counters; turning a recurring theme into a skill line, a
+written, applied, or promoted. After reviewing a worksheet, call `record_distillation_pass()`:
+the one audited write in this loop, kept out of the script. It acts on the project this server was
+started for (a worksheet covering other projects is recorded by a server started for each) and
+only resets that project's distillation-backlog counters; turning a recurring theme into a skill line, a
 `CLAUDE.md` rule, or a tool change stays your own separate edit, per the scoping above.
 
 ## Reading the record back
 
 `read_audit_log(scope=None, tool=None, since=None, until=None, status=None, limit=200)` answers
 a different question than the two memory tools above: not what a session learned, but which
-door touched a dataset, a project, or the platform log, when, and with what status. It reads the
+door touched a dataset or this project, when, and with what status (`scope=None` reads the
+project's own log, a dataset path that dataset's). It reads the
 same log every `@audited` tool and `record_event` call already writes to, filtered in memory,
 newest entries first; a corrupt or unreadable page is refused rather than answered partially.
 

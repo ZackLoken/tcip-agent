@@ -42,7 +42,7 @@ def resolve_count_operating_point(
     labels_dir: str,
     images_dir: str,
     dataset_root: str,
-    project_root: str,
+    project: Path,
     *,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
@@ -59,7 +59,7 @@ def resolve_count_operating_point(
     The pass is the one ``inference_tools._prepare_pass`` prepares from the checkpoint and
     ``regime``, its ``tile``/``tile_size``/``overlap``/``postprocess``/``cross_tile_nms`` as a
     ``run_inference`` caller states them (the checkpoint's own regime for any left out).
-    ``checkpoint_path`` must be named by a registry entry under ``project_root``; an unregistered
+    ``checkpoint_path`` must be named by a registry entry under ``project``; an unregistered
     checkpoint raises :class:`~tcip_mcp.model_registry.UnregisteredCheckpoint`, and a pass that
     cannot be prepared raises :class:`CalibrationUsageError` with its refusal.
 
@@ -110,7 +110,7 @@ def resolve_count_operating_point(
     stated = {"tile": None, "tile_size": None, "overlap": None, "cross_tile_nms": None,
               "postprocess": DEFAULT_POSTPROCESS, **(regime or {})}
     p = _prepare_pass(
-        load_registered_checkpoint(checkpoint_path, project_path=project_root), images_dir=None,
+        load_registered_checkpoint(checkpoint_path, project=project), images_dir=None,
         conf_threshold=None, device=device, max_dets=None,
         tile_batch_size=DEFAULT_TILE_BATCH_SIZE, **stated)
     if isinstance(p, str):
@@ -126,8 +126,8 @@ def resolve_count_operating_point(
         from tcip_mcp.pipelines.data.splits import selection_calibration_universe
         from tcip_mcp.pipelines.resolution import selection_digest
 
-        selection = read_selection(selection_dir)
-        selection_sha256 = selection_digest(selection)
+        selection = read_selection(selection_dir, project=project)
+        selection_sha256 = selection_digest(selection, project)
         try:
             (stems, group_by, group_key_map, _excluded, annotation_counts,
              counted) = selection_calibration_universe(selection, labels_dir, scope)
@@ -156,7 +156,6 @@ def resolve_count_operating_point(
         annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map,
         holdout_ratio=holdout_ratio, seed=seed,
-        selection_dir=selection_dir,
     )
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
@@ -186,7 +185,8 @@ def resolve_count_operating_point(
         "selection_sha256": selection_sha256,
     }
     bundle = resolve_operating_point(
-        trait, experiment_id=p.identity["experiment_id"], **resolver_inputs)
+        trait, project=project, experiment_id=p.identity["experiment_id"],
+        **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
 
     return CountCalibrationBundle(

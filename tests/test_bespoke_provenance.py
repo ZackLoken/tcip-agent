@@ -185,10 +185,10 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
-    reg_result = register_model(name="bespoke-detector", checkpoint_path=str(ckpt), config={},
-                                project_path=str(tmp_path))
+    reg_result = register_model(tmp_path, name="bespoke-detector", checkpoint_path=str(ckpt),
+                                config={})
     assert "error" not in reg_result, reg_result
-    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
     predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
     assert predictor.kind == KIND_TCIP_MODULE
@@ -220,10 +220,10 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
-    reg_result = register_model(name="bespoke-classifier", checkpoint_path=str(ckpt), config={},
-                                project_path=str(tmp_path))
+    reg_result = register_model(tmp_path, name="bespoke-classifier", checkpoint_path=str(ckpt),
+                                config={})
     assert "error" not in reg_result, reg_result
-    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
     predictor = GenericPredictor(checkpoint, device="cpu")
     assert predictor.in_chans == 2

@@ -41,37 +41,35 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     assert calls["sizes"] == [2, 2, 1]
 
 
-def test_get_experiment_metrics_pagination(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+def test_get_experiment_metrics_pagination(tmp_path):
     from tcip_mcp.experiments import get_experiment
     from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    run_dir = opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp1")
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "run-data"), experiment_id="exp1")
     for e in range(10):
         log_epoch(run_dir, e, {"loss": float(e)})
 
-    full = get_experiment("exp1")
+    full = get_experiment("exp1", project=tmp_path)
     assert full["n_epochs"] == 10 and len(full["metrics"]) == 10
 
-    page = get_experiment("exp1", metrics_offset=3, metrics_limit=4)
+    page = get_experiment("exp1", metrics_offset=3, metrics_limit=4, project=tmp_path)
     assert page["n_epochs"] == 10       # true total preserved even when paginated
     assert len(page["metrics"]) == 4
     assert page["metrics"][0]["epoch"] == 3
     assert page["metrics_offset"] == 3
 
 
-def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path, monkeypatch):
+def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path):
     """n_epochs is the count of distinct epoch values, not the row count: a bespoke loop logging
     train and val as separate rows under the same epoch still counts as one epoch. n_rows is the
     row count, and is what metrics_offset/metrics_limit actually page against."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import get_experiment
     from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
-    run_dir = opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp2")
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "run-data"), experiment_id="exp2")
     log_epoch(run_dir, 3, {"loss_train": 0.5})
     log_epoch(run_dir, 3, {"loss_val": 0.4})
 
-    result = get_experiment("exp2")
+    result = get_experiment("exp2", project=tmp_path)
     assert result["n_epochs"] == 1
     assert result["n_rows"] == 2

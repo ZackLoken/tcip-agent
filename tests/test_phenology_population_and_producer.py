@@ -29,7 +29,7 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         plants=["PLANT_A", "PLANT_UNMAPPED"],
         classifier_pred_dirs=list(body["predictions_by_date"].values()))
@@ -50,7 +50,7 @@ def test_an_empty_population_refuses_naming_the_argument(tmp_path: Path) -> None
     body = _phenology_fixture(tmp_path, validated=True)
 
     res = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"],
         output_csv_path=str(tmp_path / "out" / "bud.csv"), plants=[],
         classifier_pred_dirs=list(body["predictions_by_date"].values()))
@@ -90,17 +90,17 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     second = read_operating_point_sidecar(body["predictions_by_date"][dates[1]])
     assert first["checkpoint_sha256"] == second["checkpoint_sha256"]
     assert "error" not in deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"],
         output_csv_path=str(tmp_path / "out" / "one_producer.csv"), plants=["PLANT_A"],
         classifier_pred_dirs=list(body["predictions_by_date"].values()))
 
     from tests._binding_fixtures import record_producing_run, write_bound_sidecar
 
-    other_sha = record_producing_run("exp-other")
+    other_sha = record_producing_run(tmp_path, "exp-other")
     second_stamp = {k: v for k, v in second.items() if k != "validated_by"}
     second_stamp.update({"checkpoint_sha256": other_sha, "experiment_id": "exp-other"})
-    write_bound_sidecar(body["predictions_by_date"][dates[1]], second_stamp,
+    write_bound_sidecar(tmp_path, body["predictions_by_date"][dates[1]], second_stamp,
                         dataset_root=tmp_path / "ds", experiment_id="exp-op-other",
                         producing_experiment_id="exp-other", trait="bud_opening")
 
@@ -108,7 +108,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
         stamped_producer(body["predictions_by_date"])
     out_csv = tmp_path / "out" / "two_producers.csv"
     res = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         plants=["PLANT_A"], classifier_pred_dirs=list(body["predictions_by_date"].values()))
 

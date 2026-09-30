@@ -30,7 +30,7 @@ def _project(tmp_path: Path) -> Path:
 def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
     root = _project(tmp_path)
 
-    result = archive_project(str(root), output_dir=str(root / "bundle"))
+    result = archive_project(root, output_dir=str(root / "bundle"))
 
     assert "error" in result
     assert "inside the project" in result["error"]
@@ -43,7 +43,7 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
     dest.mkdir()
     (dest / "already_here.txt").write_text("x", encoding="utf-8")
 
-    result = archive_project(str(root), output_dir=str(dest))
+    result = archive_project(root, output_dir=str(dest))
 
     assert "error" in result
     assert "not empty" in result["error"]
@@ -54,7 +54,7 @@ def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
     root = _project(tmp_path)
 
     result = archive_project(
-        str(root), output_path=str(tmp_path / "bundle.zip"), output_dir=str(tmp_path / "bundle"),
+        root, output_path=str(tmp_path / "bundle.zip"), output_dir=str(tmp_path / "bundle"),
     )
 
     assert "error" in result
@@ -64,7 +64,7 @@ def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
 def test_archive_project_refuses_neither_output_path_nor_output_dir(tmp_path):
     root = _project(tmp_path)
 
-    result = archive_project(str(root))
+    result = archive_project(root)
 
     assert "error" in result
     assert "give either output_path" in result["error"]
@@ -74,7 +74,7 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
     root = _project(tmp_path)
     dest = tmp_path / "bundle"
 
-    result = archive_project(str(root), output_dir=str(dest))
+    result = archive_project(root, output_dir=str(dest))
 
     assert "error" not in result, result
     assert result["output_dir"] == str(dest)
@@ -91,13 +91,13 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     from tcip_mcp.tools.project_tools import initialize_project, inspect_project, register_dataset
 
     src = tmp_path / "src_project"
-    initialize_project(str(src), site="north orchard")
+    initialize_project(str(src), "Source project", "north orchard")
     manifest, npz_image = _populate_project(src)
-    reg = register_dataset(str(src), crop="currant")
+    reg = register_dataset(src, str(src), crop="currant")
     assert "error" not in reg, reg
 
     bundle_dir = tmp_path / "bundle"
-    exported = archive_project(str(src), output_dir=str(bundle_dir))
+    exported = archive_project(src, output_dir=str(bundle_dir))
     assert "error" not in exported, exported
     assert bundle_dir.is_dir()
 
@@ -114,8 +114,8 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     if not database_file(dest_abs).is_file():
         adopt_root(dest_abs, ROOT, report=lambda line: None)
 
-    status = inspect_project(str(dest))
-    assert status["initialized"] is True
+    status = inspect_project(dest)
+    assert status["display_name"] == "Source project"
     assert (dest / "annotations" / "2026-03-04" / "a_1.json").is_file()
 
     date = "2026-03-04"

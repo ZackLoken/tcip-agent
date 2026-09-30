@@ -86,14 +86,14 @@ def annotation_record_key(directory: str | Path, stem: str) -> Key:
     form, for a tree no layout resolver describes. A layout-aware key for the same file addresses
     the same file and lock.
     """
-    return Key(ANNOTATION_RECORDS_STORE, str(Path(directory).absolute()), (str(stem),))
+    return Key(ANNOTATION_RECORDS_STORE, str(Path(directory)), (str(stem),))
 
 
 def _record_key(target: Key | str | Path) -> Key:
     """The key ``target`` names: a key passed straight through, or a path placed generically."""
     if isinstance(target, Key):
         return target
-    path = Path(target).absolute()
+    path = Path(target)
     return annotation_record_key(path.parent, path.stem)
 
 

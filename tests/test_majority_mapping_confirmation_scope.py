@@ -76,7 +76,7 @@ def _predictions(
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "scope": {"subject": trait, "attribute": attribute, "id_map": id_map},
         }
-        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
+        write_bound_sidecar(project_root, d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
                             producing_experiment_id="exp-1", trait=trait)
         dirs[date] = str(d)
     from tests._binding_fixtures import write_plant_mapping
@@ -96,7 +96,7 @@ def _stamp_classifier(pred_dir: str, trait: str, positive_class: str, *, dataset
                                            "validated_against": "held_out_annotations"}},
         "trait": trait,
     }
-    write_bound_sidecar(Path(pred_dir), stamp, document="classifier_operating_point",
+    write_bound_sidecar(dataset_root.parent, Path(pred_dir), stamp, document="classifier_operating_point",
                         dataset_root=dataset_root, experiment_id=f"exp-cls-{trait}",
                         producing_experiment_id="exp-1", trait=trait)
 
@@ -120,8 +120,8 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
         classifier_dirs = [first]
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
     res = deliver_phenology_milestones(
-        trait=spec["name"],
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait=spec["name"],
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date=dirs,
         output_csv_path=str(out_csv),
         classifier_pred_dirs=classifier_dirs,

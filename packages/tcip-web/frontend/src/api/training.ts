@@ -202,7 +202,8 @@ export const trainingApi = {
 export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
 
 /**
- * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
+ * Open a live metrics stream for a training run of the open project, auto-reconnecting with
+ * capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
  * dedupe by epoch/step. A ``status`` frame carrying a report is terminal; one carrying only
  * ``error`` names an id no record claims (selected at its launch moment, before the record
@@ -211,13 +212,10 @@ export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
  * cap while the run stays unknown.
  */
 export function openTrainingStream(
-  project_root: string,
   experiment_id: string,
   onMessage: (msg: TrainingStreamMsg) => void,
 ): () => void {
-  const url = wsUrl(
-    `${ROUTES.socketTrainingRunsByExperimentIdStream(experiment_id)}?project_root=${encodeURIComponent(project_root)}`,
-  );
+  const url = wsUrl(ROUTES.socketTrainingRunsByExperimentIdStream(experiment_id));
   const socket = createReconnectingSocket({
     url,
     ...jsonFrameHandlers<TrainingStreamMsg>(

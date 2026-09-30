@@ -59,7 +59,7 @@ def _trained_on(tmp_path, train_stems: list[str]) -> tuple[str, str]:
         Image.new("RGB", (32, 32)).save(images_dir / f"{stem}.png")
         json_io.write_annotations(str(labels_dir / f"{stem}.json"),
                                   [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 32, 32)
-    run_dir = opened_run(None, {
+    run_dir = opened_run(tmp_path, {
         "model_source": {"task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": "bud"}, "auto_val": False,
@@ -68,9 +68,9 @@ def _trained_on(tmp_path, train_stems: list[str]) -> tuple[str, str]:
     return run_dir.name, str(labels_dir)
 
 
-def _resolve(experiment_id: str, labels_dir: str):
+def _resolve(project, experiment_id: str, labels_dir: str):
     return resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=project, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         experiment_id=experiment_id, calibration_labels_dir=labels_dir,
         calibration_records=_records(CAL_STEMS, 0.0),
         holdout_records=_records(HOLD_STEMS, 100000.0))
@@ -82,7 +82,7 @@ def test_a_reference_drawn_entirely_from_the_training_split_is_refused(tmp_path)
     train-disjointness result alone, which here reports its leak at group level with nothing in the
     exact-stem list beside it.
     """
-    b = _resolve(*_trained_on(tmp_path, CAL_STEMS + HOLD_STEMS))
+    b = _resolve(tmp_path, *_trained_on(tmp_path, CAL_STEMS + HOLD_STEMS))
     sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 
@@ -98,7 +98,7 @@ def test_the_same_reference_validates_against_a_training_split_it_never_touched(
     """The companion obligation: the identical records, against a run trained on other images
     entirely, must earn the held-out stamp.
     """
-    b = _resolve(*_trained_on(tmp_path, [f"other{i}" for i in range(6)]))
+    b = _resolve(tmp_path, *_trained_on(tmp_path, [f"other{i}" for i in range(6)]))
     sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 

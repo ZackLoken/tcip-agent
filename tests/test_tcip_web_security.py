@@ -42,7 +42,7 @@ def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
 
 
 def test_inference_launch_confines_checkpoint_to_image_roots(
-    client, tmp_path, tmp_path_factory: pytest.TempPathFactory
+    client, opened_project, tmp_path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     # A checkpoint outside every allowed root must be rejected before it reaches
     # torch.load(weights_only=False), an arbitrary-pickle sink.
@@ -55,7 +55,9 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
     assert resp.status_code == 403
 
 
-def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(client, tmp_path) -> None:
+def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
+    client, opened_project, tmp_path
+) -> None:
     # With no additive TCIP_IMAGE_ROOTS, a checkpoint under the workspace still clears the guard:
     # a missing checkpoint reaches its own 404, never a 403 from the path check.
     resp = client.post("/api/inference/launch", json={
@@ -145,37 +147,24 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
             pass
 
 
-def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, tmp_path) -> None:
-    """Coverage: project_root is confined so the origin, not the path guard, is what refuses this
-    connect."""
-    with pytest.raises(WebSocketDisconnect):
+def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, opened_project) -> None:
+    """A project is open, so the origin, not the absence of one, is what refuses this connect."""
+    with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect(
-            f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={tmp_path}",
+            "ws://127.0.0.1/api/training/runs/does-not-exist/stream",
             headers={"origin": "http://evil.example.com"},
         ):
             pass
+    assert closed.value.reason == "origin not allowed"
 
 
-def test_ws_training_stream_confines_project_root_to_allowed_roots(
-    client: TestClient, tmp_path_factory: pytest.TempPathFactory
+def test_ws_training_stream_of_the_open_project_opens_and_names_an_unknown_run(
+    client: TestClient, opened_project
 ) -> None:
-    # training_stream_ws's project_root must be confined the same way meta.py's report
-    # routes confine their own project_root parameter.
-    outside = tmp_path_factory.mktemp("outside")
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(
-            f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={outside}",
-        ):
-            pass
-
-
-def test_ws_training_stream_unconfined_for_a_project_root_inside_the_workspace(
-    client: TestClient, tmp_path
-) -> None:
-    # The rail must admit valid work: a project_root under the workspace still opens the socket
-    # and reaches its normal "unknown run" error message rather than being refused by the guard.
+    # The rail must admit valid work: with a project open the socket opens and reaches its normal
+    # "unknown run" error message.
     with client.websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={tmp_path}",
+        "ws://127.0.0.1/api/training/runs/does-not-exist/stream",
     ) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "status"

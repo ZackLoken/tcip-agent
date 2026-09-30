@@ -182,15 +182,11 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
     assert not (tmp_path / ".tcip" / "store.db").exists()
 
 
-def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
+def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path):
     """An import extracts a project's files into a fresh directory and, bound to the database
     backend, adopts them into a database itself: the root is usable at once, with no operator
     tcip adopt-store run between the two doors and no window where a confirmed negative
     would otherwise read as absent.
-
-    The two phases take separate platform roots. The archive and the import are audited calls
-    that record under the root their process is pinned to, so one platform root written through
-    both backends would trip the conform rail on the setup rather than on the case.
     """
     from tcip_mcp import dataset_layout
     from tcip_mcp.tools.project_tools import archive_project, import_project
@@ -200,17 +196,11 @@ def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, m
     (source / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
     negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
     restored = tmp_path / "restored"
-    platform_files = tmp_path / "platform_files"
-    platform_database = tmp_path / "platform_database"
-    platform_files.mkdir()
-    platform_database.mkdir()
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_files))
     with bound(FileBackend()):
         ts.replace(dataset_layout.image_status_key(source), negative, expect=ts.Version.ABSENT)
-        assert "error" not in archive_project(str(source), str(tmp_path / "bundle.zip"))
+        assert "error" not in archive_project(source, str(tmp_path / "bundle.zip"))
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         # The order a long-lived process reaches a destination in: it answers about the root,
         # then the bundle lands in it, then something reads.

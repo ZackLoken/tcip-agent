@@ -1,4 +1,5 @@
-"""Tests for the project record: the authored site, its create-only write, and its readers.
+"""Tests for the project record: its minted id, display name and site, its create-only write, and
+its readers.
 
 Every symbol from ``tcip_mcp.project_record`` is imported inside the test function that uses it
 rather than at module level, so a tree without the module fails one test's own assertions rather
@@ -31,195 +32,156 @@ def bound(backend):
         backend.close()
 
 
-# ── site validation ─────────────────────────────────────────────────────────────
+# ── text validation ─────────────────────────────────────────────────────────────
 
 
-def test_record_site_refuses_a_non_string(tmp_path: Path):
-    from tcip_mcp.project_record import record_site
+def test_validate_text_refuses_a_non_string():
+    from tcip_mcp.project_record import validate_text
 
     with pytest.raises(ValueError, match="must be a string"):
-        record_site(str(tmp_path), 42)  # type: ignore[arg-type]
+        validate_text("site", 42)
 
 
-def test_record_site_refuses_an_empty_or_whitespace_only_site(tmp_path: Path):
-    from tcip_mcp.project_record import record_site
+def test_validate_text_refuses_an_empty_or_whitespace_only_value():
+    from tcip_mcp.project_record import validate_text
 
     with pytest.raises(ValueError, match="empty"):
-        record_site(str(tmp_path), "   ")
+        validate_text("display name", "   ")
 
 
-def test_record_site_strips_surrounding_whitespace_before_storing(tmp_path: Path):
-    from tcip_mcp.project_record import read_record, record_site
+def test_validate_text_strips_surrounding_whitespace():
+    from tcip_mcp.project_record import validate_text
 
-    recorded = record_site(str(tmp_path), "  north orchard  ")
-    assert recorded["site"] == "north orchard"
-    assert read_record(str(tmp_path))["site"] == "north orchard"
+    assert validate_text("site", "  north orchard  ") == "north orchard"
 
 
-def test_record_site_refuses_a_non_printable_character_naming_the_code_point_and_offset(
-    tmp_path: Path,
-):
-    from tcip_mcp.project_record import record_site
+def test_validate_text_refuses_a_non_printable_character_naming_the_code_point_and_offset():
+    from tcip_mcp.project_record import validate_text
 
-    with pytest.raises(ValueError, match=r"U\+0009 at offset 5") as raised:
-        record_site(str(tmp_path), "north\torchard")
-    assert "U+0009" in str(raised.value)
+    with pytest.raises(ValueError, match=r"U\+0009 at offset 5"):
+        validate_text("site", "north\torchard")
 
 
-def test_record_site_refuses_a_site_over_the_length_bound_naming_the_length(tmp_path: Path):
-    from tcip_mcp.project_record import record_site
+def test_validate_text_refuses_a_value_over_the_length_bound_and_admits_one_at_it():
+    from tcip_mcp.project_record import validate_text
 
-    long_site = "a" * 201
     with pytest.raises(ValueError, match="201 characters"):
-        record_site(str(tmp_path), long_site)
+        validate_text("site", "a" * 201)
+    assert validate_text("site", "a" * 200) == "a" * 200
 
 
-def test_record_site_admits_a_site_at_exactly_the_length_bound(tmp_path: Path):
-    from tcip_mcp.project_record import record_site
-
-    site = "a" * 200
-    recorded = record_site(str(tmp_path), site)
-    assert recorded["site"] == site
+# ── create_record: the states of the create-only write ──────────────────────────
 
 
-# ── record_site: the states of the create-only write ────────────────────────────
+def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, read_record
+
+    record = create_record(tmp_path, "  Valley block ", "north orchard")
+
+    assert record["display_name"] == "Valley block" and record["site"] == "north orchard"
+    assert len(record["id"]) == 12
+    assert read_record(tmp_path) == record
 
 
-def test_record_site_writes_an_absent_record(tmp_path: Path):
-    from tcip_mcp.project_record import read_record, record_site
+def test_create_record_answers_the_existing_record_when_offered_it_again(tmp_path: Path):
+    """Creating a project that already records the same name and site keeps its id."""
+    from tcip_mcp.project_record import create_record
 
-    recorded = record_site(str(tmp_path), "north orchard")
-    assert recorded == {"site": "north orchard", "previous_site": None}
-    assert read_record(str(tmp_path)) == {"site": "north orchard"}
+    first = create_record(tmp_path, "Valley block", "north orchard")
 
-
-def test_record_site_is_a_no_op_when_the_same_site_is_offered_again(tmp_path: Path):
-    """A second season of the same site: the ordinary re-run, once with trailing whitespace."""
-    from tcip_mcp.project_record import read_record, record_site
-
-    record_site(str(tmp_path), "north orchard")
-
-    again = record_site(str(tmp_path), "north orchard  ")
-
-    assert again == {"site": "north orchard", "previous_site": "north orchard"}
-    assert read_record(str(tmp_path)) == {"site": "north orchard"}
+    assert create_record(tmp_path, "Valley block", "north orchard  ") == first
 
 
-def test_record_site_refuses_a_different_site_naming_both_and_the_project(tmp_path: Path):
-    from tcip_mcp.project_record import SiteConflict, read_record, record_site
+def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
+    from tcip_mcp.project_record import SiteConflict, create_record, read_record
 
-    record_site(str(tmp_path), "north orchard")
+    create_record(tmp_path, "Valley block", "north orchard")
 
     with pytest.raises(SiteConflict) as raised:
-        record_site(str(tmp_path), "south orchard")
+        create_record(tmp_path, "Valley block", "south orchard")
 
-    message = str(raised.value)
-    assert "north orchard" in message
-    assert "south orchard" in message
-    assert str(tmp_path) in message
-    assert read_record(str(tmp_path))["site"] == "north orchard"  # nothing written over it
+    assert "north orchard" in str(raised.value) and "south orchard" in str(raised.value)
+    assert read_record(tmp_path)["site"] == "north orchard"
 
 
-def test_record_site_refuses_a_present_record_that_is_not_a_site_record(tmp_path: Path):
-    from tcip_mcp.project_record import ProjectRecordInvalid, project_record_key, record_site
+def test_create_record_refuses_a_different_display_name_naming_rename(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, read_record
 
-    key = project_record_key(str(tmp_path))
-    ts.replace(key, {"not_site": "whatever"}, expect=ts.Version.ABSENT)
+    create_record(tmp_path, "Valley block", "north orchard")
 
-    with pytest.raises(ProjectRecordInvalid, match="does not hold a site"):
-        record_site(str(tmp_path), "north orchard")
+    with pytest.raises(ValueError, match="rename"):
+        create_record(tmp_path, "Hill block", "north orchard")
+
+    assert read_record(tmp_path)["display_name"] == "Valley block"
 
 
-def test_record_site_lets_a_decode_error_through_for_a_present_undecodable_record(
-    tmp_path: Path,
-):
-    from tcip_mcp.project_record import project_record_key, record_site
+def test_create_record_refuses_a_present_record_missing_a_field(tmp_path: Path):
+    from tcip_mcp.project_record import ProjectRecordInvalid, create_record, project_record_key
+
+    ts.replace(project_record_key(tmp_path), {"site": "north orchard"},
+               expect=ts.Version.ABSENT)
+
+    with pytest.raises(ProjectRecordInvalid, match="does not hold an id"):
+        create_record(tmp_path, "Valley block", "north orchard")
+
+
+def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    key = project_record_key(str(tmp_path))
-    ts.replace(key, {"site": "north orchard"}, expect=ts.Version.ABSENT)
-    damage_record(key, b"{not valid json")
+    create_record(tmp_path, "Valley block", "north orchard")
+    damage_record(project_record_key(tmp_path), b"{not valid json")
 
     with pytest.raises(ts.DecodeError):
-        record_site(str(tmp_path), "north orchard")
+        create_record(tmp_path, "Valley block", "north orchard")
 
 
-def test_record_site_refuses_writing_over_an_unadopted_root(tmp_path: Path):
+def test_create_record_refuses_writing_over_an_unadopted_root(tmp_path: Path):
     """A root whose project record is still a loose file (no database) refuses, naming the
-    conform script, the same rule every other record store obeys under this root."""
-    from tcip_mcp.project_record import record_site
+    conform command, the same rule every other record store obeys under this root."""
+    from tcip_mcp.project_record import create_record
 
     with bound(FileBackend()):
-        record_site(str(tmp_path), "north orchard")
+        create_record(tmp_path, "Valley block", "north orchard")
 
     with bound(SqliteBackend()):
         with pytest.raises(ts.StoreError, match="tcip adopt-store"):
-            record_site(str(tmp_path), "north orchard")
+            create_record(tmp_path, "Valley block", "north orchard")
 
 
-# ── record_site(replace=True): the operator script's one deliberate overwrite ───
+# ── replace_site: the one deliberate correction ─────────────────────────────────
 
 
-def test_record_site_replace_writes_fresh_when_nothing_was_there(tmp_path: Path):
-    from tcip_mcp.project_record import record_site
+def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, read_record, replace_site
 
-    recorded = record_site(str(tmp_path), "north orchard", replace=True)
-    assert recorded == {
-        "site": "north orchard", "previous_site": None, "previous_record_problem": None,
-    }
+    record = create_record(tmp_path, "Valley block", "north orchard")
 
-
-def test_record_site_replace_overwrites_a_valid_record_and_reports_the_previous_site(
-    tmp_path: Path,
-):
-    from tcip_mcp.project_record import read_record, record_site
-
-    record_site(str(tmp_path), "north orchard")
-
-    recorded = record_site(str(tmp_path), "south orchard", replace=True)
-
-    assert recorded == {
-        "site": "south orchard", "previous_site": "north orchard",
-        "previous_record_problem": None,
-    }
-    assert read_record(str(tmp_path))["site"] == "south orchard"
+    assert replace_site(tmp_path, "south orchard") == {
+        "site": "south orchard", "previous_site": "north orchard"}
+    assert read_record(tmp_path) == {**record, "site": "south orchard"}
 
 
-def test_record_site_replace_overwrites_an_invalid_record_naming_the_problem(tmp_path: Path):
-    """A prior record that existed but could not be read as a site is a replacement, not a
-    fresh write: ``previous_record_problem`` names it, distinct from ``previous_site`` being
-    unset for a truly new project."""
-    from tcip_mcp.project_record import project_record_key, read_record, record_site
+def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
+    from tcip_mcp.project_record import ProjectRecordMissing, replace_site
 
-    key = project_record_key(str(tmp_path))
-    ts.replace(key, {"not_site": "whatever"}, expect=ts.Version.ABSENT)
-
-    recorded = record_site(str(tmp_path), "north orchard", replace=True)
-
-    assert recorded["site"] == "north orchard"
-    assert recorded["previous_site"] is None
-    assert "does not hold a site" in recorded["previous_record_problem"]
-    assert read_record(str(tmp_path))["site"] == "north orchard"
+    with pytest.raises(ProjectRecordMissing):
+        replace_site(tmp_path, "south orchard")
 
 
-# ── read_record ──────────────────────────────────────────────────────────────────
+# ── read_record and record_fields ───────────────────────────────────────────────
 
 
 def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no_store(
     tmp_path: Path,
 ):
-    """Names both doors: ``initialize_project`` for a project whose name fits the workspace scheme,
-    and the operator script for any project, since ``initialize_project`` cannot serve one that
-    doesn't (``gui-smoke-scratch``-shaped names). The no-database assertion holds the store's
-    own guarantee at this surface: a read of an absent record never publishes a database,
-    which ``read_record`` relies on rather than re-checking itself."""
+    """Names the creating door; a read of an absent record never publishes a database."""
     from tcip_store.file_backend import database_file
 
     from tcip_mcp.project_record import ProjectRecordMissing, read_record
 
-    with pytest.raises(ProjectRecordMissing, match="initialize_project") as raised:
-        read_record(str(tmp_path))
-    assert "tcip write-project-site" in str(raised.value)
+    with pytest.raises(ProjectRecordMissing, match="initialize_project"):
+        read_record(tmp_path)
 
     assert not database_file(str(tmp_path.absolute())).is_file()
 
@@ -227,120 +189,65 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 def test_project_record_path_is_the_dotted_tcip_document(tmp_path: Path):
     from tcip_mcp.project_record import project_record_path
 
-    assert project_record_path(str(tmp_path)) == tmp_path / ".tcip" / "project.json"
+    assert project_record_path(tmp_path) == tmp_path / ".tcip" / "project.json"
 
 
-# ── site_fields: never raises, exactly one field set ─────────────────────────────
+def test_record_fields_reports_the_record(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, record_fields
+
+    record = create_record(tmp_path, "Valley block", "north orchard")
+
+    assert record_fields(tmp_path) == {**record, "record_problem": None}
 
 
-def test_site_fields_reports_the_recorded_site(tmp_path: Path):
-    from tcip_mcp.project_record import record_site, site_fields
+def test_record_fields_names_the_absent_record(tmp_path: Path):
+    from tcip_mcp.project_record import record_fields
 
-    record_site(str(tmp_path), "north orchard")
+    fields = record_fields(tmp_path)
 
-    fields = site_fields(str(tmp_path))
-
-    assert fields == {"site": "north orchard", "site_problem": None}
-
-
-def test_site_fields_names_the_absent_record(tmp_path: Path):
-    from tcip_mcp.project_record import site_fields
-
-    fields = site_fields(str(tmp_path))
-
-    assert fields["site"] is None
-    assert "initialize_project" in fields["site_problem"]
-    assert "tcip write-project-site" in fields["site_problem"]
+    assert fields["id"] is None and fields["site"] is None
+    assert "initialize_project" in fields["record_problem"]
 
 
-def test_site_fields_names_a_present_but_invalid_record(tmp_path: Path):
-    from tcip_mcp.project_record import project_record_key, site_fields
-
-    key = project_record_key(str(tmp_path))
-    ts.replace(key, {"not_site": "whatever"}, expect=ts.Version.ABSENT)
-
-    fields = site_fields(str(tmp_path))
-
-    assert fields["site"] is None
-    assert "does not hold a site" in fields["site_problem"]
-
-
-def test_site_fields_names_an_undecodable_record(tmp_path: Path):
-    from tcip_mcp.project_record import project_record_key, site_fields
+def test_record_fields_names_an_undecodable_record(tmp_path: Path):
+    from tcip_mcp.project_record import create_record, project_record_key, record_fields
     from tests._record_damage_fixtures import damage_record
 
-    key = project_record_key(str(tmp_path))
-    ts.replace(key, {"site": "north orchard"}, expect=ts.Version.ABSENT)
-    damage_record(key, b"{not valid json")
+    create_record(tmp_path, "Valley block", "north orchard")
+    damage_record(project_record_key(tmp_path), b"{not valid json")
 
-    fields = site_fields(str(tmp_path))
+    fields = record_fields(tmp_path)
 
-    assert fields["site"] is None
-    assert "does not decode" in fields["site_problem"]
-
-
-def test_site_fields_names_a_root_the_store_refuses_to_read(tmp_path: Path):
-    """A database already exists for this root (from some other store) but has never held
-    ``project_record``, and ``project.json`` arrives beside it outside the seam: the conform
-    rail refuses the file as a claimed document no export can explain, naming the operator
-    script. A fresh backend instance is required to force re-verification against the file
-    that arrived after the first connection was opened (test_store_conform_rail.py's own
-    ``LATE_ARRIVAL`` cases use the same two-instance shape)."""
-    from tcip_store.registry import RECORD_JSON
-
-    from tcip_mcp.project_record import project_record_path, site_fields
-    from tcip_mcp.project_status import record_report
-
-    with bound(SqliteBackend()):
-        record_report(tmp_path)  # forces a database to exist, holding project_status only
-
-    raw_path = project_record_path(tmp_path)
-    raw_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_path.write_bytes(RECORD_JSON.encode({"site": "north orchard"}))
-
-    with bound(SqliteBackend()):
-        fields = site_fields(str(tmp_path))
-
-    assert fields["site"] is None
-    assert "tcip adopt-store" in fields["site_problem"]
+    assert fields["display_name"] is None
+    assert "does not decode" in fields["record_problem"]
 
 
-def test_site_fields_on_an_unadopted_root_names_tcip_adopt_store(tmp_path: Path):
-    """A root whose records are still loose files: ``tcip adopt-store`` is the state it
-    conforms. The file backend legitimately produces that state (``import_project`` no longer
-    does: it adopts a fresh root under the database backend), so the unadopted root here is
-    built by writing through the file backend directly, through ``initialize_project``, never by
-    hand-writing ``project.json``."""
-    from tcip_mcp.project_record import site_fields
+def test_record_fields_on_an_unadopted_root_names_tcip_adopt_store(tmp_path: Path):
+    """A root whose records are still loose files, built by writing through the file backend's
+    own creation door rather than by hand-writing ``project.json``."""
+    from tcip_mcp.project_record import record_fields
     from tcip_mcp.tools.project_tools import initialize_project
 
     dest = tmp_path / "unadopted"
     with bound(FileBackend()):
-        initialize_project(str(dest), site="north orchard")
+        initialize_project(str(dest), "Valley block", "north orchard")
 
     with bound(SqliteBackend()):
-        fields = site_fields(str(dest))
+        fields = record_fields(dest)
 
     assert fields["site"] is None
-    assert "tcip adopt-store" in fields["site_problem"]
+    assert "tcip adopt-store" in fields["record_problem"]
 
 
-def test_site_fields_on_a_bare_directory_that_gained_tcip_with_no_creating_door(
+def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(
     tmp_path: Path,
 ):
-    """A store write with no door (``report_friction`` on a directory neither ``initialize_project`` nor
-    ``ingest_images`` ever touched) leaves ``.tcip`` with no project record: a permanent,
-    reachable state every reader has to name honestly rather than crash on."""
-    from tcip_mcp.project_record import site_fields
-    from tcip_mcp.tools.meta_tools import report_friction
+    from tcip_mcp.project_record import create_record, existing_project
 
-    project = tmp_path / "bare"
-    project.mkdir()
-    result = report_friction(str(project), category="missing_tool", detail="probe")
-    assert "error" not in result
-    assert (project / ".tcip").is_dir()
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    with pytest.raises(ValueError, match="names no readable project"):
+        existing_project(bare)
 
-    fields = site_fields(str(project))
-
-    assert fields["site"] is None
-    assert "initialize_project" in fields["site_problem"]
+    create_record(tmp_path, "Valley block", "north orchard")
+    assert existing_project(tmp_path) == tmp_path.resolve()

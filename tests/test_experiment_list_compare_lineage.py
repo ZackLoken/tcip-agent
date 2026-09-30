@@ -1,167 +1,160 @@
 """Experiment-tool coverage (list / compare / lineage), each run a directory the launcher's own
-writer opened."""
-
-import pytest
-
-@pytest.fixture(autouse=True)
-def _platform(tmp_path, monkeypatch):
-    """Pin the platform state root at this test's tmp dir, where its runs land."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+writer opened under the test's project."""
 
 
-def _opened(experiment_id: str, builder: str = "my_models:tree_detector", **facts):
-    """A run of a detector built by ``builder`` over its own two frames, opened by the
-    launcher's own writer; ``facts`` are ``open_run``'s other keywords."""
+def _opened(project, experiment_id: str, builder: str = "my_models:tree_detector", **facts):
+    """A run of ``project`` of a detector built by ``builder`` over its own two frames, opened by
+    the launcher's own writer; ``facts`` are ``open_run``'s other keywords."""
     from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
 
-    config = detection_config(fixture_data_dir(None, experiment_id),
+    config = detection_config(fixture_data_dir(project, experiment_id),
                               model_source={"builder": builder, "task": "detection"})
-    return opened_run(None, config, experiment_id=experiment_id, **facts)
+    return opened_run(project, config, experiment_id=experiment_id, **facts)
 
 
-def test_experiment_list_compare_lineage():
+def test_experiment_list_compare_lineage(tmp_path):
     from tcip_mcp.experiments import (
         compare_experiments, get_experiment_lineage, list_experiments, run_resolution,
     )
     from tests._verified_checkpoint_fixtures import log_epoch
 
-    e1 = _opened("e1", "my_models:tv_resnet50_det", parent_experiment="e0")
+    e1 = _opened(tmp_path, "e1", "my_models:tv_resnet50_det", parent_experiment="e0")
     log_epoch(e1, 1, {"map50": 0.6})
-    _opened("e2", "my_models:fcos_det")
+    _opened(tmp_path, "e2", "my_models:fcos_det")
 
-    assert {e["experiment_id"] for e in list_experiments()} == {"e1", "e2"}
+    assert {e["experiment_id"] for e in list_experiments(tmp_path)} == {"e1", "e2"}
 
-    cmp = compare_experiments(["e1", "e2", "missing"])
+    cmp = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
     assert cmp["count"] == 3
     first = next(c for c in cmp["experiments"] if c["experiment_id"] == "e1")
     assert first["model"] == "my_models:tv_resnet50_det"
     assert first["last_logged_metrics"]["map50"] == 0.6
     assert any("error" in c for c in cmp["experiments"])   # the missing run is reported
 
-    lineage = get_experiment_lineage("e1")["lineage"]
-    assert lineage["data"] == run_resolution("e1")["data"]
+    lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
+    assert lineage["data"] == run_resolution("e1", project=tmp_path)["data"]
     assert lineage["parent_experiment"] == "e0"
     assert lineage["checkpoint"] is None  # no final status names a checkpoint yet
-    assert "error" in get_experiment_lineage("nope")
+    assert "error" in get_experiment_lineage("nope", project=tmp_path)
 
 
-def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names():
+def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(tmp_path):
     from tcip_mcp.experiments import get_experiment_lineage, observe
     from tests._verified_checkpoint_fixtures import finished_run
 
-    checkpoint = observe(finished_run(None, experiment_id="exp-done")).checkpoint
+    checkpoint = observe(finished_run(tmp_path, experiment_id="exp-done")).checkpoint
     assert checkpoint is not None
 
-    lineage = get_experiment_lineage("exp-done")["lineage"]
+    lineage = get_experiment_lineage("exp-done", project=tmp_path)["lineage"]
     assert lineage["checkpoint"] == checkpoint
 
 
-def test_get_experiment_tool_pages_metrics_and_exposes_n_rows():
+def test_get_experiment_tool_pages_metrics_and_exposes_n_rows(tmp_path):
     """The MCP tool accepts metrics_limit/metrics_offset under view='full'; n_rows (the row
     count) is the paging bound, always present alongside n_epochs."""
     from tcip_mcp.tools.experiment_tools import get_experiment
     from tests._verified_checkpoint_fixtures import log_epoch
 
-    run_dir = _opened("exp-paged")
+    run_dir = _opened(tmp_path, "exp-paged")
     for epoch in range(5):
         log_epoch(run_dir, epoch, {"loss": float(epoch)})
 
-    full = get_experiment("exp-paged")
+    full = get_experiment(tmp_path, "exp-paged")
     assert full["n_rows"] == 5 and full["n_epochs"] == 5
 
-    page = get_experiment("exp-paged", metrics_limit=2, metrics_offset=1)
+    page = get_experiment(tmp_path, "exp-paged", metrics_limit=2, metrics_offset=1)
     assert page["n_rows"] == 5
     assert [r["epoch"] for r in page["metrics"]] == [1, 2]
 
 
-def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination():
+def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp_path):
     """A rail must admit valid work: the ordinary view='lineage' call (no pagination args)
     still succeeds; a non-default pagination arg under that view is refused as meaningless."""
     from tcip_mcp.tools.experiment_tools import get_experiment
 
-    _opened("exp-lineage")
+    _opened(tmp_path, "exp-lineage")
 
-    assert "error" not in get_experiment("exp-lineage", view="lineage")
-    assert "error" in get_experiment("exp-lineage", view="lineage", metrics_limit=3)
-    assert "error" in get_experiment("exp-lineage", view="lineage", metrics_offset=2)
+    assert "error" not in get_experiment(tmp_path, "exp-lineage", view="lineage")
+    assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_limit=3)
+    assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_offset=2)
 
 
-def _calibration():
-    """A calibration run opened by its own writer."""
+def _calibration(project):
+    """A calibration run of ``project`` opened by its own writer."""
     from tcip_mcp.experiments import open_calibration_run
 
     return open_calibration_run({
         "document": "operating_point", "checkpoint_sha256": None,
         "reference_identity": {"calibration_dataset_hash": "h"}, "trait": "bud_50per_date",
-        "derived_from": "a calibration door"})
+        "derived_from": "a calibration door"}, project=project)
 
 
-def test_list_experiments_tool_carries_has_model_source():
+def test_list_experiments_tool_carries_has_model_source(tmp_path):
     """A training run's launch record carries a config; a calibration run's does not."""
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    _opened("exp-run")
-    calibration = _calibration()
+    _opened(tmp_path, "exp-run")
+    calibration = _calibration(tmp_path)
 
-    listed = {e["experiment_id"]: e for e in list_experiments()["experiments"]}
+    listed = {e["experiment_id"]: e for e in list_experiments(tmp_path)["experiments"]}
     assert listed["exp-run"]["has_model_source"] is True
     assert listed[calibration.name]["has_model_source"] is False
 
 
-def test_list_experiments_launched_only_serves_the_training_runs_view():
+def test_list_experiments_launched_only_serves_the_training_runs_view(tmp_path):
     """launched_only=True switches list_experiments to the training runs view: training run
     directories only, calibration runs left out, in the shape _all_training_runs builds."""
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_mcp.tools.training_tools import _all_training_runs
 
-    _opened("exp-launched-view")
-    calibration = _calibration()
+    _opened(tmp_path, "exp-launched-view")
+    calibration = _calibration(tmp_path)
 
-    default_view = list_experiments()
+    default_view = list_experiments(tmp_path)
     assert "experiments" in default_view and "runs" not in default_view
 
-    launched_view = list_experiments(launched_only=True)
-    assert launched_view == {"runs": _all_training_runs()}
+    launched_view = list_experiments(tmp_path, launched_only=True)
+    assert launched_view == {"runs": _all_training_runs(tmp_path)}
     by_id = {r["experiment_id"]: r for r in launched_view["runs"]}
     assert "exp-launched-view" in by_id
     assert calibration.name not in by_id
 
 
-def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end():
+def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(tmp_path):
     """The final status is written once; a row an outside writer appends later with a later
     instant is counted, never hidden, and a completed run's own rows are not."""
     from tcip_mcp.experiments import METRICS_FILE, append_row, compare_experiments, now_iso
     from tests._verified_checkpoint_fixtures import finished_run
 
-    run_dir = finished_run(None, experiment_id="exp-ended")
+    run_dir = finished_run(tmp_path, experiment_id="exp-ended")
     append_row(run_dir / METRICS_FILE, {"epoch": 0, "timestamp": now_iso(), "loss": 0.5})
     append_row(run_dir / METRICS_FILE,
                {"epoch": 1, "timestamp": "2000-01-01T00:00:00+00:00", "loss": 0.4})
 
-    (c,) = compare_experiments(["exp-ended"])["experiments"]
+    (c,) = compare_experiments(["exp-ended"], project=tmp_path)["experiments"]
     assert c["state"] == "completed"
     assert c["last_logged_metrics"]["loss"] == 0.4
     assert c["rows_after_end"] == 1  # the row stamped now, after the end
     assert c["n_epochs"] == 2 and c["n_rows"] == 2
 
 
-def test_compare_experiments_stale_heartbeat_compares_interrupted(monkeypatch):
+def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monkeypatch):
     """A run with no final status reads running while its heartbeat is fresh, with no
     rows-after-end count since it has not ended, and interrupted once it goes stale."""
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments
 
-    _opened("exp-live")
+    _opened(tmp_path, "exp-live")
 
-    (live,) = compare_experiments(["exp-live"])["experiments"]
+    (live,) = compare_experiments(["exp-live"], project=tmp_path)["experiments"]
     assert (live["state"], live["rows_after_end"]) == ("running", None)
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
-    (stale,) = compare_experiments(["exp-live"])["experiments"]
+    (stale,) = compare_experiments(["exp-live"], project=tmp_path)["experiments"]
     assert stale["state"] == "interrupted"
 
 
-def test_compare_experiments_rows_after_end_compares_instants_across_offsets():
+def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp_path):
     """rows_after_end parses each row's timestamp (and the final status's ``ended``) as an
     instant and compares strictly-after, so a row stamped in a different UTC offset, or a bare
     "Z", still compares on the instant it actually names rather than on its ISO text; a row
@@ -172,7 +165,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets():
     from tcip_mcp.experiments import METRICS_FILE, append_row, compare_experiments, observe
     from tests._verified_checkpoint_fixtures import finished_run
 
-    run_dir = finished_run(None, experiment_id="exp-instants")
+    run_dir = finished_run(tmp_path, experiment_id="exp-instants")
     final = observe(run_dir).final
     assert final is not None
     ended = datetime.fromisoformat(final["ended"])
@@ -191,4 +184,5 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets():
     for row in rows:
         append_row(run_dir / METRICS_FILE, row)
 
-    assert compare_experiments(["exp-instants"])["experiments"][0]["rows_after_end"] == 2
+    rows_after_end = compare_experiments(["exp-instants"], project=tmp_path)["experiments"][0]
+    assert rows_after_end["rows_after_end"] == 2

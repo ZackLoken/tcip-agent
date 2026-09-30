@@ -28,7 +28,8 @@ def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data", device="cpu"))
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(run_dir))
     return TrainContext(run=run, train_loader=None, **kwargs), run_dir
 
 

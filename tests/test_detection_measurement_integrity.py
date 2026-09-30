@@ -187,18 +187,17 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64}}
     run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, run_dir.name, str(images_dir), str(labels_dir))
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     from tcip_mcp.experiments import run_resolution
 
-    assert captured["tiling"] == run_resolution(run_dir.name)["data"]["tiling"]
+    assert captured["tiling"] == run_resolution(run_dir.name, project=tmp_path)["data"]["tiling"]
     assert captured["tiling"]["tile_size"] == 64
 
 
@@ -211,7 +210,6 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     run_dir = finished_run(tmp_path, experiment_id="det-evaluated")
 
@@ -220,12 +218,12 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(tmp_path, monkeypa
                 for p in sorted(run_dir.rglob("*")) if p.is_file()}
 
     before = snapshot()
-    audit_before = list(ts.read_log(audit_log_key()).records)
-    result = evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
+    audit_before = list(ts.read_log(audit_log_key(tmp_path)).records)
+    result = evaluate_model(tmp_path, run_dir.name, str(images_dir), str(labels_dir))
 
     assert "error" not in result, result
     assert snapshot() == before
-    assert list(ts.read_log(audit_log_key()).records) == audit_before
+    assert list(ts.read_log(audit_log_key(tmp_path)).records) == audit_before
 
 
 def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
@@ -233,12 +231,11 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -250,7 +247,6 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)  # three-band sources
     scope = {"subject": "bud", "id_map": {"bud": 0}}
     one_band = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -261,7 +257,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
                                  data={"num_channels": 1, "scope": scope})
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
     assert captured["ds"].expected_channels == 1
 
     from tcip_mcp.tools.model_tools import register_model
@@ -271,10 +267,10 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     del payload["config"]["data"]["num_channels"]
     unstated = tmp_path / "unstated.pt"
     torch.save(payload, str(unstated))
-    assert "error" not in register_model(name="unstated-width", checkpoint_path=str(unstated),
-                                         config={}, project_path=str(tmp_path))
+    assert "error" not in register_model(tmp_path, name="unstated-width",
+                                         checkpoint_path=str(unstated), config={})
 
-    r = evaluate_model(str(unstated), str(images_dir), str(labels_dir))
+    r = evaluate_model(tmp_path, str(unstated), str(images_dir), str(labels_dir))
 
     assert "no band count" in r["error"], r
 
@@ -330,7 +326,6 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir(parents=True)
     for i in range(2):
@@ -343,7 +338,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
     # detection and a substituted floor of 0.5 or 0.0 would not.
     ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
-    verified = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    verified = load_registered_checkpoint(ckpt, project=tmp_path)
     _detections_as_ground_truth(verified.payload, images_dir, labels_dir, subject="bud")
 
     build_model = model_build.build_model
@@ -368,7 +363,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # Both routes run from one seed: the loss pass samples proposals, so two unseeded passes over
     # the same weights differ in that one metric by more than float noise.
     torch.manual_seed(777)
-    measured = evaluate_model(ckpt, str(images_dir), str(labels_dir))
+    measured = evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir))
     assert "error" not in measured, measured
     assert len(builds) == 1
 
@@ -402,12 +397,11 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir),
+    evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir),
                    tiling={"enabled": True, "tile_size": 64})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -609,7 +603,7 @@ def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
 
     ckpt = project_checkpoint(tmp_path)
     captured = _stub_inference(monkeypatch, train_tile_size=224, train_overlap=0.1)
-    r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=None, overlap=None)
     assert captured["tile_size"] == 224
     assert captured["overlap"] == pytest.approx(0.1)
@@ -626,7 +620,7 @@ def test_foreign_checkpoint_with_no_geometry_refuses_explicit_tile(tmp_path, mon
 
     ckpt = project_checkpoint(tmp_path)
     _stub_inference(monkeypatch)  # no train geometry
-    r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=None)
     assert "error" in r
     assert "tile_size" in r["error"]
@@ -718,7 +712,7 @@ def test_explicit_tile_size_wins(tmp_path, monkeypatch):
 
     ckpt = project_checkpoint(tmp_path)
     captured = _stub_inference(monkeypatch, train_tile_size=224)
-    r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=224)
     assert captured["tile_size"] == 224
     assert r["operating_point"]["tile_size"]["source"] == "explicit"
@@ -729,7 +723,7 @@ def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, m
 
     ckpt = project_checkpoint(tmp_path)
     _stub_inference(monkeypatch, train_tile_size=224)
-    r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
                       tile=True, tile_size=512)
     assert "error" in r
     assert "512" in r["error"] and "224" in r["error"]
@@ -791,24 +785,19 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(cfg)
+    res = training_tools.launch_training(tmp_path, cfg)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
 
-    tiling = run_resolution(eid)["data"]["tiling"]
+    tiling = run_resolution(eid, project=tmp_path)["data"]["tiling"]
     assert tiling["tile_size"] == 224  # TiledDetectionDataset default
     assert tiling["overlap"] == pytest.approx(0.2)
 
-    # Let the subprocess actually finish rather than leaking it: it keeps writing to this test's
-    # pinned TCIP_STATE_ROOT, and a late write after the test moves on would resolve against
-    # whoever is running then (tests repin TCIP_STATE_ROOT per test, they don't isolate the OS
-    # process tree). Asserting specifically on "completed" (not just any terminal state) is what
-    # makes the poisoned gt.train monkeypatch load-bearing: if the child ran inside this process,
-    # it would hit _poison_train and the run would be "failed", not "completed".
+    # "completed", not any terminal state: a child run inside this process would hit _poison_train.
     final_status = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(eid).get("status")
+        final_status = training_tools.monitor_training(tmp_path, eid).get("status")
         if final_status in ("completed", "failed", "canceled"):
             break
         time.sleep(0.5)
@@ -848,7 +837,7 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
     stub = _CalStub()
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     ckpt = project_checkpoint(tmp_path)
-    r = run_inference(str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu", tile=False)
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu", tile=False)
     assert r["conf_source"] == "default"
     assert r["validated"] is False
     assert r["operating_point"]["conf"]["value"] == pytest.approx(DEFAULT_CONF)
@@ -864,10 +853,11 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
 
     cal, hold = shifted_cal_holdout()
 
-    def _calibrate(p, *a, **k):
+    def _calibrate(p, *a, project, **k):
         inputs = {**calibration_pipeline.pass_resolver_inputs(p), "dataset_hash": "H",
                   "calibration_records": cal, "holdout_records": hold, "staged_conf_floor": 0.01}
-        bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+        bundle = resolve_operating_point("bud_opening", project=project, experiment_id=None,
+                                         **inputs)
         evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                     "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
         return bundle, "H", 0, evidence
@@ -889,7 +879,7 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
 
     ckpt = project_checkpoint(tmp_path)
     _one_image(tmp_path)
-    r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
+    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))
     assert r["conf_source"] == "calibration"
@@ -898,7 +888,7 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert r["operating_point"]["conf"]["value"] == pytest.approx(0.9)
     assert stub.applied_conf == pytest.approx(0.9)                  # resolved conf governs the model
     assert r["gate_evidence_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
-    assert ts.exists(itools.calibration_curve_key(r["calibration_evidence_key"]))
+    assert ts.exists(itools.calibration_curve_key(tmp_path, r["calibration_evidence_key"]))
 
 
 def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
@@ -918,19 +908,19 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     ckpt = project_checkpoint(tmp_path)
     _one_image(tmp_path)
 
-    r_untiled = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
+    r_untiled = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
                                        device="cpu", tile=False, trait="bud_opening",
                                        calibration_labels_dir=str(tmp_path))
-    r_tiled = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
+    r_tiled = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
                                      device="cpu", tile=True, tile_size=256, trait="bud_opening",
                                      calibration_labels_dir=str(tmp_path))
 
     # Distinct predictor paths, distinct records.
     assert r_untiled["calibration_evidence_key"] != r_tiled["calibration_evidence_key"]
-    assert ts.exists(itools.calibration_curve_key(r_untiled["calibration_evidence_key"]))
-    assert ts.exists(itools.calibration_curve_key(r_tiled["calibration_evidence_key"]))
+    assert ts.exists(itools.calibration_curve_key(tmp_path, r_untiled["calibration_evidence_key"]))
+    assert ts.exists(itools.calibration_curve_key(tmp_path, r_tiled["calibration_evidence_key"]))
 
-    sweep_body = ts.read(itools.calibration_curve_key(r_tiled["calibration_evidence_key"]))
+    sweep_body = ts.read(itools.calibration_curve_key(tmp_path, r_tiled["calibration_evidence_key"]))
     assert sweep_body["checkpoint_sha256"]  # identity threaded through, not omitted
     regime = sweep_body["calibration_evidence"]["inputs"]
     assert regime["slicing"] is not None
@@ -954,7 +944,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
                               [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
     inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": toy_records("c"),
               "holdout_records": toy_records("h", shift=3.0)}
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
@@ -963,7 +953,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
+    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))
     assert r["cross_dataset_check"] == "same-labeled-set"
@@ -985,7 +975,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     cal, hold = shifted_cal_holdout()
     inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
              "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -1004,7 +994,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     Image.new("RGB", (100, 100)).save(img_b)
     ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(
-        str(ckpt), images_dir=str(tmp_path), device="cpu",
+        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
         selection_dir=str(tmp_path / "m"))
 
@@ -1038,7 +1028,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     dh = dataset_hash(tmp_path, stems=universe)
     inputs = {"slicing": None, "dataset_hash": dh, "calibration_records": cal,
              "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -1064,7 +1054,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
         kwargs["calibration_images_dir"] = str(tmp_path)
 
     r = run_inference_verified(
-        str(ckpt), images_dir=str(tmp_path), device="cpu",
+        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", **kwargs)
 
     assert r["cross_dataset_check"] == expected_check
@@ -1087,7 +1077,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     cal, hold = shifted_cal_holdout()
     inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
               "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -1106,7 +1096,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     Image.new("RGB", (100, 100)).save(img)
     ckpt = project_checkpoint(tmp_path)
     r = run_inference_verified(
-        str(ckpt), images_dir=str(tmp_path), device="cpu",
+        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
         tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
         selection_dir=str(tmp_path / "m"))
 
@@ -1127,7 +1117,7 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
 
     ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(str(ckpt), images_dir=str(tmp_path),
+    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
                                device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))  # no labels beside the image
     assert r["cross_dataset_check"] == "not-comparable-unlabeled-target"
@@ -1184,7 +1174,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ckpt = project_checkpoint(tmp_path)
 
-    run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
+    run_inference(tmp_path, str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                   trait="bud_opening", calibration_labels_dir=str(labels_dir))
     # Every predictor pass, both calibration splits and the delivery pass, ran tiled at the same
     # geometry, not an untiled calibration sweep.
@@ -1233,7 +1223,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     ckpt = project_checkpoint(tmp_path)
 
-    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
+    r = run_inference(tmp_path, str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                       trait="bud_opening", calibration_labels_dir=str(labels_dir))
     assert "error" in r
     assert "tile_size" in r["error"]
@@ -1253,11 +1243,12 @@ def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_bud_tra
         return run_result(
             results=[{"image": img, "width": 100, "height": 100,
                       "boxes": [], "scores": [], "labels": [], "count": 0}],
-            **calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256=sha))
+            **calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256=sha))
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(str(ckpt), str(tmp_path), output_dir=str(out_dir), trait="bud_opening",
+    r = itools.run_inference(tmp_path, str(ckpt), str(tmp_path), output_dir=str(out_dir),
+                             trait="bud_opening",
                              calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
     stamp = read_operating_point_sidecar(out_dir)
@@ -1288,7 +1279,7 @@ def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, capt
     fx.seed_confirmed_count(tmp_path)
     ckpt = project_checkpoint(tmp_path)
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    return itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
+    return itools.deliver_per_image_counts(tmp_path, str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
                                   calibration_labels_dir=str(tmp_path))
 

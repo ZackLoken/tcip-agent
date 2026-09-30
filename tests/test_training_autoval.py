@@ -65,11 +65,11 @@ def test_auto_train_val_refuses_a_missing_location_in_preflights_own_words(
         data_cfg["labels_dir"] = str(tmp_path / "gone")
 
     with pytest.raises(ValueError, match="data.labels_dir"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
     # Admits valid work: the same config naming a real location trains.
     data_cfg["labels_dir"] = str(real_labels)
-    train_ds, _val_ds, _partition = auto_train_val("detection", data_cfg, None)
+    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert train_ds.num_samples
 
 
@@ -82,7 +82,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     # The loaders index by each sample's own source, so a drawn run and a bound one key alike;
@@ -105,7 +105,7 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
         "split": {"group_by": "not_a_real_grouping_key"},
     }
     with pytest.raises(ValueError):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
@@ -120,7 +120,7 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is None
     # Still the producer's own samples, indexed by source identity, with every admitted stem
     # recorded as trained: a failed draw drops the validation side, never the membership.
@@ -146,7 +146,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds, partition = auto_train_val("ordinal", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "ordinal", data_cfg, None)
 
     assert val_ds is not None
     assert train_ds.num_samples + val_ds.num_samples == 4
@@ -176,7 +176,7 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True}
-    _train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    _train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is None  # single group -> no leakage-free val possible
 
 
@@ -194,7 +194,7 @@ def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
     )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True}
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is None
     assert not hasattr(train_ds, "tile_size")
 
@@ -226,7 +226,7 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     assert train_ds.tile_size == 128 and val_ds.tile_size == 128
     assert train_ds.num_samples > 0 and val_ds.num_samples > 0
@@ -253,7 +253,7 @@ def test_spatial_manifest_tied_val_test_fractions_place_by_declared_order(tmp_pa
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.2},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["train_region"] == [(1030, 0, 3218, 3000)]
@@ -275,7 +275,7 @@ def test_spatial_manifest_tied_test_calibration_fractions_place_by_declared_orde
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.15, "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["calibration_region"] == [(0, 0, 643, 3000)]
@@ -295,7 +295,7 @@ def test_spatial_manifest_pins_train_val_and_test_regions_for_distinct_fractions
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["train_region"] == [(1236, 0, 3630, 3000)]
@@ -313,7 +313,7 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    auto_train_val("detection", data_cfg, None)
+    auto_train_val(tmp_path, "detection", data_cfg, None)
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["train_region"] and manifest["val_region"] and manifest["test_region"]
     for region in (manifest["train_region"], manifest["val_region"], manifest["test_region"]):
@@ -335,7 +335,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
                   "keep_regions": [(0, 0, 100, 100)]},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
 
 
@@ -356,7 +356,7 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(stems)
@@ -381,7 +381,7 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": "bud"}, "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
     assert partition["group_by"] == "explicit_map"
 
@@ -398,7 +398,7 @@ def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["calibration_region"] == []
@@ -417,7 +417,7 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     assert recorded_side(partition, "train") == [stem]
     assert "spatial_manifest" in data_cfg["split"]
@@ -451,13 +451,13 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
     base_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"}}
 
-    train_ds, val_ds, _ = auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", {**base_cfg, "split": dict(split)}, None)
     assert val_ds is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 5
 
     _multiband_source(images_dir, labels_dir, "c", 3)
     with pytest.raises(ValueError, match="different band counts"):
-        auto_train_val("detection", {**base_cfg, "split": dict(split)}, None)
+        auto_train_val(tmp_path, "detection", {**base_cfg, "split": dict(split)}, None)
 
 
 def _probe_spy(monkeypatch) -> list[str]:
@@ -495,7 +495,7 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: 
                 "scope": {"subject": "bud"}, "num_channels": 1,
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert val_ds is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 1
@@ -513,7 +513,7 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(tmp_path: Path, m
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert val_ds is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 5
@@ -539,7 +539,7 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
     }
     probed = _probe_spy(monkeypatch)
 
-    result = preflight_config(cfg, smoke=True)
+    result = preflight_config(tmp_path, cfg, smoke=True)
 
     assert result["valid"] is True, result["issues"]
     # One read for the run's sizes; the second is the spatial manifest's own raster identity,
@@ -556,7 +556,7 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
                 "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
 
-    train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert data_cfg["num_channels"] == train_ds.expected_channels == 5
     from tcip_mcp.pipelines.model_build import recorded_model_dims
@@ -574,7 +574,7 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["calibration_region"]
@@ -639,7 +639,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label_regardless_of_reserve
         "split": {"val_ratio": 0.2, "test_ratio": 0.1},  # no reserve_calibration_fraction
     }
     with pytest.raises(UnreadableLabelDocument):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
     assert "training without validation" not in caplog.text
 
 
@@ -655,7 +655,7 @@ def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path
                   "reserve_calibration_fraction": 0.3},
     }
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: Path):
@@ -687,7 +687,7 @@ def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: 
                   "reserve_calibration_fraction": 0.2},
     }
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_reserve_calibration_fraction_records_raster_content_identity(tmp_path: Path):
@@ -699,7 +699,7 @@ def test_reserve_calibration_fraction_records_raster_content_identity(tmp_path: 
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    auto_train_val("detection", data_cfg, None)
+    auto_train_val(tmp_path, "detection", data_cfg, None)
     manifest = data_cfg["split"]["spatial_manifest"]
     identity = manifest["raster_content_identity"]
     assert identity is not None
@@ -716,7 +716,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert val_ds is not None
     train_loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=task_collate("detection"))
@@ -732,7 +732,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
     }
-    run = trainer_run(cfg, tmp_path / "out", has_val_loader=val_loader is not None,
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=val_loader is not None,
                       id="auto-run-77")
     run = train(run, train_loader, val_loader=val_loader)
 

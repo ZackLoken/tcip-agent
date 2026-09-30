@@ -6,11 +6,11 @@ plus per-image TP/FP/FN. Both regimes share ``coco_detection_metrics``.
 
 Usage:
     tcip score-predictions --path <image_or_dataset_dir> \
-        [--project <platform_root>] [--iou-threshold 0.5] [--conf-threshold <default>] \
-        [--detail] [--trait <trait_name>]
+        [--iou-threshold 0.5] [--conf-threshold <default>] [--detail] \
+        [--trait <trait_name> --project <project>]
 
---project (or $TCIP_STATE_ROOT) is required only when --trait is given, since resolving a trait's
-derived localization criterion reads the project's own trait registry.
+--project is required with --trait, since a trait's derived localization criterion is read from
+the project's own confirmed revision.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -27,8 +27,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="Absolute path to an image file (single-image match) or a dataset "
                              "root (aggregate).")
     parser.add_argument("--project", default=None,
-                        help="Platform state root the trait registry is read under. Required "
-                             "(or set $TCIP_STATE_ROOT) only when --trait is given.")
+                        help="The project the trait's confirmed revision is read from. Required "
+                             "with --trait.")
     parser.add_argument("--iou-threshold", type=float, default=0.5,
                         help="IoU threshold for a positive match (the AP@0.5 comparability "
                              "convention).")
@@ -43,19 +43,23 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "metric. Absent -> the IoU convention governs.")
     args = parser.parse_args(argv)
 
+    trait = None
     if args.trait:
-        require_and_pin_platform_root(args.project)
+        if args.project is None:
+            parser.error("--trait requires --project, the project its confirmed revision is in")
+        from tcip_mcp.operationalization import latest_confirmed
 
-    from tcip_store.binding import bind_default
+        trait = latest_confirmed(args.trait, bound_project(args.project)).entry
+    else:
+        from tcip_store.binding import bind_default
 
-    bind_default()
+        bind_default()
 
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = score_predictions(
-        args.path, iou_threshold=args.iou_threshold, detail=args.detail, trait=args.trait,
-        **stated)
+        args.path, iou_threshold=args.iou_threshold, detail=args.detail, trait=trait, **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

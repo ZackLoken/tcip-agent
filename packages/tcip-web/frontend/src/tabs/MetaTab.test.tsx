@@ -10,9 +10,7 @@ const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  useStore.setState((s) => ({
-    gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
-  }));
+  useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/proj" } });
   vi.spyOn(metaApi, "reports").mockResolvedValue({ reports: [], count: 0, total_available: 0 });
   vi.spyOn(metaApi, "retrospectives").mockResolvedValue({
     retrospectives: [],

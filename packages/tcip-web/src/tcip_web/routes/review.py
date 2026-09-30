@@ -48,12 +48,12 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
 )
-from tcip_mcp.web_client import current_root
 from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import allowed_optional, allowed_path
 from tcip_web.routes.annotate import annotation_dict
+from tcip_web.state import store
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 logger = logging.getLogger(__name__)
@@ -71,19 +71,11 @@ def _current_user() -> str:
     return current_user()
 
 
-def _guarded(path: str) -> Path:
-    """Confine a client-supplied path and hand back the resolved path every later read uses."""
-    try:
-        return assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-
 def _get_engine(dataset_root: str) -> ReviewEngine:
     """The review engine anchored on a client-supplied dataset root, confined first (403)."""
     from tcip_mcp.project_paths import project_state_dir
 
-    key = str(_guarded(dataset_root))
+    key = str(allowed_path(dataset_root))
     if key not in _engines:
         _engines[key] = ReviewEngine(state_dir=project_state_dir(key), current_user=_current_user())
     return _engines[key]
@@ -95,7 +87,7 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
     """
     from tcip_web.routes.audit_gap import record_committed
 
-    record_committed(tool, arguments, scope=str(_guarded(scope)))
+    record_committed(tool, arguments, scope=str(allowed_path(scope)))
 
 
 def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str]:
@@ -168,10 +160,7 @@ def _verdict_class_id(scope: ClassScope, class_name: str) -> Optional[int]:
 
 
 def _image_dims(path: str) -> tuple[int, int]:
-    try:
-        p = assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    p = allowed_path(path)
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
@@ -180,15 +169,6 @@ def _image_dims(path: str) -> tuple[int, int]:
         return image_dimensions(resolve_image_source(p.parent, p.stem))
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-def _guard_path(path: Optional[str]) -> Optional[str]:
-    """Confine a client-supplied label/dir path and hand back its resolved spelling, or None; 403
-    on escape.
-    """
-    if not path:
-        return None
-    return str(_guarded(path))
 
 
 def _ensure_original_backup(label_path: Optional[str]) -> None:
@@ -260,8 +240,8 @@ def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
               pred_path: Optional[str]) -> ReviewContext:
     w, h = _image_dims(image_path)
     ctx = ReviewContext(img_name=image_name, img_width=w, img_height=h)
-    gt_path = _guard_path(gt_path)
-    pred_path = _guard_path(pred_path)
+    gt_path = allowed_optional(gt_path)
+    pred_path = allowed_optional(pred_path)
     if gt_path:
         ctx.gt = _read_annotations_or_400(read_annotations, gt_path)
     if pred_path:
@@ -621,7 +601,7 @@ def _verify_rule_admitted_claim(
         raise HTTPException(400, "rule_admitted needs a prediction bucket to read the rule from")
     bucket_dir = str(Path(pred_path).parent)
     stamp = read_operating_point_sidecar(bucket_dir, strict=True)
-    resolution = admission_rule_of(stamp, bucket_dir)
+    resolution = admission_rule_of(stamp, bucket_dir, project=store.open_root())
     if resolution.rule is None:
         raise HTTPException(400, resolution.reason)
     if prediction_score(pred) < resolution.rule.conf:
@@ -651,8 +631,8 @@ def record_action(payload: ActionPayload) -> dict:
             "record_action requires the dataset root this verdict is scoped to; name one "
             "rather than leaving it unstated.",
         )
-    gt_path = _guard_path(payload.gt_path)
-    pred_path = _guard_path(payload.pred_path)
+    gt_path = allowed_optional(payload.gt_path)
+    pred_path = allowed_optional(payload.pred_path)
     scope = _review_scope(pred_path, payload.subject, payload.attribute)
     ctx = _load_ctx(payload.image_name, payload.image_path, gt_path=gt_path, pred_path=pred_path)
     engine = _get_engine(payload.dataset_root)
@@ -821,8 +801,8 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
             "mark_complete requires the dataset root this completion is scoped to; name one "
             "rather than leaving it unstated.",
         )
-    gt_path = _guard_path(payload.gt_path)
-    pred_dir = _guard_path(payload.pred_dir)
+    gt_path = allowed_optional(payload.gt_path)
+    pred_dir = allowed_optional(payload.pred_dir)
     engine = _get_engine(payload.dataset_root)
     bucket = _bucket_of_dir(pred_dir)
     is_negative: Optional[bool] = None
@@ -882,7 +862,7 @@ class BackupPayload(BaseModel):
 @router.post("/backup_labels")
 def backup_labels(payload: BackupPayload) -> dict:
     """Top up ``<dir>/.original/``: capture any label file that has no baseline yet."""
-    label_dirs = [d for d in (_guard_path(d) for d in payload.label_dirs) if d]
+    label_dirs = [d for d in (allowed_optional(d) for d in payload.label_dirs) if d]
     engine = _get_engine(payload.dataset_root)
     n = engine.backup_original_labels(*label_dirs)
     return {"status": "ok", "files_backed_up": n}
@@ -937,8 +917,8 @@ def image_statuses(
     """Batch review status + detection presence for a whole (date). ``gt_dir``/``pred_dir`` are the
     per-image label dirs (annotations / a model's predictions on the date).
     """
-    gt_dir = _guard_path(gt_dir)
-    pred_dir = _guard_path(pred_dir)
+    gt_dir = allowed_optional(gt_dir)
+    pred_dir = allowed_optional(pred_dir)
     engine = _get_engine(dataset_root)
     stems, unreadable = _stems_with_objects(gt_dir, pred_dir)
     return ImageStatusesResponse(
@@ -978,14 +958,14 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
     )
     from tcip_store import StoreError
 
-    guarded_dir = _guarded(pred_dir)
+    guarded_dir = allowed_path(pred_dir)
     try:
         sidecar = read_operating_point_sidecar(guarded_dir, strict=True)
     except StoreError as exc:
         sidecar = None
         resolution = AdmissionResolution(rule=None, reason=str(exc))
     else:
-        resolution = admission_rule_of(sidecar, guarded_dir)
+        resolution = admission_rule_of(sidecar, guarded_dir, project=store.open_root())
     conf_field = ((sidecar or {}).get("operating_point") or {}).get("conf") or {}
     conf = conf_field.get("value")
     rule_body = (
@@ -1012,13 +992,11 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 
 
 
-def _pq_current_root() -> str:
-    return current_root()
-
-
 @dataclass
 class PriorityQueueJob:
     job_id: str
+    # The project open when the job launched, which it runs for.
+    project: str
     checkpoint_path: str
     images_dir: str
     dataset_root: str
@@ -1031,8 +1009,6 @@ class PriorityQueueJob:
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
     reviewed_skipped: int = 0
-    # The platform root this job launched under, resolved on the request thread.
-    platform_root: str = field(default_factory=_pq_current_root)
 
 
 def _pq_summary(job: PriorityQueueJob) -> dict:
@@ -1048,11 +1024,11 @@ _pq_registry = jobstore.JobRegistry()
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
-    _pq_registry.register(job.job_id, job, job_root=job.platform_root)
+    _pq_registry.register(job.job_id, job)
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
-    """A job by id, from any root this process holds."""
+    """A job by id, whichever project it runs for."""
     return _pq_registry.get(job_id)
 
 
@@ -1067,12 +1043,12 @@ def _pq_worker(job: PriorityQueueJob) -> None:
         from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
         result = prioritize_review_queue(
+            Path(job.project),
             checkpoint_path=job.checkpoint_path,
             images_dir=job.images_dir,
             dataset_root=job.dataset_root,
             method=job.method,
             budget=job.budget,
-            project_path=job.platform_root,
         )
         if "error" in result:
             job.status = "failed"
@@ -1100,9 +1076,9 @@ class LaunchPriorityQueuePayload(BaseModel):
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     # checkpoint_path is confined to the allowed roots, same as the Inference tab's own launch
     # route: a caller must not name a file outside them, registered checkpoint or not.
-    dataset_root = _guarded(payload.dataset_root)
-    checkpoint_path = _guarded(payload.checkpoint_path)
-    images_dir = _guarded(payload.images_dir)
+    dataset_root = allowed_path(payload.dataset_root)
+    checkpoint_path = allowed_path(payload.checkpoint_path)
+    images_dir = allowed_path(payload.images_dir)
     if not checkpoint_path.is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
     if not images_dir.is_dir():
@@ -1111,6 +1087,7 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     # The dataset root, not a store path: the tool derives from it the one verdict store _get_engine opens.
     job = PriorityQueueJob(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",
+        project=str(store.open_root()),
         checkpoint_path=str(checkpoint_path),
         images_dir=str(images_dir),
         dataset_root=str(dataset_root),

@@ -2,8 +2,8 @@
 
 The module functions hold the rules that must mean the same thing on every backend (kind and key
 validation, the concurrency policy, the transaction-misuse rules) and delegate the storage itself
-to the bound backend. :func:`close_connections` is a process-lifecycle operation over every key the
-bound backend has touched.
+to the bound backend. :func:`release_root` lets go of the bound backend's handles on one tree so it
+can be moved.
 """
 
 from __future__ import annotations
@@ -92,6 +92,8 @@ class Store(Protocol):
 
     def close(self) -> None: ...
 
+    def release(self, root: str) -> None: ...
+
 
 _bound: Store | None = None
 _open_transaction = threading.local()
@@ -126,19 +128,16 @@ def capabilities() -> Capabilities:
     return _backend().capabilities()
 
 
-def close_connections() -> None:
-    """Close every connection the bound backend holds, on every thread.
+def release_root(root: str | Path) -> None:
+    """Close every connection the bound backend holds on ``root`` or on a root under it, on every
+    thread, so the tree can be moved; every other root's connections stay open. The database
+    backend waits for every operation using one of those connections to return before closing
+    it; the file backend holds no handles.
 
     Refuses with ``TransactionMisuse`` inside an open transaction.
-
-    The sqlite backend closes every connection of every root and every thread: a connection is
-    opened with ``check_same_thread=False``, so closing one while another thread is inside a
-    statement on it kills the process. The caller guarantees no other thread is inside the seam for
-    the call's duration; the thread-local transaction guard here sees only the calling thread's own
-    transaction. The file backend's own ``close`` releases nothing.
     """
-    _refuse_inside_transaction("close_connections", _CLOSES_UNDER_ANOTHER_THREAD)
-    _backend().close()
+    _refuse_inside_transaction("release_root", _CLOSES_UNDER_ANOTHER_THREAD)
+    _backend().release(canonical_path(root))
 
 
 def _active_txn() -> Txn | None:
@@ -158,7 +157,7 @@ _LOGS_ARE_NOT_TRANSACTIONAL = (
 )
 
 _CLOSES_UNDER_ANOTHER_THREAD = (
-    "close the transaction first. Closing every connection while this thread holds one open "
+    "close the transaction first. Closing a root's connections while this thread holds one open "
     "inside a transaction would close the connection out from under its own commit"
 )
 
@@ -464,7 +463,6 @@ __all__ = [
     "blob_path",
     "capabilities",
     "clear_log",
-    "close_connections",
     "delete",
     "exists",
     "keys",
@@ -475,6 +473,7 @@ __all__ = [
     "read_blob_versioned",
     "read_log",
     "read_versioned",
+    "release_root",
     "replace",
     "transaction",
     "unbind",

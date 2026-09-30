@@ -9,6 +9,7 @@ workspace, which no rule admits.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from tcip_web.state import store
 
 from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
+from tests._web_fixtures import new_project, open_new_project
 from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
@@ -38,24 +40,6 @@ def client() -> TestClient:
 def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A directory beside the test's workspace that no allow-set rule admits."""
     return tmp_path_factory.mktemp("outside")
-
-
-@pytest.fixture
-def closed_project():
-    """Leave no project open after the test, whatever it opened."""
-    yield
-    store.close_project()
-
-
-def _open(client: TestClient, project_root: Path, dataset_root: Path | None = None) -> None:
-    resp = client.post("/api/dataset/select", json={
-        "project_root": str(project_root), "dataset_root": str(dataset_root or project_root)})
-    assert resp.status_code == 200, resp.text
-
-
-def _project(path: Path) -> Path:
-    (path / ".tcip").mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def _image(path: Path) -> Path:
@@ -86,8 +70,7 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     assert assert_path_allowed(str(inside)) == inside.resolve()
-    roots, _excluded = allowed_roots()
-    assert roots[0] == tmp_path.parent.resolve()
+    assert allowed_roots()[0] == tmp_path.parent.resolve()
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(outside / "leak.jpg"))
 
@@ -97,7 +80,7 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
 ) -> None:
     """A project the workspace lists through a junction or symlink resolves elsewhere and must
     still be admitted, or the front door would list a project no route can open."""
-    real = _project(outside / "linked-project")
+    real = new_project(outside / "linked-project")
     link = tmp_path.parent / "linked"
     try:
         link.symlink_to(real, target_is_directory=True)
@@ -106,20 +89,10 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
     assert assert_path_allowed(str(link / "images")) == (real / "images").resolve()
 
 
-def test_a_platform_state_root_outside_any_workspace_is_not_admitted_on_its_own(
-    tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The development pin (the repo root) is the server's own state, not breeder data."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(outside))
-    (outside / ".tcip").mkdir()
-    with pytest.raises(ValueError, match="outside the allowed roots"):
-        assert_path_allowed(str(outside / ".tcip" / "audit.jsonl"))
-
-
 def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_lives(
     tmp_path: Path, outside: Path,
 ) -> None:
-    project = _project(tmp_path)
+    project = new_project(tmp_path)
     external = outside / "field-data"
     (external / "images").mkdir(parents=True)
     with pytest.raises(ValueError):
@@ -139,11 +112,11 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
 
-    project = _project(tmp_path)
-    registered = register_dataset(str(project), crop="currant", project_root=str(project))
+    project = new_project(tmp_path)
+    registered = register_dataset(project, str(project), "currant")
     assert "error" not in registered
 
-    roots, _excluded = allowed_roots()
+    roots = allowed_roots()
 
     assert all(root.is_absolute() for root in roots)
     assert project.resolve() in roots
@@ -168,9 +141,11 @@ def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
 def test_image_roots_stay_additive_on_top_of_the_derived_set(
     tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tcip_web.state import store
+
     extra = outside / "archive"
     extra.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(extra))
+    store.configure(store.workspace, (extra.resolve(),))
     assert assert_path_allowed(str(extra / "scan.tif")) == (extra / "scan.tif").resolve()
     inside = tmp_path / "still-admitted"
     inside.mkdir()
@@ -203,7 +178,7 @@ def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
     from tcip_mcp.tools import project_tools
     from tcip_web.paths import allowed_roots
 
-    _project(tmp_path)
+    new_project(tmp_path)
 
     def broken(_root):
         raise tcip_store.DecodeError("registry bytes are not a document")
@@ -217,28 +192,27 @@ def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
 
 
 def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
-    client: TestClient, tmp_path: Path, outside: Path, closed_project,
+    client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
+    open_new_project(tmp_path)
     inside = tmp_path / "proj"
     _image(inside / "images" / "2026-02-11" / "a.jpg")
     _image(outside / "images" / "2026-02-11" / "a.jpg")
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(outside)}).status_code == 403
     assert client.post("/api/dataset/select", json={
-        "project_root": str(outside), "dataset_root": str(outside)}).status_code == 403
-    assert store.project_root is None
+        "dataset_root": str(outside)}).status_code == 403
+    assert store.state.dataset.dataset_root is None
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(inside)}).status_code == 200
     selected = client.post("/api/dataset/select", json={
-        "project_root": str(inside), "dataset_root": str(inside), "date": "2026-02-11"})
+        "dataset_root": str(inside), "date": "2026-02-11"})
     assert selected.status_code == 200
     assert selected.json()["selection"]["image_list"] == ["a.jpg"]
-    _open(client, inside)
-    assert store.project_root == inside.resolve()
 
 
 def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
-    client: TestClient, tmp_path: Path, closed_project,
+    client: TestClient, tmp_path: Path,
 ) -> None:
     """The subject registry route and the dataset tree's per-date scan read one directory under
     one guard: a symlink whose target genuinely sits inside the allow-set is admitted by both."""
@@ -246,7 +220,7 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     from tcip_annotation.state import Annotation, BBox
     from tcip_web.routes.dataset import _subjects_by_date
 
-    project = _project(tmp_path)
+    project = open_new_project(tmp_path)
     date = "2026-02-11"
     real_annotations = tmp_path.parent / "nas" / "annotations_store" / date
     real_annotations.mkdir(parents=True)
@@ -261,21 +235,19 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     assert problem is None
 
     load = client.get("/api/subjects/load", params={
-        "project_root": str(project), "dataset_root": str(project),
-        "annotations_dir": str(ann_dir / date)})
+        "dataset_root": str(project), "annotations_dir": str(ann_dir / date)})
     assert load.status_code == 200
     assert set(load.json()["subjects"]) == {"bud"}
 
     select = client.post("/api/dataset/select", json={
-        "project_root": str(project), "dataset_root": str(project),
-        "subject": "bud", "date": date})
+        "dataset_root": str(project), "subject": "bud", "date": date})
     assert select.status_code == 200
     assert select.json()["annotations_present"] is True
     assert select.json()["label_problem"] is None
 
 
 def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_routes(
-    client: TestClient, tmp_path: Path, outside: Path, closed_project,
+    client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
     """The same directory 403s the subject registry route and is reported as this date's problem
     by the dataset tree, rather than the tree quietly listing what the registry route refuses."""
@@ -283,7 +255,7 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     from tcip_annotation.state import Annotation, BBox
     from tcip_web.routes.dataset import _subjects_by_date
 
-    project = _project(tmp_path)
+    project = open_new_project(tmp_path)
     date = "2026-02-11"
     real_annotations = outside / "nas" / "annotations_store" / date
     real_annotations.mkdir(parents=True)
@@ -298,56 +270,35 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     assert problem is not None and "outside the allowed roots" in problem
 
     resp = client.get("/api/subjects/load", params={
-        "project_root": str(project), "dataset_root": str(project),
-        "annotations_dir": str(ann_dir / date)})
+        "dataset_root": str(project), "annotations_dir": str(ann_dir / date)})
     assert resp.status_code == 403
 
     # The selection door is advisory and never rejects, so it reports the same refusal as the
     # date's label problem rather than scanning what the other two routes refuse.
     select = client.post("/api/dataset/select", json={
-        "project_root": str(project), "dataset_root": str(project),
-        "subject": "bud", "date": date})
+        "dataset_root": str(project), "subject": "bud", "date": date})
     assert select.status_code == 200
     assert select.json()["annotations_present"] is False
     assert "outside the allowed roots" in (select.json()["label_problem"] or "")
 
 
-def test_the_state_store_persists_under_the_guarded_root_not_the_snapshot_it_loaded(
-    tmp_path: Path, outside: Path,
-) -> None:
-    """A gui.json edited on disk to name another project must not redirect the next flush."""
-    from tcip_mcp.web_client import gui_snapshot_key
-    from tcip_web.state import DatasetSelection, GuiState, StateStore
-
-    inside = _project(tmp_path / "proj")
-    tcip_store.replace(gui_snapshot_key(str(inside)),
-                       GuiState(dataset=DatasetSelection(project_root=str(outside))).model_dump(mode="json"))
-    s = StateStore()
-    assert s.open_project(inside.resolve()) is True
-    assert s.state.dataset.project_root == str(outside)
-    s._flush_sync()
-    assert tcip_store.read(gui_snapshot_key(str(inside)), default=None) is not None
-    assert tcip_store.read(gui_snapshot_key(str(outside)), default=None) is None
-    assert not (outside / ".tcip").exists()
-
-
-def test_session_routes_confine_the_project_root_and_the_dataset_root_they_record(
+def test_session_routes_confine_the_dataset_root_they_record(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
-    inside = _project(tmp_path / "proj")
-    assert client.post("/api/sessions/start", json={"project_root": str(outside)}).status_code == 403
-    assert client.get("/api/sessions/load", params={"project_root": str(outside)}).status_code == 403
+    open_new_project(tmp_path)
+    inside = tmp_path / "proj"
+    inside.mkdir()
+    assert client.post("/api/sessions/start", json={}).status_code == 200
     assert client.post("/api/sessions/image_event", json={
-        "project_root": str(inside), "image_name": "a.jpg", "final_annotation_count": 1,
+        "image_name": "a.jpg", "final_annotation_count": 1,
         "dataset_root": str(outside)}).status_code == 403
     assert not (outside / ".tcip").exists()
 
-    assert client.post("/api/sessions/start", json={"project_root": str(inside)}).status_code == 200
     ok = client.post("/api/sessions/image_event", json={
-        "project_root": str(inside), "image_name": "a.jpg", "final_annotation_count": 1,
+        "image_name": "a.jpg", "final_annotation_count": 1,
         "session_seconds_delta": 2.0, "dataset_root": str(inside)})
     assert ok.status_code == 200
-    loaded = client.get("/api/sessions/load", params={"project_root": str(inside)})
+    loaded = client.get("/api/sessions/load")
     assert loaded.status_code == 200
     assert loaded.json()["sessions"][0]["images"]["a.jpg"]["dataset_root"] == str(inside.resolve())
 
@@ -355,7 +306,7 @@ def test_session_routes_confine_the_project_root_and_the_dataset_root_they_recor
 def test_review_routes_confine_the_dataset_root_and_the_label_files_they_read(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
-    inside = _project(tmp_path / "proj")
+    inside = new_project(tmp_path / "proj")
     image = _image(inside / "images" / "2026-02-11" / "a.jpg")
     assert client.get("/api/review/image_statuses", params={
         "dataset_root": str(outside)}).status_code == 403
@@ -376,9 +327,11 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
     """The audit scope is derived and guarded before the label is written, so a refused write
     leaves no label behind. The image is admitted through the additive roots so that only the
     label's own dataset root is what refuses."""
+    from tcip_web.state import store
+
     image = _image(outside / "dataset" / "images" / "2026-02-11" / "a.jpg")
     label = outside / "dataset" / "annotations" / "2026-02-11" / "a.json"
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(outside / "dataset" / "images"))
+    store.configure(store.workspace, ((outside / "dataset" / "images").resolve(),))
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(image), "label_path": str(label), "annotations": []})
     assert resp.status_code == 403
@@ -395,58 +348,44 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
 # ── the Results doors belong to the open project ──────────────────────────
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(
     client: TestClient, tmp_path: Path,
 ) -> None:
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
-    store.close_project()
+    asyncio.run(store.close_project())
     refused = client.post("/api/results/phenology_measurement", json=body)
     assert refused.status_code == 409
-    assert "open a project" in refused.json()["detail"]
+    assert "no project is open" in refused.json()["detail"]
 
-    _open(client, tmp_path, tmp_path / "ds")
+    open_new_project(tmp_path)
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
-def test_a_delivery_cannot_name_one_project_while_another_is_open(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
-    other = _project(tmp_path / "other")
-    _open(client, other)
-    resp = client.post("/api/results/phenology_measurement", json=body)
-    assert resp.status_code == 403
-    assert "not the open project" in resp.json()["detail"]
-    assert not (other / "results_export").exists()
-
-
-@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
-    b = _project(tmp_path / "b")
+    b = new_project(tmp_path.parent / "b")
     propose(b, BUD_OPENING)
     seed_confirmed_crossing(b, BUD_OPENING.name, measured_subject="bud")
-    _open(client, b)
+    open_new_project(b)
 
-    diverted = {**body, "project_root": str(b)}
-    resp = client.post("/api/results/phenology_measurement", json=diverted)
+    resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 403
     assert "does not belong to project" in resp.json()["detail"]
     resp = client.post("/api/results/export_csv",
-                       json={**diverted, "payload": "milestones", "filename": "x.csv"})
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 403
     assert not (b / "results_export").exists()
     assert not any(r["tool"] in ("results.export_csv", "delivery_event")
                    for r in tcip_store.read_log(audit_log_key(b)).records)
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
@@ -461,7 +400,6 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     relocated = {**body, "predictions_by_date": {
         d: str(copied / Path(p).relative_to(tmp_path / "ds"))
         for d, p in body["predictions_by_date"].items()}}
-    _open(client, tmp_path)
     refused = client.post("/api/results/phenology_measurement", json=relocated)
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
@@ -472,12 +410,12 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert resp.status_code not in (403, 409), resp.text
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
     payload = _capture_fixture(tmp_path)
-    _open(client, tmp_path, tmp_path / "images")
+    open_new_project(tmp_path)
 
     # The payload carries no path: a persist_path pointed outside the project names nothing
     # this door reads, so the build still lands under the open project, addressed by name.
@@ -498,7 +436,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     moved_csv.write_text(Path(payload["csv_path"]).read_text(encoding="utf-8"), encoding="utf-8")
     from tests._binding_fixtures import register_plant_registry_for
 
-    moved_registry = register_plant_registry_for([moved_csv], name="moved-plots")
+    moved_registry = register_plant_registry_for(tmp_path, [moved_csv], name="moved-plots")
     ok = client.post("/api/results/plant_mapping/build",
                      json={**payload, "plant_registry": moved_registry})
     assert ok.status_code == 200, ok.text

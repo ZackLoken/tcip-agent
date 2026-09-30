@@ -23,17 +23,19 @@ IMG_W, IMG_H = 160, 100
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
-def allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An armed allow-list holding exactly one root, with a real image and dataset layout inside."""
+def allowed(tmp_path: Path) -> Path:
+    """The backend started with one additive image root, a real image and dataset layout inside."""
+    from tcip_web.state import store
+
     root = tmp_path / "allowed"
     (root / "images").mkdir(parents=True)
     Image.new("RGB", (IMG_W, IMG_H), color=(70, 90, 110)).save(root / "images" / "IMG_0007.JPG")
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(root.resolve()))
+    store.configure(store.workspace, (root.resolve(),))
     return root
 
 

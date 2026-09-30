@@ -1,12 +1,12 @@
 r"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid, from the
 command line.
 
-Wraps ``vision_tools.visualize``: saved to ``.tcip/artifacts/viz/``, path returned. --project (or
-$TCIP_STATE_ROOT) is required, since the artifact and the platform audit line land under it.
+Wraps ``vision_tools.visualize``: saved under the project's ``.tcip/artifacts/viz/``, path
+returned. --project is required, since the artifact and the audit line land under it.
 
 Usage:
     tcip visualize --source annotations --path <image.jpg> \
-        --project <platform_root> [--task detect] [--class-names fruit,shoot] \
+        --project <project> [--task detect] [--class-names fruit,shoot] \
         [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16]
 
 --source is one of 'annotations' (path = image file), 'predictions' (path = image file),
@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -30,9 +30,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--path", required=True,
                         help="Image file (annotations/predictions/comparison) or dataset "
                              "folder (dataset).")
-    parser.add_argument("--project", default=None,
-                        help="Platform state root the artifact and the audit line land under. "
-                             "Required (or set $TCIP_STATE_ROOT).")
+    parser.add_argument("--project", required=True,
+                        help="The project the artifact and the audit line land under.")
     parser.add_argument("--task", default="detect", choices=["detect", "segment"])
     parser.add_argument("--class-names", default="",
                         help="Comma-separated class names (e.g. 'fruit,shoot').")
@@ -46,17 +45,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="Number of samples in the grid (source=dataset only).")
     args = parser.parse_args(argv)
 
-    require_and_pin_platform_root(args.project)
-
-    from tcip_store.binding import bind_default
-
-    bind_default()
+    project = bound_project(args.project)
 
     from tcip_mcp.tools.vision_tools import visualize
 
     stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
     result = visualize(
-        args.source, args.path, task=args.task, class_names=args.class_names,
+        project, args.source, args.path, task=args.task, class_names=args.class_names,
         iou_threshold=args.iou_threshold, n=args.n, **stated)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0

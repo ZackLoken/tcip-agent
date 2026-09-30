@@ -799,6 +799,9 @@ class FileBackend:
     def close(self) -> None:
         """Release nothing; the file backend holds no handles between calls."""
 
+    def release(self, root: str) -> None:
+        """Release nothing under ``root``; the file backend holds no handles between calls."""
+
 
 class _FileTxn:
     """The file backend's transaction handle: reads under the lock, writes staged until exit."""

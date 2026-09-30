@@ -1,14 +1,7 @@
-"""Embedded agent terminal: run the real Claude Code CLI in a PTY.
-
-The in-app agent surface is the actual ``claude`` interactive TUI, spawned fenced and directly (no
-wrapping shell) in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on
-POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` / ``.claude/skills/`` / ``.mcp.json``
-and inherits the machine's existing Claude Code auth. Raw PTY bytes stream to xterm.js in the
-browser over a WebSocket; keystrokes stream back.
-
-This module owns the process/PTY concerns; the HTTP/WS surface is ``routes/terminal.py``. The spawn
-command can be overridden via ``TCIP_TERMINAL_CMD``; with no override and no ``claude`` on PATH the
-terminal reports unavailable.
+"""Embedded agent terminal: the ``claude`` CLI spawned fenced and directly in a pseudo-terminal
+(ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and
+keystrokes streamed in. ``TCIP_TERMINAL_CMD`` overrides the spawn command; with no override and
+no ``claude`` on PATH the terminal reports unavailable.
 """
 
 from __future__ import annotations
@@ -69,12 +62,17 @@ def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
     return command
 
 
-def _materialize_fence_settings() -> Optional[Path]:
+_PROJECT_HOOKS = frozenset({"agent_session_start.py", "agent_learning_capture.py"})
+"""The hook scripts that act on the session's project, launched with ``--project``."""
+
+
+def _materialize_fence_settings(project: Optional[Path]) -> Optional[Path]:
     """Write a spawn-time copy of the fence settings with absolute hook commands.
 
     Rewrites each guard command to an absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this
     process's ``sys.executable`` + the guard directory), so a hook runs whatever the tool's current
-    cwd.
+    cwd; a :data:`_PROJECT_HOOKS` script is also passed ``--project`` naming ``project`` when one
+    is given.
 
     Returns the materialized file, or ``None`` if the template is missing/unreadable.
     """
@@ -91,7 +89,10 @@ def _materialize_fence_settings() -> Optional[Path]:
     for event_groups in cfg.get("hooks", {}).values():
         for group in event_groups:
             for hook in group.get("hooks", []):
-                hook["command"] = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
+                command = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
+                if project is not None and any(name in command for name in _PROJECT_HOOKS):
+                    command += f' --project "{project.as_posix()}"'
+                hook["command"] = command
     # A process-private directory (mkdtemp, mode 0700 on POSIX), not a fixed shared-temp name, so the
     # live fence cannot be pre-created or race-written by another local process before the CLI reads it.
     try:
@@ -102,7 +103,7 @@ def _materialize_fence_settings() -> Optional[Path]:
     return dest
 
 
-def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
+def _resolve_fence(project: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
     """The fenced flags' values: ``(settings_path, workspace_dir)``, or ``(None, None)`` if no
     fence.
 
@@ -111,9 +112,9 @@ def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
     """
     if not _FENCE_SETTINGS.is_file():
         return None, None
-    from tcip_mcp.workspace import workspace_root
+    from tcip_web.state import store
 
-    materialized = _materialize_fence_settings()
+    materialized = _materialize_fence_settings(project)
     if materialized is None:
         logger.warning(
             "Could not materialize absolute fence hook paths; falling back to the committed "
@@ -121,17 +122,33 @@ def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
             "friction), check temp-dir writability."
         )
     settings_path = materialized or _FENCE_SETTINGS
-    return str(settings_path), str(workspace_root())
+    return str(settings_path), str(store.workspace)
 
 
-def resolve_terminal_command() -> Optional[list[str]]:
-    """Argv for the agent terminal, or ``None`` when unavailable.
+def _mcp_config(project: Path) -> list[str]:
+    """The flags that start the session's MCP server for ``project`` alone: a spawn-time
+    configuration naming this interpreter's ``tcip_mcp --project <project>``, and
+    ``--strict-mcp-config`` so the repository's own configuration, which names no project, is not
+    loaded beside it."""
+    config = {"mcpServers": {"tcip": {
+        "command": Path(sys.executable).as_posix(),
+        "args": ["-m", "tcip_mcp", "--project", project.as_posix()],
+    }}}
+    dest = Path(tempfile.mkdtemp(prefix="tcip_mcp_")) / "tcip.mcp.json"
+    dest.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return ["--mcp-config", str(dest), "--strict-mcp-config"]
+
+
+def resolve_terminal_command(project: Optional[Path]) -> Optional[list[str]]:
+    """Argv for the agent terminal acting on ``project``, or ``None`` when unavailable.
 
     Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the ``claude``
     CLI on PATH. The real CLI is spawned fenced and directly (no wrapping shell), so
     ``/exit`` ends the process cleanly: ``--settings`` applies the breeder-lane profile (absolute
     hook paths), ``--add-dir`` grants the workspace, ``--permission-mode default`` surfaces
-    un-allowed actions for approval.
+    un-allowed actions for approval, and with a ``project`` the MCP server starts for it
+    (:func:`_mcp_config`). With none, the repository's configuration starts a server for no
+    project.
     """
     override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
     if override:
@@ -142,10 +159,13 @@ def resolve_terminal_command() -> Optional[list[str]]:
     exe = shutil.which(cli)
     if exe is None:
         return None
-    settings_path, ws = _resolve_fence()
+    argv = [exe]
+    settings_path, ws = _resolve_fence(project)
     if settings_path:
-        return [exe, "--settings", settings_path, "--add-dir", ws or "", "--permission-mode", "default"]
-    return [exe]
+        argv += ["--settings", settings_path, "--add-dir", ws or "", "--permission-mode", "default"]
+    if project is not None:
+        argv += _mcp_config(project)
+    return argv
 
 
 _CLI_VERSIONS: dict[str, Optional[str]] = {}
@@ -236,15 +256,13 @@ def terminal_status() -> dict:
     ok, why = _pty_backend_available()
     if not ok:
         return {"available": False, "reason": why}
-    if resolve_terminal_command() is None:
+    if resolve_terminal_command(None) is None:
         return {"available": False, "reason": _UNAVAILABLE_REASON}
     return {"available": True}
 
 
 def terminal_cwd() -> str:
-    """Where the agent runs: the repo root (so .mcp.json / CLAUDE.md / skills load and the fence's
-    cwd-relative deny paths bind correctly). Overridable via env.
-    """
+    """Where the agent runs: ``TCIP_TERMINAL_CWD``, else the repository root."""
     return os.environ.get(TERMINAL_CWD_ENV, str(repo_root_from_here()))
 
 

@@ -393,7 +393,7 @@ def test_write_subject_registry(tmp_path):
     out = tmp_path / "subjects.json"
     # The expert authors the nested registry: two ordered values of a categorical attribute.
     res = write_subject_registry(
-        str(tmp_path),
+        tmp_path, str(tmp_path),
         subjects={"bud": {"description": "a currant bud",
                              "attributes": {"opening": {"type": "categorical",
                                                            "values": ["closed", "open"]}}}},
@@ -419,7 +419,7 @@ def test_write_subject_registry_response_names_the_store_written_path_not_a_fore
 
     foreign = tmp_path / "c.json"
     res = write_subject_registry(
-        str(tmp_path), subjects={"bud": {}}, output_path=str(foreign))
+        tmp_path, str(tmp_path), subjects={"bud": {}}, output_path=str(foreign))
 
     assert "error" not in res
     assert res["subjects_path"] == str(tmp_path / "subjects.json")
@@ -430,7 +430,7 @@ def test_write_subject_registry_response_names_the_store_written_path_not_a_fore
 def test_write_subject_registry_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
-    res = write_subject_registry(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
+    res = write_subject_registry(tmp_path, str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
     assert "error" in res
 
 
@@ -440,7 +440,7 @@ def test_write_subject_registry_defaults_into_the_dataset(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     res = write_subject_registry(
-        str(tmp_path),
+        tmp_path, str(tmp_path),
         subjects={"bud": {"description": "a currant bud",
                              "attributes": {"opening": {"type": "categorical",
                                                            "values": ["closed", "open"]}}}},

@@ -43,7 +43,7 @@ def _revision(project_root: Path) -> TraitRevision:
 # A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
 # so it carries every key the writer's cells read even as that shape grows.
 _NO_MAPPING = MappingBuild(
-    name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
+    name="none", dataset_root="", dataset_id="", built_by="test", built_at="",
     dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "stated"},
     plant_registry={"name": "unregistered", "digest": "0" * 64},
     capture_identity={}, capture_digests={}, unreadable={}, assignments={},
@@ -53,11 +53,13 @@ _NO_MAPPING = MappingBuild(
 
 def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "bud",
             attribute: str | None = None) -> None:
-    """Write a bucket's operating_point.json exactly the way run_inference does: the only
-    fact count_by_class reads to decide whether/how a bucket was classified."""
+    """Write a bucket's operating_point.json, filed under the project holding ``dir_path``,
+    exactly the way run_inference does: the only fact count_by_class reads to decide whether/how
+    a bucket was classified."""
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(dir_path, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}})
+    write_sidecar(dir_path, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}},
+                  project=dir_path.parent)
 
 
 # ── date helpers (unchanged) ──────────────────────────────────────────────
@@ -408,11 +410,11 @@ def _real_delivery_flags(tmp_path: Path):
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
     predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
     pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
-    classifier_recon = reconcile_classifier_validity([str(d1)])
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
+    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
     classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening")
-    tile_recon = reconcile_tile_size_validity(pred_dirs)
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
+    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     document_reconciliations = {
         "operating_point": recon,
@@ -434,7 +436,7 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
             flags={"classifier": None, "operating_point": None}, acknowledgment=None,
             document_reconciliations={}, producer={},
             dimension_reconciliations={}, predictions_by_date={},
-            project_root=tmp_path, plant_mapping=_NO_MAPPING)
+            project=tmp_path, plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
 
@@ -451,7 +453,7 @@ def test_write_phenology_csv_refuses_a_count_only_reconciliation_with_nothing_on
             "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
             document_reconciliations=count_only, producer={},
             dimension_reconciliations=dimension_reconciliations,
-            predictions_by_date=predictions_by_date, project_root=tmp_path,
+            predictions_by_date=predictions_by_date, project=tmp_path,
             plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
@@ -468,7 +470,7 @@ def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="nothing to reconcile"),
         document_reconciliations={}, producer={},
         dimension_reconciliations={}, predictions_by_date={},
-        project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        project=tmp_path, plant_mapping=_NO_MAPPING)
     assert (tmp_path / "out.csv").exists()
     assert [r["door"] for r in resolution.read_delivery_events(tmp_path)] == ["test"]
 
@@ -497,14 +499,14 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
     predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
     pred_dirs = list(predictions_by_date.values())
 
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
     assert recon["missing_sidecars"] == [str(d2)]
     assert recon["confs"] == {str(d1): 0.7, str(d2): None}
 
-    classifier_recon = reconcile_classifier_validity([str(d1)])
+    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
     classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening")
-    tile_recon = reconcile_tile_size_validity(pred_dirs)
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
+    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
     phenology.write_phenology_csv(
@@ -517,7 +519,7 @@ def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_
             },
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
     records = [
         r for r in resolution.read_delivery_events(tmp_path) if r["door"] == "test.missing_stamp"
@@ -541,7 +543,7 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
             "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=incomplete, acknowledgment=None,
             document_reconciliations=document_reconciliations, producer={},
             dimension_reconciliations=dimension_reconciliations,
-            predictions_by_date=predictions_by_date, project_root=tmp_path,
+            predictions_by_date=predictions_by_date, project=tmp_path,
             plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
@@ -549,7 +551,7 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
         "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
     assert cells["positive_state_classifier_validated"]
 
 
@@ -580,11 +582,11 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
     predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
     pred_dirs = list(predictions_by_date.values())
 
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
-    classifier_recon = reconcile_classifier_validity([str(d1)])
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
+    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
     classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening")
-    tile_recon = reconcile_tile_size_validity(pred_dirs)
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
+    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
     assert tile_recon["operative"] and tile_recon["validated"] == VALIDATED_FALSE
     assert recon["validated"] != VALIDATED_FALSE  # the count operating point itself cleared
 
@@ -600,7 +602,7 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
             },
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert cells["operating_point_validated"] == VALIDATED_FALSE
 
@@ -608,7 +610,6 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
 def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_it(tmp_path):
     """The delivery event is recorded inside the writer itself: a caller that calls the writer
     directly, never through ``deliver_phenology_milestones``, still leaves the record behind."""
-    import tcip_store as ts
     from tcip_mcp.pipelines import resolution
 
     flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
@@ -619,11 +620,10 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
         "test.direct_writer_call", [], out_csv, _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
-    scope = project_state_dir(tmp_path)
-    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.direct_writer_call"]
+    records = [r for r in resolution.read_delivery_events(tmp_path)
+               if r["door"] == "test.direct_writer_call"]
     assert len(records) == 1, records
     assert records[0]["output_path"] == str(out_csv)
     assert records[0]["trait"] == "bud_opening"
@@ -649,7 +649,7 @@ def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="just in case"),
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert cells["acknowledged_by"] is None
     assert cells["acknowledgment_reason"] is None
@@ -672,7 +672,7 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
         "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert set(cells) == set(phenology.PROVENANCE_COLUMNS)
 
@@ -689,7 +689,7 @@ def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
         "test", [row], tmp_path / "curve.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "curve.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     assert header == phenology.curve_csv_columns()
@@ -713,7 +713,7 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
         "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     values = written.splitlines()[1].split(",")
@@ -847,7 +847,7 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
         "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
         document_reconciliations=document_reconciliations, producer={},
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     assert "n_observed_dates" in header

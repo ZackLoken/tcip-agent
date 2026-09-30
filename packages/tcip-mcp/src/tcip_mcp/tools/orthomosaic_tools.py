@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.resolution import Acknowledgment
@@ -22,6 +22,7 @@ _PER_PLANT_VALUE_KEY = "count"
 
 
 def orthomosaic_plant_counts(
+    project: Path,
     predictions_dir: str,
     raster_path: str,
     plant_registry: str,
@@ -31,10 +32,11 @@ def orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
-    project_root: str | Path | None = None,
     acknowledgment: Acknowledgment | None = None,
 ) -> dict:
-    """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
+    """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s),
+    delivered under ``project``: its meaning-record is read, its ``plant_registry`` looked up and
+    its delivery event recorded there.
 
     Raises rather than returns an error dict: ``operationalization.OperationalizationRefused``
     (from ``export_aggregated_csv``, no counts) when no confirmed trait revision states a
@@ -101,7 +103,7 @@ def orthomosaic_plant_counts(
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
-            against the platform state root.
+            against the project.
         delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
             to the registered trait whose spec delivers it and whose confirmed operationalization
             this delivery rests on.
@@ -114,16 +116,12 @@ def orthomosaic_plant_counts(
         canopy_subject: The subject registry's subject naming a canopy boundary in the raster's own
             label document. Empty (default) runs the nearest-neighbor regime; set, this door
             attributes by segment containment instead.
-        project_root: The project this delivery's meaning-record reads and delivery event belong
-            to, and where ``plant_registry`` is looked up. ``None`` resolves against this process's
-            pinned platform root.
         acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused
-    from tcip_mcp.project_paths import resolve_output_path
 
-    output_csv_path = str(resolve_output_path(output_csv_path))
+    output_csv_path = str(Path(project, output_csv_path))
     pred_dir = Path(predictions_dir)
     if not pred_dir.is_dir():
         raise CountDeliveryRefused(f"predictions_dir not found: {predictions_dir}")
@@ -139,15 +137,13 @@ def orthomosaic_plant_counts(
         registry_csv_entries,
         verify_registry_csv_bytes,
     )
-    from tcip_mcp.project_paths import platform_state_root
 
-    resolved_project_root = Path(project_root) if project_root is not None else platform_state_root()
-    registry_record = load_registry(resolved_project_root, plant_registry)
+    registry_record = load_registry(project, plant_registry)
     if registry_record is None:
         raise CountDeliveryRefused(
             f"plant registry not found: {plant_registry!r}; register it with "
             "register_plant_registry before this door reads it")
-    registry_entries = registry_csv_entries(registry_record)
+    registry_entries = registry_csv_entries(registry_record, project)
     missing, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(registry_entries)
     if missing:
         raise CountDeliveryRefused(f"plant CSV(s) not found: {missing}")
@@ -351,8 +347,10 @@ def orthomosaic_plant_counts(
         }
 
         assert document_path is not None  # canopy_subject implies the document was resolved above
+        from tcip_mcp.registry_paths import stored_path
+
         canopy_segments_doc = {
-            "path": str(document_path), "sha256": hashlib.sha256(document_bytes).hexdigest(),
+            "path": stored_path(document_path, project), "sha256": hashlib.sha256(document_bytes).hexdigest(),
             "subject": canopy_subject, "n_segments": len(segments),
         }
         segment_ties_disclosure = [
@@ -362,7 +360,6 @@ def orthomosaic_plant_counts(
         ]
         plant_mapping_disclosure = {
             "plant_registry": {"name": registry_record["name"], "digest": registry_record["digest"]},
-            "project_root": str(resolved_project_root),
             "raster_identity": recorded_identity,
             "canopy_segments": canopy_segments_doc,
             "segment_ties": segment_ties_disclosure,
@@ -425,7 +422,6 @@ def orthomosaic_plant_counts(
         # the raster identity and the tolerance instead.
         plant_mapping_disclosure = {
             "plant_registry": {"name": registry_record["name"], "digest": registry_record["digest"]},
-            "project_root": str(resolved_project_root),
             "raster_identity": recorded_identity,
             "nn_tolerance_m": resolved_tolerance,
             "detections_unattributed": n_unmapped,
@@ -456,7 +452,7 @@ def orthomosaic_plant_counts(
             pred_dirs=[predictions_dir],
             door="deliver_orthomosaic_plant_counts",
             plant_mapping=plant_mapping_disclosure,
-            acknowledgment=acknowledgment, project_root=project_root,
+            acknowledgment=acknowledgment, project=project,
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
@@ -494,8 +490,9 @@ def orthomosaic_plant_counts(
     }
 
 
-@mcp.tool()
+@tool()
 def deliver_orthomosaic_plant_counts(
+    project: Path,
     predictions_dir: str,
     raster_path: str,
     plant_registry: str,
@@ -509,8 +506,7 @@ def deliver_orthomosaic_plant_counts(
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
 
     The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract. This door
-    passes no ``project_root`` (the process-pinned platform root) and builds no
-    ``acknowledgment``, so an unvalidated delivery always refuses here.
+    builds no ``acknowledgment``, so an unvalidated delivery always refuses here.
 
     Returns the core's own response dict unchanged on success. On refusal, returns ``{"error": ...,
     **facts}``: the meaning door's own message with no facts (``OperationalizationRefused``), the
@@ -524,9 +520,9 @@ def deliver_orthomosaic_plant_counts(
 
     try:
         return orthomosaic_plant_counts(
-            predictions_dir, raster_path, plant_registry, output_csv_path, delivered_phenotype,
-            crop=crop, pipeline_version=pipeline_version, nn_tolerance_m=nn_tolerance_m,
-            canopy_subject=canopy_subject, project_root=None, acknowledgment=None,
+            project, predictions_dir, raster_path, plant_registry, output_csv_path,
+            delivered_phenotype, crop=crop, pipeline_version=pipeline_version,
+            nn_tolerance_m=nn_tolerance_m, canopy_subject=canopy_subject, acknowledgment=None,
         )
     except OperationalizationRefused as exc:
         return {"error": str(exc)}

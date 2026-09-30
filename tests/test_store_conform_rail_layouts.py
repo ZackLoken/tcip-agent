@@ -87,21 +87,19 @@ def test_a_project_root_holding_a_stray_csv_and_a_nested_dataset_is_admitted(tmp
     assert database_path(str(tmp_path)).is_file()
 
 
-def test_a_workspace_root_holding_only_foreign_files_is_admitted(tmp_path, monkeypatch):
-    """A workspace is a directory of project folders and a marker. Nothing else in it is the
-    seam's, and the marker's one-part key shape claimed every single-segment file there, which
-    made a spreadsheet beside the projects read as record state."""
+def test_a_workspace_root_holding_only_foreign_files_is_admitted(tmp_path):
+    """A workspace is a directory of project folders and a last-opened pointer. Nothing else in
+    it is the seam's, so a spreadsheet beside the projects never reads as record state."""
     from tcip_mcp import workspace
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
     (tmp_path / "notes.txt").write_text("ü", encoding="utf-8")
     (tmp_path / "measurements.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     (tmp_path / "currant_2026").mkdir()
 
     with bound(SqliteBackend()):
-        ts.replace(workspace.active_project_key(), "currant_2026")
+        workspace.write_last_opened(tmp_path, "3f9a1c7e5b20")
 
-        assert ts.read(workspace.active_project_key()).strip() == "currant_2026"
+        assert workspace.read_last_opened(tmp_path) == "3f9a1c7e5b20"
 
 
 # ── one directory, more than one kind of root ────────────────────────────────

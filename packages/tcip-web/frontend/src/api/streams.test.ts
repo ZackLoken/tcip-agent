@@ -151,17 +151,15 @@ describe("openInferenceStream", () => {
 });
 
 describe("openTrainingStream", () => {
-  it("opens the run's stream over ws, percent-escaping the run id and project root", () => {
-    openTrainingStream("/data/proj", "run 1/a", vi.fn());
+  it("opens the run's stream over ws, percent-escaping the run id", () => {
+    openTrainingStream("run 1/a", vi.fn());
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(lastSocket().url.startsWith("ws://")).toBe(true);
-    expect(lastSocket().url).toContain(
-      "/api/training/runs/run%201%2Fa/stream?project_root=%2Fdata%2Fproj",
-    );
+    expect(lastSocket().url.endsWith("/api/training/runs/run%201%2Fa/stream")).toBe(true);
   });
 
   it("reconnects after a mid-run drop so metric rows resume", () => {
-    openTrainingStream("/data/proj", "r1", vi.fn());
+    openTrainingStream("r1", vi.fn());
     lastSocket().open();
     lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
 
@@ -173,7 +171,7 @@ describe("openTrainingStream", () => {
   });
 
   it("holds the reconnect delay at 15 seconds once the backoff has saturated", () => {
-    openTrainingStream("/data/proj", "r1", vi.fn());
+    openTrainingStream("r1", vi.fn());
     for (const delay of [500, 1000, 2000, 4000, 8000]) {
       lastSocket().drop();
       vi.advanceTimersByTime(delay);
@@ -188,7 +186,7 @@ describe("openTrainingStream", () => {
   });
 
   it("stops reconnecting once a terminal status frame has arrived", () => {
-    openTrainingStream("/data/proj", "r1", vi.fn());
+    openTrainingStream("r1", vi.fn());
     lastSocket().open();
     lastSocket().message(
       JSON.stringify({ type: "status", experiment_id: "r1", status: { status: "completed" } }),
@@ -201,7 +199,7 @@ describe("openTrainingStream", () => {
 
   it("keeps reconnecting past an error-only status frame, since the run is not known yet", () => {
     const onMessage = vi.fn();
-    openTrainingStream("/data/proj", "r1", onMessage);
+    openTrainingStream("r1", onMessage);
     lastSocket().open();
     lastSocket().message(
       JSON.stringify({ type: "status", experiment_id: "r1", status: null, error: "unknown run" }),
@@ -227,7 +225,7 @@ describe("openTrainingStream", () => {
   });
 
   it("grows the reconnect delay across open-then-error-then-close cycles, and a metric frame resets it", () => {
-    openTrainingStream("/data/proj", "r1", vi.fn());
+    openTrainingStream("r1", vi.fn());
 
     for (const delay of [499, 999, 1999]) {
       lastSocket().open();
@@ -255,7 +253,7 @@ describe("openTrainingStream", () => {
   });
 
   it("closing the stream suppresses any further reconnect", () => {
-    const stop = openTrainingStream("/data/proj", "r1", vi.fn());
+    const stop = openTrainingStream("r1", vi.fn());
     lastSocket().open();
     stop();
     vi.advanceTimersByTime(60_000);
@@ -263,7 +261,7 @@ describe("openTrainingStream", () => {
   });
 
   it("parses each frame once, not once for the terminal check and again for the handler", () => {
-    openTrainingStream("/data/proj", "r1", vi.fn());
+    openTrainingStream("r1", vi.fn());
     lastSocket().open();
     const parseSpy = vi.spyOn(JSON, "parse");
     lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));

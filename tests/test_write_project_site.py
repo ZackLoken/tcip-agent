@@ -1,8 +1,7 @@
 """Tests for tcip write-project-site, run by subprocess against a project on disk.
 
-The command is the one door that records a site for a project whose name the scheme refuses, and
-the sanctioned path for conforming a project that predates the record; every project here is
-scaffolded through the platform's own doors first.
+The command corrects a site typed wrong once, keeping the record's id and display name; every
+project here is created through ``initialize_project`` first.
 """
 
 from __future__ import annotations
@@ -19,79 +18,40 @@ def _run_command(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_write_project_site_writes_a_fresh_site_for_a_project_with_no_record(tmp_path: Path):
-    from tcip_mcp.tools.meta_tools import report_friction
-
-    project = tmp_path / "bare"
-    project.mkdir()
-    report_friction(str(project), category="missing_tool", detail="probe")
-
-    result = _run_command(str(project), "north orchard")
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "written" in result.stdout
-
-
-def test_write_project_site_reports_already_recorded_the_same(tmp_path: Path):
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
-
-    result = _run_command(str(project), "north orchard")
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "already recorded the same" in result.stdout
-
-
-def test_write_project_site_refuses_a_conflicting_site_without_replace(tmp_path: Path):
+def test_write_project_site_replaces_the_site_and_keeps_the_id_and_name(project: Path):
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import initialize_project
 
-    project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
+    before = read_record(project)
 
     result = _run_command(str(project), "south orchard")
 
-    assert result.returncode != 0
-    assert "refused" in result.stdout
-    assert read_record(str(project))["site"] == "north orchard"  # nothing written
-
-
-def test_write_project_site_replaces_a_conflicting_site(tmp_path: Path):
-    from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
-
-    result = _run_command(str(project), "south orchard", "--replace")
-
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "replaced" in result.stdout
-    assert read_record(str(project))["site"] == "south orchard"
+    assert "written" in result.stdout
+    after = read_record(project)
+    assert after == {**before, "site": "south orchard"}
 
 
-def test_write_project_site_replaces_a_damaged_record_naming_it_replaced_not_written(
-    tmp_path: Path,
-):
-    """A prior record that existed but could not be read as a site is a replacement, not a
-    fresh write: the breeder's earlier value existed and this call is what corrected it."""
+def test_write_project_site_refuses_a_directory_holding_no_project_record(tmp_path: Path):
+    bare = tmp_path / "bare"
+    bare.mkdir()
+
+    result = _run_command(str(bare), "north orchard")
+
+    assert result.returncode == 2
+    assert "refused" in result.stdout
+
+
+def test_write_project_site_refuses_a_record_that_does_not_read(project: Path):
     import tcip_store
 
-    from tcip_mcp.project_record import project_record_key, read_record
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tcip_mcp.project_record import project_record_key
 
-    project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
     key = project_record_key(str(project))
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
 
-    result = _run_command(str(project), "south orchard", "--replace")
+    result = _run_command(str(project), "south orchard")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "replaced" in result.stdout
-    assert "written:" not in result.stdout
-    assert "does not hold a site" in result.stdout
-    assert read_record(str(project))["site"] == "south orchard"
+    assert result.returncode == 2
+    assert "does not hold an id, a display name and a site" in result.stdout
+    assert tcip_store.read(key) == {"not_site": "x"}

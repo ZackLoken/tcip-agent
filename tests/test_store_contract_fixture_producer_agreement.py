@@ -17,12 +17,14 @@ from tests.test_store_contract import LOCK_IDENTITY, REGISTERED
 def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_side(tmp_path):
     """A selection's record is its sample list: each entry names its own source and label rather
     than a shared root, so the golden cannot carry a per-date members block or a bare id list."""
-    fresh = selection.selection_document(selection.write_selection(
+    import tcip_store as ts
+
+    selection.write_selection(
         tmp_path / "splits",
         selection.Selection(
             samples=(
-                selection.Sample(member="a_1", source="images/2026-03-04/a_1.jpg",
-                                 ground_truth="annotations/2026-03-04/a_1.json",
+                selection.Sample(member="a_1", source=str(tmp_path / "images/2026-03-04/a_1.jpg"),
+                                 ground_truth=str(tmp_path / "annotations/2026-03-04/a_1.json"),
                                  group="a", side="train",
                                  confirmation_bucket="bud/2026-03-04",
                                  ground_truth_digest="7f3a1b9c2d4e5f60"),
@@ -30,7 +32,9 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
             scope=selection.ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
         ),
-    ))
+        project=tmp_path,
+    )
+    fresh = ts.read(selection.selection_key(tmp_path / "splits"))
     golden = REGISTERED["selection"].golden
     assert isinstance(golden, dict)
 
@@ -51,15 +55,15 @@ def test_the_cal_holdout_lock_golden_carries_every_key_the_resolver_writes(tmp_p
 
     assert set(golden) == set(fresh) == {
         "identity_hash", "calibration", "holdout", "group_by", "group_key_map", "seed",
-        "holdout_ratio", "selection_dir", "redraw_history",
+        "holdout_ratio", "redraw_history",
     }
 
 
-def test_the_shared_validation_row_fixtures_selection_disjointness_is_the_resolvers_own():
-    row = validation_row()
-    assert row["selection_disjointness"] == _real_selection_disjointness()
-    assert len(row["selection_disjointness"]) == 12, (
-        "the resolver produces twelve keys, never a four-key shape")
+def test_the_shared_validation_row_fixtures_selection_disjointness_is_the_resolvers_own(tmp_path):
+    row = validation_row(tmp_path)
+    assert row["selection_disjointness"] == _real_selection_disjointness(tmp_path)
+    assert len(row["selection_disjointness"]) == 11, (
+        "the resolver produces eleven keys, never a four-key shape")
 
 
 def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tmp_path):
@@ -76,7 +80,7 @@ def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tm
     pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
     calibrate_physical_scale(
-        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        tmp_path, trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
         images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
         reference_csv=ref_csv, group_key_map=group_key_map)
 

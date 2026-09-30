@@ -1,18 +1,13 @@
 """Start or stop the served web app under a scratch environment, for a GUI capture harness.
 
-``start`` launches ``python -m tcip_web`` with ``TCIP_WORKSPACE`` and ``TCIP_STATE_ROOT`` pointed
-at scratch directories under a caller-named harness root, waits until the projects route answers,
-and records pid and port in ``server_info.json`` under that root; ``stop`` kills the recorded
-process tree and removes the record. Modeled on the day-3 capture harness's own
-``harness_env.py``/``server_ctl.py`` pair, generalized to any harness root instead of one baked
-in. No project fixture, seed data, or crop name lives here: seeding a project into the scratch
-workspace before ``start``, or against the running server after it, is the capture script's own
-job, never this tool's.
+``start`` launches ``python -m tcip_web`` with ``TCIP_WORKSPACE`` pointed at a scratch directory
+under a caller-named harness root, waits until the projects route answers, and records pid and
+port in ``server_info.json`` under that root; ``stop`` kills the recorded process tree and removes
+the record. It seeds nothing.
 
-``stop`` is Windows-only (``taskkill /T``); it refuses outright on any other host rather than
-kill the recorded pid alone and leave its children running.
+``stop`` is Windows-only (``taskkill /T``) and refuses on any other host.
 
-    python tools/serve_capture_app.py start <root> --state-project my_project --port 8799
+    python tools/serve_capture_app.py start <root> --port 8799
     python tools/serve_capture_app.py stop <root>
 """
 
@@ -74,19 +69,16 @@ def _refuse_unsafe_root(root: Path) -> None:
         )
 
 
-def build_environ(root: Path, state_project: str, port: int) -> dict[str, str]:
-    """The environment ``start`` launches ``python -m tcip_web`` under: a scratch workspace and
-    state root beneath ``root``, the port to bind, unbuffered output, and the repository root
-    prefixed onto ``PYTHONPATH`` (as the day-3 harness did) so a seeded run's subprocess can
-    import a fixture module (a tiny trainer, say) by dotted name against the repository, the
-    same way the capture script's own seeding step does. Refuses an unsafe root before building
-    anything.
+def build_environ(root: Path, port: int) -> dict[str, str]:
+    """The environment ``start`` launches ``python -m tcip_web`` under: a scratch workspace
+    beneath ``root``, the port to bind, unbuffered output, and the repository root prefixed onto
+    ``PYTHONPATH``, so a run's subprocess can import a module of the repository by dotted name.
+    Refuses an unsafe root before building anything.
     """
     _refuse_unsafe_root(root)
     workspace = root / "workspace"
     env = dict(os.environ)
     env["TCIP_WORKSPACE"] = str(workspace)
-    env["TCIP_STATE_ROOT"] = str(workspace / state_project)
     env["TCIP_WEB_PORT"] = str(port)
     env["PYTHONUNBUFFERED"] = "1"
     existing = env.get("PYTHONPATH", "")
@@ -94,12 +86,12 @@ def build_environ(root: Path, state_project: str, port: int) -> dict[str, str]:
     return env
 
 
-def start(root: Path, state_project: str, port: int) -> None:
+def start(root: Path, port: int) -> None:
     info_path = root / "server_info.json"
     if info_path.exists():
         raise SystemExit(f"{info_path} exists; stop first")
-    env = build_environ(root, state_project, port)
-    Path(env["TCIP_STATE_ROOT"]).mkdir(parents=True, exist_ok=True)
+    env = build_environ(root, port)
+    Path(env["TCIP_WORKSPACE"]).mkdir(parents=True, exist_ok=True)
     log_path = root / "server.log"
     log = open(log_path, "a", encoding="utf-8")
     proc = subprocess.Popen(
@@ -124,12 +116,8 @@ def start(root: Path, state_project: str, port: int) -> None:
 
 
 def stop(root: Path) -> None:
-    """Kill the recorded process and remove its record. Windows-only: it kills the process tree
-    with ``taskkill /T``, which has no POSIX equivalent this tool implements (``start`` never
-    puts the child in its own process group, so there is no group id for ``os.killpg`` to target
-    without first changing how the process is launched); a non-Windows host is refused outright
-    rather than left to kill the recorded pid alone and leave its children running.
-    """
+    """Kill the recorded process tree with ``taskkill /T`` and remove its record; refuses on a
+    host other than Windows."""
     if sys.platform != "win32":
         raise SystemExit(
             "stop is Windows-only (it kills the process tree with taskkill /T); this host is "
@@ -152,8 +140,6 @@ def main() -> int:
 
     p_start = sub.add_parser("start", help="launch python -m tcip_web under the harness root")
     p_start.add_argument("root", type=Path)
-    p_start.add_argument("--state-project", required=True,
-                         help="project directory name created under <root>/workspace")
     p_start.add_argument("--port", type=int, required=True)
 
     p_stop = sub.add_parser("stop", help="kill the recorded server and remove its record")
@@ -162,7 +148,7 @@ def main() -> int:
     args = parser.parse_args()
     _refuse_unsafe_root(args.root)
     if args.action == "start":
-        start(args.root, args.state_project, args.port)
+        start(args.root, args.port)
     else:
         stop(args.root)
     return 0

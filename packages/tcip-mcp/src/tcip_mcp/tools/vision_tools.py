@@ -1,7 +1,7 @@
 """Vision tools: render annotations and predictions for visual analysis.
 
-Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the path so the agent can call
-its client's own image-capable read tool on it to visually inspect it.
+Each tool saves a rendered image under the project's ``.tcip/artifacts/viz/`` and returns the path
+so the agent can call its client's own image-capable read tool on it to visually inspect it.
 """
 
 from __future__ import annotations
@@ -29,7 +29,8 @@ from tcip_annotation.viz import (
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.server import mcp
+from tcip_mcp.project_paths import viz_output_path
+from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     import numpy as np
@@ -210,6 +211,7 @@ def _poly_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dic
 
 @audited
 def visualize(
+    project: Path,
     source: str,
     path: str,
     task: str = "detect",
@@ -220,8 +222,8 @@ def visualize(
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
-    Saves to .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read
-    tool.
+    Saves under ``project``'s ``.tcip/artifacts/viz/`` and returns ``image_path`` for the agent's
+    own image-capable read tool.
 
     Rendering conventions, shared across every source: boxes/masks color by class through the
     20-class palette in ``tcip_annotation.viz``, indexed by first-seen order within one render
@@ -251,18 +253,18 @@ def visualize(
         n: Number of samples in the grid (source='dataset' only).
     """
     if source == "annotations":
-        return _viz_annotations(path, task=task, class_names=class_names)
+        return _viz_annotations(project, path, task=task, class_names=class_names)
     if source == "predictions":
         return _viz_predictions(
-            path, task=task, class_names=class_names, conf_threshold=conf_threshold
+            project, path, task=task, class_names=class_names, conf_threshold=conf_threshold
         )
     if source == "comparison":
         return _viz_comparison(
-            path, task=task, iou_threshold=iou_threshold, class_names=class_names,
+            project, path, task=task, iou_threshold=iou_threshold, class_names=class_names,
             conf_threshold=conf_threshold,
         )
     if source == "dataset":
-        return _viz_dataset_sample(path, n=n, task=task, class_names=class_names)
+        return _viz_dataset_sample(project, path, n=n, task=task, class_names=class_names)
     return {
         "error": f"Unknown source '{source}'. "
         "Use 'annotations', 'predictions', 'comparison', or 'dataset'."
@@ -270,6 +272,7 @@ def visualize(
 
 
 def _viz_annotations(
+    project: Path,
     image_path: str,
     task: str = "detect",
     class_names: str = "",
@@ -297,7 +300,8 @@ def _viz_annotations(
     if task == "detect":
         shapes = _boxable(anns)
         out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
-                                native_size=read.native_size, class_names=_name_map(idx))
+                                native_size=read.native_size, class_names=_name_map(idx),
+                                output_path=viz_output_path(project, "detections"))
         summary = f"Rendered {len(shapes)} detections on {img.name}"
         if shapes:
             from collections import Counter
@@ -307,7 +311,8 @@ def _viz_annotations(
     else:
         shapes = [a for a in anns if polygonal(a.geometry)]
         out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
-                                   native_size=read.native_size, class_names=_name_map(idx))
+                                   native_size=read.native_size, class_names=_name_map(idx),
+                                   output_path=viz_output_path(project, "segmentations"))
         summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
 
     return {
@@ -323,6 +328,7 @@ def _viz_annotations(
 
 
 def _viz_predictions(
+    project: Path,
     image_path: str,
     task: str = "detect",
     class_names: str = "",
@@ -359,13 +365,15 @@ def _viz_predictions(
         shapes = _boxable(preds)
         out = render_detections(
             read.pixels, [_box_dict(a, index, scope=scope) for a in shapes],
-            native_size=read.native_size, class_names=_name_map(idx))
+            native_size=read.native_size, class_names=_name_map(idx),
+            output_path=viz_output_path(project, "detections"))
         summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
         shapes = [a for a in preds if polygonal(a.geometry)]
         out = render_segmentations(
             read.pixels, [_poly_dict(a, index, scope=scope) for a in shapes],
-            native_size=read.native_size, class_names=_name_map(idx))
+            native_size=read.native_size, class_names=_name_map(idx),
+            output_path=viz_output_path(project, "segmentations"))
         summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
 
     return {
@@ -379,6 +387,7 @@ def _viz_predictions(
 
 
 def _viz_comparison(
+    project: Path,
     image_path: str,
     task: str = "detect",
     iou_threshold: float = 0.5,
@@ -433,7 +442,8 @@ def _viz_comparison(
 
     read = _display_for_path(image_path)
     out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
-                            matches=tp_matches, class_names=_name_map(idx))
+                            matches=tp_matches, class_names=_name_map(idx),
+                            output_path=viz_output_path(project, "comparison"))
 
     return {
         "image_path": out,
@@ -510,6 +520,7 @@ def get_worst_predictions(
 
 @audited
 def render_failure_cases(
+    project: Path,
     predictions_dir: str,
     labels_dir: str,
     images_dir: str = "",
@@ -557,10 +568,6 @@ def render_failure_cases(
         return {"summary": "No prediction errors found", "image_path": None}
 
     from tcip_mcp.dataset_layout import label_filename
-    from tcip_mcp.project_paths import resolve_state
-
-    out_dir = resolve_state(Path(".tcip") / "artifacts" / "viz" / "failures").resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # One GT-vs-prediction render per case, titled in the same pass so a case that can't be
     # resolved drops its title with it.
@@ -585,7 +592,7 @@ def render_failure_cases(
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 
-        out = str(out_dir / f"failure_{len(case_paths):03d}_{stem}.png")
+        out = viz_output_path(project, f"failure_{len(case_paths):03d}_{stem}")
         render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
                           class_names=_name_map(idx), output_path=out)
         case_paths.append(out)
@@ -594,7 +601,8 @@ def render_failure_cases(
     # Render grid of all failure cases
     grid_path = None
     if case_paths:
-        grid_path = render_grid(case_paths, titles=titles, cols=min(4, len(case_paths)))
+        grid_path = render_grid(case_paths, titles=titles, cols=min(4, len(case_paths)),
+                                output_path=viz_output_path(project, "failures"))
 
     return {
         "image_path": grid_path,
@@ -605,6 +613,7 @@ def render_failure_cases(
 
 
 def _viz_dataset_sample(
+    project: Path,
     folder_path: str,
     n: int = 16,
     task: str = "detect",
@@ -651,22 +660,26 @@ def _viz_dataset_sample(
             if task == "detect":
                 shapes = _boxable(anns)
                 out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
-                                        native_size=read.native_size, class_names=_name_map(idx))
+                                        native_size=read.native_size, class_names=_name_map(idx),
+                                        output_path=viz_output_path(project, "detections"))
             else:
                 shapes = [a for a in anns if polygonal(a.geometry)]
                 out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
                                            native_size=read.native_size,
-                                           class_names=_name_map(idx))
+                                           class_names=_name_map(idx),
+                                           output_path=viz_output_path(project, "segmentations"))
             titles.append(f"{stem} ({len(shapes)})")
         else:
             # An unlabeled sample renders too, with nothing drawn on it: the grid tiles rendered
             # artifacts, so every cell has to be one.
-            out = render_detections(read.pixels, [], native_size=read.native_size)
+            out = render_detections(read.pixels, [], native_size=read.native_size,
+                                    output_path=viz_output_path(project, "detections"))
             titles.append(f"{stem} (no labels)")
 
         rendered_paths.append(out)
 
-    grid_path = render_grid(rendered_paths, titles=titles, cols=min(4, len(rendered_paths)))
+    grid_path = render_grid(rendered_paths, titles=titles, cols=min(4, len(rendered_paths)),
+                            output_path=viz_output_path(project, "grid"))
 
     return {
         "image_path": grid_path,
@@ -678,159 +691,88 @@ def _viz_dataset_sample(
     }
 
 
-@mcp.tool()
+@tool()
 @audited
 def capture_live_canvas(
+    project: Path,
+    workspace: Path,
     refresh: bool = True,
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
-    render_last_known: bool = False,
 ) -> dict:
-    """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
+    """Render exactly what the human's GUI canvas showed for this project: image, shapes, viewport.
 
-    Reads the canvas state the GUI pushes under ``.tcip/state/``: ``canvas_live.json`` (image,
-    viewport, classes, legend, counts, tab, mode, active_subject, cut_armed, dirty and user) and
-    ``canvas_shapes.json`` (the full display-resolved geometry, including unsaved edits and an
-    in-progress drawing). Renders the region being shown at up to ``max_edge`` and returns the
-    artifact path for the agent's own image-capable read tool, plus the classes schema, review
-    legend, per-tag/per-creator counts, and the state's age.
-
-    The GUI's currently open project is named by the ``canvas_open_binding`` record, checked
-    against this process's own pinned project before rendering anything; a mismatch refuses by
-    default. Pass ``render_last_known=True`` to render this process's own pinned project's last
-    pushed canvas anyway, labeled not-live.
+    Reads the canvas state the GUI pushes under the project's ``.tcip/state/``:
+    ``canvas_live.json`` (image, viewport, classes, legend, counts, tab, mode, active_subject,
+    cut_armed, dirty and user) and ``canvas_shapes.json`` (the full display-resolved geometry,
+    including unsaved edits and an in-progress drawing). The backend writes a push only under the
+    project it has open, so these documents are always this project's own. Renders the region
+    being shown at up to ``max_edge`` and returns the artifact path for the agent's own
+    image-capable read tool, plus the classes schema, review legend, per-tag/per-creator counts,
+    and the state's age. A canvas document that will not read raises the store's own error.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting briefly
-            for it to land. Falls back to the last pushed state if no GUI responds. No-op when the
-            binding names another project.
+            for it to land. The backend delivers the ping only while it has this project open;
+            otherwise the last pushed state renders, labeled not live, with the backend's answer.
         crop_to_viewport: Render only the region the human currently sees (their zoom/pan). Pass
             False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
-        render_last_known: When the GUI's open project differs from this process's own, render this
-            process's own pinned project's last pushed canvas anyway (labeled not-live) instead of
-            refusing. Ignored when the two agree.
     """
     import time as _time
 
-    from tcip_mcp import workspace
-    from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.web_client import (
-        GuiBindingUnreadable, binding_divergence, canvas_geometry_key, canvas_meta_key,
-        gui_binding_matches, read_canvas_binding,
+        PANEL_EVENT_CANVAS_STATE_REQUEST, canvas_geometry_key, canvas_meta_key, post_panel_event,
     )
 
-    root = str(platform_state_root())
-    meta_doc = canvas_meta_key(root)
-    shapes_doc = canvas_geometry_key(root)
+    meta_doc = canvas_meta_key(str(project))
+    shapes_doc = canvas_geometry_key(str(project))
 
-    def _read(key: ts.Key) -> dict | None:
-        try:
-            return ts.read(key, default=None)
-        except (OSError, ts.DecodeError):
-            return None
-
-    binding: dict | None = None
-    same_root = False
-    state: dict | None = None
-    sdoc: dict = {}
-    shapes: list = []
-    shapes_valid = False
-    region = None
-    out = ""
-    src_image = ""
+    prev_ts = (ts.read(meta_doc, default=None) or {}).get("received_at", 0)
     refreshed = False
-    ping_delivered = False
+    ping: dict = {}
+    if refresh:
+        ping = post_panel_event(project, workspace, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
+        if ping.get("delivered"):
+            for _ in range(12):  # ~2.4s for the GUI's flush to land
+                _time.sleep(0.2)
+                cur = ts.read(meta_doc, default=None)
+                if cur and cur.get("received_at", 0) > prev_ts:
+                    refreshed = True
+                    break
 
-    for attempt in range(2):
-        try:
-            same_root, binding = gui_binding_matches(root)
-        except GuiBindingUnreadable as exc:
-            return {"error": str(exc)}
+    state = ts.read(meta_doc, default=None)
+    if state is None:
+        return {"error": "No canvas state has been pushed for this project; the GUI pushes its "
+                         "canvas only while it has this project open.",
+                "refresh_answer": ping}
 
-        if binding is None:
-            ws_root = str(workspace.workspace_root(create=False))
-            return {"error": f"No current canvas binding exists under the workspace root "
-                              f"{ws_root}; opening a project in the GUI creates one."}
+    from tcip_mcp.registry_paths import resolved_registry_path
 
-        if not same_root and not render_last_known:
-            return {
-                "error": "The GUI's open project differs from this tool's own pinned project; "
-                         "its canvas is not this project's live view.",
-                "divergence": binding_divergence(binding, root),
-            }
+    src_image = str(resolved_registry_path(project, state["image_path"]))
+    if not Path(src_image).is_file():
+        return {"error": f"Canvas state references a missing image: {src_image}"}
 
-        prev = _read(meta_doc)
-        prev_ts = (prev or {}).get("received_at", 0)
-        refreshed = False
-        ping_delivered = False
-        if refresh and same_root:
-            from tcip_mcp.web_client import PANEL_EVENT_CANVAS_STATE_REQUEST, post_panel_event
+    # Geometry is valid only when its identity matches the meta document: a heartbeat for a
+    # different image/tab means the stored shapes are stale and must not render.
+    sdoc = ts.read(shapes_doc, default=None) or {}
+    shapes_valid = (
+        sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
+    )
+    shapes: list = (sdoc.get("shapes") or []) if shapes_valid else []
+    viewport = state.get("viewport")
+    # Read exactly the region being rendered: the human's viewport is a rectangle in the
+    # image's own grid, so a raster far too large to decode whole is still capturable.
+    region = None
+    if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
+        region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
+                  float(viewport["w"]), float(viewport["h"]))
+    read = _display_for_path(src_image, max_edge=max_edge, region=region)
+    out = render_canvas_state(read.pixels, shapes,
+                              origin=(read.rect.x0, read.rect.y0), scale=read.scale,
+                              output_path=viz_output_path(project, "canvas", suffix=".jpg"))
+    ping_delivered = bool(ping.get("delivered"))
 
-            res = post_panel_event("app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
-            ping_delivered = bool(res.get("delivered"))
-            if ping_delivered:
-                for _ in range(12):  # ~2.4s for the GUI's flush to land
-                    _time.sleep(0.2)
-                    cur = _read(meta_doc)
-                    if cur and cur.get("received_at", 0) > prev_ts:
-                        refreshed = True
-                        break
-
-        state = _read(meta_doc)
-        if state is None:
-            if same_root:
-                return {"error": "No live canvas state found; is the GUI open with a project "
-                                  "loaded? The frontend pushes its canvas state to the project "
-                                  f"the GUI has open, and it already agrees this is {root}; "
-                                  "nothing has been pushed there yet."}
-            return {
-                "error": f"No live canvas state found under this project's own root ({root}); "
-                         "the GUI has a different project open.",
-                "divergence": binding_divergence(binding, root),
-            }
-
-        src_image = state.get("image_path") or ""
-        if not Path(src_image).is_file():
-            return {"error": f"Canvas state references a missing image: {src_image}"}
-
-        # Geometry is valid only when its identity matches the meta document: a heartbeat for a
-        # different image/tab means the stored shapes are stale and must not render.
-        sdoc = _read(shapes_doc) or {}
-        shapes_valid = (
-            sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
-        )
-        shapes = (sdoc.get("shapes") or []) if shapes_valid else []
-        viewport = state.get("viewport")
-        # Read exactly the region being rendered: the human's viewport is a rectangle in the
-        # image's own grid, so a raster far too large to decode whole is still capturable.
-        region = None
-        if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
-            region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
-                      float(viewport["w"]), float(viewport["h"]))
-        read = _display_for_path(src_image, max_edge=max_edge, region=region)
-        out = render_canvas_state(read.pixels, shapes,
-                                  origin=(read.rect.x0, read.rect.y0), scale=read.scale)
-
-        # The binding fence, only when this attempt started same_root: render_last_known's own
-        # render reads only this project's documents, so a binding already elsewhere can't stale it.
-        if same_root:
-            try:
-                binding_after = read_canvas_binding()
-            except GuiBindingUnreadable as exc:
-                return {"error": str(exc)}
-            if binding_after is None or binding_after.get("generation") != binding.get("generation"):
-                if attempt == 0:
-                    continue
-                return {
-                    "error": "The GUI's open project changed while this call was rendering; "
-                             "retry the call.",
-                    "divergence": binding_divergence(binding_after or binding, root),
-                }
-        break
-
-    # Every path that reaches here returned already unless the loop broke with both set.
-    assert binding is not None and state is not None
     now = _time.time()
     tag_counts: dict[str, int] = {}
     creator_counts: dict[str, int] = {}
@@ -842,23 +784,16 @@ def capture_live_canvas(
                 creator_counts[str(cb)] = creator_counts.get(str(cb), 0) + 1
 
     age = round(max(0.0, now - float(state.get("received_at") or now)), 1)
-    live = same_root and (refreshed or age < 5.0)
-    if not same_root:
-        summary = (
-            f"Rendered this project's last known {state.get('tab')} canvas for "
-            f"{state.get('image')} ({len(shapes)} shapes, {age}s old; not live: the GUI has "
-            "another project open)."
-        )
-    elif live:
+    if refreshed or age < 5.0:
         summary = f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
     else:
         summary = (
             f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
-            f"({len(shapes)} shapes, {age}s old; the GUI did not answer the refresh ping; it may "
-            "be closed, on another tab, or on a different project)."
+            f"({len(shapes)} shapes, {age}s old; not live: the GUI did not answer the refresh "
+            "ping, see refresh_answer)."
         )
     summary += " Read image_path with your own image-capable read tool to see it."
-    result = {
+    return {
         "image_path": out,
         "source_image": src_image,
         "image": state.get("image"),
@@ -867,7 +802,6 @@ def capture_live_canvas(
         "cut_armed": state.get("cut_armed"),
         "user": state.get("user"),
         "dirty": state.get("dirty"),
-        "project_root": state.get("project_root"),
         "viewport": state.get("viewport"),
         "cropped_to_viewport": region is not None,
         "classes": state.get("classes") or [],
@@ -883,15 +817,14 @@ def capture_live_canvas(
         # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
         "refreshed": refreshed,
         "refresh_ping_delivered": ping_delivered,
+        "refresh_answer": ping,
         "summary": summary,
     }
-    if not same_root:
-        result["divergence"] = binding_divergence(binding, root)
-    return result
 
 
 @audited
 def overlay_reference_grid(
+    project: Path,
     image_path: str,
     tile_size: int | None = None,
     overlap: float = 0.0,
@@ -934,7 +867,8 @@ def overlay_reference_grid(
         cells = reference_cells(w, h, tile_size, overlap, clamp=True)
     except ValueError as e:
         return {"error": str(e)}
-    out = render_grid_overlay(display.pixels, cells, native_size=(w, h))
+    out = render_grid_overlay(display.pixels, cells, native_size=(w, h),
+                              output_path=viz_output_path(project, "grid_overlay"))
 
     geometry = grid_geometry(w, h, tile_size, overlap)
     last = f"{column_label(geometry['cols'] - 1)}{geometry['rows']}"

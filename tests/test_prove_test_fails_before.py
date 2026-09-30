@@ -21,14 +21,16 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "tools" / "prove_test_fails_before.py"
 TEST_FILE = REPO / "tests" / "test_admission_rule_of.py"
 KNOWN_GUARD = "test_admission_rule_of_answers_none_for_no_stamp"
-# The commit before the guard's own fix; the guard is a unit test over one function, so no
-# fixture of the working tree's tests/ overlay depends on production code newer than this.
+# A commit whose own tests/ tree holds the guard, paired with the commit before the guard's fix
+# as the baseline, so every fixture the guard reaches is of the baseline's own era.
+TEST_REV = "14d03827"
 BASELINE = "b8ed53a4"
 
 
 def _run_guard_check(test_file: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(SCRIPT), test_file, "-k", KNOWN_GUARD, "--baseline", BASELINE],
+        [sys.executable, str(SCRIPT), test_file, "-k", KNOWN_GUARD, "--test-rev", TEST_REV,
+         "--baseline", BASELINE],
         cwd=str(REPO), capture_output=True, text=True, timeout=300,
     )
 

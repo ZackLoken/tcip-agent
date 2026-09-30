@@ -405,6 +405,7 @@ def resolve_operating_point_from_review(
     review_state: dict,
     trait_name: str,
     *,
+    project: Path,
     scope_root: str | Path,
     bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
@@ -425,7 +426,8 @@ def resolve_operating_point_from_review(
     subject: str | None = None,
     calibration_labels_dir: str | None = None,
 ) -> ResolvedBundle:
-    """Resolve the count operating point from review verdicts (the review-confirmation reference).
+    """Resolve the count operating point from review verdicts (the review-confirmation reference),
+    for ``trait_name`` of ``project``.
 
     Splits the reviewed images into a locked, group-aware calibration/holdout split
     (``resolve_locked_cal_holdout_split``, keyed by the review reference's own content hash) and
@@ -483,7 +485,7 @@ def resolve_operating_point_from_review(
     cal_records = [by_id[s] for s in locked["calibration"] if s in by_id]
     hold_records = [by_id[s] for s in locked["holdout"] if s in by_id]
     bundle = resolve_operating_point(
-        trait_name, dataset_hash=ref_hash,
+        trait_name, project=project, dataset_hash=ref_hash,
         calibration_records=cal_records or None,
         holdout_records=hold_records or None,
         tile_size=tile_size, tile_size_source=tile_size_source,

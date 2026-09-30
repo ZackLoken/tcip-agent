@@ -31,7 +31,7 @@ def client() -> TestClient:
 
 def _single(client: TestClient, root: Path, image_name: str, status: str, subject: str,
             date: str | None = None) -> None:
-    body = {"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
+    body = {"dataset_root": str(root), "image_name": image_name,
             "status": status, "subject": subject}
     if date:
         body["date"] = date
@@ -41,7 +41,7 @@ def _single(client: TestClient, root: Path, image_name: str, status: str, subjec
 
 def _bulk(client: TestClient, root: Path, statuses: dict[str, str], subject: str,
           date: str | None = None) -> None:
-    body = {"project_root": str(root), "dataset_root": str(root), "subject": subject,
+    body = {"dataset_root": str(root), "subject": subject,
             "statuses": statuses}
     if date:
         body["date"] = date
@@ -117,7 +117,7 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
     assert len(on_disk) == 3
 
     def read(subject: str, date: str | None) -> dict[str, str]:
-        params = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+        params = {"dataset_root": str(tmp_path),
                   "subject": subject}
         if date:
             params["date"] = date
@@ -170,7 +170,7 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
     """
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
-    body = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+    body = {"dataset_root": str(tmp_path),
             "image_name": "IMG_0009.JPG", "status": "negative", "subject": "bud",
             "user": "rowan"}
     assert client.post("/api/subjects/image_status", json=body).status_code == 200

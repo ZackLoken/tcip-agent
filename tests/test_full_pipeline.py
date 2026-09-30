@@ -108,8 +108,8 @@ class TestFullClassificationPipeline:
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = trainer_run(config, output_dir, has_val_loader=val_loader is not None,
-                          id="auto-run-32")
+        run = trainer_run(config, output_dir, project=tmp_path,
+                          has_val_loader=val_loader is not None, id="auto-run-32")
 
         rows: list[dict] = []
         completed_run = train(run, loader, val_loader=val_loader,
@@ -141,10 +141,10 @@ class TestFullClassificationPipeline:
         from tcip_mcp.model_registry import load_registered_checkpoint
 
         ckpt_path = str(out / "model_best.pt")
-        result = register_model(name="test-classifier", checkpoint_path=ckpt_path, config={},
-                                project_path=str(tmp_path))
+        result = register_model(tmp_path, name="test-classifier", checkpoint_path=ckpt_path,
+                                config={})
         assert "error" not in result, result
-        checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+        checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
         predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.1)
 
         # Pick some test images
@@ -179,14 +179,14 @@ class TestFullClassificationPipeline:
         bucket = tmp_path / "ds" / "predictions" / "cls_preds"
         write_prediction(bucket, "img_a")
         write_bound_sidecar(
-            bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
+            tmp_path, bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
                                                  "validated_against": VALIDATED_HELD_OUT}},
                     "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
         export_detection_csv(csv_results, csv_path, revision=fx.count_revision(tmp_path),
                              operating_point_validated=VALIDATED_HELD_OUT,
-                             pred_dirs=[str(bucket)])
+                             pred_dirs=[str(bucket)], project=tmp_path)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
@@ -294,7 +294,8 @@ class TestDetectionPipelineRealData:
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
-        run = trainer_run(config, detection_output_dir, has_val_loader=False, id="auto-run-33")
+        run = trainer_run(config, detection_output_dir, project=tmp_path, has_val_loader=False,
+                          id="auto-run-33")
         completed = train(run, loader, val_loader=None)
 
         assert completed.status == "completed"
@@ -313,10 +314,10 @@ class TestDetectionPipelineRealData:
         from tcip_mcp.model_registry import load_registered_checkpoint
 
         ckpt_path = str(out / "model_best.pt")
-        result = register_model(name="test-detector", checkpoint_path=ckpt_path, config={},
-                                project_path=str(tmp_path))
+        result = register_model(tmp_path, name="test-detector", checkpoint_path=ckpt_path,
+                                config={})
         assert "error" not in result, result
-        checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+        checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
         predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.01)
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
@@ -342,14 +343,14 @@ class TestDetectionPipelineRealData:
         bucket = tmp_path / "ds" / "predictions" / "det_preds"
         write_prediction(bucket, "img_a")
         write_bound_sidecar(
-            bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
+            tmp_path, bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
                                                  "validated_against": VALIDATED_HELD_OUT}},
                     "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
             dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
         export_detection_csv(results, csv_path, revision=fx.count_revision(tmp_path),
                              operating_point_validated=VALIDATED_HELD_OUT,
-                             pred_dirs=[str(bucket)])
+                             pred_dirs=[str(bucket)], project=tmp_path)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()

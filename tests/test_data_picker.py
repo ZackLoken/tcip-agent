@@ -74,17 +74,17 @@ def _stub_child(monkeypatch) -> None:
 # -- selection_compatibility ---------------------------------------------------
 
 
-def _selection_with_an_empty_val_side(root: Path, out: Path):
-    """A real ``draw_splits`` draw, rewritten without its ``val`` samples: the shape a run binds
-    to as leaving it with an empty side. Every other recorded field stays exactly what the draw
-    wrote, so this exercises only the one refusal under test."""
+def _selection_with_an_empty_val_side(project: Path, root: Path, out: Path):
+    """A real ``draw_splits`` draw under ``project``, rewritten without its ``val`` samples: the
+    shape a run binds to as leaving it with an empty side. Every other recorded field stays
+    exactly what the draw wrote, so this exercises only the one refusal under test."""
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
 
-    drawn = _draw(root, out)
+    drawn = _draw(project, root, out)
     return write_selection(out, Selection(
         samples=tuple(s for s in drawn.samples if s.side != "val"),
         scope=drawn.scope, seed=drawn.seed, group_by=drawn.group_by,
-    ))
+    ), project=project)
 
 
 def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
@@ -92,7 +92,7 @@ def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    selection = _selection_with_an_empty_val_side(root, out)
+    selection = _selection_with_an_empty_val_side(tmp_path, root, out)
 
     issues = selection_compatibility(_bound_config(root, out), selection, str(out))
 
@@ -106,9 +106,9 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(tmp_path: 
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _selection_with_an_empty_val_side(root, out)
+    _selection_with_an_empty_val_side(tmp_path, root, out)
 
-    result = preflight_config(_bound_config(root, out))
+    result = preflight_config(tmp_path, _bound_config(root, out))
 
     assert any("empty side" in i for i in result["issues"])
 
@@ -122,7 +122,7 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    selection = _draw(root, out)
+    selection = _draw(tmp_path, root, out)
 
     assert selection_compatibility(_bound_config(root, out), selection, str(out)) == []
 
@@ -139,7 +139,7 @@ def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreada
     config["data"]["split"] = {"selection_dir": str(tmp_path / "nope"), "seed": 7,
                                "group_by": "stem"}
 
-    result = preflight_config(config)
+    result = preflight_config(tmp_path, config)
 
     assert len([i for i in result["issues"] if "conflicts with" in i]) == 1
 
@@ -150,13 +150,13 @@ def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreada
 def test_read_selection_checked_tells_absence_apart_from_a_broken_record(tmp_path: Path):
     from tcip_mcp.pipelines.data.selection import read_selection_checked, selection_key
 
-    absent, absent_error = read_selection_checked(tmp_path / "nope")
+    absent, absent_error = read_selection_checked(tmp_path / "nope", project=tmp_path)
     assert (absent, absent_error) == (None, None)
 
     broken_dir = tmp_path / "broken"
     broken_dir.mkdir()
     ts.replace(selection_key(broken_dir), {"seed": 1, "samples": []})
-    broken, broken_error = read_selection_checked(broken_dir)
+    broken, broken_error = read_selection_checked(broken_dir, project=tmp_path)
     assert broken is None
     assert broken_error is not None and "no samples" in broken_error
 
@@ -177,7 +177,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
 
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
-    drawn = draw_splits(str(root), output_path=str(root / "splits" / "rows"),
+    drawn = draw_splits(tmp_path, str(root), output_path=str(root / "splits" / "rows"),
                         ground_truth=str(csv_path), seed=4, train_ratio=0.5, val_ratio=0.25,
                         calibration_ratio=0.25, group_by="stem")
     assert "error" not in drawn, drawn
@@ -188,7 +188,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
                  "task": "classification"},
     }, experiment_id="exp-table-picker")
 
-    result = list_split_choices("exp-table-picker")
+    result = list_split_choices(tmp_path, "exp-table-picker")
 
     offered = {choice["selection_dir"]: choice for choice in result["selections"]}
     assert str(root / "splits" / "rows") in offered, result
@@ -196,7 +196,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
 
 
 def test_list_split_choices_route_404s_for_an_unknown_experiment(
-    tmp_path: Path, monkeypatch, client: TestClient,
+    tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
     """The route itself exists and answers a known id (proving the 404 below discriminates the
     one unknown id, never a route that failed to mount at all)."""
@@ -233,15 +233,15 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
-    default_selection = _draw(root, dataset_default)
+    default_selection = _draw(tmp_path, root, dataset_default)
 
     elsewhere = tmp_path / "elsewhere"
-    _draw(root, elsewhere, seed=2)
-    launched = launch_training(_bound_config(root, elsewhere))
+    _draw(tmp_path, root, elsewhere, seed=2)
+    launched = launch_training(tmp_path, _bound_config(root, elsewhere))
     assert "error" not in launched, launched
 
     other_subject_dir = tmp_path / "other_subject"
-    _draw(root, other_subject_dir, subject=OTHER_SUBJECT, seed=3)
+    _draw(tmp_path, root, other_subject_dir, subject=OTHER_SUBJECT, seed=3)
     opened_run(tmp_path, _bound_config(root, other_subject_dir),
                experiment_id="exp-other-subject")
 
@@ -252,7 +252,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked")
 
-    result = list_split_choices("exp-picked")
+    result = list_split_choices(tmp_path, "exp-picked")
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     expected = default_selection.counts()
@@ -287,14 +287,14 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path):
     from tests.test_freeze_selection import _real_drawn_experiment
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-src")
-    frozen = freeze_selection("exp-src")
+    _real_drawn_experiment(tmp_path, root, "exp-src")
+    frozen = freeze_selection(tmp_path, "exp-src")
     assert "error" not in frozen, frozen
 
     picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-frozen")
 
-    result = list_split_choices("exp-picked-frozen")
+    result = list_split_choices(tmp_path, "exp-picked-frozen")
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     entry = by_dir[frozen["selection_dir"]]
@@ -310,10 +310,10 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     from tests.test_freeze_selection import _real_drawn_experiment
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(root, "exp-first")
-    _real_drawn_experiment(root, "exp-second")
-    first = freeze_selection("exp-first")
-    second = freeze_selection("exp-second")
+    _real_drawn_experiment(tmp_path, root, "exp-first")
+    _real_drawn_experiment(tmp_path, root, "exp-second")
+    first = freeze_selection(tmp_path, "exp-first")
+    second = freeze_selection(tmp_path, "exp-second")
     assert "error" not in first, first
     assert "error" not in second, second
     assert Path(first["selection_dir"]).parent == root / "splits"
@@ -323,7 +323,7 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-both-frozen")
 
-    result = list_split_choices("exp-picked-both-frozen")
+    result = list_split_choices(tmp_path, "exp-picked-both-frozen")
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     assert by_dir[first["selection_dir"]]["enabled"] is True
@@ -344,7 +344,7 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     opened_run(tmp_path, cfg, experiment_id="exp-moved-dirs")
     shutil.rmtree(root / "images" / DATES[0])
 
-    result = list_split_choices("exp-moved-dirs")
+    result = list_split_choices(tmp_path, "exp-moved-dirs")
 
     assert result["as_recorded"]["compatible"] is False
     assert "Not found: data.images_dir" in result["as_recorded"]["reason"]
@@ -367,12 +367,12 @@ def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
-    drawn = _draw(root, selection_dir)
+    drawn = _draw(tmp_path, root, selection_dir)
     opened_run(tmp_path, _bound_config(root, selection_dir), experiment_id="exp-version-refused")
     selection_path(selection_dir).write_text(
         json.dumps({**selection_document(drawn), "schema_version": 99}), encoding="utf-8")
 
-    result = list_split_choices("exp-version-refused")
+    result = list_split_choices(tmp_path, "exp-version-refused")
 
     assert result["as_recorded"]["compatible"] is False
     assert "schema_version" in result["as_recorded"]["reason"]
@@ -389,13 +389,13 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
-    _draw(root, dataset_default)
+    _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     cfg["data"]["split"] = {"seed": 7, "group_by": "tile_prefix"}
     opened_run(tmp_path, cfg, experiment_id="exp-drawn-policy")
 
-    result = list_split_choices("exp-drawn-policy")
+    result = list_split_choices(tmp_path, "exp-drawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
     candidate = candidate_config_with_selection(cfg, str(dataset_default))
@@ -415,15 +415,15 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
-    _draw(root, dataset_default)
+    _draw(tmp_path, root, dataset_default)
     own_manifest_dir = tmp_path / "own"
-    _draw(root, own_manifest_dir, seed=3)
+    _draw(tmp_path, root, own_manifest_dir, seed=3)
 
     cfg = _bound_config(root, own_manifest_dir)
     cfg["data"]["split"].update({"seed": 11, "redraw_within_selection": True})
     opened_run(tmp_path, cfg, experiment_id="exp-redrawn-policy")
 
-    result = list_split_choices("exp-redrawn-policy")
+    result = list_split_choices(tmp_path, "exp-redrawn-policy")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
     candidate = candidate_config_with_selection(cfg, str(dataset_default))
@@ -441,13 +441,13 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
-    _draw(root, dataset_default)
+    _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     cfg["data"]["split"] = {"seed": 7, "redraw_within_selection": None}
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
-    result = list_split_choices("exp-null-policy-key")
+    result = list_split_choices(tmp_path, "exp-null-policy-key")
     entry = next(m for m in result["selections"] if m["selection_dir"] == str(dataset_default))
 
     assert entry["replaced_split_keys"] == ["seed"]
@@ -478,7 +478,7 @@ def test_list_split_choices_reads_the_picked_runs_own_launch_record_only_once(
 
     monkeypatch.setattr(experiments_module, "read_record", _counting_read_record)
 
-    list_split_choices("exp-picked-once")
+    list_split_choices(tmp_path, "exp-picked-once")
 
     assert reads.count("exp-picked-once") == 1
     assert reads.count("exp-other-once") == 1
@@ -496,7 +496,7 @@ def test_list_split_choices_does_not_offer_the_own_selection_under_a_different_s
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     elsewhere = tmp_path / "elsewhere"
-    _draw(root, elsewhere, seed=2)
+    _draw(tmp_path, root, elsewhere, seed=2)
 
     opened_run(tmp_path, _bound_config(root, elsewhere), experiment_id="exp-own-spelling")
 
@@ -505,7 +505,7 @@ def test_list_split_choices_does_not_offer_the_own_selection_under_a_different_s
     other_cfg["data"]["split"] = {"selection_dir": respelled}
     opened_run(tmp_path, other_cfg, experiment_id="exp-other-spelling")
 
-    result = list_split_choices("exp-own-spelling")
+    result = list_split_choices(tmp_path, "exp-own-spelling")
 
     offered = {m["selection_dir"] for m in result["selections"]}
     assert str(elsewhere) not in offered
@@ -525,7 +525,7 @@ def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
     splits_dir = root / "splits"
     splits_dir.mkdir(parents=True, exist_ok=True)
     real_dir = splits_dir / "real"
-    _draw(root, real_dir, seed=3)
+    _draw(tmp_path, root, real_dir, seed=3)
 
     link_dir = splits_dir / "link"
     try:
@@ -536,7 +536,7 @@ def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-symlinked-splits")
 
-    result = list_split_choices("exp-symlinked-splits")
+    result = list_split_choices(tmp_path, "exp-symlinked-splits")
 
     offered = [m["selection_dir"] for m in result["selections"]]
     matches = [p for p in offered if Path(p).resolve() == real_dir.resolve()]
@@ -555,7 +555,7 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     shared_dir = tmp_path / "shared_manifest"
-    _draw(root, shared_dir, seed=4)
+    _draw(tmp_path, root, shared_dir, seed=4)
 
     own_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, own_cfg, experiment_id="exp-picker")
@@ -566,7 +566,7 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
     upper_cfg["data"]["split"] = {"selection_dir": str(shared_dir).upper()}
     opened_run(tmp_path, upper_cfg, experiment_id="exp-candidate-upper")
 
-    result = list_split_choices("exp-picker")
+    result = list_split_choices(tmp_path, "exp-picker")
 
     offered = [m["selection_dir"] for m in result["selections"]]
     matches = [p for p in offered if Path(p).resolve() == shared_dir.resolve()]
@@ -577,7 +577,7 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
 
 
 def test_relaunch_route_409s_for_a_selection_dir_outside_the_enabled_set(
-    tmp_path: Path, monkeypatch, client: TestClient,
+    tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
     """The browser's string is verified against the platform's own listing: a string this
     listing never offered, and one it offered but disabled, both refuse the same way."""
@@ -604,7 +604,7 @@ def test_relaunch_route_409s_for_a_selection_dir_outside_the_enabled_set(
 
 
 def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_chosen(
-    tmp_path: Path, monkeypatch, client: TestClient,
+    tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
     """"As recorded" launches the stated config's own data section, whether it was bound or
     drawn, byte for byte: the route never rewrites data.split unless a partition is chosen."""
@@ -613,7 +613,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
 
     captured: dict = {}
 
-    def fake_launch_training(config, *a, **k):
+    def fake_launch_training(project, config, *a, **k):
         captured["data"] = config.get("data")
         return {"experiment_id": config.get("experiment_id"), "status": "launched"}
 
@@ -626,7 +626,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     assert resp.status_code == 200, resp.json()
     assert captured["data"] == drawn["data"]
 
-    _draw(root, tmp_path / "manifest")
+    _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest")
     opened_run(tmp_path, bound, experiment_id="exp-bound")
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-bound"})
@@ -634,15 +634,15 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     assert captured["data"] == bound["data"]
 
 
-def _relaunched_config(response) -> dict:
-    """The launch record of the new run a relaunch response names."""
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+def _relaunched_config(project: Path, response) -> dict:
+    """The launch record of the new run of ``project`` a relaunch response names."""
+    from tcip_mcp.experiments import experiment_dir, observe
 
-    return read_record(experiment_dir(response.json()["experiment_id"]) / RUN_FILE)
+    return observe(experiment_dir(response.json()["experiment_id"], project=project)).record
 
 
 def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
-    tmp_path: Path, monkeypatch, client: TestClient,
+    tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
     """A launch with a chosen partition submits a string the server itself listed; the new run's
     launch record states that candidate, data.split replaced wholesale and the stated class scope
@@ -653,11 +653,11 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     chosen = root / "splits"
-    _draw(root, chosen)
+    _draw(tmp_path, root, chosen)
 
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-choose-partition")
-    source_path = experiment_dir("exp-choose-partition") / RUN_FILE
+    source_path = experiment_dir("exp-choose-partition", project=tmp_path) / RUN_FILE
     source_before = read_record(source_path)
 
     resp = client.post("/api/training/runs", json={
@@ -665,7 +665,7 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
     })
     assert resp.status_code == 200, resp.json()
 
-    launched = _relaunched_config(resp)
+    launched = _relaunched_config(tmp_path, resp)
     assert launched["config"]["data"]["split"] == {"selection_dir": str(chosen)}
     assert "scope" not in launched["config"]["data"]
     assert launched["parent_experiment"] == "exp-choose-partition"
@@ -673,7 +673,7 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
 
 
 def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_directory(
-    tmp_path: Path, monkeypatch, client: TestClient,
+    tmp_path: Path, opened_project: Path, monkeypatch, client: TestClient,
 ) -> None:
     """The picker's own dedupe offers one spelling of a symlinked directory; the relaunch route
     must still admit the other spelling of the identical directory, not just the one string it
@@ -690,7 +690,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     splits_dir = root / "splits"
     splits_dir.mkdir(parents=True, exist_ok=True)
     real_dir = splits_dir / "real"
-    _draw(root, real_dir, seed=5)
+    _draw(tmp_path, root, real_dir, seed=5)
 
     link_dir = splits_dir / "link"
     try:
@@ -701,7 +701,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     opened_run(tmp_path, cfg, experiment_id="exp-symlink-relaunch")
 
-    choices = list_split_choices("exp-symlink-relaunch")
+    choices = list_split_choices(tmp_path, "exp-symlink-relaunch")
     offered = next(m["selection_dir"] for m in choices["selections"] if m["enabled"])
     assert offered in (str(real_dir), str(link_dir))
     other_spelling = str(real_dir) if offered == str(link_dir) else str(link_dir)
@@ -712,23 +712,25 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     })
     assert resp.status_code == 200, resp.json()
 
-    assert _relaunched_config(resp)["config"]["data"]["split"] == {"selection_dir": other_spelling}
+    recorded = _relaunched_config(tmp_path, resp)["config"]["data"]["split"]
+    assert set(recorded) == {"selection_dir"}
+    assert identity(recorded["selection_dir"]) == identity(other_spelling)
 
 
 def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(tmp_path: Path) -> None:
     """The candidate config the route builds for a chosen partition, resolved and opened by the
     launcher's own producer: the run's launch record names the chosen selection as the partition
     it bound to."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import candidate_config_with_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     chosen = tmp_path / "chosen"
-    _draw(root, chosen, seed=5)
+    _draw(tmp_path, root, chosen, seed=5)
     stated = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
 
     run_dir = opened_run(tmp_path, candidate_config_with_selection(stated, str(chosen)),
                          experiment_id="exp-bound-split-record")
 
-    binding = read_record(run_dir / RUN_FILE)["resolved"]["partition"]["selection"]
+    binding = observe(run_dir).record["resolved"]["partition"]["selection"]
     assert binding["selection_dir"] == str(chosen)

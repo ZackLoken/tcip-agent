@@ -62,7 +62,7 @@ def _skewed_calibration_records() -> list[dict]:
     return recs
 
 
-def test_resolved_max_dets_covers_the_densest_calibration_image():
+def test_resolved_max_dets_covers_the_densest_calibration_image(tmp_path):
     """End to end through the real door: the cap stamped on the bundle has to admit the reference's
     own crowded image, not just its typical one.
     """
@@ -70,7 +70,8 @@ def test_resolved_max_dets_covers_the_densest_calibration_image():
     densest = max(len(r["gt"]) for r in recs)
     assert densest == 300  # the fixture really is skewed, not uniform
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", calibration_records=recs)
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                dataset_hash="h", calibration_records=recs)
     max_dets = b.params["max_dets"]
 
     assert max_dets._raw == 411

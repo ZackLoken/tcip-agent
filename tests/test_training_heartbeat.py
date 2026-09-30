@@ -40,28 +40,26 @@ def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
     assert observe(run_dir).state == "interrupted"
 
 
-def test_listed_runs_read_running_against_interrupted(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+def test_listed_runs_read_running_against_interrupted(tmp_path):
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    _beat(opened_run(None, _config(tmp_path), experiment_id="live"), 0)
-    _beat(opened_run(None, _config(tmp_path), experiment_id="dead"), 2 * 3600)
+    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="live"), 0)
+    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="dead"), 2 * 3600)
 
-    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
     assert by_id["live"]["status"] == "running"
     assert by_id["dead"]["status"] == "interrupted"
 
 
-def test_a_listed_row_carries_the_heartbeat_instant(tmp_path, monkeypatch):
+def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     """No process id is recorded anywhere a listed row could check, so a client showing a
     'running' row as live needs the heartbeat instant itself, not just the derived state, to
     say how stale that liveness claim already is."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.tools.experiment_tools import list_experiments
 
-    instant = _beat(opened_run(None, _config(tmp_path), experiment_id="beating"), 180)
+    instant = _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="beating"), 180)
 
-    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
     assert by_id["beating"]["status"] == "running"
     assert by_id["beating"]["heartbeat"] == datetime.fromtimestamp(
         instant, timezone.utc).isoformat()
@@ -72,19 +70,18 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     "interrupted" the same way under a configured heartbeat window, one constant
     (``experiments.HEARTBEAT_STALE_SECONDS``) read by every consumer: a 300s-old heartbeat reads
     stale under a 30s window even though it would read fresh under the 600s default."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments as compare_tool
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_mcp.tools.training_tools import monitor_training
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 30.0)
-    _beat(opened_run(None, _config(tmp_path), experiment_id="exp-window"), 300)
+    _beat(opened_run(tmp_path, _config(tmp_path), experiment_id="exp-window"), 300)
 
-    by_id = {r["experiment_id"]: r for r in list_experiments(launched_only=True)["runs"]}
+    by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path, launched_only=True)["runs"]}
     assert by_id["exp-window"]["status"] == "interrupted"
 
-    cmp = compare_tool(["exp-window"])
+    cmp = compare_tool(["exp-window"], project=tmp_path)
     assert cmp["experiments"][0]["state"] == "interrupted"
 
-    assert monitor_training("exp-window")["status"] == "interrupted"
+    assert monitor_training(tmp_path, "exp-window")["status"] == "interrupted"

@@ -158,12 +158,12 @@ def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDat
     return built
 
 
-def _draw(root: Path, out: Path, *, subject: str = SUBJECT, attribute: str | None = None,
-         seed: int = 2):
-    result = draw_splits(str(root), output_path=str(out), subject=subject, attribute=attribute,
+def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT,
+          attribute: str | None = None, seed: int = 2):
+    result = draw_splits(project, str(root), output_path=str(out), subject=subject, attribute=attribute,
                          seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
-    return read_selection(out)
+    return read_selection(out, project=project)
 
 
 def _run_data_cfg(root: Path, selection_dir: Path, **overrides) -> dict:
@@ -183,10 +183,10 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
 
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
@@ -237,7 +237,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     config = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -259,7 +259,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(tmp_path: Path):
         "a bound run reads the dataset's own imagery and ground truth; nothing is copied")
 
     # Both dates reach the members the run actually recorded, from two label directories.
-    samples = partition_samples(run_resolution(run_dir.name)["partition"])
+    samples = partition_samples(run_resolution(run_dir.name, project=tmp_path)["partition"])
     consumed = {s for s in samples if s.side in ("train", "val")}
     assert {Path(s.ground_truth).parent.name for s in consumed} == set(DATES)
     assert {Path(s.ground_truth).stem for s in consumed} == {
@@ -284,7 +284,7 @@ def test_a_bound_run_keeps_its_selections_class_map_when_the_registry_is_reorder
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out, attribute="condition", seed=1)
+    drawn = _draw(tmp_path, root, out, attribute="condition", seed=1)
     assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
 
     # The same attribute, its values declared the other way round: a map re-derived here would
@@ -326,14 +326,14 @@ def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(tmp_path: Path)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     for stated in ({"subject": OTHER_SUBJECT}, asdict(drawn.scope)):
         with pytest.raises(ValueError, match="Drop data.scope"):
-            auto_train_val("detection", _run_data_cfg(root, out, scope=stated), None)
+            auto_train_val(tmp_path, "detection", _run_data_cfg(root, out, scope=stated), None)
 
     data_cfg = _run_data_cfg(root, out)
-    train_ds, val_ds, _partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _partition = auto_train_val(tmp_path, "detection", data_cfg, None)
     assert data_cfg["scope"] == asdict(drawn.scope)
     assert train_ds.scope == drawn.scope and val_ds.scope == drawn.scope
 
@@ -346,12 +346,12 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(tmp_path: Path)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     emptied = drawn.on("train")[0]
     json_io.write_annotations(emptied.ground_truth, [], 64, 64, keep_empty=True)
 
     with pytest.raises(ValueError, match="no longer admissible"):
-        auto_train_val("detection", _run_data_cfg(root, out), None)
+        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
 
 def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path):
@@ -362,14 +362,14 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(tmp_path: Path
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     emptied = drawn.on("train")[0]
     json_io.write_annotations(emptied.ground_truth, [], 64, 64, keep_empty=True)
     record_image_statuses(
         root, status_bucket(SUBJECT, Path(emptied.ground_truth).parent.name),
         {Path(emptied.source).name: "negative"}, recorded_by="user:tester")
 
-    train_ds, val_ds, partition = auto_train_val("detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -389,13 +389,13 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(tmp_p
     images_dir = root / "images" / DATES[0]
     Image.new("RGB", (64, 64), (10, 10, 10)).save(images_dir / "spare.jpg")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     assert "spare" not in {Path(s.source).stem for s in drawn.samples}
 
     # The same logical image now resolves to two files: the directory can no longer be listed.
     Image.new("RGB", (64, 64), (20, 20, 20)).save(images_dir / "spare.png")
 
-    train_ds, val_ds, _partition = auto_train_val("detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, _partition = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
     assert len(train_ds) == len(drawn.on("train"))
     assert len(val_ds) == len(drawn.on("val"))
@@ -442,9 +442,10 @@ def test_a_positive_named_unlike_its_image_contradicts_a_stale_negative(tmp_path
         member="reviewed", source=str(images_dir / "photo.jpg"),
         ground_truth=str(labels_dir / "reviewed.json"),
         group="g", side="train", confirmation_bucket=bucket),
-    ), scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=0, group_by="stem"))
+    ), scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=0, group_by="stem"),
+        project=tmp_path)
 
-    selection = read_selection(out)
+    selection = read_selection(out, project=tmp_path)
     refuse_inadmissible_samples(selection.samples, selection.scope)
 
 
@@ -483,8 +484,8 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
             ground_truth=str(labels_dir / "a.json"),
             group="g", side="train", confirmation_bucket=status_bucket(SUBJECT, DATES[0]),
             row_key=row_key),
-        ), scope=ClassScope() if row_key else scope, seed=0, group_by="stem"))
-        return read_selection(out)
+        ), scope=ClassScope() if row_key else scope, seed=0, group_by="stem"), project=tmp_path)
+        return read_selection(out, project=tmp_path)
 
     scope = ClassScope(subject=SUBJECT, id_map={SUBJECT: 0})
     with pytest.raises(ValueError, match="a detection loader does not read"):
@@ -505,7 +506,7 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
 
     root = _tiled_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out, seed=1)
+    drawn = _draw(tmp_path, root, out, seed=1)
 
     side_of_parent: dict[str, str] = {}
     for sample in drawn.samples:
@@ -514,7 +515,7 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     assert len(side_of_parent) == 4
 
     data_cfg = _run_data_cfg(root, out)
-    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
     parents_on = {
         side: {Path(stem).stem.rsplit("_", 2)[0] for stem in ds.stems}
         for side, ds in (("train", train_ds), ("val", val_ds))
@@ -541,10 +542,10 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(tmp_path: 
     record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"n.jpg": "negative"},
                           recorded_by="user:tester")
     out = tmp_path / "m"
-    drawn = _draw(root, out, seed=1)
+    drawn = _draw(tmp_path, root, out, seed=1)
     assert "n" in {Path(s.ground_truth).stem for s in drawn.samples}
 
-    train_ds, val_ds, _ = auto_train_val("detection", _run_data_cfg(root, out), None)
+    train_ds, val_ds, _ = auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
     negatives = [s for s in drawn.on("train") + drawn.on("val")
                  if Path(s.ground_truth).stem == "n"]
@@ -560,7 +561,7 @@ def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(tmp_path: Path):
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "m"
 
-    drawn = _draw(root, out, seed=1)
+    drawn = _draw(tmp_path, root, out, seed=1)
 
     assert "n" not in {Path(s.ground_truth).stem for s in drawn.samples}
 
@@ -572,11 +573,11 @@ def test_a_bound_run_reads_class_ids_from_the_selections_own_map(tmp_path: Path)
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out, attribute="condition")
+    drawn = _draw(tmp_path, root, out, attribute="condition")
     assert drawn.scope.id_map == {"healthy": 0, "damaged": 1}
 
     data_cfg = _run_data_cfg(root, out)
-    train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert train_ds.scope == drawn.scope
     assert data_cfg.get("num_classes") is None  # the map's length is the one class count
@@ -591,13 +592,13 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
     data_cfg["dataset_source"] = {
         "builder": f"{__name__}:build_recording_dataset", "task": "detection",
     }
 
-    train_ds, _val_ds, _ = auto_train_val("detection", data_cfg, None)
+    train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert sorted(s.identity for s in train_ds.seen_samples) == sorted(
         s.identity for s in drawn.on("train"))
@@ -621,19 +622,19 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     source = {"builder": f"{__name__}:build_recording_dataset", "task": task}
 
     bound_cfg = _run_data_cfg(root, out)
     bound_cfg["dataset_source"] = source
-    bound_train, bound_val, _partition = auto_train_val(task, bound_cfg, None)
+    bound_train, bound_val, _partition = auto_train_val(tmp_path, task, bound_cfg, None)
 
     unbound_cfg = {"images_dir": str(root / "images" / DATES[0]),
                    "labels_dir": str(root / "annotations" / DATES[0]),
                    "scope": {"subject": SUBJECT}, "dataset_source": source,
                    "split": {"val_ratio": 0.5, "seed": 3}}
     unbound_train, unbound_val, _unbound_partition = auto_train_val(
-        task, unbound_cfg, None)
+        tmp_path, task, unbound_cfg, None)
 
     assert bound_val is not None and unbound_val is not None, \
         "each route draws both sides over the samples its producer named"
@@ -678,14 +679,14 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     config = {"model_source": {"task": "detection"}, "data": _run_data_cfg(root, out)}
     config["data"]["dataset_source"] = {
         "builder": f"{__name__}:build_recording_dataset", "task": "detection",
     }
 
     before = len(_RECORDED_BUILDS)
-    batch, why = _one_real_batch("detection", resolve_run(config).train_ds)
+    batch, why = _one_real_batch("detection", resolve_run(config, project=tmp_path).train_ds)
 
     assert why is None and batch is not None
     smoked = _RECORDED_BUILDS[before]  # the training side, built first
@@ -703,14 +704,14 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     write_selection(out, Selection(
         samples=tuple(s for s in drawn.samples if s.side != "val"),
         scope=drawn.scope, seed=drawn.seed, group_by=drawn.group_by,
-    ))
+    ), project=tmp_path)
 
     with pytest.raises(ValueError, match="empty side"):
-        auto_train_val("detection", _run_data_cfg(root, out), None)
+        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
 
 def _strip_the_recorded_subject(out: Path) -> None:
@@ -730,11 +731,11 @@ def test_the_selection_writer_refuses_a_document_selection_with_no_subject(tmp_p
     from tcip_mcp.pipelines.data.selection import write_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
     unscoped = dataclasses.replace(drawn, scope=ClassScope(id_map=drawn.scope.id_map))
 
     with pytest.raises(ValueError, match="no subject"):
-        write_selection(tmp_path / "unscoped", unscoped)
+        write_selection(tmp_path / "unscoped", unscoped, project=tmp_path)
     assert not (tmp_path / "unscoped").exists()
 
 
@@ -743,11 +744,11 @@ def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     _strip_the_recorded_subject(out)
 
     with pytest.raises(ValueError, match="no subject"):
-        auto_train_val("detection", _run_data_cfg(root, out), None)
+        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
 
 def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(tmp_path: Path):
@@ -755,12 +756,12 @@ def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(t
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
     data_cfg["split"]["val_ratio"] = 0.3
 
     with pytest.raises(ValueError, match="val_ratio"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(tmp_path: Path):
@@ -771,10 +772,10 @@ def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(tm
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
     with pytest.raises(ValueError, match="a semantic_seg loader does not read"):
-        auto_train_val("semantic_seg", _run_data_cfg(root, out), None)
+        auto_train_val(tmp_path, "semantic_seg", _run_data_cfg(root, out), None)
 
 
 def test_auto_train_val_binding_failure_raises_rather_than_degrading(tmp_path: Path):
@@ -784,12 +785,12 @@ def test_auto_train_val_binding_failure_raises_rather_than_degrading(tmp_path: P
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     gone = drawn.on("train")[0]
     Path(gone.source).unlink()
 
     with pytest.raises(ValueError, match="no longer admissible"):
-        auto_train_val("detection", _run_data_cfg(root, out), None)
+        auto_train_val(tmp_path, "detection", _run_data_cfg(root, out), None)
 
 
 # -- redraw_within_selection ---------------------------------------------------
@@ -809,12 +810,12 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     pool = {s.identity for s in drawn.on("train") + drawn.on("val")}
     held_out = {s.identity for s in drawn.on("calibration")}
 
     data_cfg = _redraw_cfg(root, out, seed=1)
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert set(train_ds.stems) | set(val_ds.stems) == pool
     assert not (set(train_ds.stems) | set(val_ds.stems)) & held_out
@@ -827,10 +828,10 @@ def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
     def _train(seed: int) -> list[str]:
-        train_ds, _val, _ = auto_train_val("detection", _redraw_cfg(root, out, seed), None)
+        train_ds, _val, _ = auto_train_val(tmp_path, "detection", _redraw_cfg(root, out, seed), None)
         return sorted(train_ds.stems)
 
     first = _train(1)
@@ -843,12 +844,12 @@ def test_a_redraw_without_a_seed_refuses(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
     data_cfg["split"]["redraw_within_selection"] = True
 
     with pytest.raises(ValueError, match="requires data.split.seed"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
@@ -856,12 +857,12 @@ def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     data_cfg = _run_data_cfg(root, out)
     data_cfg["split"]["seed"] = 3
 
     with pytest.raises(ValueError, match="seed"):
-        auto_train_val("detection", data_cfg, None)
+        auto_train_val(tmp_path, "detection", data_cfg, None)
 
 
 def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts(tmp_path: Path):
@@ -873,13 +874,15 @@ def test_redraw_starved_issue_names_the_selection_the_seed_and_both_counts(tmp_p
     from tcip_mcp.pipelines.data.splits import redraw_pool, redraw_starved_issue
 
     drawn_dir = tmp_path / "drawn"
-    _draw(_two_subject_two_date_dataset(tmp_path / "ds"), drawn_dir)
+    _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "ds"), drawn_dir)
     assert redraw_starved_issue(
-        *redraw_pool(read_selection(drawn_dir)), selection_dir=str(drawn_dir), seed=3) is None
+        *redraw_pool(read_selection(drawn_dir, project=tmp_path)), selection_dir=str(drawn_dir),
+        seed=3) is None
 
     _root, one_group = one_foreground_group_selection(tmp_path / "one")
     starved = redraw_starved_issue(
-        *redraw_pool(read_selection(one_group)), selection_dir=str(one_group), seed=3)
+        *redraw_pool(read_selection(one_group, project=tmp_path / "one")),
+        selection_dir=str(one_group), seed=3)
     assert starved is not None
     assert f"{str(one_group)!r}" in starved and "seed 3" in starved
     assert "1 foreground group" in starved and "2 distinct group" in starved
@@ -910,7 +913,8 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     write_selection(out, Selection(
         samples=(_sample("fg", "train"), _sample("neg", "val"),
                  _sample("held_a", "calibration"), _sample("held_b", "calibration")),
-        scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=1, group_by="explicit_map"))
+        scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}), seed=1, group_by="explicit_map"),
+        project=tmp_path)
     return root, out
 
 
@@ -924,7 +928,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(tmp_pa
     config = _preflight_config(root, out)
     config["data"]["split"].update({"redraw_within_selection": True, "seed": 1})
 
-    result = preflight_config(config)
+    result = preflight_config(tmp_path, config)
 
     assert any("foreground group" in issue for issue in result["issues"]), result["issues"]
 
@@ -946,9 +950,9 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(tmp_path: Path
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
-    result = preflight_config(_preflight_config(root, out))
+    result = preflight_config(tmp_path, _preflight_config(root, out))
 
     # A bound config names no images_dir or labels_dir: the selection's samples carry their own
     # paths, so the directory checks must not raise an objection against it.
@@ -960,10 +964,10 @@ def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     _strip_the_recorded_subject(out)
 
-    result = preflight_config(_preflight_config(root, out))
+    result = preflight_config(tmp_path, _preflight_config(root, out))
 
     assert any("records no subject" in i for i in result["issues"])
 
@@ -973,11 +977,11 @@ def test_preflight_config_admits_the_redraw_pair_with_a_warning(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     config = _preflight_config(root, out)
     config["data"]["split"].update({"redraw_within_selection": True, "seed": 1})
 
-    result = preflight_config(config)
+    result = preflight_config(tmp_path, config)
 
     assert result["issues"] == []
     assert any("redraw_within_selection=true" in w for w in result["warnings"])
@@ -987,15 +991,15 @@ def test_preflight_config_admits_the_redraw_pair_with_a_warning(tmp_path: Path):
 
 
 def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     run_dir = resolved_run(tmp_path, _run_data_cfg(root, out), experiment_id="exp-bound")
-    partition = read_record(run_dir / RUN_FILE)["resolved"]["partition"]
+    partition = observe(run_dir).record["resolved"]["partition"]
 
     assert partition["selection"]["selection_dir"] == str(out)
     assert _side_members(partition, "train") == sorted(

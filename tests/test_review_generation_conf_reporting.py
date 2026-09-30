@@ -19,7 +19,7 @@ RECORDED_CONF = 0.37
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 

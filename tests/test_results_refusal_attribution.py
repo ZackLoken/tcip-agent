@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
 from tcip_web.app import app
-from tcip_web.state import store
 
+from tests._web_fixtures import open_new_project
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
@@ -121,9 +121,9 @@ def test_the_two_refusals_do_not_read_alike(client: TestClient, tmp_path: Path) 
     classifier_broken = _phenology_fixture(tmp_path / "classifier", validated=True, detections=4)
     _unvalidate_classifier(classifier_broken)
 
-    store.open_project(Path(count_broken["project_root"]).resolve())
+    open_new_project(tmp_path / "count")
     count_detail = _refusal_detail(client, count_broken, "phenology_measurement")
-    store.open_project(Path(classifier_broken["project_root"]).resolve())
+    open_new_project(tmp_path / "classifier")
     classifier_detail = _refusal_detail(client, classifier_broken, "phenology_measurement")
     assert count_detail != classifier_detail
     assert "['classifier']" not in count_detail

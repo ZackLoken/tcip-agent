@@ -25,7 +25,7 @@ MOSAIC_W, MOSAIC_H = 4000, 3000
 
 
 def _write_split(tmp_path: Path, experiment_id: str, spatial: dict) -> None:
-    """A real run under the pinned root, opened by the launcher's own producer and writer, whose
+    """A real run under the project, opened by the launcher's own producer and writer, whose
     launch record is then set past that writer to state a within-image spatial split with
     ``spatial`` as its manifest."""
     from tcip_store import RECORD_JSON
@@ -33,7 +33,7 @@ def _write_split(tmp_path: Path, experiment_id: str, spatial: dict) -> None:
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    run_dir = opened_run(None, detection_config(tmp_path / f"{experiment_id}-data"),
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / f"{experiment_id}-data"),
                          experiment_id=experiment_id)
     record = read_record(run_dir / RUN_FILE)
     record["resolved"]["data"]["split"] = {"spatial_manifest": {
@@ -58,7 +58,8 @@ def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak(tmp_path):
     assert not rects_overlap((0, 0, 400, 1000), gap_rect)          # genuinely clear of train
     assert not rect_contains_rect((600, 0, 1000, 1000), gap_rect)  # and attested by nothing
 
-    res = _train_disjointness("exp_gap", {"mosaic"}, set(), cal_rects={"mosaic": gap_rect})
+    res = _train_disjointness("exp_gap", {"mosaic"}, set(), cal_rects={"mosaic": gap_rect},
+                              project=tmp_path)
     assert res["group_check"] == "spatial_strip_geometric"
     assert res["leaked_groups"] == ["mosaic"]
 
@@ -75,7 +76,7 @@ def test_a_rect_inside_an_attested_region_is_admitted(tmp_path):
     })
 
     res = _train_disjointness("exp_clean", {"mosaic"}, set(),
-                              cal_rects={"mosaic": (650, 100, 750, 300)})
+                              cal_rects={"mosaic": (650, 100, 750, 300)}, project=tmp_path)
     assert res["leaked_groups"] == []
     assert res["unresolvable"] is False
 
@@ -116,8 +117,8 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    resolved_run(None, data_cfg, experiment_id="exp_four_way")
-    spatial = run_resolution("exp_four_way")["data"]["split"]["spatial_manifest"]
+    resolved_run(tmp_path, data_cfg, experiment_id="exp_four_way")
+    spatial = run_resolution("exp_four_way", project=tmp_path)["data"]["split"]["spatial_manifest"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"
 
@@ -126,7 +127,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
     clean = _train_disjointness("exp_four_way", {stem}, set(),
-                                cal_rects={stem: _shrunk(cal_region[0])})
+                                cal_rects={stem: _shrunk(cal_region[0])}, project=tmp_path)
     assert clean["group_check"] == "spatial_strip_geometric"
     assert clean["leaked_groups"] == []
 
@@ -135,7 +136,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     assert all(not rects_overlap(tuple(tr), beyond_extent) for tr in spatial["train_region"])
 
     leaked = _train_disjointness("exp_four_way", set(), {stem},
-                                 hold_rects={stem: beyond_extent})
+                                 hold_rects={stem: beyond_extent}, project=tmp_path)
     assert leaked["leaked_groups"] == [stem]
 
 
@@ -153,8 +154,8 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 7},
     }
-    resolved_run(None, data_cfg, experiment_id="exp_spatial_no_seed")
-    resolved = run_resolution("exp_spatial_no_seed")
+    resolved_run(tmp_path, data_cfg, experiment_id="exp_spatial_no_seed")
+    resolved = run_resolution("exp_spatial_no_seed", project=tmp_path)
 
     assert resolved["partition"]["seed"] is None
     assert "seed" not in resolved["data"]["split"]["spatial_manifest"]

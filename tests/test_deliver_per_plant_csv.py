@@ -60,15 +60,14 @@ def _write_one_plant_scene(tmp_path: Path) -> tuple[Path, Path, str]:
 
     from tests._binding_fixtures import write_geo_image as _write_geo_image
 
-    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
 
     dataset_root = tmp_path / "ds"
     images_root = dataset_root / "images"
     date = "2026-02-11"
     _write_geo_image(images_root / date / "P1.jpg", 43.19670, -90.058000,
                      datetime(2026, 2, 11, 9, 30))
-    result = register_dataset(
-        str(dataset_root), crop=sorted(registered_crops())[0], project_root=str(tmp_path))
+    result = register_dataset(tmp_path, str(dataset_root), crop=sorted(registered_crops())[0])
     assert "error" not in result, result
 
     plant_csv = tmp_path / "plants.csv"
@@ -94,8 +93,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     from tests._binding_fixtures import write_geo_image as _write_geo_image
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
 
     dataset_root = tmp_path / "ds"
     images_root = dataset_root / "images"
@@ -104,7 +102,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
                      datetime(2026, 2, 11, 9, 30))
     _write_geo_image(images_root / date / "P2.jpg", 43.19680, -90.057000,
                      datetime(2026, 2, 11, 9, 35))
-    register_dataset(str(dataset_root), crop=sorted(registered_crops())[0], project_root=str(tmp_path))
+    register_dataset(tmp_path, str(dataset_root), crop=sorted(registered_crops())[0])
 
     plant_csv = tmp_path / "plants.csv"
     plant_csv.write_text(
@@ -117,10 +115,10 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     from tests._binding_fixtures import register_plant_registry_for
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     mapping_name = "valley"
     mapped = build_plant_mapping(
-        name=mapping_name, images_root=str(images_root), plant_registry=registry)
+        tmp_path, name=mapping_name, images_root=str(images_root), plant_registry=registry)
     assert "error" not in mapped, mapped
     assert mapped["n_mapped"] == 2
 
@@ -132,7 +130,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     ckpt = project_checkpoint(tmp_path)
     pred_dir = dataset_root / "predictions" / "run" / date
-    ran = run_inference(ckpt, str(images_root / date), output_dir=str(pred_dir),
+    ran = run_inference(tmp_path, ckpt, str(images_root / date), output_dir=str(pred_dir),
                         conf_threshold=0.0, tile=False)
     assert "error" not in ran, ran
 
@@ -157,7 +155,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     predictions_by_date = {date: str(pred_dir)}
 
     refused = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping=mapping_name,
         predictions_by_date=predictions_by_date)
     assert "error" in refused
@@ -171,10 +169,10 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     op = dict(sidecar.get("operating_point") or {})
     op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
     stamp = {**sidecar, "validated": True, "trait": fx.COUNT_TRAIT, "operating_point": op}
-    write_bound_sidecar(pred_dir, stamp, dataset_root=dataset_root, experiment_id="exp-promoted")
+    write_bound_sidecar(tmp_path, pred_dir, stamp, dataset_root=dataset_root, experiment_id="exp-promoted")
 
     delivered = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping=mapping_name,
         predictions_by_date=predictions_by_date)
     assert "error" not in delivered, delivered
@@ -195,25 +193,20 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     from tcip_mcp.audit import audit_log_key
 
-    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE
-    from tcip_mcp.project_paths import project_state_dir
+    from tcip_mcp.pipelines.resolution import read_delivery_events
 
-    scope = project_state_dir(tmp_path)
-    events = [
-        tcip_store.read(key, default=None)
-        for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
-    ]
-    event = next(e for e in events if e and e["door"] == "deliver_per_plant_csv")
+    events = read_delivery_events(tmp_path)
+    event = next(e for e in events if e["door"] == "deliver_per_plant_csv")
     bindings = event["document_reconciliations"]["operating_point"]["bindings"]
     assert bindings[str(pred_dir)]["ok"] is True
 
     # The delivery's one line, in the dataset's log, names the event: the refusal wrote nothing,
-    # so it left none, and the delivery leaves no second line in the platform's log.
+    # so it left none, and the delivery leaves no second line in the project's log.
     page = tcip_store.read_log(audit_log_key(dataset_root))
     door_rows = [r for r in page.records if r["tool"] == "delivery_event"]
     assert [r["arguments"] for r in door_rows] == [{"event_id": event["event_id"]}]
-    platform_page = tcip_store.read_log(audit_log_key())
-    assert [r for r in platform_page.records if r["tool"] == "delivery_event"] == []
+    project_page = tcip_store.read_log(audit_log_key(tmp_path))
+    assert [r for r in project_page.records if r["tool"] == "delivery_event"] == []
 
     assert event["plant_mapping"]["name"] == mapping_name
     assert event["plant_mapping"]["record_sha256"] == mapping_build.record_sha256
@@ -234,7 +227,7 @@ def test_deliver_per_plant_csv_refuses_an_unknown_plant_mapping_by_name(tmp_path
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="no-such-mapping",
         predictions_by_date={"2026-02-11": str(tmp_path)})
     assert "error" in res
@@ -258,7 +251,7 @@ def test_deliver_per_plant_csv_refuses_a_named_mapping_with_no_verification_inpu
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley")
     assert "error" in res
     assert "predictions_by_date" in res["error"]
@@ -279,27 +272,24 @@ def test_deliver_per_plant_csv_refuses_a_malformed_record_through_the_writer(tmp
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="")
     assert "error" in res
     assert "no" in res["error"] and "observation" in res["error"]
     assert not out_csv.exists()
 
 
-def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_not_cover(
-    tmp_path, monkeypatch,
-):
+def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_not_cover(tmp_path):
     """The shared preamble (``plant_mapping.resolve_delivery_mapping``) refuses a delivered date
     the mapping was never built to cover, before any bucket or dataset identity is read."""
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
 
     from tests._binding_fixtures import register_plant_registry_for
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
         nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
@@ -315,7 +305,7 @@ def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_no
 
     uncovered_date = "2026-03-01"
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={
             date: str(dataset_root / "predictions" / "run" / date),
@@ -328,28 +318,27 @@ def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_no
 
 
 def test_deliver_per_plant_csv_refuses_predictions_under_a_different_dataset_than_the_mapping(
-    tmp_path, monkeypatch,
+    tmp_path,
 ):
     """A predictions bucket resolving to a dataset root the mapping was not built over refuses
     naming both roots, through the shared preamble."""
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
 
     other_dataset_root = tmp_path / "ds2"
     other_dataset_root.mkdir()
     other_reg = register_dataset(
-        str(other_dataset_root), crop=sorted(registered_crops())[0], project_root=str(tmp_path))
+        tmp_path, str(other_dataset_root), crop=sorted(registered_crops())[0])
     assert "error" not in other_reg, other_reg
 
     from tests._binding_fixtures import register_plant_registry_for
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
         nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
@@ -364,7 +353,7 @@ def test_deliver_per_plant_csv_refuses_predictions_under_a_different_dataset_tha
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(other_dataset_root / "predictions" / "run" / date)})
     assert "error" in res
@@ -400,27 +389,24 @@ def test_deliver_per_plant_csv_refuses_a_mapping_with_no_capture_at_all_for_a_de
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley", predictions_by_date=preds_by_date)
     assert "error" in res
     assert "recorded no capture at all" in res["error"]
     assert not out_csv.exists()
 
 
-def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(
-    tmp_path, monkeypatch,
-):
+def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(tmp_path):
     """This door's one added claim over the writer: every delivered ``plant_id`` must appear
     among a plot the named mapping actually assigned, or the delivery refuses by name."""
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
 
     from tests._binding_fixtures import register_plant_registry_for
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
         nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
 
@@ -440,7 +426,7 @@ def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(pred_dir)})
     assert "error" in res
@@ -450,20 +436,19 @@ def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(
 
 
 def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_was_built(
-    tmp_path, monkeypatch,
+    tmp_path,
 ):
     """A verification refusal from the shared preamble itself, distinct from its three
     resolution-time refusals: a capture the mapping's own assignments do not name means the
     mapping does not cover what is on disk now."""
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
 
     from tests._binding_fixtures import register_plant_registry_for
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     mapped = build_plant_mapping(
-        name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
+        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
         nn_tolerance_m=10.0)
     assert "error" not in mapped, mapped
     assert mapped["n_mapped"] == 1
@@ -488,7 +473,7 @@ def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_wa
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
+        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(pred_dir)})
     assert "error" in res

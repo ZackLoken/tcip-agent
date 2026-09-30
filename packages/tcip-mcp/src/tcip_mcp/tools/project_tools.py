@@ -6,12 +6,11 @@ import os
 import shutil
 import uuid
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import tcip_store
 from tcip_store import (
     RECORD_JSON,
-    DecodeError,
     Key,
     StoreDescriptor,
     VersionConflict,
@@ -19,7 +18,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 
 _PROJECT_STATE_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".json")
@@ -53,81 +52,39 @@ register_store(
 )
 
 
-def dataset_registry_key(project_root: str | Path) -> Key:
+def dataset_registry_key(project: str | Path) -> Key:
     """The project's record of which datasets it uses, keyed by dataset id.
 
     ``cas``: :func:`upsert_dataset` reads the whole list, replaces one entry and writes it
     back, so an unconditional write drops a dataset another registration had just added.
     """
-    return Key(DATASET_REGISTRY_STORE, str(Path(project_root).absolute()), _DATASET_REGISTRY_PARTS)
+    return Key(DATASET_REGISTRY_STORE, str(Path(project)), _DATASET_REGISTRY_PARTS)
 
 
-def read_datasets(project_root: str | Path) -> list[dict]:
+def read_datasets(project: str | Path) -> list[dict]:
     """The project's dataset registry (``[{id, path, crop, fingerprint}]``), or [] when absent.
 
     A registry present but undecodable raises rather than reading as empty.
     """
-    return tcip_store.read(dataset_registry_key(project_root), default=[])
+    return tcip_store.read(dataset_registry_key(project), default=[])
 
 
-def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str:
-    """What a dataset registry entry stores for ``path``: relative to ``project_root`` when
-    ``dataset_root`` is that root or sits under it, the project's own tree becoming ``"."``;
-    absolute otherwise, and a ``".."`` form is never produced.
+def dataset_entry_path(project: str | Path, entry: dict) -> Path:
+    """The absolute path a dataset registry ``entry`` names, resolved through
+    :func:`~tcip_mcp.registry_paths.resolved_registry_path`."""
+    from tcip_mcp.registry_paths import resolved_registry_path
 
-    Containment is decided by filesystem identity (``os.path.samefile`` over the resolved dataset
-    root's own ancestors), so a case variant, an alias or a junction of either root reads exactly
-    as the filesystem sees it. Absolute (unchanged) whenever either side is not an existing
-    directory. A relative form is stored with POSIX separators (``as_posix()``).
-    """
-    from tcip_mcp.registry_paths import nearest_containing_ancestor
-
-    dataset_root, project_root = Path(dataset_root), Path(project_root)
-    if dataset_root.is_dir() and project_root.is_dir():
-        resolved = dataset_root.resolve()
-        ancestor = nearest_containing_ancestor(resolved, project_root, tolerant=True)
-        if ancestor is not None:
-            return resolved.relative_to(ancestor).as_posix()
-        return str(resolved)
-    return str(dataset_root)
+    return resolved_registry_path(project, entry["path"])
 
 
-def entry_is_external(entry: dict) -> bool:
-    """Whether this registry entry names a dataset outside the project's own tree.
-
-    An external dataset is the one kind :func:`registry_path_for` stores absolute; every other
-    entry is the project's own tree or a directory under it, stored relative. Grammar-aware
-    (:func:`~tcip_mcp.registry_paths.is_external_form`), so a Windows drive or UNC spelling reads
-    as external whichever platform reads it.
-    """
-    from tcip_mcp.registry_paths import is_external_form
-
-    return is_external_form(str(entry["path"]))
-
-
-def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
-    """The absolute path a dataset registry ``entry`` names, resolving a relative ``path`` (the
-    project's own tree, stored ``"."`` or a deeper relative form by :func:`registry_path_for`)
-    against ``project_root``; an already-absolute ``path`` (an external dataset) is returned
-    unchanged.
-
-    A relative ``path`` is joined by its POSIX parts, so a nested entry resolves the same whichever
-    platform wrote or reads it.
-    """
-    path = entry["path"]
-    if entry_is_external(entry):
-        return Path(path)
-    return Path(project_root).joinpath(*PurePosixPath(path).parts)
-
-
-def upsert_dataset(project_root: str | Path, entry: dict) -> None:
+def upsert_dataset(project: str | Path, entry: dict) -> None:
     """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset updates
     the ``path`` of its existing id rather than duplicating, so identity survives a move.
 
     The read and the write are one transaction, so two registrations running at once cannot
     each write a list assembled from the state before the other's entry landed.
     """
-    key = dataset_registry_key(project_root)
+    key = dataset_registry_key(project)
     with tcip_store.transaction(key) as txn:
         regs = [r for r in txn.read(key, default=[])
                 if r.get("id") != entry.get("id")]
@@ -135,9 +92,9 @@ def upsert_dataset(project_root: str | Path, entry: dict) -> None:
         txn.write(key, sorted(regs, key=lambda r: str(r.get("id", ""))))
 
 
-@mcp.tool()
+@tool()
 @audited(scope_arg="dataset_root")
-def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> dict:
+def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
 
     Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the
@@ -152,21 +109,20 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     what committed and keeps the id it carries, and the project registry is reconciled against that
     committed id rather than the one this call proposed.
 
-    The registry's stored ``path`` (see :func:`registry_path_for`) is relative to ``project_root``
-    whenever the dataset sits under it, the project's own tree becoming ``"."``; a genuinely
-    external dataset stays absolute. A relative entry resolves at whatever path the project itself
-    is opened from.
+    The registry's stored ``path`` follows :func:`~tcip_mcp.registry_paths.stored_path`: relative
+    to the project whenever the dataset sits under it, absolute for an external dataset.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``subjects.json``).
         crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
             expert's fact.
-        project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
     """
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import decode_dataset_identity_document, dataset_identity_key
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.project_record import mint_id
+    from tcip_mcp.registry_paths import stored_path
 
     root = Path(dataset_root)
     if not root.is_dir():
@@ -196,7 +152,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
                                  "that cites the old one"}
         candidate = {
             "crop": crop,
-            "id": existing.get("id") or uuid.uuid4().hex[:12],  # minted once, then kept
+            "id": existing.get("id") or mint_id(),
             "fingerprint": fingerprint,
         }
         try:
@@ -208,247 +164,75 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         identity = candidate
         break
 
-    proj = Path(project_root) if project_root else root
-    upsert_dataset(proj, {"id": identity["id"], "path": registry_path_for(root, proj),
-                          "crop": crop, "fingerprint": fingerprint})
+    upsert_dataset(project, {"id": identity["id"], "path": stored_path(root, project),
+                             "crop": crop, "fingerprint": fingerprint})
     return {"dataset_root": str(root), **identity}
 
 
-def _scaffold_project(project_path: str, site: str) -> dict:
-    """Create ``.tcip/`` with its artifacts and models directories, and record the project's site.
+@tool()
+def initialize_project(project_path: str, display_name: str, site: str) -> dict:
+    """Create a TCIP project: ``.tcip/`` with its artifacts and models directories, and its record
+    holding a freshly minted id, ``display_name`` and ``site``, then one ``project_created`` line
+    in its own log.
 
-    The directories are idempotent: re-running only re-mkdirs.
-
-    ``site`` is validated before anything is created, so a refused site leaves nothing on disk. The
-    site is then written last, by :func:`tcip_mcp.project_record.record_site`, a create-only write:
-    an absent record is written, a present record with the same site is left as is, and a present
-    record with a different or unreadable site raises (``ValueError`` or ``StoreError``, per
-    :func:`~tcip_mcp.project_record.record_site`'s own contract).
-    """
-    from tcip_mcp.project_record import record_site, validate_site
-
-    validate_site(site)
-    tcip = _project_dir(project_path)
-    (tcip / "artifacts").mkdir(exist_ok=True)
-    (tcip / "models").mkdir(exist_ok=True)
-    recorded = record_site(project_path, site)
-
-    return {
-        "project_path": project_path,
-        "tcip_dir": str(tcip),
-        "created": [".tcip/", ".tcip/artifacts/", ".tcip/models/"],
-        "site": recorded["site"],
-    }
-
-
-@mcp.tool()
-@audited
-def initialize_project(project_path: str, site: str) -> dict:
-    """Initialize a TCIP project directory.
-
-    Creates ``.tcip/`` with its artifacts and models directories and records the project's
-    site. When ``project_path`` is directly under the workspace, its basename must fit
-    ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``);
-    a path outside the workspace is not a workspace project and is not held to the scheme.
+    Creating a project that already records the same display name and site answers it as it
+    stands; one recording a different site or display name refuses rather than overwriting it.
+    A refused record leaves nothing on disk.
 
     Args:
         project_path: Root directory of the project.
-        site: The orchard or station this project's plants stand in, in the breeder's own
-            words. Ask the breeder rather than guessing it from a path or filename; a project
-            that already records a different site refuses rather than overwriting it.
+        display_name: The name the project picker shows; renaming later changes only this.
+        site: The orchard or station this project's plants stand in, in the breeder's own words.
     """
     from tcip_store import StoreError
 
-    from tcip_mcp import workspace
+    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.project_record import create_record
 
-    p = Path(project_path).expanduser().resolve()
-    if p.parent == workspace.workspace_root():
-        try:
-            workspace.parse_project_name(p.name)
-        except ValueError as exc:
-            return {"error": str(exc)}
+    project = Path(project_path).expanduser().resolve()
     try:
-        # The resolved path, so a relative project_path scaffolds where the name check above
-        # just resolved it, rather than the record write refusing a relative root afterward.
-        return _scaffold_project(str(p), site)
+        record = create_record(project, display_name, site)
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
+    tcip = _project_dir(str(project))
+    (tcip / "artifacts").mkdir(exist_ok=True)
+    (tcip / "models").mkdir(exist_ok=True)
+    record_event_or_raise("project_created", dict(record), scope=project)
+    return {"project_path": str(project), **record}
 
 
-@mcp.tool()
-@audited
-def activate_project(name: str) -> dict:
-    """Set the workspace's active project so the GUI opens it.
-
-    Writes the workspace active-project marker (``<workspace>/.active``) and notifies a running GUI
-    to open the project. ``name`` is an existing workspace project's directory name; adoption opens
-    what is there rather than creating anything, so any safely-named project is adoptable,
-    conforming or not.
-
-    The notification also carries whether the web backend repinned its own platform-state root on
-    it (``backend_repinned``, a bool), the root it repinned to (``backend_platform_root``), or why
-    it could not (``backend_root_problem``): when the backend is down or the delivery fails,
-    ``backend_repinned`` is ``False`` and the other two are ``None``.
-
-    Args:
-        name: The workspace project to make active.
+@tool()
+def view_gui_state(project: Path) -> dict:
+    """The GUI state the human last left in this project, from its ``gui.json``
+    (``web_client.read_gui_snapshot``): the tab, the mode and the dataset selection, with
+    ``current_image``, the image the selection's index names. A ``note`` stands in for all of it
+    when the GUI has persisted nothing for this project; a snapshot that will not read raises.
     """
-    from tcip_mcp import workspace
-    from tcip_mcp.web_client import PANEL_EVENT_ACTIVE_PROJECT_CHANGED, post_panel_event
+    from tcip_mcp.web_client import current_image, read_gui_snapshot
 
-    try:
-        marker = workspace.activate_project(name)
-        proj = workspace.project_path(name)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    delivery = post_panel_event(
-        "app", PANEL_EVENT_ACTIVE_PROJECT_CHANGED, {"name": name, "project_path": str(proj)}
-    )
-    response = delivery.get("response") or {}
-    backend_platform_root = response.get("platform_root")
-    return {
-        "name": name,
-        "project_path": str(proj),
-        "marker": str(marker),
-        "gui_notified": bool(delivery.get("delivered")),
-        "backend_repinned": backend_platform_root is not None,
-        "backend_platform_root": backend_platform_root,
-        "backend_root_problem": response.get("platform_root_problem"),
-        "recent_activity": _recent_activity(str(proj)),
-    }
+    state = read_gui_snapshot(project)
+    if state is None:
+        return {"note": "the GUI has not persisted a selection for this project"}
+    return {**state.model_dump(mode="json"), "current_image": current_image(state.dataset)}
 
 
-def _resolve_project_path(project_path: str) -> str:
-    from tcip_mcp import workspace
-    return workspace.resolve_project_path(project_path)
+@tool()
+def inspect_project(project: Path) -> dict:
+    """Get an overview of the project.
 
-
-def _root_divergence_report() -> dict[str, str] | None:
-    """Whether this process's platform-state root disagrees with the workspace's active-project
-    marker.
-
-    ``None`` when there is no marker, the marker names an adoptable project this process's root
-    already matches, or the two agree. Carries ``marker_problem`` when the marker could not be used
-    at all: a store refusal, a lock timeout, or a name
-    :func:`tcip_mcp.workspace.adoptable_project_root` refuses to open.
-
-    Reads with ``create=False``, so it never brings the workspace directory into existence.
-    """
-    from tcip_mcp import workspace
-    from tcip_mcp.project_paths import platform_state_root
-
-    try:
-        found = workspace.active_project_if_present(create=False)
-    except Exception as exc:  # noqa: BLE001 - reported, never raised out of inspect_project
-        return {"marker_problem": str(exc)}
-    if found is None:
-        problem = workspace.marker_problem(create=False)
-        return {"marker_problem": problem} if problem else None
-    _, marker_project = found
-    root = platform_state_root()
-    if root == marker_project:
-        return None
-    return {
-        "platform_root": str(root),
-        "marker_project": str(marker_project),
-        "action": "activate_project",
-    }
-
-
-@mcp.tool()
-def view_gui_state() -> dict:
-    """The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the
-    exact current image. Lets the agent work through the app instead of globbing or asking which image
-    is open. Reads the active-project marker + that project's gui.json. active_project is None when
-    nothing is open.
-    """
-    from tcip_mcp import workspace
-    from tcip_mcp.web_client import gui_snapshot_key
-
-    name = workspace.read_active_project()
-    if not name:
-        return {"active_project": None,
-                "note": "no active project; open one in the GUI or call activate_project"}
-    project_root = workspace.project_path(name)
-    ctx: dict = {"active_project": name, "project_root": str(project_root)}
-    try:
-        gui = tcip_store.read(gui_snapshot_key(project_root), default=None)
-    except (DecodeError, OSError) as e:
-        ctx["error"] = f"could not read the GUI snapshot: {e}"
-        return ctx
-    if gui is None:
-        ctx["note"] = "no GUI snapshot yet (the GUI has not persisted a selection for this project)"
-        return ctx
-    ds = gui.get("dataset") or {}
-    image_list = ds.get("image_list") or []
-    idx = ds.get("current_image_index") or 0
-    dataset_root, date = ds.get("dataset_root"), ds.get("date")
-    current_image = None
-    if dataset_root and date and 0 <= idx < len(image_list):
-        from tcip_mcp.dataset_layout import image_dir
-
-        current_image = str(image_dir(dataset_root, date) / image_list[idx])
-    ctx.update({
-        "dataset_root": dataset_root,
-        "subject": ds.get("subject"),
-        "date": date,
-        "active_tab": gui.get("active_tab"),
-        "mode": gui.get("mode"),
-        "n_images": len(image_list),
-        "current_image_index": idx,
-        "current_image": current_image,
-    })
-    return ctx
-
-
-@mcp.tool()
-def inspect_project(project_path: str = "") -> dict:
-    """Get an overview of a TCIP project.
-
-    Carries ``platform_root_diverges_from_marker`` when this process's platform-state root
-    (``$TCIP_STATE_ROOT``) names a different project than the workspace's active-project marker.
-    Carries ``platform_root_binding``, this process's own
-    :class:`tcip_mcp.project_paths.RootBinding` as a dict, when either
-    :func:`tcip_mcp.project_paths.pin_platform_root` or
-    :func:`tcip_mcp.project_paths.repin_platform_root` has run.
-
-    For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
-    ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why
-    there is no site (no record yet, a damaged one, or a root the store refuses to read).
-    ``plant_mappings`` carries every mapping name persisted under the project, the same shape:
+    Carries the record's ``id``, ``display_name`` and ``site`` beside ``record_problem`` from
+    ``tcip_mcp.project_record.record_fields``: the three are set, or ``record_problem`` names why
+    they are not (a damaged record, or a root the store refuses to read). ``plant_mappings``
+    carries every mapping name persisted under the project, the same shape:
     ``plant_mappings_problem`` names why the listing came back empty when the root's state is a
     store the bound backend refuses to read (a root still in the loose-file layout under the
-    database default). A path with no ``.tcip`` carries neither, the same as it carries no other
-    live-computed field.
-
-    Args:
-        project_path: Root directory of the project. Empty defaults to the active project.
+    database default).
     """
-    from tcip_mcp.project_paths import root_binding
+    from tcip_mcp.project_record import record_fields
 
-    project_path = _resolve_project_path(project_path)
-    root = Path(project_path)
-    tcip = root / ".tcip"
+    tcip = project / ".tcip"
 
-    status: dict = {"project_path": project_path, "initialized": tcip.is_dir()}
-    divergence = _root_divergence_report()
-    if divergence:
-        status["platform_root_diverges_from_marker"] = divergence
-    binding = root_binding()
-    if binding is not None:
-        status["platform_root_binding"] = {
-            "root": str(binding.root),
-            "source": binding.source,
-            "inherited_root": binding.inherited_root,
-            "marker_problem": binding.marker_problem,
-        }
-    if not tcip.is_dir():
-        return status
-
-    from tcip_mcp.project_record import site_fields
-
-    status.update(site_fields(project_path))
+    status: dict = {"project_path": str(project), **record_fields(project)}
 
     # Models
     models_dir = tcip / "models"
@@ -466,35 +250,34 @@ def inspect_project(project_path: str = "") -> dict:
     image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
     from tcip_mcp import dataset_layout
 
-    images_dir = dataset_layout.image_root(root)
+    images_dir = dataset_layout.image_root(project)
     if images_dir.is_dir():
-
         status["image_count"] = sum(
             1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
         )
-        status["dates"] = dataset_layout.list_dates(root)
+        status["dates"] = dataset_layout.list_dates(project)
 
     from tcip_store import StoreError
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_names
 
     try:
-        status["plant_mappings"] = plant_mapping_names(root)
+        status["plant_mappings"] = plant_mapping_names(project)
     except StoreError as exc:
         status["plant_mappings"] = []
         status["plant_mappings_problem"] = str(exc)
 
-    status["recent_activity"] = _recent_activity(project_path)
+    status["recent_activity"] = _recent_activity(project)
     return status
 
 
-def _recent_activity(project_path: str) -> dict:
+def _recent_activity(project: Path) -> dict:
     """The project's persisted status summary (recent report/retrospective/distillation activity),
     namespaced separately from the live-computed fields above it; it may be stale or corrupt.
     """
     from tcip_mcp.project_status import read_project_status
 
-    activity = read_project_status(project_path)
+    activity = read_project_status(project)
     if activity.get("_version_refused"):
         return {"status_unavailable": "project_status.json is at a schema_version this "
                                        "reader does not accept"}
@@ -572,11 +355,20 @@ def _write_bundle_directory(out_dir: Path, root: Path, members: list[Path]) -> t
 
 @audited
 def archive_project(
-    project_path: str, output_path: str = "", output_dir: str = "",
+    project: Path, output_path: str = "", output_dir: str = "",
     include_models: bool = False,
 ) -> dict:
-    """Export an annotation project as a portable bundle: a ZIP file, or, given ``output_dir``
-    instead of ``output_path``, the identical bundle written as a directory tree.
+    """Export ``project`` as a portable bundle (:func:`write_archive`, on its terms) and record
+    the export in the project's log."""
+    return write_archive(project, output_path=output_path, output_dir=output_dir,
+                         include_models=include_models)
+
+
+def write_archive(
+    project: Path, *, output_path: str = "", output_dir: str = "", include_models: bool = False,
+) -> dict:
+    """Export ``project`` as a portable bundle: a ZIP file, or, given ``output_dir`` instead of
+    ``output_path``, the identical bundle written as a directory tree.
 
     Composes the bundle from the shared membership accounting
     (:func:`tcip_mcp.tools.bundle.account_for`): every record or log a derived root of this tree
@@ -589,7 +381,7 @@ def archive_project(
     bespoke run's ``model_src/`` snapshot travels regardless.
 
     Exactly one of ``output_path``/``output_dir`` must be given. ``output_dir`` refuses a
-    destination inside ``project_path`` (a bundle cannot contain the tree it was drawn from) and a
+    destination inside the project (a bundle cannot contain the tree it was drawn from) and a
     destination that already holds anything.
 
     Every database under the tree is exported to its loose files first, through
@@ -609,9 +401,7 @@ def archive_project(
     caller is reading is decided by which of ``output_dir``/``output_path`` the response carries.
 
     Args:
-        project_path: Root directory of the project.
-        output_path: Destination path for the ZIP file. A relative path resolves against the
-            platform state root, which is not necessarily ``project_path``.
+        output_path: Destination path for the ZIP file; a relative path is under the project.
         output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP; the
             same path-resolution rule as ``output_path``.
         include_models: Whether to include model checkpoints (can be large).
@@ -623,15 +413,13 @@ def archive_project(
         return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
                          "tree) to archive into"}
 
-    root = Path(project_path).resolve()
+    root = Path(project).resolve()
     if not root.is_dir():
-        return {"error": f"Project directory not found: {project_path}"}
+        return {"error": f"Project directory not found: {project}"}
 
     resolved_output_dir: Path | None = None
     if output_dir:
-        from tcip_mcp.project_paths import resolve_output_path
-
-        resolved_output_dir = Path(resolve_output_path(output_dir)).resolve()
+        resolved_output_dir = Path(project, output_dir).resolve()
         try:
             resolved_output_dir.relative_to(root)
         except ValueError:
@@ -682,9 +470,7 @@ def archive_project(
         resolved_output_dir.mkdir(parents=True, exist_ok=True)
         files_added, size_bytes = _write_bundle_directory(resolved_output_dir, root, members)
     else:
-        from tcip_mcp.project_paths import resolve_output_path
-
-        out = Path(resolve_output_path(output_path))
+        out = Path(project, output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         files_added = _write_bundle_zip(out, root, members)
         size_bytes = out.stat().st_size
@@ -854,10 +640,10 @@ class StoreErrorRuntime(RuntimeError):
     """Raised inside the retried move body; caught outside the retry as a tool refusal."""
 
 
-@audited
 def import_project(bundle_path: str, destination: str) -> dict:
     """Import an annotation project from a bundle ``archive_project`` wrote: a ZIP archive, or a
-    directory tree written by its ``output_dir`` mode.
+    directory tree written by its ``output_dir`` mode, and record one ``import_project`` line in
+    the imported project's own log.
 
     A directory bundle is staged through the identical walker a ZIP bundle is
     (:func:`_stage_bundle`), so the two are read back exactly alike below this point.
@@ -870,9 +656,7 @@ def import_project(bundle_path: str, destination: str) -> dict:
     then renames the staged tree onto ``destination``.
 
     ``destination`` must not already exist, or must be an empty directory: this door merges nothing
-    into a live project. When ``destination`` is directly under the workspace, its basename must
-    fit ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``); a
-    destination outside the workspace is not held to the scheme.
+    into a live project.
 
     A refusal at any step leaves the destination exactly as it was (absent, or its original empty
     state); the staging tree this run made is removed whether the run refused, raised, or
@@ -895,7 +679,7 @@ def import_project(bundle_path: str, destination: str) -> dict:
     """
     from filelock import Timeout as _LockTimeout
 
-    from tcip_mcp import workspace
+    from tcip_mcp.audit import record_event_or_raise
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, lock_file_for, path_lock
 
     bp = Path(bundle_path)
@@ -903,12 +687,6 @@ def import_project(bundle_path: str, destination: str) -> dict:
         return {"error": f"bundle not found: {bundle_path}"}
 
     dest = Path(destination).expanduser().resolve()
-    if dest.parent == workspace.workspace_root():
-        try:
-            workspace.parse_project_name(dest.name)
-        except ValueError as exc:
-            return {"error": str(exc)}
-
     if dest.exists():
         if not dest.is_dir():
             return {"error": f"destination {dest} exists and is not a directory"}
@@ -936,6 +714,8 @@ def import_project(bundle_path: str, destination: str) -> dict:
         return {"error": f"could not lock a fresh staging directory at {staging}"}
     finally:
         lock_file_for(staging).unlink(missing_ok=True)
+    if "error" not in result:
+        record_event_or_raise("import_project", {"bundle_path": bundle_path}, scope=dest)
     return result
 
 
@@ -1027,22 +807,24 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     }
 
 
-def _external_dataset_paths(project_root: Path) -> list[str]:
+def _external_dataset_paths(project: Path) -> list[str]:
     """The imported project's own registered dataset entries that stay absolute (external)."""
-    return sorted(str(e["path"]) for e in read_datasets(project_root) if entry_is_external(e))
+    from tcip_mcp.registry_paths import is_external_form
+
+    return sorted(str(e["path"]) for e in read_datasets(project)
+                  if is_external_form(str(e["path"])))
 
 
-@mcp.tool()
-@audited(scope_arg="project_root")
-def delete_stray_state_file(project_root: str, relative_path: str, reason: str) -> dict:
-    """Delete one stray file under a project's ``.tcip/state`` root: a file
+@tool()
+@audited
+def delete_stray_state_file(project: Path, relative_path: str, reason: str) -> dict:
+    """Delete one stray file under the project's ``.tcip/state`` root: a file
     ``stray_state.stray_state_files`` lists, and the doctor's own finding names, that no store
     claims, no blob home claims, and that is not the storage backend's own bookkeeping.
 
     ``reason`` is required and non-empty, recorded on this door's own audit line.
 
-    Refuses, before any write, naming why: an empty ``reason``; a ``project_root`` whose ``.tcip``
-    is not a directory; ``relative_path`` empty, absolute, carrying a ``..`` segment, or resolving
+    Refuses, before any write, naming why: an empty ``reason``; ``relative_path`` empty, absolute, carrying a ``..`` segment, or resolving
     outside the state root; a path under the state root's own database home; a path that does not
     exist; a directory; a link or junction; a path the accounting classifies as the storage
     backend's own bookkeeping, as a claimed store's own file (naming the store), or as a recognized
@@ -1056,13 +838,9 @@ def delete_stray_state_file(project_root: str, relative_path: str, reason: str) 
         return {"error": "delete_stray_state_file needs a non-empty reason: the confirmation "
                          "with the person this destructive act requires."}
 
-    root = Path(project_root)
-    if not (root / ".tcip").is_dir():
-        return {"error": f"{project_root} has no .tcip directory; not a project root"}
-
     from tcip_mcp.stray_state import stray_state_file_refusal
 
-    target, refusal = stray_state_file_refusal(project_root, relative_path)
+    target, refusal = stray_state_file_refusal(project, relative_path)
     if refusal is not None:
         return {"error": refusal}
 

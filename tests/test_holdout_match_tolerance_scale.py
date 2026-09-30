@@ -52,7 +52,7 @@ def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[
     return recs
 
 
-def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
+def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale(tmp_path):
     """Calibration carries 80 px objects, the holdout 20 px ones, and every holdout detection sits
     30 px from its GT center: comfortably inside the 60 px tolerance calibration's own scale earns,
     and far outside the 15 px the holdout's own scale earns.
@@ -64,7 +64,7 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
@@ -81,14 +81,14 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_scale():
+def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_scale(tmp_path):
     """The companion obligation: a 30 px displacement against 80 px objects is a genuine hit on both
     sides, and such a reference must still earn its held-out stamp.
     """
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
@@ -109,7 +109,7 @@ def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("no_floor_trait", **tiled_regime(), dataset_hash="h",
+    b = resolve_operating_point("no_floor_trait", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                 staged_conf_floor=0.05, calibration_records=cal,
                                 holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
@@ -119,13 +119,13 @@ def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_an_authored_floor_the_holdout_does_not_clear_refuses():
+def test_an_authored_floor_the_holdout_does_not_clear_refuses(tmp_path):
     """A floor stricter than what the reference's own precision/recall reach refuses by name,
     distinct from the unauthored case."""
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 

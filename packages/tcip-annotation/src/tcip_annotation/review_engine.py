@@ -201,7 +201,7 @@ register_store(
 
 def label_baseline_key(label_dir: str | Path, stem: str) -> Key:
     """One label file's pristine copy, beside the directory the original lives in."""
-    return Key(LABEL_BASELINES_STORE, str(Path(label_dir).absolute()), (str(stem),))
+    return Key(LABEL_BASELINES_STORE, str(Path(label_dir)), (str(stem),))
 
 
 def capture_label_baseline(label_path: str | Path) -> bool:

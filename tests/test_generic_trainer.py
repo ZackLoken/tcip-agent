@@ -82,7 +82,7 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
     config = {"model_source": {}}
     draw_seed_if_unset(config)
     run = TrainRun(id="auto-run-seed-applied", config=config, objective=LOSS_OBJECTIVE,
-                   output_dir=str(tmp_path / "out"))
+                   project=tmp_path, output_dir=str(tmp_path / "out"))
     train(run, train_loader=None)  # fails at build, after seeding
 
     assert captured["seed"] == run.config["seed"]
@@ -99,7 +99,7 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
     run = TrainRun(id="auto-run-unwritable", config={"model_source": {}},
-                   objective=LOSS_OBJECTIVE, output_dir=str(blocker / "out"))
+                   objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(blocker / "out"))
     run = train(run, train_loader=None)
 
     assert run.status == "failed"  # not stuck at "running"

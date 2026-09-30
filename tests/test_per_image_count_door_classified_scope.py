@@ -38,7 +38,7 @@ def _classified_bucket(tmp_path: Path) -> Path:
         images_dir=str(tmp_path / "images"), raster_path=None,
         produced_at="2026-05-20T00:00:00+00:00", image_filenames={"img1": "img1.png"},
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
     return bucket
 
 
@@ -51,7 +51,7 @@ def test_a_classified_bucket_delivers_its_object_count_not_its_value_count(tmp_p
     from tcip_mcp.pipelines.resolution import Acknowledgment
 
     result = per_image_counts_from_bucket(
-        str(bucket), str(out), revision=fx.count_revision(tmp_path), project_root=tmp_path,
+        tmp_path, str(bucket), str(out), revision=fx.count_revision(tmp_path),
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="unvalidated fixture"))
 
     assert "error" not in result

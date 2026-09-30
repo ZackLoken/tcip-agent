@@ -82,10 +82,10 @@ def _launch_record(res: dict) -> dict:
     return read_record(Path(res["output_dir"]) / RUN_FILE)
 
 
-def test_the_run_directory_lies_under_the_platform_state_root_not_the_process_cwd(
+def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
     """The run directory handed to the child and the run record written into it resolve under the
-    platform state root's experiments directory, never under the launching process's cwd."""
+    project's experiments directory, never under the launching process's cwd."""
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, experiments_dir
 
@@ -93,11 +93,10 @@ def test_the_run_directory_lies_under_the_platform_state_root_not_the_process_cw
     server_cwd = tmp_path / "server_cwd"
     project.mkdir()
     server_cwd.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
     monkeypatch.chdir(server_cwd)
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir))
+    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
 
     run_dir = Path(res["output_dir"])
     assert run_dir == experiments_dir(project) / res["experiment_id"]
@@ -118,10 +117,10 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
 
     ds_root = tmp_path / "ds"
     images_dir, labels_dir = _canonical_dataset(ds_root)
-    registered = register_dataset(str(ds_root), crop="currant")
+    registered = register_dataset(tmp_path, str(ds_root), crop="currant")
     assert registered["id"] and registered["fingerprint"]
 
-    res = training_tools_launch(_detection_config(images_dir, labels_dir))
+    res = training_tools_launch(tmp_path, _detection_config(images_dir, labels_dir))
 
     dataset = _launch_record(res)["dataset"]
     assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}
@@ -135,11 +134,10 @@ def test_launch_records_what_the_smoke_contract_checked(
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     launched_config = _detection_config(images_dir, labels_dir)
-    res = training_tools_launch(launched_config)
+    res = training_tools_launch(project, launched_config)
     assert "model_contract" not in launched_config
 
     record = _launch_record(res)["model_contract"]
@@ -155,10 +153,9 @@ def test_launch_omitting_overfit_check_records_null(
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir))
+    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
     assert res["overfit_check"] is None
 
     assert _launch_record(res)["model_contract"]["overfit_check"] is None
@@ -173,11 +170,10 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        _detection_config(images_dir, labels_dir), overfit_check=True)
+        project, _detection_config(images_dir, labels_dir), overfit_check=True)
     assert "error" not in res, res
     assert res["overfit_check"] is not None
     assert "passed" in res["overfit_check"]
@@ -199,7 +195,6 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
 
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     config = {
@@ -212,7 +207,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
                      "mixed_precision": False, "device": "cpu",
         "evaluation": {"selection_metric": "loss"},
     }
-    res = training_tools.launch_training(config, overfit_check=True)
+    res = training_tools.launch_training(project, config, overfit_check=True)
     assert "error" not in res, res
 
     record = _launch_record(res)["model_contract"]
@@ -233,10 +228,9 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir))
+    res = training_tools_launch(project, _detection_config(images_dir, labels_dir))
 
     record = _launch_record(res)
     config = record["config"]
@@ -248,11 +242,11 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     assert "experiment_id" not in config
 
 
-def training_tools_launch(config: dict) -> dict:
-    """Launch and assert the config was accepted, so a preflight refusal never reads as a
-    provenance failure in the tests above."""
+def training_tools_launch(project: Path, config: dict) -> dict:
+    """Launch a run of ``project`` and assert the config was accepted, so a preflight refusal
+    never reads as a provenance failure in the tests above."""
     from tcip_mcp.tools import training_tools
 
-    res = training_tools.launch_training(config)
+    res = training_tools.launch_training(project, config)
     assert "error" not in res, res
     return res

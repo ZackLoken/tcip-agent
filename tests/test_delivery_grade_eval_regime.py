@@ -17,8 +17,8 @@ from tests._regime_fixtures import tiled_regime
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so trait/subject="bud" call sites keep resolving.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
+# trait/subject="bud" call sites resolve.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -57,13 +57,12 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True, max_dets=50)
     assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
 
@@ -76,13 +75,12 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    r = evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True, tiling={"tile_size": 128, "overlap": 0.0})
     assert "error" not in r, r
     assert r["max_dets"] == DEFAULT_MAX_DETS == 1000
@@ -103,13 +101,12 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir))
+    evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir))
     assert captured["max_dets"] == 100
 
 
@@ -124,13 +121,12 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                    max_dets=7)
     assert captured["max_dets"] == 7
 
@@ -148,14 +144,13 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import SCOPED_DATA, registered_checkpoint
 
     ckpt = registered_checkpoint(
         tmp_path, data={**SCOPED_DATA, "tiling": {"tile_size": 384, "overlap": 0.15}})
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True)
     # The measurement is handed the checkpoint whose own record states its class space.
     assert captured["checkpoint"].data_config["scope"]["subject"] == "bud"
@@ -174,13 +169,12 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
         raise ValueError("Cannot resolve a trustworthy tile_size for ckpt.pt: ... tiling=")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    r = evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True)
     assert "error" in r
     assert "tiling=" in r["error"]
@@ -197,13 +191,12 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
         raise UnreadableLabelDocument("labels/2026-03-02/IMG_0001.json does not decode as JSON")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
 
-    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir),
+    r = evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                        use_tiled_inference=True)
     assert "error" in r
     assert "IMG_0001.json" in r["error"]
@@ -443,22 +436,25 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
         predictor_mod.build_predictor = build_predictor_orig
 
 
-def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
+def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness(tmp_path):
     """`tile_size`'s source is never inferred from truthiness: a truthy value alone, even a
     fabricated fallback the caller never actually derived, must not be stamped "derived". The
     caller's own resolved source travels through explicitly."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # A truthy tile_size with no source claim defaults to "default", not silently "derived".
-    b_default = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None, tile_size=640)
+    b_default = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                        dataset_hash=None, tile_size=640)
     assert b_default.get("tile_size").source == "default"
 
     b_derived = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=224, tile_size_source="derived")
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=224,
+        tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size")._raw == 224
 
     b_explicit = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=512,
+        tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     assert b_explicit.get("tile_size").source == "explicit"

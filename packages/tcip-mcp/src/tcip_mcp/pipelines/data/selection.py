@@ -17,6 +17,8 @@ import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+
 SIDES = ("train", "val", "calibration")
 """The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration``
 builds neither and is the universe a calibration or an evaluation reads its operating point off,
@@ -310,7 +312,7 @@ def selection_key(selection_dir: str | Path) -> Key:
     ``last_writer_wins``: a selection is written once, whole, at the end of the draw that produced
     it.
     """
-    return Key(SELECTION_STORE, str(Path(selection_dir).absolute()), _SELECTION_PARTS)
+    return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
 
 
 def selection_path(selection_dir: str | Path) -> Path:
@@ -320,8 +322,15 @@ def selection_path(selection_dir: str | Path) -> Path:
     return Path(key.root, *relative.parts)
 
 
+SAMPLE_PATHS: PathFields = (("source",), ("ground_truth",))
+"""The fields of a sample document that name a path."""
+
+SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
+"""The fields of a selection document that name a path."""
+
+
 def sample_document(sample: Sample) -> dict[str, Any]:
-    """The JSON shape one sample is recorded as, the one :func:`read_sample` reads back."""
+    """The JSON shape one sample is held in, the one :func:`read_sample` reads back."""
     doc: dict[str, Any] = {
         "member": sample.member, "source": sample.source, "ground_truth": sample.ground_truth,
         "group": sample.group, "side": sample.side,
@@ -338,7 +347,7 @@ def sample_document(sample: Sample) -> dict[str, Any]:
 
 
 def selection_document(selection: Selection) -> dict[str, Any]:
-    """The JSON shape a selection is written as, the one :func:`as_selection` reads back."""
+    """The JSON shape a selection is held in, the one :func:`as_selection` reads back."""
     return {
         "samples": [sample_document(s) for s in selection.samples],
         "scope": asdict(selection.scope),
@@ -349,7 +358,7 @@ def selection_document(selection: Selection) -> dict[str, Any]:
 
 
 def read_sample(raw: Any, position: int, where: str) -> Sample:
-    """One recorded sample document read back as a :class:`Sample`, refusing by name (naming
+    """One sample document read back as a :class:`Sample`, refusing by name (naming
     ``position`` in the record at ``where``) a non-mapping, a sample missing
     ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, a
     malformed ``rect``, and a sample whose ground truth is its own label document and which names
@@ -394,7 +403,7 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
 
 
 def as_selection(document: Any, *, where: str) -> Selection:
-    """A recorded document read back as a :class:`Selection`, refusing by name on anything a draw
+    """A held document read back as a :class:`Selection`, refusing by name on anything a draw
     never writes.
 
     ``where`` names the document in every refusal. Refuses a non-mapping, a missing or empty
@@ -428,28 +437,35 @@ def as_selection(document: Any, *, where: str) -> Selection:
     )
 
 
-def write_selection(selection_dir: str | Path, selection: Selection) -> Selection:
-    """Write ``selection`` under ``selection_dir`` and answer it back.
+def stored_selection_document(selection: Selection, project: str | Path) -> dict[str, Any]:
+    """The document a selection of ``project`` is stored as: :func:`selection_document` with its
+    paths stored against ``project`` (:data:`SELECTION_PATHS`)."""
+    return recorded_paths(selection_document(selection), SELECTION_PATHS, project)
+
+
+def write_selection(selection_dir: str | Path, selection: Selection, *,
+                    project: str | Path) -> Selection:
+    """Write ``selection``, a selection of ``project``, under ``selection_dir``
+    (:func:`stored_selection_document`), and answer it back.
 
     Refuses, before anything is written, whatever :func:`as_selection` refuses, so a selection on
     disk is always one a reader will accept.
     """
-    document = selection_document(selection)
-    as_selection(document, where=str(selection_dir))
+    as_selection(selection_document(selection), where=str(selection_dir))
     out_dir = Path(selection_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    tcip_store.replace(selection_key(out_dir), document)
+    tcip_store.replace(selection_key(out_dir), stored_selection_document(selection, project))
     return selection
 
 
-def read_selection(selection_dir: str | Path) -> Selection:
-    """The selection recorded under ``selection_dir``.
+def read_selection(selection_dir: str | Path, *, project: str | Path) -> Selection:
+    """The selection of ``project`` recorded under ``selection_dir``.
 
     Refuses with ``ValueError`` naming ``selection_dir`` when nothing is recorded there, when the
     record will not decode, or when it fails any of :func:`as_selection`'s shape checks. Lets
     :class:`tcip_store.SchemaVersionRefused` propagate.
     """
-    document = _read_selection_document(selection_dir)
+    document = _read_selection_document(selection_dir, project)
     if document is None:
         raise ValueError(
             f"no selection recorded under {selection_dir}; run draw_splits first.")
@@ -457,7 +473,7 @@ def read_selection(selection_dir: str | Path) -> Selection:
 
 
 def read_selection_checked(
-    selection_dir: str | Path,
+    selection_dir: str | Path, *, project: str | Path,
 ) -> tuple[Selection | None, str | None]:
     """:func:`read_selection` for a caller listing a candidate directory rather than binding to
     it, which must tell "nothing recorded here" apart from "something is recorded here and it is
@@ -469,7 +485,7 @@ def read_selection_checked(
     from tcip_store import SchemaVersionRefused
 
     try:
-        document = _read_selection_document(selection_dir)
+        document = _read_selection_document(selection_dir, project)
         if document is None:
             return None, None
         return as_selection(document, where=str(selection_dir)), None
@@ -479,14 +495,15 @@ def read_selection_checked(
         return None, str(exc)
 
 
-def _read_selection_document(selection_dir: str | Path) -> Any | None:
+def _read_selection_document(selection_dir: str | Path, project: str | Path) -> Any | None:
     from tcip_store import DecodeError
 
     try:
-        return tcip_store.read(selection_key(selection_dir), default=None)
+        document = tcip_store.read(selection_key(selection_dir), default=None)
     except DecodeError as exc:
         raise ValueError(
             f"the selection at {selection_dir} could not be read: {exc}") from exc
+    return None if document is None else runtime_paths(document, SELECTION_PATHS, project)
 
 
 def with_sides(selection: Selection, assignment: dict[str, str]) -> Selection:

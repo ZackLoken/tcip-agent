@@ -57,20 +57,20 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
     return recs
 
 
-def _resolve(*, spurious: bool):
+def _resolve(project, *, spurious: bool):
     return resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=project, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_records("c", 0.0, spurious=spurious),
         holdout_records=_records("h", 100000.0, spurious=spurious))
 
 
-def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
+def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance(tmp_path):
     """Class 2 carries 10 objects an image and is over-counted by 2 on every one of them, a 20%
     systematic miscount of that class. Class 1 carries 250 an image and is never wrong, so the
     pooled per-image density is 260 and the pooled bias of 2 is well inside the pooled tolerance:
     only the class's own density refuses this reference.
     """
-    b = _resolve(spurious=True)
+    b = _resolve(tmp_path, spurious=True)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
     rare = hb["per_class"]["2"]
@@ -96,12 +96,12 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_the_same_dense_and_rare_class_pairing_validates_when_every_class_is_honest():
+def test_the_same_dense_and_rare_class_pairing_validates_when_every_class_is_honest(tmp_path):
     """The companion obligation: the same two-class density profile, counted correctly, must still
     earn its held-out stamp. A per-class tolerance that refused a rare class merely for being rare
     would block every legitimate multi-class reference.
     """
-    b = _resolve(spurious=False)
+    b = _resolve(tmp_path, spurious=False)
     sweep = b.params["conf"].gate_evidence
 
     assert set(sweep["holdout_bias"]["per_class"]) == {"1", "2"}

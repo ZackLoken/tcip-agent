@@ -58,7 +58,7 @@ def _validated_stamp(tmp_path, **overrides) -> dict:
     the sidecar store's own locking/CAS/codec mechanics rather than the binding check itself."""
     from tests._binding_fixtures import file_validation_record
 
-    return file_validation_record(_stamp(**overrides), dataset_root=tmp_path)
+    return file_validation_record(tmp_path, _stamp(**overrides), dataset_root=tmp_path)
 
 
 # --- the stamp shape is one shape, whatever the producer had in hand ---
@@ -109,7 +109,7 @@ def test_stamped_producer_names_the_one_producer_its_stamps_record(tmp_path):
     from tcip_mcp.pipelines.resolution import stamped_producer
 
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp(validated=False))
+    write_sidecar(bucket, _stamp(validated=False), project=tmp_path)
 
     assert stamped_producer({"only": str(bucket)}) == {
         "sha256": "f" * 64, "experiment_id": "exp_001"}
@@ -120,7 +120,7 @@ def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
     of the validated_by rail (validated=False here, so only the key-set check is in play)."""
     bucket = tmp_path / "bucket"
     with pytest.raises(ValueError, match="mystery_field"):
-        write_sidecar(bucket, _stamp(validated=False, mystery_field="anything"))
+        write_sidecar(bucket, _stamp(validated=False, mystery_field="anything"), project=tmp_path)
 
 
 def test_write_sidecar_admits_every_declared_extension_key(tmp_path):
@@ -129,15 +129,15 @@ def test_write_sidecar_admits_every_declared_extension_key(tmp_path):
 
     bucket = tmp_path / "bucket"
     stamp = _stamp(validated=False, **{key: "x" for key in STAMP_EXTENSION_KEYS})
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
     assert read_operating_point_sidecar(bucket) == stamp
 
 
 def test_update_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp(validated=False))
+    write_sidecar(bucket, _stamp(validated=False), project=tmp_path)
     with pytest.raises(ValueError, match="mystery_field"):
-        update_sidecar(bucket, lambda stored: {**stored, "mystery_field": "x"})
+        update_sidecar(bucket, lambda stored: {**stored, "mystery_field": "x"}, project=tmp_path)
 
 
 def test_update_sidecar_refuses_a_merge_whose_stored_stamp_carries_an_undeclared_key(tmp_path):
@@ -149,14 +149,14 @@ def test_update_sidecar_refuses_a_merge_whose_stored_stamp_carries_an_undeclared
         txn.write(key, {**_stamp(validated=False), "mystery_field": "x"})
 
     with pytest.raises(ValueError, match="mystery_field"):
-        update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}})
+        update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}}, project=tmp_path)
 
 
 def test_update_sidecar_admits_a_merge_of_a_declared_key_over_a_written_stamp(tmp_path):
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp(validated=False))
+    write_sidecar(bucket, _stamp(validated=False), project=tmp_path)
 
-    assert update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}})
+    assert update_sidecar(bucket, lambda stored: {**stored, "gate_evidence_summary": {"n": 1}}, project=tmp_path)
     assert read_operating_point_sidecar(bucket)["gate_evidence_summary"] == {"n": 1}
 
 
@@ -167,7 +167,7 @@ def test_the_key_set_rail_is_scoped_to_the_operating_point_document_only(tmp_pat
     bucket = tmp_path / "bucket"
     write_sidecar(
         bucket, {"validated": False, "trait": "bud_opening", "failures": [], "gate_evidence": {}},
-        "ordinal_operating_point",
+        "ordinal_operating_point", project=tmp_path,
     )
 
 
@@ -178,7 +178,7 @@ def test_an_old_vintage_sweep_data_keyed_sidecar_still_reads(tmp_path):
     bucket = tmp_path / "bucket"
     write_sidecar(
         bucket, {"validated": False, "trait": "bud_opening", "failures": [], "sweep_data": {"kappa": 0.5}},
-        "classifier_operating_point",
+        "classifier_operating_point", project=tmp_path,
     )
     from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
 
@@ -191,7 +191,7 @@ def test_an_old_vintage_sweep_data_keyed_sidecar_still_reads(tmp_path):
 def test_sidecar_write_and_read_round_trip(tmp_path):
     bucket = tmp_path / "predictions" / "best" / "2026-03-04"
     stamp = _validated_stamp(tmp_path)
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
     assert read_operating_point_sidecar(bucket) == stamp
 
 
@@ -202,7 +202,7 @@ def test_sidecar_store_refuses_an_unconditional_replace(tmp_path):
 
     bucket = tmp_path / "bucket"
     stamp = _validated_stamp(tmp_path)
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
     with pytest.raises(PolicyViolation):
         tcip_store.replace(sidecar_key(bucket), stamp)
 
@@ -211,9 +211,9 @@ def test_sidecar_update_merges_against_what_is_stored(tmp_path):
     """The compare-and-set form decides against the stored stamp rather than a copy read earlier,
     so fields the producing run wrote survive a promotion."""
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp(validated=False))
+    write_sidecar(bucket, _stamp(validated=False), project=tmp_path)
     wrote = update_sidecar(
-        bucket, lambda stored: {**stored, "shippable_issues": ["conf"]})
+        bucket, lambda stored: {**stored, "shippable_issues": ["conf"]}, project=tmp_path)
     stored = read_operating_point_sidecar(bucket)
 
     assert wrote is True
@@ -223,9 +223,9 @@ def test_sidecar_update_merges_against_what_is_stored(tmp_path):
 
 def test_sidecar_update_can_decline_to_write(tmp_path):
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _validated_stamp(tmp_path, validated=True))
+    write_sidecar(bucket, _validated_stamp(tmp_path, validated=True), project=tmp_path)
 
-    assert update_sidecar(bucket, lambda stored: None) is False
+    assert update_sidecar(bucket, lambda stored: None, project=tmp_path) is False
     assert read_operating_point_sidecar(bucket)["validated"] is True
 
 
@@ -242,13 +242,13 @@ def test_a_stamp_field_that_json_cannot_hold_is_refused_at_the_sidecar_writer(tm
     bucket = tmp_path / "bucket"
 
     with pytest.raises(TypeError) as refused:
-        write_sidecar(bucket, _stamp(produced_at=datetime.now(timezone.utc)))
+        write_sidecar(bucket, _stamp(produced_at=datetime.now(timezone.utc)), project=tmp_path)
     assert "stamp.produced_at" in str(refused.value)
     assert read_operating_point_sidecar(bucket) is None
 
-    write_sidecar(bucket, _validated_stamp(tmp_path))
+    write_sidecar(bucket, _validated_stamp(tmp_path), project=tmp_path)
     with pytest.raises(TypeError) as update_refused:
-        update_sidecar(bucket, lambda stored: {**stored, "raster_path": Path("ortho.tif")})
+        update_sidecar(bucket, lambda stored: {**stored, "raster_path": Path("ortho.tif")}, project=tmp_path)
     assert "stamp.raster_path" in str(update_refused.value)
     assert read_operating_point_sidecar(bucket)["raster_path"] is None
 
@@ -257,8 +257,8 @@ def test_an_ordinary_stamp_is_still_written_and_merged(tmp_path):
     """The refusal above must not cost a real calibration its stamp or its promotion."""
     bucket = tmp_path / "bucket"
 
-    write_sidecar(bucket, _validated_stamp(tmp_path))
-    wrote = update_sidecar(bucket, lambda stored: {**stored, "raster_path": "ortho.tif"})
+    write_sidecar(bucket, _validated_stamp(tmp_path), project=tmp_path)
+    wrote = update_sidecar(bucket, lambda stored: {**stored, "raster_path": "ortho.tif"}, project=tmp_path)
 
     assert wrote is True
     stored = read_operating_point_sidecar(bucket)
@@ -279,7 +279,7 @@ def test_sidecar_bytes_are_the_canonical_record_spelling(tmp_path):
     tcip_store.bind(FileBackend())
     bucket = tmp_path / "bucket"
     stamp = _validated_stamp(tmp_path)
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
 
     assert (bucket / "operating_point.json").read_bytes() == RECORD_JSON.encode(stamp)
 

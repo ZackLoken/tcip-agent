@@ -21,7 +21,8 @@ from tcip_web.paths import safe_join
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project: Path) -> TestClient:
+    """A client of the backend with ``tmp_path`` open as its project."""
     return TestClient(app, base_url="http://127.0.0.1")
 
 
@@ -191,7 +192,7 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
     client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
     client.get(
         "/api/subjects/load",
-        params={"project_root": str(dataset_root), "annotations_dir": str(ann)},
+        params={"dataset_root": str(dataset_root), "annotations_dir": str(ann)},
     )
     client.get(
         "/api/review/image_statuses",
@@ -202,23 +203,18 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
 
 
 def test_dataset_select_carries_a_label_problem_with_no_subject_named(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+    client: TestClient, dataset_root: Path, opened_project: Path,
 ) -> None:
     """A corrupt label makes the date's own subject list empty, which is exactly the date a
     subject-less default-open selects; the advisory must name the problem even then, not only
     when a subject happens to be named."""
-    project = tmp_path / "proj"
-    project.mkdir()
     ann = dataset_root / "annotations" / "2-11-26"
     ann.mkdir(parents=True)
     (ann / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
 
     resp = client.post(
         "/api/dataset/select",
-        json={
-            "project_root": str(project), "dataset_root": str(dataset_root),
-            "subject": None, "date": "2-11-26",
-        },
+        json={"dataset_root": str(dataset_root), "subject": None, "date": "2-11-26"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -227,13 +223,12 @@ def test_dataset_select_carries_a_label_problem_with_no_subject_named(
     assert str(ann / "IMG_0000.json") in body["label_problem"]
 
 
-def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
-    project = tmp_path / "proj"
-    project.mkdir()
+def test_dataset_select_populates_state(
+    client: TestClient, dataset_root: Path, opened_project: Path,
+) -> None:
     resp = client.post(
         "/api/dataset/select",
         json={
-            "project_root": str(project),
             "dataset_root": str(dataset_root),
             "subject": "bud",
             "date": "2-11-26",
@@ -251,16 +246,13 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
 
 
 def test_dataset_select_returns_400_for_a_stem_collision(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    project = tmp_path / "proj"
-    project.mkdir()
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
 
     resp = client.post(
         "/api/dataset/select",
         json={
-            "project_root": str(project),
             "dataset_root": str(dataset_root),
             "subject": "bud",
             "date": "2-11-26",
@@ -271,12 +263,9 @@ def test_dataset_select_returns_400_for_a_stem_collision(
 
 
 def test_dataset_select_advisory_reflects_actual_labels(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    project = tmp_path / "proj"
-    project.mkdir()
     body = {
-        "project_root": str(project),
         "dataset_root": str(dataset_root),
         "subject": "bud",
         "date": "2-11-26",
@@ -300,12 +289,10 @@ def test_dataset_select_advisory_reflects_actual_labels(
 
 
 def test_dataset_select_still_selects_over_an_unreadable_label(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
     """The advisory check never blocks a selection: an unreadable label reads as advisory-absent
     rather than refusing the select outright."""
-    project = tmp_path / "proj"
-    project.mkdir()
     ann = dataset_root / "annotations" / "2-11-26"
     ann.mkdir(parents=True, exist_ok=True)
     (ann / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
@@ -313,7 +300,7 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     resp = client.post(
         "/api/dataset/select",
         json={
-            "project_root": str(project), "dataset_root": str(dataset_root),
+            "dataset_root": str(dataset_root),
             "subject": "bud", "date": "2-11-26", "model_name": "baseline",
         },
     )
@@ -325,140 +312,26 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     assert str(ann / "IMG_0000.json") in body["label_problem"]
 
 
-def test_dataset_select_rejects_a_project_root_outside_the_allowed_roots(
-    client: TestClient, dataset_root: Path, tmp_path_factory,
+def test_dataset_select_rejects_a_dataset_root_outside_the_allowed_roots(
+    client: TestClient, opened_project: Path, tmp_path_factory,
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
-    resp = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(outside), "dataset_root": str(dataset_root)},
-    )
+    resp = client.post("/api/dataset/select", json={"dataset_root": str(outside)})
     assert resp.status_code == 403
 
 
-def test_dataset_select_answers_the_binding_generation(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    project = tmp_path / "proj"
-    project.mkdir()
-    resp = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(project), "dataset_root": str(dataset_root)},
-    )
-    assert resp.status_code == 200
-    assert isinstance(resp.json()["generation"], int)
-
-
-def test_dataset_select_generation_bumps_only_when_the_root_changes(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
-) -> None:
-    """Generation stability: re-selecting the same root and navigating dates/subjects on it
-    bump nothing; a different root bumps."""
-    project = tmp_path / "proj"
-    project.mkdir()
-    other = tmp_path / "other"
-    other.mkdir()
-
-    g1 = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(project), "dataset_root": str(dataset_root), "date": "2-11-26"},
-    ).json()["generation"]
-
-    same_root_navigated = client.post(
-        "/api/dataset/select",
-        json={
-            "project_root": str(project), "dataset_root": str(dataset_root),
-            "date": "3-2-26", "subject": "bud",
-        },
-    ).json()["generation"]
-    assert same_root_navigated == g1
-
-    same_root_reselected = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(project), "dataset_root": str(dataset_root), "date": "2-11-26"},
-    ).json()["generation"]
-    assert same_root_reselected == g1
-
-    different_root = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(other), "dataset_root": str(dataset_root), "date": "2-11-26"},
-    ).json()["generation"]
-    assert different_root == g1 + 1
-
-
-def test_dataset_select_answers_service_unavailable_on_a_busy_binding(
-    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The binding write states what it does on StoreBusy: 503, nothing else adopted."""
-    import tcip_store as ts
-    from tcip_web.routes import dataset as dataset_route
-    from tcip_web.state import store
-
-    def _busy(*_a, **_kw):
-        key = dataset_route.canvas_open_binding_key()
-        raise ts.StoreBusy((key,), key, 5.0)
-
-    monkeypatch.setattr(dataset_route.ts, "transaction", _busy)
-    project = tmp_path / "proj"
-    project.mkdir()
-    generation_before = store.binding_generation
-    dataset_root_before = store.state.dataset.dataset_root
-    resp = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(project), "dataset_root": str(dataset_root)},
-    )
-    assert resp.status_code == 503
-    assert store.project_root is None
-    assert store.binding_generation == generation_before  # nothing was adopted
-    assert store.state.dataset.dataset_root == dataset_root_before
-
-
-def test_dataset_select_never_pairs_the_old_dataset_with_the_new_generation_on_a_mid_select_failure(
-    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The in-memory generation moves only immediately before the mutate it names: an
-    exception raised while gathering the new selection (after the binding record has already
-    moved to the new root) must leave the in-memory generation still naming whatever the
-    in-memory dataset names, never a mismatched pair a connect-time replay could deliver."""
-    from tcip_web.routes import dataset as dataset_route
-    from tcip_web.state import store
-
-    project = tmp_path / "proj"
-    project.mkdir()
-    first = client.post(
-        "/api/dataset/select",
-        json={"project_root": str(project), "dataset_root": str(dataset_root)},
-    ).json()
-
-    other_project = tmp_path / "other_proj"
-    other_project.mkdir()
-
-    def _boom(*_a, **_kw):
-        raise OSError("simulated directory listing failure")
-
-    monkeypatch.setattr(dataset_route, "list_logical_images", _boom)
-    with pytest.raises(OSError):
-        client.post(
-            "/api/dataset/select",
-            json={
-                "project_root": str(other_project), "dataset_root": str(dataset_root),
-                "date": "2-11-26",
-            },
-        )
-
-    assert store.binding_generation == first["generation"]
-    assert store.state.dataset.project_root == str(project)
+def test_dataset_select_refuses_while_no_project_is_open(dataset_root: Path) -> None:
+    resp = TestClient(app, base_url="http://127.0.0.1").post(
+        "/api/dataset/select", json={"dataset_root": str(dataset_root)})
+    assert resp.status_code == 409
 
 
 def test_dataset_nav_persists_current_index(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    project = tmp_path / "proj"
-    project.mkdir()
     client.post(
         "/api/dataset/select",
         json={
-            "project_root": str(project),
             "dataset_root": str(dataset_root),
             "subject": "bud",
             "date": "2-11-26",
@@ -903,31 +776,28 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """Labels travel with their dataset, so the trail of a label write is recorded beside them
-    and not in the log of whichever project happened to have the dataset open."""
-    proj = tmp_path / "proj"
+    and not in the log of the project that happened to have the dataset open."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    label_path = tmp_path / "labels" / "IMG_0000.json"
-    resp = _save_box(client, img_path, label_path, project_root=str(proj))
+    label_path = dataset_root / "annotations" / "2-11-26" / "IMG_0000.json"
+    resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 200
 
-    assert any(e.get("tool") == "gui_save_labels" for e in _audit_entries(tmp_path))
-    assert _audit_entries(proj) == []
+    assert any(e.get("tool") == "gui_save_labels" for e in _audit_entries(dataset_root))
+    assert not any(e.get("tool") == "gui_save_labels" for e in _audit_entries(tmp_path))
 
 
-def test_annotate_save_with_no_dataset_root_audits_the_platform_log(
+def test_annotate_save_with_no_dataset_root_audits_the_open_projects_log(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """A label path outside any dataset tree, still under an allowed root, is recorded to the
-    platform log instead of proceeding unaudited: the widened ``root`` is what makes this so."""
+    open project's log instead of proceeding unaudited."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "notes" / "IMG_0000.json"
     resp = _save_box(client, img_path, label_path)
     assert resp.status_code == 200
 
     entries = _audit_entries(tmp_path)
-    entry = next((e for e in entries if e.get("tool") == "gui_save_labels"), None)
-    assert entry is not None, entries
-    assert "scope" not in entry
+    assert any(e.get("tool") == "gui_save_labels" for e in entries), entries
 
 
 class _AppendRefused(RuntimeError):
@@ -1488,11 +1358,9 @@ def test_review_action_auto_completes_and_audits(
 ) -> None:
     """A single detection on the image: reviewing it flips the image to 'completed' (the only
     GUI path to that status) and leaves an audit-trail entry. That entry belongs beside the
-    labels rather than in the project the breeder is working out of; the project root here is a
-    genuinely different directory, so a log written there is a log in the wrong place rather
-    than the same file under another name."""
-    project_root = tmp_path / "proj"
-    project_root.mkdir()
+    labels rather than in the open project the breeder is working out of, a different directory
+    from the dataset root here, so a log written there is a log in the wrong place rather than
+    the same file under another name."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
@@ -1516,7 +1384,7 @@ def test_review_action_auto_completes_and_audits(
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
     assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
-    assert _audit_entries(project_root) == []
+    assert not any(e.get("tool") == "gui_review_action" for e in _audit_entries(tmp_path))
 
 
 def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
@@ -1759,19 +1627,15 @@ def test_review_action_records_subject_name_and_reviewer(
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
-def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, str]:
+def _verdicted_launch_dataset(tmp_path: Path) -> tuple[Path, Path, str]:
     """A dataset with one image, one canonical bucket and one verdict in its own verdict store.
 
-    The platform root is pinned to a different, empty root, so a launch door counting verdicts
-    there rather than in the dataset's own store would find none.
+    The open project (``tmp_path``) is a different root from the dataset, holding no verdict, so
+    a launch door counting verdicts there rather than in the dataset's own store would find none.
     """
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
     from tcip_mcp.prediction_buckets import bucket_key_of
-
-    platform_root = tmp_path / "platform"
-    (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -1799,7 +1663,7 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
 ) -> None:
     """The launch door counts a bucket's verdicts in the store belonging to the dataset it is
     writing into, so the breeder's recorded verdicts are the ones that freeze it."""
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
 
     # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
     resp = client.post("/api/inference/launch", json={
@@ -1820,10 +1684,6 @@ def test_inference_launch_writes_an_unreviewed_bucket_in_place(
     # The bucket resolution under test is the route's own synchronous step; the prediction pass
     # behind it is not what this pins.
     monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
-
-    platform_root = tmp_path / "platform"
-    (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -1848,9 +1708,6 @@ def _launch_setup(tmp_path, monkeypatch):
     from tcip_web.routes import inference as inference_routes
 
     monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
-    platform_root = tmp_path / "platform"
-    (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -1866,7 +1723,7 @@ def test_inference_launch_refuses_a_bucket_that_already_holds_a_document(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """A guard: a launch into a bucket already holding a document is refused by name rather than
-    admitted beside it (the document's bytes, the job registry and the platform audit log are
+    admitted beside it (the document's bytes, the job registry and the dataset's audit log are
     asserted unchanged as coverage of the no-state-change decision, not part of what this guards)."""
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.prediction_buckets import BucketHoldsDocuments
@@ -1930,7 +1787,7 @@ def test_inference_launch_redirects_past_a_verdict_though_the_bucket_also_holds_
     """Coverage of the verdict-first order: a bucket carrying both a verdict and a document still
     redirects rather than refusing on the document (the fixture leaves the real worker running,
     so nothing about a prediction pass is asserted here, only the route's own synchronous step)."""
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
 
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
@@ -1971,7 +1828,7 @@ def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
         raster_path=None,
         produced_at="2026-01-01T00:00:00+00:00",
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=tmp_path)
 
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
@@ -2129,7 +1986,7 @@ def test_inference_launch_refuses_by_the_requested_name_though_the_redirected_bu
 
     from tcip_web.routes import inference as inference_routes
 
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
     event = threading.Event()
 
     def _wait_worker(job) -> None:
@@ -2225,7 +2082,7 @@ def test_state_snapshot_available(client: TestClient) -> None:
 
 
 def test_state_tab_push_mutates_the_store(client: TestClient) -> None:
-    from tcip_web.state import TAB_NAMES
+    from tcip_mcp.web_client import TAB_NAMES
 
     assert "review" in TAB_NAMES
     resp = client.post("/api/state/tab", json={"active_tab": "review"})

@@ -175,10 +175,9 @@ def test_resolve_command_fences_the_real_cli(monkeypatch, tmp_path):
     # --settings points at a materialized profile (valid JSON, still denies internals, guard hooks
     # absolute/cd-proof).
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "ws"))
     monkeypatch.setattr(pty_host.shutil, "which", lambda name: f"/fake/{name}")
 
-    argv = pty_host.resolve_terminal_command()
+    argv = pty_host.resolve_terminal_command(None)
     assert argv is not None
     assert argv[0] == "/fake/claude"  # claude directly, not a wrapping shell
     assert "--settings" in argv and "--add-dir" in argv
@@ -220,7 +219,7 @@ def test_absolutize_guard_command_rewrites_relative_to_absolute():
 def test_override_is_not_fenced(monkeypatch):
     # The test double / power-user override must never inherit the fence flags.
     monkeypatch.setenv("TCIP_TERMINAL_CMD", "python fake.py")
-    argv = pty_host.resolve_terminal_command()
+    argv = pty_host.resolve_terminal_command(None)
     assert "--settings" not in argv
 
 
@@ -793,8 +792,8 @@ def test_materialized_fence_is_written_to_a_private_directory_not_a_fixed_shared
     # each spawn materializes it into its own process-private directory instead.
     import tempfile
 
-    p1 = pty_host._materialize_fence_settings()
-    p2 = pty_host._materialize_fence_settings()
+    p1 = pty_host._materialize_fence_settings(None)
+    p2 = pty_host._materialize_fence_settings(None)
     assert p1 is not None and p2 is not None
     shared_root = Path(tempfile.gettempdir()).resolve()
     assert p1.parent.resolve() != shared_root, "fence still written directly into the shared temp root"

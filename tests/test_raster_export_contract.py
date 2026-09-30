@@ -48,7 +48,7 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
 
     out_dir = tmp_path / "preds"
     result = run_inference(
-        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        tmp_path, exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
 
     assert "error" not in result, result
@@ -73,13 +73,16 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
 
     from tcip_mcp.audit import audit_log_key
 
-    rows = [r for key in dict.fromkeys((audit_log_key(), audit_log_key(exp["root"]),
+    rows = [r for key in dict.fromkeys((audit_log_key(exp["root"]),
                                         audit_log_key(tmp_path), audit_log_key(out_dir)))
             for r in ts.read_log(key).records]
     published = [r for r in rows if r["tool"] == "prediction_bucket_published"]
     stamped = [r for r in rows if r["tool"] == "stamp_written"]
     assert [r["arguments"]["predictions_dir"] for r in published] == [str(out_dir)]
-    assert [r["stamp"]["raster_path"] for r in stamped] == [str(exp["raster_path"])]
+    from tcip_mcp.registry_paths import stored_path
+
+    assert [r["stamp"]["raster_path"] for r in stamped] == [
+        stored_path(exp["raster_path"], tmp_path)]
     assert not [r for r in rows if r["tool"] == "run_inference"]
 
 
@@ -94,12 +97,12 @@ def test_the_raster_door_runs_at_the_operating_point_its_prepared_pass_states(tm
 
     exp = _build_experiment(tmp_path)
     result = run_inference(
-        exp["checkpoint_path"], output_dir=str(tmp_path / "preds"),
+        tmp_path, exp["checkpoint_path"], output_dir=str(tmp_path / "preds"),
         raster_path=str(exp["raster_path"]), conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" not in result, result
 
     prepared = _prepare_pass(
-        load_registered_checkpoint(exp["checkpoint_path"]), images_dir=None, conf_threshold=0.0,
+        load_registered_checkpoint(exp["checkpoint_path"], project=tmp_path), images_dir=None, conf_threshold=0.0,
         device=None, tile=True, tile_size=TILE, overlap=0.2, cross_tile_nms=None,
         max_dets=None, postprocess="nms", tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
     assert not isinstance(prepared, str), prepared
@@ -133,7 +136,7 @@ def test_a_redirected_raster_export_names_the_bucket_the_caller_asked_for(tmp_pa
     engine.record_detection_action(bucket_key_of(reviewed), det, ctx, action="accepted")
 
     result = run_inference(
-        exp["checkpoint_path"], output_dir=str(reviewed), raster_path=str(exp["raster_path"]),
+        tmp_path, exp["checkpoint_path"], output_dir=str(reviewed), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2)
 
     assert "error" not in result, result
@@ -154,7 +157,7 @@ def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_deliver
 
     out_dir = tmp_path / "preds"
     result = run_inference(
-        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        tmp_path, exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
 
     assert "error" in result

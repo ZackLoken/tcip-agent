@@ -11,7 +11,6 @@ import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { useStore } from "@/store";
 
 export interface ReviewFocusData {
-  project_root?: string;
   dataset_root?: string;
   subject?: string | null;
   date?: string | null;
@@ -23,29 +22,23 @@ export interface ReviewFocusData {
   conf_threshold?: number;
 }
 
-/** True if the loaded predictions dir already reflects `model` (handles posix + Windows seps). */
-function predictionsMatchModel(predDir: string | null | undefined, model: string): boolean {
-  const d = predDir ?? "";
-  return d.includes(`/predictions/${model}/`) || d.includes(`\\predictions\\${model}\\`);
-}
-
 export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
   const cur = useStore.getState().gui.dataset;
+  const project = useStore.getState().openProject;
   const needsSwitch =
     !!d.dataset_root &&
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date ||
-      (!!d.model_name && !predictionsMatchModel(cur.predictions_dir, d.model_name)));
-  if (needsSwitch) {
+      (!!d.model_name && d.model_name !== cur.model_name));
+  if (needsSwitch && project) {
     const res = await api.dataset.select({
-      project_root: d.project_root ?? d.dataset_root!,
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
       date: d.date ?? null,
       model_name: d.model_name ?? null,
     });
-    useStore.getState().applyRestoredDataset(res.selection, res.generation);
+    useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);
   }
 

@@ -83,7 +83,7 @@ describe("canvas.pushState 409 recovery", () => {
   });
 
   const body = () => ({
-    binding_generation: 3,
+    project_id: "a1b2c3d4e5f6",
     tab: "annotate" as const,
     image_path: "/p/img.jpg",
     image: "img.jpg",
@@ -100,12 +100,15 @@ describe("canvas.pushState 409 recovery", () => {
     expect(res).toEqual({ status: "ok", shapes_written: true });
   });
 
-  it("returns a conflict and triggers a resync on a 409, never adopting its generation", async () => {
+  it("returns a conflict and triggers a resync on a 409", async () => {
     const resync = vi.spyOn(stateSocket, "resync").mockImplementation(() => {});
     // The route's real 409 body, as HTTPException(409, {...}) serializes it: nested under
     // "detail", never the flat shape a naive stub would guess.
     stubFetch(409, {
-      detail: { error: "the GUI's open project has changed", generation: 7, project_name: null },
+      detail: {
+        error: "this push was built for a project the backend does not have open",
+        open_project_id: "ffffffffffff",
+      },
     });
     const res = await api.canvas.pushState(body());
     expect(res).toEqual({ status: "conflict" });

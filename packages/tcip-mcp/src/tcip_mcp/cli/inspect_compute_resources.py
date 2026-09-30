@@ -1,12 +1,11 @@
 """Report the host's current compute headroom: CPU, memory, GPU free bytes, and how many training
-runs this host already has active. Reports, never caps.
+runs the project already has active. Reports, never caps.
 
 Wraps ``tcip_mcp.tools.training_tools.inspect_compute_resources``.
 
-    tcip inspect-compute-resources --project <project_root>
+    tcip inspect-compute-resources --project <project>
 
-``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names the project this run's active-run
-count and audit line resolve against; without it the answer resolves against the process cwd.
+``--project`` names the project this run's active-run count and audit line resolve against.
 """
 
 from __future__ import annotations
@@ -15,26 +14,20 @@ import argparse
 import json
 import sys
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--project", default="",
-                         help="Project root this run resolves against; falls back to "
-                              "$TCIP_STATE_ROOT.")
+    parser.add_argument("--project", required=True,
+                         help="The project this run resolves against.")
     args = parser.parse_args(argv)
 
-    require_and_pin_platform_root(args.project or None)
-
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    project = bound_project(args.project)
 
     from tcip_mcp.tools.training_tools import inspect_compute_resources
 
-    bind_default()
-
-    result = inspect_compute_resources()
+    result = inspect_compute_resources(project)
     print(json.dumps(result, indent=2))
     return 0
 

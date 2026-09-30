@@ -16,36 +16,27 @@ import tcip_mcp.audit as audit_module
 import tcip_store as ts
 
 
-@pytest.fixture
-def platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "platform"
-    root.mkdir()
-    monkeypatch.setattr(audit_module, "AUDIT_ROOT", root)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
-    return root
+def _rows(project: Path) -> list[dict]:
+    return list(ts.read_log(audit_module.audit_log_key(project)).records)
 
 
-def _rows() -> list[dict]:
-    return list(ts.read_log(audit_module.audit_log_key()).records)
-
-
-def test_a_successful_monitor_result_with_a_null_error_audits_nothing(platform_root: Path) -> None:
+def test_a_successful_monitor_result_with_a_null_error_audits_nothing(tmp_path: Path) -> None:
     """The stream's own read: a run whose status carries ``error: None`` polled through
     ``monitor_training`` leaves the log exactly as it found it."""
     from tcip_mcp.tools.training_tools import monitor_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    opened_run(None, detection_config(platform_root.parent / "ds"), experiment_id="exp-polled")
-    before = len(_rows())
+    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled")
+    before = len(_rows(tmp_path))
 
-    status = monitor_training("exp-polled")
+    status = monitor_training(tmp_path, "exp-polled")
 
     assert status["status"] == "running"
     assert status["error"] is None
-    assert len(_rows()) == before
+    assert len(_rows(tmp_path)) == before
 
 
-def test_read_only_doors_leave_no_line(platform_root: Path) -> None:
+def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     from tcip_mcp.tools.experiment_tools import get_experiment, list_experiments
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
     from tcip_mcp.tools.meta_tools import read_audit_log
@@ -53,21 +44,21 @@ def test_read_only_doors_leave_no_line(platform_root: Path) -> None:
     from tcip_mcp.tools.training_tools import inspect_compute_resources, monitor_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    opened_run(None, detection_config(platform_root.parent / "ds"), experiment_id="exp-read")
-    before = len(_rows())
+    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-read")
+    before = len(_rows(tmp_path))
 
-    get_experiment("exp-read")
-    list_experiments()
-    list_experiments(launched_only=True)
-    monitor_training("exp-read")
-    monitor_training("no-such-run")
-    inspect_compute_resources()
-    view_gui_state()
+    get_experiment(tmp_path, "exp-read")
+    list_experiments(tmp_path)
+    list_experiments(tmp_path, launched_only=True)
+    monitor_training(tmp_path, "exp-read")
+    monitor_training(tmp_path, "no-such-run")
+    inspect_compute_resources(tmp_path)
+    view_gui_state(tmp_path)
     serve_domain_knowledge()
     serve_domain_knowledge("no such document")
-    read_audit_log()
+    read_audit_log(tmp_path)
 
-    assert len(_rows()) == before
+    assert len(_rows(tmp_path)) == before
 
 
 def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path) -> None:
@@ -81,76 +72,74 @@ def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path) -> None:
 
     client = TestClient(app, base_url="http://127.0.0.1")
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
-    before = list(ts.read_log(audit_module.audit_log_key(tmp_path)).records)
+    before = _rows(tmp_path)
 
     resp = client.post("/api/results/phenology_measurement", json=body)
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["milestones"]["rows"]
-    assert list(ts.read_log(audit_module.audit_log_key(tmp_path)).records) == before
+    assert _rows(tmp_path) == before
 
 
 def test_ranking_a_review_queue_leaves_no_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ranking candidates for review reads a checkpoint and a manifest and writes nothing, so a
-    successful ranking through a registered run leaves the platform log as it found it."""
+    successful ranking through a registered run leaves the project's log as it found it."""
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
     from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
-    _draw(root, manifest_dir)
-    _run_dir, ckpt_path = _bound_checkpoint(manifest_dir, "exp-ranked")
+    _draw(tmp_path, root, manifest_dir)
+    _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-ranked")
     _stub_scorer(monkeypatch)
-    before = _rows()
+    before = _rows(tmp_path)
 
     result = prioritize_review_queue(
-        checkpoint_path=ckpt_path, images_dir=str(root / "images" / DATES[0]),
-        project_path=str(tmp_path))
+        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images" / DATES[0]))
 
     assert "error" not in result, result
     assert result["queue"]
-    assert _rows() == before
+    assert _rows(tmp_path) == before
 
 
-def test_a_mutating_door_still_leaves_one_line(platform_root: Path) -> None:
+def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
     """The rail admits the work it exists for: a mutation through the platform's own door leaves
     exactly one line, status ok, after the record it wrote landed."""
     from tcip_mcp.tools.meta_tools import report_friction
 
-    before = len(_rows())
-    result = report_friction(str(platform_root), "unexpected_behavior", "a real mutation")
+    before = len(_rows(tmp_path))
+    result = report_friction(tmp_path, "unexpected_behavior", "a real mutation")
 
     assert "error" not in result
-    rows = _rows()
+    rows = _rows(tmp_path)
     assert len(rows) == before + 1
     assert rows[-1]["tool"] == "report_friction"
     assert rows[-1]["status"] == "ok"
 
 
-def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(platform_root: Path) -> None:
+def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(tmp_path: Path) -> None:
     """A refusal returned as the error dict every tool returns is no act and leaves no line; a
     dict whose ``error`` is null is an ordinary answer."""
     from tcip_mcp.audit import audited
 
     @audited
-    def refuse() -> dict:
+    def refuse(project: Path) -> dict:
         return {"error": "refused by name"}
 
     @audited
-    def answer() -> dict:
+    def answer(project: Path) -> dict:
         return {"error": None, "status": "running"}
 
     @audited
-    def explode() -> dict:
+    def explode(project: Path) -> dict:
         raise RuntimeError("boom")
 
-    refuse()
-    answer()
+    refuse(tmp_path)
+    answer(tmp_path)
     with pytest.raises(RuntimeError):
-        explode()
+        explode(tmp_path)
 
-    statuses = [(r["tool"], r["status"]) for r in _rows()]
+    statuses = [(r["tool"], r["status"]) for r in _rows(tmp_path)]
     assert statuses == [("answer", "ok"), ("explode", "exception")]

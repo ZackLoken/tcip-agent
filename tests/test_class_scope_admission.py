@@ -33,7 +33,7 @@ def test_a_door_stating_an_attribute_with_no_subject_refuses_by_the_same_admissi
     labels_dir = root / "annotations" / DATES[0]
 
     result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(labels_dir),
+        tmp_path, dataset_root=str(root), labels_dir=str(labels_dir),
         images_dir=str(root / "images" / DATES[0]),
         attribute="condition", reason="a redraw naming no subject")
 
@@ -51,17 +51,17 @@ def test_a_classified_scope_the_admission_produced_round_trips_through_the_selec
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
                          attribute="condition", seed=1, train_ratio=0.5, val_ratio=0.25,
                          calibration_ratio=0.25)
     assert "error" not in result, result
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert drawn.scope == ClassScope(SUBJECT, "condition", {"healthy": 0, "damaged": 1})
     assert result["scope"] == asdict(drawn.scope)
 
     data_cfg: dict = {"split": {"selection_dir": str(out)}}
-    auto_train_val("detection", data_cfg, None)
+    auto_train_val(tmp_path, "detection", data_cfg, None)
     assert ClassScope.of(data_cfg) == drawn.scope
 
 
@@ -107,11 +107,11 @@ def test_a_subject_or_attribute_beside_a_selection_refuses_the_redraw(tmp_path: 
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    assert "error" not in draw_splits(str(root), output_path=str(out), subject=SUBJECT,
+    assert "error" not in draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
                                       attribute="condition", seed=1, train_ratio=0.5,
                                       val_ratio=0.25, calibration_ratio=0.25)
     images_dir, labels_dir = _dirs(root)
-    call = {"dataset_root": str(root), "labels_dir": labels_dir, "images_dir": images_dir,
+    call = {"project": tmp_path, "dataset_root": str(root), "labels_dir": labels_dir, "images_dir": images_dir,
             "selection_dir": str(out), "reason": "redraw the held-out side"}
 
     for stated in ({"subject": SUBJECT}, {"attribute": "condition"}, {"subject": ""}):

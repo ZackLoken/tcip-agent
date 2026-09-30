@@ -178,12 +178,12 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
     _write_image(images_dir, "img_001")
     img = str(images_dir / "img_001.jpg")
 
-    res = save_annotations(img, annotations=[{"bbox": [10, 10, 40, 40]}], path=str(tmp_path / "x.json"))
+    res = save_annotations(tmp_path, tmp_path.parent,img, annotations=[{"bbox": [10, 10, 40, 40]}], path=str(tmp_path / "x.json"))
     assert "error" in res and "subject" in res["error"]
     assert not (tmp_path / "x.json").exists()
 
     # A real subject still writes (the rail admits valid work).
-    ok = save_annotations(img, annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
+    ok = save_annotations(tmp_path, tmp_path.parent,img, annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
                           path=str(tmp_path / "y.json"))
     assert ok.get("count") == 1 and (tmp_path / "y.json").is_file()
 
@@ -202,7 +202,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     out = tmp_path / "both.json"
 
     res = save_annotations(
-        img,
+        tmp_path, tmp_path.parent, img,
         annotations=[{
             "subject": "bud",
             "points": [[10, 20], [110, 20], [110, 220]],
@@ -234,7 +234,7 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(tmp_path, geometry)
     _write_image(images_dir, "img_001")
     out = tmp_path / "refused.json"
 
-    res = save_annotations(str(images_dir / "img_001.jpg"),
+    res = save_annotations(tmp_path, tmp_path.parent,str(images_dir / "img_001.jpg"),
                            annotations=[{"subject": "bud", **geometry}], path=str(out))
 
     assert "polygon" in res.get("error", "") and not out.exists()
@@ -254,7 +254,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     # segment_prompt's own output shape: [[{x,y}, ...], ...], one ring per connected region.
     out = tmp_path / "rings.json"
     res = save_annotations(
-        img,
+        tmp_path, tmp_path.parent, img,
         annotations=[{
             "subject": "bud",
             "rings": [
@@ -274,7 +274,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     # Round-trip shape ([x,y] pairs, as the client projection's "rings" uses) also works.
     out2 = tmp_path / "rings_listshape.json"
     res2 = save_annotations(
-        img,
+        tmp_path, tmp_path.parent, img,
         annotations=[{"subject": "bud", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
         path=str(out2),
     )
@@ -285,7 +285,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     # "rings" wins over "points"/"bbox" when more than one is present (never less complete).
     out3 = tmp_path / "rings_precedence.json"
     res3 = save_annotations(
-        img,
+        tmp_path, tmp_path.parent, img,
         annotations=[{
             "subject": "bud",
             "rings": [[{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 4}]],

@@ -8,6 +8,7 @@ generalizes from one trait's own vocabulary.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import os
 import shutil
@@ -40,18 +41,15 @@ DATES = ["2026-02-11", "2026-02-25"]
 from tests._population import mapped_plants
 
 
-def _init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
-    # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    result = initialize_project(str(tmp_path), site="orchard block")
+def _init(tmp_path: Path) -> None:
+    result = initialize_project(str(tmp_path), "Orchard", site="orchard block")
     assert "error" not in result, result
 
 
 def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
-    result = register_dataset(str(root), crop=sorted(registered_crops())[0], project_root=str(tmp_path))
+    result = register_dataset(tmp_path, str(root), crop=sorted(registered_crops())[0])
     assert "error" not in result, result
     return root
 
@@ -61,8 +59,8 @@ def _write_scene(
 ) -> tuple[Path, Path, dict[str, str]]:
     """Real geolocated images for ``plants`` (``PLANTS`` by default) across ``dates``, plus
     matching classified prediction buckets (id_map only, unvalidated: these rails are about the
-    mapping's own binding, not the measurement-validity gate). Returns
-    (images_root, plant_csv, preds_by_date).
+    mapping's own binding, not the measurement-validity gate), stamped under the project the
+    dataset sits in. Returns (images_root, plant_csv, preds_by_date).
     """
     from tcip_mcp.pipelines.resolution import write_sidecar
 
@@ -83,7 +81,7 @@ def _write_scene(
                 bucket / f"{stem}.json",
                 [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                            attributes={"bloom_state": "open"})], 8, 8)
-        write_sidecar(bucket, {"scope": _SCOPE}, "operating_point")
+        write_sidecar(bucket, {"scope": _SCOPE}, "operating_point", project=dataset_root.parent)
         preds_by_date[date] = str(bucket)
 
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
@@ -96,10 +94,11 @@ def _write_scene(
 
 
 def _validate_buckets(
-    preds_by_date: dict[str, str], dataset_root: Path, *, trait: str = "currant_bloom",
+    project: Path, preds_by_date: dict[str, str], dataset_root: Path, *,
+    trait: str = "currant_bloom",
 ) -> None:
-    """Earn a genuine record for every bucket in ``preds_by_date``, under whichever platform
-    root is active now: ``deliver_phenology_milestones`` takes no acknowledgment at all, so a
+    """Earn a genuine record for every bucket in ``preds_by_date``, under ``project``:
+    ``deliver_phenology_milestones`` takes no acknowledgment at all, so a
     delivery this file needs to actually complete (as opposed to refuse on a mapping-binding
     rail) needs a real validation record behind its buckets, not a caller string.
     """
@@ -112,7 +111,7 @@ def _validate_buckets(
     for date, bucket_str in preds_by_date.items():
         bucket = Path(bucket_str)
         write_bound_sidecar(
-            bucket, {
+            project, bucket, {
                 "scope": _SCOPE, "validated": True, "trait": trait,
                 "operating_point": {"conf": {"value": 0.6,
                                              "validated_against": VALIDATED_HELD_OUT}},
@@ -120,7 +119,7 @@ def _validate_buckets(
             dataset_root=dataset_root, experiment_id=f"exp-op-{date}", trait=trait,
             producing_experiment_id=producing_experiment_id)
         write_bound_sidecar(
-            bucket, {
+            project, bucket, {
                 "validated": True, "trait": trait,
                 "operating_point": {"classifier": {"value": "open",
                                                     "validated_against": VALIDATED_HELD_OUT}},
@@ -140,8 +139,8 @@ def _validate_buckets(
 def test_build_plant_mapping_refuses_a_name_outside_name_segment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
-    res = build_plant_mapping(name="Not Legal!", images_root=str(tmp_path), plant_registry="unregistered")
+    _init(tmp_path)
+    res = build_plant_mapping(tmp_path, name="Not Legal!", images_root=str(tmp_path), plant_registry="unregistered")
     assert "error" in res
     assert "lowercase" in res["error"]
 
@@ -149,10 +148,10 @@ def test_build_plant_mapping_refuses_a_name_outside_name_segment(
 def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_dataset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     images_root = tmp_path / "ds" / "images"
     (images_root / DATES[0]).mkdir(parents=True)
-    res = build_plant_mapping(name="valley", images_root=str(images_root), plant_registry="unregistered")
+    res = build_plant_mapping(tmp_path, name="valley", images_root=str(images_root), plant_registry="unregistered")
     assert "error" in res
     assert "register_dataset" in res["error"]
     assert not (tmp_path / ".tcip" / "state" / "plant_mappings").exists()
@@ -161,31 +160,31 @@ def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_data
 def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
 
     trailing = str(images_root) + os.sep
-    res = build_plant_mapping(name="trailing-sep", images_root=trailing, plant_registry=register_plant_registry_for([plant_csv]))
+    res = build_plant_mapping(tmp_path, name="trailing-sep", images_root=trailing, plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
     forward = str(images_root).replace("\\", "/")
-    res = build_plant_mapping(name="forward-slash", images_root=forward, plant_registry=register_plant_registry_for([plant_csv]))
+    res = build_plant_mapping(tmp_path, name="forward-slash", images_root=forward, plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
     monkeypatch.chdir(dataset_root)
-    res = build_plant_mapping(name="relative", images_root="images", plant_registry=register_plant_registry_for([plant_csv]))
+    res = build_plant_mapping(tmp_path, name="relative", images_root="images", plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res, res
 
 
 def test_deliver_phenology_milestones_refuses_predictions_from_a_different_dataset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -193,7 +192,7 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
     _, _, other_preds = _write_scene(other_root)
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=other_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=other_preds,
         output_csv_path=str(tmp_path / "out.csv"))
     assert "error" in res
     assert "different dataset" in res["error"]
@@ -207,11 +206,11 @@ def test_deliver_phenology_milestones_refuses_predictions_under_no_dataset_root_
     ``images``/``annotations``/``predictions``/``labels`` path segment) refuses naming the remedy,
     since this dataset-bound mapping delivery, not ``run_inference`` itself, is what needs
     one dataset root to attribute detections to."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -222,7 +221,7 @@ def test_deliver_phenology_milestones_refuses_predictions_under_no_dataset_root_
         orphan_preds[date] = str(bucket)
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=orphan_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=orphan_preds,
         output_csv_path=str(tmp_path / "out.csv"))
     assert "error" in res
     assert "register_dataset" in res["error"]
@@ -235,11 +234,11 @@ def test_deliver_phenology_milestones_refuses_predictions_under_no_dataset_root_
 def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -252,11 +251,11 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
                    attributes={"bloom_state": "open"})], 8, 8)
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(extra, {"scope": _SCOPE}, "operating_point")
+    write_sidecar(extra, {"scope": _SCOPE}, "operating_point", project=tmp_path)
     preds_by_date[extra_date] = str(extra)
 
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(tmp_path / "out.csv"))
     assert "error" in res
     assert extra_date in res["error"]
@@ -268,7 +267,7 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
 def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _, _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
@@ -278,7 +277,7 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
     })
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="forged", plants=mapped_plants("forged"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="forged", plants=mapped_plants(tmp_path, "forged"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "is missing" in res["error"]
@@ -288,7 +287,7 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
 def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _, _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
@@ -296,7 +295,7 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
     # A literal dict, not a MappingBuild().to_record(): this shape is the record's own contract
     # (_REQUIRED_TOP_KEYS), independent of whatever the dataclass's constructor happens to take.
     record = {
-        "name": "forged", "project_root": str(tmp_path), "dataset_root": str(dataset_root),
+        "name": "forged", "dataset_root": "ds",
         "dataset_id": "whatever-id", "built_by": "build_plant_mapping",
         "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
         "nn_tolerance_m": {"value": 10.0, "source": "stated"},
@@ -308,7 +307,7 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), record)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="forged", plants=mapped_plants("forged"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="forged", plants=mapped_plants(tmp_path, "forged"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "receipt" in res["error"]
@@ -321,11 +320,11 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
 def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -335,7 +334,7 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert str(plant_csv) in res["error"]
@@ -351,11 +350,11 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     """A recorded, mapped capture this delivery's own ``predictions_by_date`` carries no
     document for is unread: corrupting its bytes afterward must surface only as this capture's
     own disclosure, never a readability refusal, since an unread capture is never opened."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -364,9 +363,9 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     (images_root / DATES[0] / f"{p2_stem}.jpg").write_bytes(b"not a real jpeg any more")
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -386,11 +385,11 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
     """The same unread capture as above, but changed to a different, still-readable image rather
     than garbage: the whole-date identity this would have flipped is never recomputed either,
     since this delivery does not read every capture of the date."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -401,9 +400,9 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
         datetime(2026, 2, 11, 10, 45))
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -422,11 +421,11 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 ) -> None:
     """A mapped date this delivery's own ``predictions_by_date`` omits is disclosed as a bare
     date and never enumerated: a capture corrupted under it changes nothing about the delivery."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -435,9 +434,9 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(delivered_preds, dataset_root)
+    _validate_buckets(tmp_path, delivered_preds, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered_preds,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(delivered_preds.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -454,11 +453,11 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 def test_a_moved_read_capture_refuses_naming_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -471,7 +470,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert target.name in res["error"]
@@ -485,11 +484,11 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     """With every mapped capture's prediction present, an in-place EXIF timestamp change at the
     same GPS position is caught by the whole-date identity recompute, not the moved-position
     check, since the position itself never moved."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -499,7 +498,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "changed since this mapping was built" in res["error"]
@@ -512,13 +511,13 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
     """An unmapped raster capture beside two fully-read mapped plants does not block the
     whole-date recompute: the trigger is every mapped capture read, so an in-place EXIF
     timestamp change on a mapped capture still refuses even with the raster never read."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -528,7 +527,7 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert "changed since this mapping was built" in res["error"]
@@ -541,20 +540,20 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
     """The admitting side of the same scene: nothing changed on disk, both plants' predictions are
     present, and the raster is verified only through the whole-date digest, so it is not also
     listed among the unverified captures."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -571,11 +570,11 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
 def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did_not_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -584,9 +583,9 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(delivered_preds, dataset_root)
+    _validate_buckets(tmp_path, delivered_preds, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered_preds,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(delivered_preds.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -603,11 +602,11 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -617,7 +616,7 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert target.name in res["error"]
@@ -633,7 +632,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     geotagged image later is never examined for a readability flip at all, coverage of that dead
     path rather than a guard, and under a partial read (another mapped plant's prediction absent)
     it surfaces only as this capture's own disclosure."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     # Both dates, not just DATES[0]: DATES[1] stays fully intact so the classifier is still
     # assessed somewhere once DATES[0]'s own P2 prediction is removed below.
@@ -644,7 +643,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     target.write_bytes(b"garbage, no EXIF, unreadable at build time")
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
@@ -659,9 +658,9 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -692,12 +691,12 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     # Bound before anything is written, so this root's state is file-backed throughout: the
     # lock below has to guard the exact file the receipt append writes to.
     ts.bind(FileBackend(lock_timeout_s=0.2))
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     build = plant_mapping.build_mapping(
         images_root, [plant_csv], name="valley", dataset_root=dataset_root,
-        dataset_id="whatever-id", project_root=tmp_path, built_by="build_plant_mapping",
+        dataset_id="whatever-id", project=tmp_path, built_by="build_plant_mapping",
         plant_registry={"name": "unregistered", "digest": "0" * 64})
 
     audit_path = tmp_path / ".tcip" / "audit.jsonl"
@@ -733,11 +732,11 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     from tcip_web.state import store
 
     ts.bind(FileBackend(lock_timeout_s=0.2))
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
-    registry = register_plant_registry_for([plant_csv])
-    store.open_project(tmp_path.resolve())
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
 
@@ -803,7 +802,7 @@ def _cite_mapping(tmp_path: Path, name: str) -> None:
         "test_delivery_door", None, None,
         document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=seed_confirmed_count(tmp_path),
-        delivery_kind="per_image_count", plant_mapping=disclosure, project_root=tmp_path,
+        delivery_kind="per_image_count", plant_mapping=disclosure, project=tmp_path,
     )
 
 
@@ -819,11 +818,11 @@ def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt
     from tcip_web.app import app
     from tcip_web.state import store
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _preds_by_date = _write_scene(dataset_root)
-    registry = register_plant_registry_for([plant_csv])
-    store.open_project(tmp_path.resolve())
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
     first = client.post("/api/results/plant_mapping/build", json={
@@ -872,12 +871,12 @@ def test_the_web_build_route_answers_409_null_when_the_supersede_archive_receipt
 def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     assert build_res["n_dates"] == len(DATES)
 
@@ -891,9 +890,9 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -906,22 +905,21 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     assert len(events) == 1, events
     pm = events[0]["plant_mapping"]
     assert pm["name"] == "valley"
-    assert pm["project_root"] == str(tmp_path)
     assert pm["record_sha256"] == build.record_sha256
     assert set(pm["capture_identity"].keys()) == set(DATES)
 
     # A rebuild under the same name is cited by the delivery just recorded, so it refuses
     # without supersede; with it, the rebuild reads back and still delivers.
     blocked = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" in blocked
     build_res2 = build_plant_mapping(
-        name="valley", images_root=str(images_root),
-        plant_registry=register_plant_registry_for([plant_csv]), supersede=True)
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]), supersede=True)
     assert "error" not in build_res2, build_res2
     out_csv2 = tmp_path / "out2" / "bloom_phenology.csv"
     res2 = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv2), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res2, res2
 
@@ -932,21 +930,21 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
     """Coverage: the disclosure a phenology delivery records carries the mapping's own
     ``nn_tolerance_m``, so a delivered milestone states the radius its identities were matched
     under."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
 
@@ -965,11 +963,11 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -978,9 +976,9 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     shutil.rmtree(images_root / DATES[0])
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1001,7 +999,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     """One plant's verified CSV must not answer for another plant's missing one: a read capture
     whose recorded plant sits in the unreachable CSV did not move, and the delivery proceeds with
     that CSV in plant_csvs_unverified rather than refusing as if the capture had moved."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, _plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
 
@@ -1014,17 +1012,17 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
             w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
         per_plant_csvs.append(path)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root),
-        plant_registry=register_plant_registry_for(per_plant_csvs))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
     per_plant_csvs[1].unlink()
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1047,7 +1045,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     deleted, while a partial read (a third plant's prediction absent) means the delivery cannot
     fall back on the whole-date digest either. The moved capture is disclosed as unverified rather
     than refused as moved, since its own plant's CSV cannot answer for whether it moved."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     plants3 = PLANTS + [{"plot": "P3", "accession": "acc-C", "lat": 43.19670, "lon": -90.058074}]
     images_root, _plant_csv, preds_by_date = _write_scene(
@@ -1062,8 +1060,8 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
             w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
         per_plant_csvs.append(path)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root),
-        plant_registry=register_plant_registry_for(per_plant_csvs))
+        tmp_path, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1077,9 +1075,9 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     (Path(preds_by_date[DATES[0]]) / f"{p3_stem}.json").unlink()
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1099,29 +1097,32 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
 def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_mapping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
 
     # Copied, not moved: a live sqlite handle under the tree can hold a Windows file lock a
     # real rename would trip over; id preservation only needs dataset.json at the new root.
     moved_root = tmp_path / "ds_moved"
     shutil.copytree(str(dataset_root), str(moved_root))
-    reg = register_dataset(str(moved_root), crop=sorted(registered_crops())[0], project_root=str(tmp_path))
+    reg = register_dataset(tmp_path, str(moved_root), crop=sorted(registered_crops())[0])
     assert "error" not in reg, reg
     original = plant_mapping.load_mapping(tmp_path, "valley")
     assert original is not None
     assert reg["id"] == original.dataset_id, "register_dataset must preserve the id across the move"
 
+    # A covered bucket is keyed by its location against the project, so the claim is earned
+    # again where the moved dataset now holds its buckets.
     moved_preds = {d: str(moved_root / "predictions" / "live" / d) for d in preds_by_date}
+    _validate_buckets(tmp_path, moved_preds, moved_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=moved_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=moved_preds,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(moved_preds.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1131,7 +1132,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     shutil.rmtree(str(images_root))
     out_csv2 = tmp_path / "out2.csv"
     res2 = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=moved_preds,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=moved_preds,
         output_csv_path=str(out_csv2), classifier_pred_dirs=list(moved_preds.values()))
     assert "error" not in res2, res2
 
@@ -1150,14 +1151,14 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     res_a = build_plant_mapping(
-        name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_a, res_a
     res_b = build_plant_mapping(
-        name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_b, res_b
 
     # A record written straight through the store, bypassing the door's NAME_SEGMENT check,
@@ -1172,32 +1173,28 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
 ) -> None:
     """Rail 13's delivery half: two projects mapping one registered dataset under the same
     mapping name each build and deliver through their own record, never the other's."""
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
     for proj in (proj_a, proj_b):
-        res = initialize_project(str(proj), site=f"orchard {proj.name}")
+        res = initialize_project(str(proj), proj.name, site=f"orchard {proj.name}")
         assert "error" not in res, res
 
     dataset_root = tmp_path / "shared_ds"
     dataset_root.mkdir()
     for proj in (proj_a, proj_b):
-        reg = register_dataset(
-            str(dataset_root), crop=sorted(registered_crops())[0], project_root=str(proj))
+        reg = register_dataset(proj, str(dataset_root), crop=sorted(registered_crops())[0])
         assert "error" not in reg, reg
 
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     build_a = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]),
-        dates=[DATES[0]])
+        proj_a, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(proj_a, [plant_csv]), dates=[DATES[0]])
     assert "error" not in build_a, build_a
     _seed_currant_bloom_trait(proj_a)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_b))
     build_b = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]),
-        dates=list(DATES))
+        proj_b, name="valley", images_root=str(images_root),
+        plant_registry=register_plant_registry_for(proj_b, [plant_csv]), dates=list(DATES))
     assert "error" not in build_b, build_b
     _seed_currant_bloom_trait(proj_b)
 
@@ -1205,34 +1202,33 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     assert plant_mapping.load_mapping(proj_a, "valley").dates == [DATES[0]]
     assert set(plant_mapping.load_mapping(proj_b, "valley").dates) == set(DATES)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     date0_preds = {DATES[0]: preds_by_date[DATES[0]]}
-    # Earned under proj_a's own experiment store: a validation record is platform-rooted, so
-    # each project earns its own rather than sharing one filed under the other's root.
-    _validate_buckets(date0_preds, dataset_root)
+    # Each project earns its own validation record rather than sharing one filed under the
+    # other's root.
+    _validate_buckets(proj_a, date0_preds, dataset_root)
     out_csv_a = proj_a / "out.csv"
     res_a = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"),
-        predictions_by_date=date0_preds,
+        proj_a, trait="currant_bloom", mapping_name="valley",
+        plants=mapped_plants(proj_a, "valley"), predictions_by_date=date0_preds,
         output_csv_path=str(out_csv_a), classifier_pred_dirs=list(date0_preds.values()))
     assert "error" not in res_a, res_a
     assert out_csv_a.exists()
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_b))
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(proj_b, preds_by_date, dataset_root)
     out_csv_b = proj_b / "out.csv"
     res_b = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        proj_b, trait="currant_bloom", mapping_name="valley",
+        plants=mapped_plants(proj_b, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv_b), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res_b, res_b
     assert out_csv_b.exists()
 
     # A date proj_a's own (narrower) mapping does not cover refuses through proj_a's own
     # record, unaffected by proj_b's wider mapping under the identical name.
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     out_csv_a2 = proj_a / "out2.csv"
     res_a2 = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        proj_a, trait="currant_bloom", mapping_name="valley",
+        plants=mapped_plants(proj_a, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv_a2))
     assert "error" in res_a2
     assert DATES[1] in res_a2["error"]
@@ -1249,25 +1245,23 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
 ) -> None:
     from tcip_mcp.tools.ingest_tools import ingest_images
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
     extra_source = tmp_path / "extra_source"
     write_geo_image(extra_source / "P3_extra.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 40))
-    res = ingest_images(
-        source=str(extra_source), name="ds", site="orchard block",
-        project_path=str(dataset_root), date_from=DATES[0])
+    res = ingest_images(dataset_root, source=str(extra_source), date_from=DATES[0])
     assert "error" not in res, res
     assert res["buckets"].get(DATES[0]) == 1
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1286,7 +1280,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     """
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     date_dir = images_root / DATES[0]
@@ -1294,7 +1288,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1304,7 +1298,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1331,11 +1325,11 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
         record_digest,
     )
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1365,9 +1359,9 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     assert receipts[-1] == recomputed
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1385,7 +1379,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
         detect_and_write_band_groups,
     )
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     date_dir = images_root / DATES[0]
@@ -1396,7 +1390,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     assert grouped["formed"], grouped
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -1407,7 +1401,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert DATES[0] in res["error"]
@@ -1426,7 +1420,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.postprocessing.plant_mapping import _read_date_stamps
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     date_dir = images_root / DATES[0]
@@ -1450,7 +1444,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     assert stamps_by_stem["aux"].kind == "band_group" and stamps_by_stem["aux"].readable is None
 
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in build_res, build_res
     assert build_res["unreadable"][DATES[0]] == ["bad.jpg"]
     _seed_currant_bloom_trait(tmp_path)
@@ -1463,9 +1457,9 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     assert by_stem["aux"].source == "unmapped"
 
     out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     assert out_csv.exists()
@@ -1478,7 +1472,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
 def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
 
@@ -1492,14 +1486,14 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     monkeypatch.setattr(ts, "read_log", spy)
 
     res_a = build_plant_mapping(
-        name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley-a", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_a, res_a
     build_a = plant_mapping.load_mapping(tmp_path, "valley-a")
     assert build_a is not None
     assert calls == [None]
 
     res_b = build_plant_mapping(
-        name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for([plant_csv]))
+        tmp_path, name="valley-b", images_root=str(images_root), plant_registry=register_plant_registry_for(tmp_path, [plant_csv]))
     assert "error" not in res_b, res_b
     build_b = plant_mapping.load_mapping(tmp_path, "valley-b")
     assert build_b is not None
@@ -1514,13 +1508,13 @@ def test_a_build_leaves_one_row_its_receipt(
     line could not: every row the call adds to the log is counted, and there is one."""
     from tcip_mcp.audit import audit_log_key
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     before = len(ts.read_log(audit_log_key(tmp_path)).records)
 
-    res = build_plant_mapping(name="valley", images_root=str(images_root), plant_registry=registry)
+    res = build_plant_mapping(tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
 
     assert "error" not in res, res
     rows = ts.read_log(audit_log_key(tmp_path)).records[before:]

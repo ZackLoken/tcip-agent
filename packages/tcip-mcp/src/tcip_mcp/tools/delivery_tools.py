@@ -5,10 +5,11 @@ delivery supersession.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import tcip_store
 from tcip_mcp.audit import audited
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 
 _SUPERSEDED_BY = "supersede_delivery"
 """The actor stamped on every supersession: this door is MCP-only (no HTTP request carries a
@@ -16,8 +17,9 @@ breeder identity to it), so the stamp names the door itself, bare, the way a too
 identity is stamped everywhere else (``identity.py``), never a person's ``user:`` prefix."""
 
 
-@mcp.tool()
+@tool()
 def deliver_per_plant_csv(
+    project: Path,
     results: list[dict],
     output_path: str,
     delivered_phenotype: str,
@@ -47,8 +49,7 @@ def deliver_per_plant_csv(
         results: ``aggregate_per_plant``'s own output: one dict per plant, each carrying at least
             ``plant_id``, ``value``, ``value_key``, ``measurement_document`` and
             ``plant_attribution``.
-        output_path: Where to write the delivered CSV. A relative path resolves against the
-            platform state root, never the server process's cwd.
+        output_path: Where to write the delivered CSV; a relative path is under the project.
         delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
             to the registered trait whose spec delivers it and whose confirmed operationalization
             this delivery rests on.
@@ -78,7 +79,6 @@ def deliver_per_plant_csv(
     from tcip_mcp.pipelines.postprocessing import plant_mapping as plant_mapping_pipeline
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, DeliveryRefused
-    from tcip_mcp.project_paths import platform_state_root, resolve_output_path
     from tcip_mcp.traits import TraitUnknownError
 
     mapping_build = None
@@ -92,7 +92,7 @@ def deliver_per_plant_csv(
                 "mapping at all.")}
         try:
             mapping_build, verified = plant_mapping_pipeline.resolve_delivery_mapping(
-                platform_state_root(), plant_mapping, predictions_by_date)
+                project, plant_mapping, predictions_by_date)
         except plant_mapping_pipeline.MappingDeliveryRefusal as exc:
             return {"error": str(exc)}
         mapping_disclosure = mapping_build.delivery_disclosure(verified, predictions_by_date)
@@ -116,13 +116,12 @@ def deliver_per_plant_csv(
 
     pred_dirs = list(predictions_by_date.values()) if predictions_by_date else None
 
-    resolved_output_path = str(resolve_output_path(output_path))
     try:
         csv_path, tail = export_aggregated_csv(
-            results, resolved_output_path, delivered_phenotype=delivered_phenotype, crop=crop,
-            pipeline_version=pipeline_version, pred_dirs=pred_dirs, images_dir=images_dir,
-            scale_capture_id=scale_capture_id, door="deliver_per_plant_csv",
-            plant_mapping=mapping_disclosure,
+            results, str(Path(project, output_path)), delivered_phenotype=delivered_phenotype,
+            crop=crop, pipeline_version=pipeline_version, pred_dirs=pred_dirs,
+            images_dir=images_dir, scale_capture_id=scale_capture_id,
+            door="deliver_per_plant_csv", plant_mapping=mapping_disclosure, project=project,
         )
     except DeliveryRefused as exc:
         refusal = {
@@ -156,10 +155,10 @@ def deliver_per_plant_csv(
     }
 
 
-@mcp.tool()
+@tool()
 @audited
 def supersede_delivery(
-    event_id: str, reason: str, *, replacement_event_id: str | None = None,
+    project: Path, event_id: str, reason: str, *, replacement_event_id: str | None = None,
 ) -> dict:
     """Record that a delivered file's number is withdrawn or replaced, without touching the file or
     the event it names.
@@ -186,16 +185,15 @@ def supersede_delivery(
         delivery_supersession_key,
         read_one_delivery_event,
     )
-    from tcip_mcp.project_paths import platform_state_root, project_state_dir
+    from tcip_mcp.project_paths import project_state_dir
 
     if not reason or not reason.strip():
         return {"error": "reason is required and must be non-empty"}
 
-    platform_root = platform_state_root()
-    scope = project_state_dir(platform_root)
+    scope = project_state_dir(project)
 
     try:
-        event = read_one_delivery_event(platform_root, event_id)
+        event = read_one_delivery_event(project, event_id)
     except DeliveryEventShapeError as exc:
         return {"error": str(exc)}
     if event is None:
@@ -203,7 +201,7 @@ def supersede_delivery(
 
     if replacement_event_id is not None:
         try:
-            replacement = read_one_delivery_event(platform_root, replacement_event_id)
+            replacement = read_one_delivery_event(project, replacement_event_id)
         except DeliveryEventShapeError as exc:
             return {"error": str(exc)}
         if replacement is None:

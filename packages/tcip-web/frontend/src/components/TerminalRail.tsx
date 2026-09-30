@@ -19,7 +19,7 @@ import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import type { TerminalInputFrame, TerminalResizeFrame } from "@/api/types.generated";
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
-import { selectProjectOpen } from "@/store/slices/gui";
+import { selectProjectRoot } from "@/store/slices/gui";
 
 type TerminalSendFrame = TerminalInputFrame | TerminalResizeFrame;
 
@@ -83,11 +83,11 @@ export function TerminalRail() {
   const pendingMessage = useStore((s) => s.pendingTerminalMessage);
   const clearPendingMessage = useStore((s) => s.clearPendingTerminalMessage);
 
-  // Show a starter hint until a project is open (selectProjectOpen, the fact the footer also
-  // names) or they've sent their first input; a first-time breeder otherwise meets a blank cursor.
-  const projectOpen = useStore(selectProjectOpen);
+  // Show a starter hint until a project is open or they've sent their first input; a first-time
+  // breeder otherwise meets a blank cursor.
+  const projectRoot = useStore(selectProjectRoot);
   const [hasInput, setHasInput] = useState(false);
-  const showStarterHint = !!status?.available && !projectOpen && !hasInput;
+  const showStarterHint = !!status?.available && !projectRoot && !hasInput;
 
   const [width, setWidth] = useState<number>(() => {
     try {

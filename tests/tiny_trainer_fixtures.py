@@ -206,15 +206,18 @@ class CancelSentinelAtCall:
             request_cancel(path)
 
 
-def trainer_run(config: dict, output_dir, *, has_val_loader: bool, id: str = "run"):
-    """A ``TrainRun`` over ``config`` writing into ``output_dir`` at the objective the launcher's
-    own producer resolves for it (``generic_trainer.resolve_objective``)."""
+def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: str = "run"):
+    """A ``TrainRun`` of ``project`` over ``config`` writing into ``output_dir`` at the objective
+    the launcher's own producer resolves for it (``generic_trainer.resolve_objective``)."""
+    from pathlib import Path
+
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
     return TrainRun(id=id, config=config,
-                    objective=resolve_objective(config, has_val_loader=has_val_loader),
-                    output_dir=str(output_dir))
+                    objective=resolve_objective(config, project=Path(project),
+                                                has_val_loader=has_val_loader),
+                    project=Path(project), output_dir=str(output_dir))
 
 
 class TransientlyDivergedModel(nn.Module):

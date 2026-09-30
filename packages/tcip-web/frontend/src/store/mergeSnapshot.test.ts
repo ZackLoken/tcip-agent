@@ -2,24 +2,31 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { DatasetSelection, GuiState } from "@/store/types";
+import type { DatasetSelection, GuiState, OpenProject } from "@/store/types";
 
 const s = () => useStore.getState();
 
+const PROJECT: OpenProject = { id: "a1b2c3d4e5f6", path: "/proj" };
+const OTHER: OpenProject = { id: "ffffffffffff", path: "/other" };
+
 function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {
-    project_root: "/proj",
     dataset_root: "/proj/ds",
     subject: "subject_a",
     date: "2-11-26",
+    model_name: null,
     image_list: ["a.jpg", "b.jpg", "c.jpg"],
     current_image_index: 0,
     images_dir: "/proj/ds/images/2-11-26",
     annotations_dir: "/proj/ds/annotations/2-11-26",
     predictions_dir: null,
+    label_paths: {},
+    prediction_paths: {},
     ...over,
   };
 }
+
+const EMPTY = { dataset_root: null, date: null, image_list: [] };
 
 function snapshot(over: Partial<GuiState> = {}): GuiState {
   return {
@@ -49,7 +56,9 @@ describe("mergeSnapshot ownership model", () => {
         active_subject: "bush",
         dataset: dataset({ current_image_index: 2 }),
       }),
+      openProject: PROJECT,
       wsVersion: 5,
+      wsEpoch: null,
     });
   });
 
@@ -63,7 +72,7 @@ describe("mergeSnapshot ownership model", () => {
         dataset: dataset({ current_image_index: 0 }),
       }),
       6,
-      null,
+      PROJECT,
       null,
     );
     expect(s().gui.active_tab).toBe("review");
@@ -72,65 +81,27 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.current_image_index).toBe(2); // navigation kept
   });
 
-  it("does not clobber a populated dataset with an empty backend snapshot (restart)", () => {
-    s().mergeSnapshot(
-      snapshot({
-        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
-      }),
-      7,
-      null,
-      null,
-    );
+  it("keeps a populated dataset when the same project's snapshot carries none", () => {
+    s().mergeSnapshot(snapshot({ dataset: dataset(EMPTY) }), 7, PROJECT, null);
     expect(s().gui.dataset.dataset_root).toBe("/proj/ds");
     expect(s().gui.dataset.image_list).toHaveLength(3);
   });
 
-  it("keeps the client's own generation on a same-epoch empty-dataset broadcast", () => {
-    // Same process, no restart: nothing in the backend can pair a real generation with an
-    // empty-dataset envelope here, so the client's still-good value survives instead.
-    useStore.setState({ bindingGeneration: 5 });
+  it("adopts the snapshot wholesale when it names another open project", () => {
     s().mergeSnapshot(
-      snapshot({
-        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
-      }),
+      snapshot({ dataset: dataset({ dataset_root: "/other", date: "3-2-26" }) }),
       7,
-      null,
+      OTHER,
       null,
     );
-    expect(s().gui.dataset.dataset_root).toBe("/proj/ds"); // dataset still protected
-    expect(s().bindingGeneration).toBe(5); // generation kept, not nulled
+    expect(s().openProject).toEqual(OTHER);
+    expect(s().gui.dataset.dataset_root).toBe("/other");
   });
 
-  it("adopts the record-read generation on a restart's epoch-changed empty-dataset replay", () => {
-    // A restart's connect-time replay carries an empty dataset but a generation read fresh off
-    // the durable record: the surviving tab adopts that instead of nulling a valid value.
-    useStore.setState({ bindingGeneration: 5, wsEpoch: "epoch-1" });
-    s().mergeSnapshot(
-      snapshot({
-        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
-      }),
-      0,
-      9,
-      "epoch-2",
-    );
-    expect(s().gui.dataset.dataset_root).toBe("/proj/ds"); // dataset still protected
-    expect(s().bindingGeneration).toBe(9); // record-read value adopted
-    expect(s().canvasBindingMissing).toBe(false);
-  });
-
-  it("trips the presence gate when the epoch-changed replay's record read comes back empty", () => {
-    // The genuinely no-record case: the gate must trip, not silently keep a stale prior value.
-    useStore.setState({ bindingGeneration: 5, wsEpoch: "epoch-1" });
-    s().mergeSnapshot(
-      snapshot({
-        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
-      }),
-      0,
-      null,
-      "epoch-2",
-    );
-    expect(s().bindingGeneration).toBeNull();
-    expect(s().canvasBindingMissing).toBe(true);
+  it("drops the dataset when the backend has no project open", () => {
+    s().mergeSnapshot(snapshot({ dataset: dataset(EMPTY) }), 7, null, null);
+    expect(s().openProject).toBeNull();
+    expect(s().gui.dataset.dataset_root).toBeNull();
   });
 
   it("adopts a new dataset identity and resets index + reviewStatus", () => {
@@ -145,13 +116,11 @@ describe("mergeSnapshot ownership model", () => {
     s().mergeSnapshot(
       snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
       8,
-      4,
+      PROJECT,
       null,
     );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
-    // The generation names the same identity change as the dataset, adopted in this one update.
-    expect(s().bindingGeneration).toBe(4);
     expect(s().reviewStatus).toEqual({
       byImage: {},
       hasDetections: {},
@@ -161,13 +130,13 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("drops a stale (older-version) replay", () => {
-    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "9-9-99" }) }), 3, null, null); // 3 < wsVersion 5
+    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "9-9-99" }) }), 3, PROJECT, null); // 3 < wsVersion 5
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
   });
 
   it("applies a snapshot carrying the version already recorded", () => {
     // Only an older version is a stale replay; a re-broadcast at the current version is real state.
-    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "3-2-26" }) }), 5, null, null);
+    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "3-2-26" }) }), 5, PROJECT, null);
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().wsVersion).toBe(5);
   });
@@ -177,13 +146,12 @@ describe("mergeSnapshot ownership model", () => {
     s().mergeSnapshot(
       snapshot({ dataset: dataset({ date: "3-2-26" }) }),
       1, // lower than wsVersion 5, and would ordinarily be dropped as stale
-      2,
+      PROJECT,
       "epoch-2",
     );
     expect(s().gui.dataset.date).toBe("3-2-26"); // accepted, not dropped
     expect(s().wsVersion).toBe(1);
     expect(s().wsEpoch).toBe("epoch-2");
-    expect(s().bindingGeneration).toBe(2);
   });
 
   it("keeps the local image-list array itself on a same-dataset snapshot", () => {
@@ -196,7 +164,7 @@ describe("mergeSnapshot ownership model", () => {
     expect(incoming.dataset.image_list).not.toBe(localList);
     expect(incoming.dataset.image_list).toEqual(localList);
 
-    s().mergeSnapshot(incoming, 6, null, null);
+    s().mergeSnapshot(incoming, 6, PROJECT, null);
 
     expect(s().gui.dataset.image_list).toBe(localList);
     expect(s().gui.dataset.predictions_dir).toBe("/proj/ds/predictions/m2/2-11-26");
@@ -205,19 +173,10 @@ describe("mergeSnapshot ownership model", () => {
   it("adopts the persisted state on boot, with the tab from the project's own record", () => {
     // Boot adopts backend mode/filters/position; the tab is the client's per-project record,
     // since the backend's active_tab only moves on agent focus events (stale, often Review).
-    localStorage.removeItem("tcip.lasttab./proj");
+    localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
     useStore.setState({
-      gui: snapshot({
-        active_subject: null,
-        dataset: dataset({
-          project_root: null,
-          dataset_root: null,
-          subject: null,
-          date: null,
-          image_list: [],
-          current_image_index: 0,
-        }),
-      }),
+      gui: snapshot({ active_subject: null, dataset: dataset({ ...EMPTY, subject: null }) }),
+      openProject: null,
       wsVersion: 0,
     });
     s().mergeSnapshot(
@@ -228,35 +187,26 @@ describe("mergeSnapshot ownership model", () => {
         dataset: dataset({ current_image_index: 2 }),
       }),
       1,
-      3,
+      PROJECT,
       null,
     );
     expect(s().gui.active_tab).toBe("annotate"); // no record yet: first-open default
     expect(s().gui.mode).toBe("polygon");
     expect(s().gui.active_subject).toBe("bush");
     expect(s().gui.dataset.current_image_index).toBe(2);
-    expect(s().bindingGeneration).toBe(3); // adopted with the dataset, not stranded
+    expect(s().openProject).toEqual(PROJECT);
   });
 
   it("boot hydration lands on the project's recorded last-used tab when one exists", () => {
-    recordLastTab("/proj", "training");
+    recordLastTab(PROJECT.id, "training");
     useStore.setState({
-      gui: snapshot({
-        active_subject: null,
-        dataset: dataset({
-          project_root: null,
-          dataset_root: null,
-          subject: null,
-          date: null,
-          image_list: [],
-          current_image_index: 0,
-        }),
-      }),
+      gui: snapshot({ active_subject: null, dataset: dataset({ ...EMPTY, subject: null }) }),
+      openProject: null,
       wsVersion: 0,
     });
-    s().mergeSnapshot(snapshot({ active_tab: "review" }), 1, null, null);
+    s().mergeSnapshot(snapshot({ active_tab: "review" }), 1, PROJECT, null);
     expect(s().gui.active_tab).toBe("training");
-    localStorage.removeItem("tcip.lasttab./proj");
+    localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
   });
 });
 
@@ -264,6 +214,7 @@ describe("applyRestoredDataset", () => {
   beforeEach(() => {
     useStore.setState({
       gui: snapshot({ dataset: dataset() }),
+      openProject: PROJECT,
       reviewStatus: {
         byImage: { "a.jpg": "completed" },
         hasDetections: { "a.jpg": true },
@@ -274,7 +225,7 @@ describe("applyRestoredDataset", () => {
   });
 
   it("clears reviewStatus on a dataset identity change", () => {
-    s().applyRestoredDataset(dataset({ dataset_root: "/proj/other", date: "3-2-26" }), 7);
+    s().applyRestoredDataset(dataset({ dataset_root: "/proj/other", date: "3-2-26" }), PROJECT);
     expect(s().reviewStatus).toEqual({
       byImage: {},
       hasDetections: {},
@@ -284,20 +235,14 @@ describe("applyRestoredDataset", () => {
   });
 
   it("keeps reviewStatus when the identity is unchanged", () => {
-    s().applyRestoredDataset(dataset(), 7);
+    s().applyRestoredDataset(dataset(), PROJECT);
     expect(s().reviewStatus.byImage).toEqual({ "a.jpg": "completed" });
   });
 
-  it("adopts the generation in the same update as the dataset", () => {
-    s().applyRestoredDataset(dataset({ date: "3-2-26" }), 12);
+  it("adopts the open project in the same update as the dataset", () => {
+    s().applyRestoredDataset(dataset({ dataset_root: "/other", date: "3-2-26" }), OTHER);
     expect(s().gui.dataset.date).toBe("3-2-26");
-    expect(s().bindingGeneration).toBe(12);
-  });
-
-  it("clears canvasBindingMissing on a binding adoption", () => {
-    useStore.setState({ canvasBindingMissing: true });
-    s().applyRestoredDataset(dataset({ date: "3-2-26" }), 12);
-    expect(s().canvasBindingMissing).toBe(false);
+    expect(s().openProject).toEqual(OTHER);
   });
 });
 

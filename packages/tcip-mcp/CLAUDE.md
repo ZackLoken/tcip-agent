@@ -37,7 +37,9 @@ src/tcip_mcp/
                             # number means) as appended revisions the breeder confirms
   operationalization.py    # the check every delivery door runs on the latest confirmed revision
   prediction_buckets.py    # prediction-bucket immutability: never overwrite predictions a human reviewed
-  project_paths.py, workspace.py     # platform-state-root and workspace-root resolvers
+  project_record.py       # a project's own record: its id, display name and site
+  workspace.py            # the workspace root, its project directories and last-opened pointer
+  project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root
   experiments.py, model_registry.py   # run and sweep directories (.tcip/experiments/, .tcip/hpo/), each
                                         # written once as it goes; the registry is completed runs plus
                                         # the foreign checkpoints registered beside them
@@ -48,13 +50,15 @@ src/tcip_mcp/
   audit.py, project_status.py, web_client.py
 ```
 
-Every MCP tool in `tools/` is decorated `@mcp.tool()`, and every mutating door leaves exactly one
+Every MCP tool in `tools/` is decorated `@tool()` (`server.tool`); a tool that acts on a project
+takes the project the server was started for as its first parameter (the knowledge door and the
+project-creation door act on none), and every mutating door leaves exactly one
 audit line per act, the decorator's or the library's: a tool that changes state is `@audited`
 unless the library function it calls records its own event with facts the decorator cannot carry
 (a digest, what was written), and then it is not decorated. The decorator writes no line for a
 call returning its error dict and an exception line for a call that raises. A read-only tool (a status poll, a listing, a
 document served back) leaves none, so the audit log records mutations and nothing else. `serve_domain_knowledge`'s
-`@mcp.tool(description=...)` composes its client-visible description from the knowledge corpus
+`@tool(description=...)` composes its client-visible description from the knowledge corpus
 at import time rather than leaving it as the bare docstring. A mutating door demoted from tool
 status (run only through its own `tcip` subcommand) keeps `@audited` without registering.
 Run `python tools/list_tools.py` for the current tool list/count; never hardcode a count in a
@@ -77,7 +81,7 @@ doc or comment.
 - State mutations route through audited doors only, each leaving one line: an `@audited` tool or
   console-command door, or a library function recording its own event through
   `record_event_or_raise`; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
-  three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever
+  two kinds of root (a dataset's own, a project's own), held by whichever
   backend the process bound, that other code (including scripts) must not write around. `audit.py`
   decides where an entry goes and what a failed append means: the decorator raises
   `MutationCommittedWithoutAuditLine`; a caller that is neither an MCP tool nor a demoted door

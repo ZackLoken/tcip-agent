@@ -164,7 +164,7 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     result = propose_annotations(
-        image_path=str(exif_rotated_source),
+        tmp_path, image_path=str(exif_rotated_source),
         grid_cells=["B1", "C1"],
         tile_size=TILE_SIZE,
         engine_params={"model_type": "hiera_t"},
@@ -201,7 +201,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     before = set(Path(tempfile_gettempdir()).glob("tcip_propose_crop_*"))
     with pytest.raises(RuntimeError, match="engine exploded"):
         propose_annotations(
-            image_path=str(exif_rotated_source),
+            tmp_path, image_path=str(exif_rotated_source),
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
         )
@@ -307,7 +307,7 @@ class TestRegionFrameIsTheResolvedImageSources:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
 
-        result = propose_annotations(image_path=str(manifest), engine="patch",
+        result = propose_annotations(tmp_path, image_path=str(manifest), engine="patch",
                                      grid_cells=["B1", "C1"], tile_size=TILE_SIZE)
         assert "error" not in result, result
         assert result["candidates"][0]["bbox"] == [float(v) for v in PATCH_BOX]
@@ -338,7 +338,7 @@ class TestRegionFrameIsTheResolvedImageSources:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: NeverProposer())
 
-        result = propose_annotations(image_path=str(manifest), engine="patch",
+        result = propose_annotations(tmp_path, image_path=str(manifest), engine="patch",
                                      grid_cells=["B1"], tile_size=TILE_SIZE)
         assert "2 band(s) of uint16" in result.get("error", "")
 
@@ -374,7 +374,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = tmp_path / "whole_frame.jpg"
         Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
         assert "error" not in result, result
         assert called == []
         assert result["candidates"][0]["bbox"] == [10.0, 10.0, 30.0, 30.0]
@@ -400,11 +400,11 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
         assert "error" not in result, result
 
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
-        assert set(envelope) == {"engine", "candidates", "image_identity", "image_path"}
+        assert set(envelope) == {"engine", "candidates", "image_identity"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -434,7 +434,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
 
         assert "candidates[0].bbox" in result["error"]
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
@@ -460,7 +460,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "short_ring.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
 
         assert "three or more points" in result.get("error", ""), result
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
@@ -488,7 +488,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path))
 
         assert "error" not in result, result
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
@@ -515,7 +515,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unscored.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = proposal_tools.propose_annotations(image_path=str(img_path), engine="unscored")
+        result = proposal_tools.propose_annotations(tmp_path, image_path=str(img_path), engine="unscored")
 
         assert "'score'" in result.get("error", ""), result
         assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None

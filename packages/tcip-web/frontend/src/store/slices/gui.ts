@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 
+import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import {
   datasetKey,
   loadDatasetUi,
@@ -13,39 +14,12 @@ import type {
   DatasetSelection,
   GuiState,
   Mode,
-  ReviewFilters,
+  OpenProject,
   TabName,
   ViewState,
 } from "@/store/types";
 
-const DEFAULT_REVIEW: ReviewFilters = {
-  iou_threshold: 0.5,
-  conf_threshold: 0.25,
-  filter_type: "all",
-  filter_class: "all",
-  detection_idx: 0,
-};
-
-const DEFAULT_DATASET: DatasetSelection = {
-  project_root: null,
-  dataset_root: null,
-  subject: null,
-  date: null,
-  image_list: [],
-  current_image_index: 0,
-  images_dir: null,
-  annotations_dir: null,
-  predictions_dir: null,
-};
-
-const DEFAULT_STATE: GuiState = {
-  active_tab: "annotate",
-  dataset: DEFAULT_DATASET,
-  view: { scale: 1, offset_x: 0, offset_y: 0 },
-  mode: "box",
-  active_subject: null,
-  review: DEFAULT_REVIEW,
-};
+const DEFAULT_DATASET: DatasetSelection = GUI_STATE_DEFAULTS.dataset;
 
 /** True when two selections name a different (dataset_root, date, subject): the identity a
  *  review-status fetch is scoped to, so a fact fetched for one never gates navigation in the
@@ -57,53 +31,44 @@ function datasetIdentityChanged(
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
 }
 
-/** True once a project is open (a dataset root is set), whether or not a date has been picked
- *  yet; the one spelling of "a project is open" the footer and the terminal rail's starter hint
- *  both read, so neither can drift from the other. */
-export const selectProjectOpen = (s: Pick<AppState, "gui">): boolean =>
-  !!s.gui.dataset.dataset_root;
+/** The open project's directory, or null when the backend has none open. */
+export const selectProjectRoot = (s: Pick<AppState, "openProject">): string | null =>
+  s.openProject?.path ?? null;
 
 export interface GuiSlice {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
+  /** The project the backend has open, from its state envelope or the open request's answer. */
+  openProject: OpenProject | null;
   wsStatus: "disconnected" | "connecting" | "connected" | "error";
   /** Highest backend state version applied; used to drop stale snapshot replays. */
   wsVersion: number;
   /** This backend process's launch identity, from the envelope; a change accepts a lower
    *  wsVersion instead of dropping it as a stale replay (a restarted backend's own snapshot). */
   wsEpoch: string | null;
-  /** The canvas_open_binding generation the last select response or broadcast carried; the
-   *  canvas pusher's write-authority token, adopted in the same store update as the dataset. */
-  bindingGeneration: number | null;
-  /** True while a dataset is selected but no binding_generation has been adopted yet (the
-   *  canvas pusher's presence gate is blocking pushes): surfaces the condition rather than
-   *  pushing silently against a binding that is not there to check the generation against. */
-  canvasBindingMissing: boolean;
 
-  setGui: (next: GuiState) => void;
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
   clearDataset: () => void;
   /** Persist the current dataset's UI state (position/filters) before switching away. Call
    *  synchronously before the async /dataset/select so a broadcast can't move it mid-await. */
   saveCurrentDatasetUi: () => void;
-  /** Adopt a new dataset selection and its binding generation in one store update, restoring
-   *  the selection's saved position/filters when the user has been here before (else the
-   *  selection's own values). Establishes the new identity locally so a same-identity backend
-   *  snapshot keeps the restored index instead of resetting it to 0. */
-  applyRestoredDataset: (sel: DatasetSelection, generation: number) => void;
+  /** Adopt a new dataset selection of ``project`` in one store update, restoring the selection's
+   *  saved position/filters when the user has been here before (else the selection's own values).
+   *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
+   *  index instead of resetting it to 0. */
+  applyRestoredDataset: (sel: DatasetSelection, project: OpenProject) => void;
   /**
    * Apply a backend state snapshot with ownership-aware merge, not a wholesale
    * replace: a wholesale replace would clobber unsaved edits, the active tab, and
-   * the scroll position. Backend owns the dataset selection; the browser owns
-   * navigation/view/mode/subject/review-filter state and keeps its own copy. ``generation``
-   * and ``epoch`` come from the same envelope and are adopted in this one update, never set
-   * separately from the dataset they describe.
+   * the scroll position. Backend owns the dataset selection and the open project; the browser
+   * owns navigation/view/mode/subject/review-filter state and keeps its own copy. ``project``
+   * and ``epoch`` come from the same envelope and are adopted in this one update.
    */
   mergeSnapshot: (
     state: GuiState,
     version: number | null,
-    generation: number | null,
+    project: OpenProject | null,
     epoch: string | null,
   ) => void;
   setWsStatus: (s: "disconnected" | "connecting" | "connected" | "error") => void;
@@ -111,18 +76,15 @@ export interface GuiSlice {
   setView: (view: ViewState) => void;
   setMode: (mode: Mode) => void;
   setActiveSubject: (subject: string | null) => void;
-  setCanvasBindingMissing: (missing: boolean) => void;
 }
 
 export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, get) => ({
-  gui: DEFAULT_STATE,
+  gui: GUI_STATE_DEFAULTS,
+  openProject: null,
   wsStatus: "disconnected",
   wsVersion: 0,
   wsEpoch: null,
-  bindingGeneration: null,
-  canvasBindingMissing: false,
 
-  setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
   clearDataset: () =>
     set((s) => ({
@@ -132,7 +94,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
 
   saveCurrentDatasetUi: () => {
     const s = get();
-    const key = datasetKey(s.gui.dataset);
+    const key = datasetKey(s.openProject, s.gui.dataset);
     if (!key) return;
     saveDatasetUi(key, {
       index: s.gui.dataset.current_image_index,
@@ -141,9 +103,9 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     });
   },
 
-  applyRestoredDataset: (sel, generation) =>
+  applyRestoredDataset: (sel, project) =>
     set((s) => {
-      const key = datasetKey(sel);
+      const key = datasetKey(project, sel);
       const restored = key ? loadDatasetUi(key) : null;
       const index =
         restored && sel.image_list.length
@@ -153,14 +115,11 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         gui: {
           ...s.gui,
           // Land on the project's last-used tab; a project never opened before gets Annotate.
-          active_tab: loadLastTab(sel.project_root) ?? "annotate",
+          active_tab: loadLastTab(project.id) ?? "annotate",
           dataset: { ...sel, current_image_index: index },
           review: restored?.review ?? s.gui.review,
         },
-        // Adopted alongside the dataset in this one update: the pusher's next build reads a
-        // generation that already names the same project as the dataset it fires against.
-        bindingGeneration: generation,
-        canvasBindingMissing: false,
+        openProject: project,
         imageStatus: {
           ...s.imageStatus,
           activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
@@ -174,7 +133,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       };
     }),
 
-  mergeSnapshot: (incoming, version, generation, epoch) =>
+  mergeSnapshot: (incoming, version, project, epoch) =>
     set((s) => {
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
@@ -189,30 +148,27 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       const local = s.gui;
       const inDs = incoming.dataset;
 
-      /** A null/empty backend dataset must never clobber a populated client one: this is what
-       *  lets the browser survive a backend restart (the restarted backend broadcasts an empty
-       *  state before it knows the project). An ordinary same-process broadcast (no epoch change)
-       *  keeps the client's own still-good generation rather than adopting whatever this one
-       *  empty envelope carries; a restart's replay (epoch changed) adopts the incoming value,
-       *  which by then is the record-read generation (see StateStore.refresh_binding_generation_
-       *  from_record), not a fresh process's stranding None. */
-      if (!inDs || !inDs.dataset_root) {
-        if (!epochChanged) {
-          return {
-            wsVersion: nextVersion,
-            wsEpoch: nextEpoch,
-            bindingGeneration: s.bindingGeneration,
-          };
-        }
+      // The backend names which project is open; a different one (or none) leaves nothing of
+      // the previous project's dataset in the browser.
+      if (project?.id !== s.openProject?.id) {
         return {
+          gui: project
+            ? {
+                ...incoming,
+                active_tab: loadLastTab(project.id) ?? "annotate",
+                active_subject: incoming.active_subject ?? null,
+              }
+            : { ...local, dataset: DEFAULT_DATASET },
+          openProject: project,
+          reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
-          bindingGeneration: generation,
-          canvasBindingMissing: generation == null,
         };
       }
 
-      const identityChanged = datasetIdentityChanged(inDs, local.dataset);
+      if (!inDs.dataset_root) {
+        return { wsVersion: nextVersion, wsEpoch: nextEpoch };
+      }
 
       // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
       // the tab is the client's per-project record (backend active_tab only moves on agent focus).
@@ -220,18 +176,16 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         return {
           gui: {
             ...incoming,
-            active_tab: loadLastTab(incoming.dataset.project_root) ?? "annotate",
+            active_tab: (project && loadLastTab(project.id)) ?? "annotate",
             active_subject: incoming.active_subject ?? null,
           },
           reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
-          bindingGeneration: generation,
-          canvasBindingMissing: generation == null,
         };
       }
 
-      if (identityChanged) {
+      if (datasetIdentityChanged(inDs, local.dataset)) {
         // New dataset selection: adopt it wholesale (including its index) and drop
         // the stale reviewStatus. The active tab stays put.
         return {
@@ -239,8 +193,6 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
-          bindingGeneration: generation,
-          canvasBindingMissing: generation == null,
         };
       }
       /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
@@ -259,8 +211,6 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         },
         wsVersion: nextVersion,
         wsEpoch: nextEpoch,
-        bindingGeneration: generation,
-        canvasBindingMissing: generation == null,
       };
     }),
 
@@ -268,11 +218,10 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   setActiveTab: (active_tab) =>
     set((s) => {
       // Write-through so the next open of this project resumes on the tab last worked in.
-      if (s.gui.dataset.project_root) recordLastTab(s.gui.dataset.project_root, active_tab);
+      if (s.openProject) recordLastTab(s.openProject.id, active_tab);
       return { gui: { ...s.gui, active_tab } };
     }),
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
   setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
-  setCanvasBindingMissing: (canvasBindingMissing) => set({ canvasBindingMissing }),
 });

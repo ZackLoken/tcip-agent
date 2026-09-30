@@ -119,9 +119,10 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     identity = agent_identity.begin("claude-code", "2.1.238")
 
-    audit_module.record_event("identity_probe", {}, agent_session="forged", agent_client_name="x")
+    audit_module.record_event("identity_probe", {}, scope=tmp_path, agent_session="forged",
+                              agent_client_name="x")
 
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+    key = audit_module.audit_log_key(tmp_path)
     (row,) = [r for r in ts.read_log(key).records if r["tool"] == "identity_probe"]
     assert row["agent_session"] == identity.session
     assert row["agent_client_name"] == "claude-code"
@@ -183,18 +184,18 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     import tcip_store as ts
 
     def rows(tool: str) -> list[dict]:
-        key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+        key = audit_module.audit_log_key(tmp_path)
         return [r for r in ts.read_log(key).records if r["tool"] == tool]
 
     audit_module.record_event(
-        "no_handshake", {}, agent_session="forged", harness_effort_at_connect="max"
+        "no_handshake", {}, scope=tmp_path, agent_session="forged", harness_effort_at_connect="max"
     )
     (row,) = rows("no_handshake")
     assert "agent_session" not in row and "harness_effort_at_connect" not in row
 
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     agent_identity.begin("codex-mcp-client", "0.147.0")
-    audit_module.record_event("codex_session", {}, harness_session="forged")
+    audit_module.record_event("codex_session", {}, scope=tmp_path, harness_session="forged")
     (row,) = rows("codex_session")
     assert row["agent_client_name"] == "codex-mcp-client"
     assert "harness_session" not in row

@@ -32,6 +32,11 @@ beforeEach(() => {
   }
   // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
   vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
+  // The status read-back after a finished write; a case about staleness overrides it.
+  vi.spyOn(subjectsApi, "loadImageStatus").mockResolvedValue({
+    statuses: {},
+    stale_definition: [],
+  });
 });
 
 afterEach(() => {
@@ -244,12 +249,12 @@ describe("AnnotateToolbar subject authoring", () => {
         ...s.gui,
         dataset: {
           ...s.gui.dataset,
-          project_root: "C:/proj",
           dataset_root: "C:/data",
           date: "2026-01-01",
           annotations_dir: "C:/data/annotations/2026-01-01",
         },
       },
+      openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
     }));
   }
 
@@ -283,7 +288,7 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf", "husk"]);
     expect(useStore.getState().gui.active_subject).toBe("husk");
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][1]).toEqual({ leaf: {}, husk: {} });
+    expect(saveSpy.mock.calls[0][0]).toEqual({ leaf: {}, husk: {} });
   });
 
   it("selects an existing subject rather than resetting its attribute definitions", async () => {
@@ -360,7 +365,7 @@ describe("AnnotateToolbar subject authoring", () => {
       fireEvent.click(screen.getByText("+ New subject"));
     });
 
-    expect(saveSpy.mock.calls[0][4]).toBe("v1");
+    expect(saveSpy.mock.calls[0][2]).toBe("v1");
     expect(useStore.getState().registry.version).toBe("v2");
   });
 
@@ -539,20 +544,23 @@ describe("AnnotateToolbar band picker (progressive disclosure)", () => {
 
 function seedImageDataset(opts: { subject: string; currentStatus?: ImageStatus; stale?: boolean }) {
   const dataset: DatasetSelection = {
-    project_root: "C:/proj",
     dataset_root: "C:/data",
     subject: opts.subject,
     date: "2026-01-01",
+    model_name: null,
     image_list: ["img1.jpg"],
     current_image_index: 0,
     images_dir: "C:/data/images/2026-01-01",
     annotations_dir: "C:/data/annotations/2026-01-01",
     predictions_dir: null,
+    label_paths: { "img1.jpg": "C:/data/annotations/2026-01-01/img1.json" },
+    prediction_paths: {},
   };
   const byImage: Record<string, ImageStatus> = {};
   if (opts.currentStatus) byImage["img1.jpg"] = opts.currentStatus;
   useStore.setState((s) => ({
     gui: { ...s.gui, dataset },
+    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
     canvas: { ...s.canvas, loadedImagePath: imagePath(dataset, "img1.jpg") },
     imageStatus: {
       ...s.imageStatus,
@@ -585,13 +593,11 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "negative",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
   });
@@ -609,18 +615,16 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "complete",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
   });
 
-  it("does not restore a mark on a failed stamp when unchecking Complete (not a finished status)", async () => {
+  it("reads no staleness back when unchecking Complete (not a finished status)", async () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete" });
     setCanvasBoxSubjects([]);
     const setStatus = vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
@@ -634,22 +638,42 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "unannotated",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
+    expect(subjectsApi.loadImageStatus).not.toHaveBeenCalled();
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
   });
 
-  it("marks stale and toasts the stamp-gap sentence when a finished status's audit line is lost", async () => {
+  it("leaves an unstamped finished status unmarked when the backend names it not stale", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
-    const committed = { status: "ok", digest_stamped: false };
+    vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
+      status: "ok",
+      digest_stamped: false,
+    });
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(subjectsApi.loadImageStatus).toHaveBeenCalledWith("subject_a", "2026-01-01", "C:/data");
+    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
+
+  it("marks stale when the backend names the finished image stale after its audit line is lost", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.mocked(subjectsApi.loadImageStatus).mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      stale_definition: ["img1.jpg"],
+    });
+    const committed = { status: "ok", digest_stamped: true };
     const message = "gui_set_image_status completed and its audit entry could not be written";
     vi.spyOn(subjectsApi, "setImageStatus").mockRejectedValue(
       new StructuredRefusalError(
@@ -666,7 +690,7 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
 
     expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
     const messages = useStore.getState().toasts.map((t) => t.message);
-    expect(messages).toContainEqual(expect.stringContaining("its schema stamp did not land"));
+    expect(messages).toContainEqual(expect.stringContaining("is stale under subject_a"));
     expect(messages).toContainEqual(message);
   });
 });
@@ -674,18 +698,21 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
 describe("AnnotateToolbar current image identity", () => {
   it("leaves the identity null for an empty image list, rather than a display constant a status write could read as a real name", () => {
     const dataset: DatasetSelection = {
-      project_root: "C:/proj",
       dataset_root: "C:/data",
       subject: "subject_a",
       date: "2026-01-01",
+      model_name: null,
       image_list: [],
       current_image_index: 0,
       images_dir: "C:/data/images/2026-01-01",
       annotations_dir: "C:/data/annotations/2026-01-01",
       predictions_dir: null,
+      label_paths: {},
+      prediction_paths: {},
     };
     useStore.setState((s) => ({
       gui: { ...s.gui, dataset },
+      openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
       imageStatus: { ...s.imageStatus, byImage: { [UNSET_GLYPH]: "complete" } },
     }));
     renderToolbar();
@@ -904,13 +931,11 @@ describe("AnnotateToolbar stale re-confirm", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "negative",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
@@ -929,13 +954,11 @@ describe("AnnotateToolbar stale re-confirm", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "complete",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
@@ -971,12 +994,16 @@ describe("AnnotateToolbar stale re-confirm", () => {
     expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
   });
 
-  it("restores the stale mark and toasts the image when the digest stamp did not land", async () => {
+  it("restores the stale mark and toasts the image when the backend still names it stale", async () => {
     seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
     setCanvasBoxSubjects(["subject_a"]);
     vi.spyOn(subjectsApi, "setImageStatus").mockResolvedValue({
       status: "ok",
       digest_stamped: false,
+    });
+    vi.mocked(subjectsApi.loadImageStatus).mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      stale_definition: ["img1.jpg"],
     });
     renderToolbar();
 
@@ -986,7 +1013,7 @@ describe("AnnotateToolbar stale re-confirm", () => {
 
     expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
     expect(useStore.getState().toasts.at(-1)?.message).toMatch(
-      /img1\.jpg's status was recorded, but its schema stamp did not land/,
+      /img1\.jpg is stale under subject_a's attribute schema/,
     );
   });
 });

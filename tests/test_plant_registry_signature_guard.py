@@ -21,15 +21,15 @@ def test_build_plant_mapping_refuses_plant_csv_paths_argument(
     """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
     from tests.test_plant_mapping_binding import _init
 
-    _init(tmp_path, monkeypatch)
-    with pytest.raises(TypeError):
+    _init(tmp_path)
+    with pytest.raises(TypeError, match="plant_csv_paths"):
         build_plant_mapping(  # type: ignore[call-arg]
-            name="valley", images_root=str(tmp_path), plant_csv_paths=["nope.csv"])
+            tmp_path, name="valley", images_root=str(tmp_path), plant_csv_paths=["nope.csv"])
 
 
-def test_deliver_orthomosaic_plant_counts_refuses_plant_csv_paths_argument() -> None:
+def test_deliver_orthomosaic_plant_counts_refuses_plant_csv_paths_argument(tmp_path: Path) -> None:
     """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="plant_csv_paths"):
         deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
-            predictions_dir="preds", raster_path="raster.tif", plant_csv_paths=["nope.csv"],
+            tmp_path, predictions_dir="preds", raster_path="raster.tif", plant_csv_paths=["nope.csv"],
             output_csv_path="out.csv", delivered_phenotype="stem_count")

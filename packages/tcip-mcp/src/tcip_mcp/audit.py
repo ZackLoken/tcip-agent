@@ -1,15 +1,7 @@
-"""Audit logging decorator for the platform's mutating doors.
-
-Every call of a mutating door is logged with timestamp, tool name, arguments, status, and duration,
-into an append-only store scoped to a dataset, a project, or the platform (:func:`audit_log_key`).
-``status`` is ``ok`` when the body returned and ``exception`` when it raised. :func:`audited`
-decorates a door; :func:`record_event` / :func:`record_event_or_raise` record for code that is not
-one. An entry's ``scope`` field names the resolved root the entry was filed under when the writer
-passed one (:func:`_stamp_scope`).
-
-An append the decorator cannot make is a refusal, not a warning, because the append runs after the
-tool body: see :class:`MutationCommittedWithoutAuditLine`.
-"""
+"""The audit log: one append-only store under a dataset root or a project root
+(:func:`audit_log_key`). :func:`audited` records a decorated door's calls (timestamp, tool name,
+arguments, status and duration); :func:`record_event` and :func:`record_event_or_raise` record for
+code that is not a door."""
 
 from __future__ import annotations
 
@@ -19,19 +11,14 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar, overload
 
 from tcip_store import LOG_JSON, Key, StoreDescriptor, append, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp import agent_identity
-from tcip_mcp.project_paths import resolve_state
 
 logger = logging.getLogger(__name__)
-
-# Relative default (tests rebind this constant). At write time ``resolve_state`` anchors it to
-# ``$TCIP_STATE_ROOT`` when pinned, so processes from different dirs don't fragment the log.
-AUDIT_ROOT = Path(".")
 
 _AUDIT_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
 """The append-only log under a root's own ``.tcip/``."""
@@ -84,35 +71,11 @@ class AuditEntryNotWritten(RuntimeError):
         self.arguments = arguments or {}
 
 
-def platform_audit_scope() -> Path:
-    """The root a platform event is recorded under, resolved at write time."""
-    return resolve_state(AUDIT_ROOT)
-
-
-def audit_log_key(scope: str | Path | None = None) -> Key:
-    """The audit log one event belongs in.
-
-    ``scope`` is the root the event's subject hangs off: a dataset root when the event changed a
-    record that travels with the data, a project root when the event is the project's own outward
-    action or another project's door files a line about it there, the platform root (the default)
-    for everything else.
-    """
-    root = Path(scope) if scope is not None else platform_audit_scope()
-    return Key(AUDIT_LOG_STORE, str(root.resolve()), _AUDIT_PARTS)
-
-
-def _stamp_scope(entry: dict[str, Any], scope: str | Path | None) -> Key:
-    """Stamp ``entry`` from the same Key :func:`audit_log_key` builds, and return that Key: the
-    stamped scope is the key's own root.
-
-    ``entry["scope"]`` is stamped only when the caller passed a scope; the value may equal the
-    platform root, so its absence means the writer took the platform default, never that the line
-    is non-platform.
-    """
-    key = audit_log_key(scope)
-    if scope is not None:
-        entry["scope"] = key.root
-    return key
+def audit_log_key(scope: str | Path) -> Key:
+    """The audit log one event belongs in: the one under ``scope``, the root the event's subject
+    hangs off (a dataset root when the event changed a record that travels with the data, the
+    project root otherwise)."""
+    return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
 
 
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
@@ -147,27 +110,22 @@ def _entry(
     return entry
 
 
-def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
-    """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising."""
-    try:
-        append(_stamp_scope(entry, scope), entry)
-    except Exception:
-        # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
-        logger.warning("Failed to write audit entry", exc_info=True)
-
-
 def record_event(
     tool: str,
     arguments: dict[str, Any] | None = None,
     *,
     status: str = "ok",
-    scope: str | Path | None = None,
+    scope: str | Path,
     **extra: Any,
 ) -> None:
     """Emit one best-effort audit line for a caller that is not an ``@audited`` door. ``scope``
     names the root whose log the entry belongs in (see :func:`audit_log_key`). Never raises.
     """
-    _write_entry(_entry(tool, arguments, status, extra), scope)
+    try:
+        append(audit_log_key(scope), _entry(tool, arguments, status, extra))
+    except Exception:
+        # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
+        logger.warning("Failed to write audit entry", exc_info=True)
 
 
 def record_event_or_raise(
@@ -175,7 +133,7 @@ def record_event_or_raise(
     arguments: dict[str, Any] | None = None,
     *,
     status: str = "ok",
-    scope: str | Path | None = None,
+    scope: str | Path,
     **extra: Any,
 ) -> None:
     """Emit one audit line for a confirmation write that must not land silently unrecorded.
@@ -187,7 +145,7 @@ def record_event_or_raise(
     """
     entry = _entry(tool, arguments, status, extra)
     try:
-        append(_stamp_scope(entry, scope), entry)
+        append(audit_log_key(scope), entry)
     except Exception as exc:
         logger.warning("Failed to write the audit entry for %s", tool, exc_info=True)
         raise AuditEntryNotWritten(tool, exc, arguments=arguments) from exc
@@ -218,24 +176,27 @@ def dataset_scope_of(value: Any) -> Path | None:
     return root.resolve()
 
 
+_Door = TypeVar("_Door", bound=Callable[..., Any])
+
+
+@overload
+def audited(fn: _Door) -> _Door: ...
+@overload
+def audited(*, scope_arg: str | None = None) -> Callable[[_Door], _Door]: ...
 def audited(
     fn: Callable | None = None,
     *,
     scope_arg: str | None = None,
-    scope_via: Callable[[Any], Any] | None = None,
 ) -> Callable:
     """Decorator that logs a mutating door's calls to the audit log their scope names.
 
-    Bare (``@audited``), a call is a platform event and is recorded in the platform's log.
-    ``@audited(scope_arg=...)`` declares which of the tool's own arguments carries the dataset or
-    project location the call mutates a record of: that argument's value is resolved at call time
-    (:func:`dataset_scope_of` for a dataset argument; a project argument resolves as the root it
-    names), and the entry goes to that root's log carrying a ``scope`` field naming it. An argument
-    that is ``None``, absent, or resolves to no root leaves the call a platform event. Exactly one
-    log receives each entry.
-
-    ``scope_via`` is the resolver the body itself calls to canonicalize that argument before
-    writing through it, so the scope is resolved along the identical path the write takes.
+    The decorated door takes a ``project`` parameter, and refuses decoration without one. Bare
+    (``@audited``), a call is recorded in that project's log. ``@audited(scope_arg=...)`` declares
+    which of the tool's own arguments carries the dataset location the call mutates a record of:
+    that argument's value, read against the project, is resolved at call time
+    (:func:`dataset_scope_of`), and the entry goes to that root's log. An argument that is
+    ``None``, absent, or resolves to no root leaves the entry in the project's log. Exactly one log
+    receives each entry, and ``project`` is not among its recorded arguments.
 
     A body that returns leaves its ``ok`` line, except a body returning a dict whose ``"error"`` is
     set, which leaves no line; a body that raises leaves its ``exception`` line.
@@ -246,46 +207,42 @@ def audited(
     - The body raised: the body's exception is what the caller gets; the failed audit-of-failure is
       logged.
     - A declared scope argument was given and resolving it raised: the call refuses. A resolution
-      that cleanly answers "no dataset" leaves the call a platform event.
+      that cleanly answers "no dataset" leaves the entry in the project's log.
 
     Binds positional args to their parameter names, so a positional call is recorded like a keyword
-    one. Binding failures never abort the call; they fall back to the kwargs-only record, and to
-    the platform log.
+    one; a call that does not bind raises the body's own ``TypeError``.
     """
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)
+        if "project" not in sig.parameters:
+            raise ValueError(f"@audited on {func.__name__} needs a project parameter to record under")
         if scope_arg is not None and scope_arg not in sig.parameters:
             raise ValueError(
                 f"@audited(scope_arg={scope_arg!r}) on {func.__name__} names no parameter of it; "
                 f"it takes {tuple(sig.parameters)}"
-            )
-        if scope_via is not None and scope_arg is None:
-            raise ValueError(
-                f"@audited(scope_via=...) on {func.__name__} has no scope_arg to apply it to"
             )
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             tool_name = func.__name__
             t0 = time.monotonic()
-            try:
-                bound = sig.bind(*args, **kwargs)
-                bound.apply_defaults()
-                logged_args: dict[str, Any] = dict(bound.arguments)
-            except TypeError:
-                logged_args = dict(kwargs)
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            logged_args: dict[str, Any] = dict(bound.arguments)
+            project = logged_args.pop("project")
+            logged_args.pop("workspace", None)
             entry = _entry(tool_name, logged_args)
 
             def record() -> None:
                 """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""
                 # Resolved after the body, so a tool that creates the dataset it names is
-                # recorded in that dataset's own log rather than the platform's.
+                # recorded in that dataset's own log rather than the project's.
                 scope = None
                 raw = logged_args.get(scope_arg) if scope_arg else None
                 if raw is not None:
-                    scope = dataset_scope_of(scope_via(raw) if scope_via else raw)
+                    scope = dataset_scope_of(Path(project, raw))
                 entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
-                append(_stamp_scope(entry, scope), entry)
+                append(audit_log_key(scope if scope is not None else project), entry)
 
             # One entry per call by construction: the two paths are exclusive, and neither
             # writer sits inside a handler that could run the other.

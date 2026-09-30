@@ -9,7 +9,7 @@ operators and the Claude agent drive through the same state store.
 packages/tcip-web/
   src/tcip_web/
     app.py              # FastAPI app
-    state.py            # in-memory GuiState + debounced .tcip/state/gui.json
+    state.py            # the open project, its GuiState (written to .tcip/state/gui.json on change)
     paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
     identity.py         # current-user identity for created_by/accepted_by provenance stamping
     jobstore.py         # background job tracking (training/inference/tuning)
@@ -48,15 +48,14 @@ python -m tcip_web
 
 On startup, the backend:
 
+- Resolves the workspace `TCIP_WORKSPACE` names, once, and refuses to start when it is unset.
 - Binds to `TCIP_WEB_HOST:TCIP_WEB_PORT` (defaults `127.0.0.1:8765`).
 - Writes the workspace root's `.tcip/state/web_port.txt` so MCP tools can discover it, the
   one location every process on the machine resolves the same way regardless of which
   project each has open.
-- Pins its own platform-state root from the workspace's active-project marker, so it starts
-  on the project the GUI has open.
-- Replays the last `.tcip/state/gui.json` snapshot if present.
-
-Set `TCIP_WEB_RELOAD=1` to run under uvicorn auto-reload during development.
+- Opens the project the workspace's last-opened pointer names (by the id in its
+  `.tcip/project.json`), if that project is still in the workspace, and replays that project's
+  `.tcip/state/gui.json` snapshot if present.
 
 Open `http://127.0.0.1:8765/` once the backend is up.
 

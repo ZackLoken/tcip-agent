@@ -25,7 +25,7 @@ _BOX = (10.0, 10.0, 30.0, 30.0)
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
@@ -41,7 +41,7 @@ def _earned_bucket(
         stems=(_STEM,), boxes=(_BOX,), scores=scores,
     )
     bucket = Path(built["bucket"])
-    stamp = earn_validated_stamp(bucket, dataset_root, trait=_EARNED_TRAIT)
+    stamp = earn_validated_stamp(tmp_path, bucket, dataset_root, trait=_EARNED_TRAIT)
     pred = read_annotations(bucket / f"{_STEM}.json")[0]
     return {
         "dataset_root": dataset_root, "bucket": bucket, "images_dir": Path(built["images_dir"]),
@@ -177,7 +177,7 @@ def _row_gone_bucket(
 
     built = _earned_bucket(tmp_path, monkeypatch, experiment_id=experiment_id)
     validated_by = built["stamp"]["validated_by"]
-    shutil.rmtree(find_run(validated_by["experiment_id"]))
+    shutil.rmtree(find_run(validated_by["experiment_id"], project=tmp_path))
     return built, validated_by
 
 
@@ -259,7 +259,7 @@ def test_refusal_scoreless_prediction(
     write_annotations(
         bucket / "scoreless.json", [Annotation(subject=subject, geometry=BBox(*_BOX))], 100, 100,
     )
-    earn_validated_stamp(bucket, dataset_root, trait=_EARNED_TRAIT)
+    earn_validated_stamp(tmp_path, bucket, dataset_root, trait=_EARNED_TRAIT)
     scoreless_pred = read_annotations(bucket / "scoreless.json")[0]
     assert scoreless_pred.score is None
 
@@ -397,7 +397,7 @@ def test_parsed_marker_resolves_through_find_validation(
     parsed = parse_validation_reference(marker)
     assert parsed is not None
     experiment_id, record_digest = parsed
-    row = find_validation(find_observation(experiment_id), record_digest)
+    row = find_validation(find_observation(experiment_id, project=tmp_path), record_digest)
     assert row is not None
 
 

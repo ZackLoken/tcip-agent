@@ -11,6 +11,7 @@ does not clear.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -126,16 +127,17 @@ def _labeled_reference(tmp_path):
     return images_dir, labels_dir
 
 
-def _persisted_gate_evidence(run_inference_result: dict) -> dict:
-    """The full gate-evidence dict a ``run_inference`` calibration persisted, read back by the same
-    key the response names (``calibration_evidence_key``): the response's own
-    ``gate_evidence_summary`` is a compact, response-safe subset, this is the whole thing.
+def _persisted_gate_evidence(tmp_path, run_inference_result: dict) -> dict:
+    """The full gate-evidence dict a ``run_inference`` calibration persisted under the project
+    ``tmp_path``, read back by the same key the response names (``calibration_evidence_key``):
+    the response's own ``gate_evidence_summary`` is a compact, response-safe subset, this is the
+    whole thing.
     """
     from tcip_store import store
 
     from tcip_mcp.tools.inference_tools import calibration_curve_key
 
-    body = store.read(calibration_curve_key(run_inference_result["calibration_evidence_key"]))
+    body = store.read(calibration_curve_key(tmp_path, run_inference_result["calibration_evidence_key"]))
     return body["gate_evidence"]
 
 
@@ -151,12 +153,12 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     ckpt = _checkpoint(tmp_path, "build_bare_score_thresh_detector")
     images_dir, labels_dir = _labeled_reference(tmp_path)
 
-    r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False,
+    r = run_inference(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False,
                       trait="bud_opening", calibration_labels_dir=str(labels_dir))
 
     assert "error" not in r, r
     assert r["validated"] is True
-    gate_evidence = _persisted_gate_evidence(r)
+    gate_evidence = _persisted_gate_evidence(tmp_path, r)
     assert gate_evidence["failures"] == []
     assert gate_evidence["staged_conf_floor_attribute_path"] == "self"
     assert gate_evidence["conf_censored"] is False
@@ -170,9 +172,14 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     )
 
     key = r["calibration_evidence_key"]
-    body = store.read(calibration_curve_key(key))
+    body = store.read(calibration_curve_key(tmp_path, key))
     assert calibration_curve_identity(body) == key
-    assert _calibration_evidence(r) == body["calibration_evidence"]
+    evidence = _calibration_evidence(tmp_path, r)
+    labels = Path(labels_dir).resolve()
+    assert evidence["inputs"]["calibration_labels_dir"] == str(labels)
+    assert body["calibration_evidence"]["inputs"]["calibration_labels_dir"] == (
+        labels.relative_to(tmp_path.resolve()).as_posix())
+    assert evidence["resolver"] == body["calibration_evidence"]["resolver"]
     assert "schema_version" not in body
 
 
@@ -185,12 +192,12 @@ def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monke
     ckpt = _checkpoint(tmp_path, "build_bare_no_knob_detector")
     images_dir, labels_dir = _labeled_reference(tmp_path)
 
-    r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False,
+    r = run_inference(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False,
                       trait="bud_opening", calibration_labels_dir=str(labels_dir))
 
     assert "error" not in r, r
     assert r["validated"] is False
-    gate_evidence = _persisted_gate_evidence(r)
+    gate_evidence = _persisted_gate_evidence(tmp_path, r)
     assert gate_evidence["staged_conf_floor_attribute_path"] is None
     assert gate_evidence["conf_censored"] is False
     assert "conf_floor_unstated" in gate_evidence["failures"]

@@ -55,7 +55,6 @@ RENAMES = [
     ("select_best_model", "rank_registered_models"),
     ("check_training_status", "monitor_training"),
     ("init_project", "initialize_project"),
-    ("set_active_project", "activate_project"),
     ("write_class_map", "write_subject_registry"),
 ]
 
@@ -72,10 +71,12 @@ MERGED = [
     ("state_trait_operationalization", "propose_trait"),
 ]
 
-# A demotion folded into a script with no single surviving door gets the same whole-tree sweep a
-# merge's old name gets; there is no survivor tool name to check registration of, only "script".
+# A name with no surviving door (a demotion folded into a script, or a door deleted outright) gets
+# the same whole-tree sweep a merge's old name gets; there is no survivor to check registration of.
 RETIRED = [
     ("validate_data_quality", "script"),
+    ("set_active_project", "deleted"),
+    ("activate_project", "deleted"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

@@ -17,7 +17,7 @@ import pytest
 
 
 @pytest.fixture
-def client():
+def client(opened_project):
     from fastapi.testclient import TestClient
 
     import tcip_web.routes.review as review_mod
@@ -70,8 +70,8 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
 
     calls: list[dict] = []
 
-    def fake_prioritize_review_queue(**kwargs):
-        calls.append(kwargs)
+    def fake_prioritize_review_queue(project, **kwargs):
+        calls.append({"project": project, **kwargs})
         return {
             "method": "combined", "task": "detection",
             "total_candidates": 3, "reviewed_skipped": 1, "selected_count": 2,
@@ -95,6 +95,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     # The route hands over the root the request named, never a client-supplied state path: the
     # tool derives the store from it, the same one _get_engine opens.
     assert len(calls) == 1
+    assert calls[0]["project"] == tmp_path
     assert calls[0]["dataset_root"] == str(tmp_path)
     assert "review_state_dir" not in calls[0]
     # The route never sends a strategy kwarg: prioritize_review_queue accepts none since the split.
@@ -110,7 +111,7 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(client, tmp_path: Path, mo
     images = tmp_path / "images"
     images.mkdir()
 
-    def fake_prioritize_review_queue(**kwargs):
+    def fake_prioritize_review_queue(project, **kwargs):
         return {"error": "no scorer registered as 'nonsense'"}
 
     import tcip_mcp.tools.feedback_tools as feedback_tools_mod

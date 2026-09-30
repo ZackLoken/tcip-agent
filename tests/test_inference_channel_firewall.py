@@ -33,9 +33,9 @@ def _five_band_raster(tmp_path: Path) -> str:
     return str(path)
 
 
-def _held_out_bundle():
-    """A conf resolved from a dense reference that passes its own held-out gate, with the
-    resolver arguments behind it."""
+def _held_out_bundle(project):
+    """A conf resolved for ``project`` from a dense reference that passes its own held-out gate,
+    with the resolver arguments behind it."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
 
@@ -51,7 +51,8 @@ def _held_out_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "slicing": None, "staged_conf_floor": 0.01,
     }
-    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
+    return resolve_operating_point("bud_opening", experiment_id=None, project=project,
+                                   **inputs), inputs
 
 
 def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overrides):
@@ -59,19 +60,18 @@ def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overr
     import tcip_mcp.pipelines.calibration as calibration
     from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
-    bundle, inputs = _held_out_bundle()
+    bundle, inputs = _held_out_bundle(tmp_path)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
     monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
         "task": "detection",
     }, data={"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
     return run_inference_verified(
-        str(ckpt), images_dir=str(tmp_path), device="cpu",
+        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
         trait="bud_opening", calibration_labels_dir=str(tmp_path), **overrides)
 
 

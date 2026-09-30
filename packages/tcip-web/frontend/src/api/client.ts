@@ -12,14 +12,11 @@ import {
   type ActionPayload,
   type CoveragePayload,
   type CoverageRecord,
-  type DependencyWarning,
   type GridZoomPayload,
   type JobStatus,
-  type ReleaseResponse,
-  type RemovalPreview,
-  type RemovalResponse,
-  type RenamePreview,
-  type RenameResponse,
+  type ProjectSummary,
+  type RemovalRequest,
+  type RenameRequest,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
@@ -83,7 +80,6 @@ export interface SaveLabelsBody {
   // Non-empty: the backend refuses a save with nowhere to write (422); resolve that locally.
   label_path: string;
   annotations: AnnotationPayload[];
-  project_root?: string | null;
   /** Echo the loaded mtime token so the backend can 409 a stale (lost-update) write. */
   base_mtime?: string | null;
   /** GUI-set annotator identity; stamped as created_by ("user:<name>") on saved GT. */
@@ -135,122 +131,35 @@ export interface OverviewJob {
   error: string | null;
 }
 
-export interface ProjectSummary {
-  name: string;
-  path: string;
-  created: number;
-  modified: number;
-  dates: string[];
-  subjects: string[];
-  models: string[];
-  // Per-date availability: subjects with labels / models with predictions on each date, so the
-  // pickers never offer a date with nothing there (an empty canvas).
-  subjects_by_date: Record<string, string[]>;
-  models_by_date: Record<string, string[]>;
-  image_count: number;
-  is_active: boolean;
-  // Exactly one is set (the backend's site_fields never raises), so a recordless or damaged
-  // project still lists.
-  site: string | null;
-  site_problem: string | null;
-  // The first date's labels that would not read, naming the file; the project still lists.
-  label_problem: string | null;
-  // The backend's own identity_conflict text, or null; disabled only for a refusal
-  // removal_releasable cannot clear.
-  removal_refusal: string | null;
-  // Whether a release (api.projects.releaseBinding) would clear removal_refusal.
-  removal_releasable: boolean;
-  // Every dataset this project registered under another workspace project now pending
-  // removal or gone.
-  dependency_warnings: DependencyWarning[];
-  // A complete sentence, or null: a registry that will not decode leaves dependency_warnings
-  // empty beside it; an entry with a path and no id leaves the other entries' warnings beside it.
-  dependency_problem: string | null;
-}
-
-/** One workspace project the listing carries under `pending_removal`: archived, marked, and
- *  moving into the workspace's holding directory at the next backend start. */
-export interface PendingRemovalEntry {
-  name: string;
-  requested_at: string;
-  archive_path: string;
-  holding_dir: string;
-}
-
-/** One outcome of the last `complete_pending_removals` run this backend reported at startup. */
-export interface RemovalOutcome {
-  name: string;
-  moved_to?: string;
-  blocked_by?: string;
-  // The OSError's own errno behind blocked_by, null when it carried none: EACCES/EPERM name a
-  // held handle, EXDEV a filesystem boundary.
-  blocked_errno?: number | null;
-  skipped?: string;
-  archive_path: string | null;
-}
-
-/** One workspace project the listing carries under `pending_rename`: marked, moving onto its
- *  new name at the next backend start. */
-export interface PendingRenameEntry {
-  name: string;
-  new_name: string;
-  requested_at: string;
-}
-
-/** One outcome of the last `complete_pending_renames` run this backend reported at startup. */
-export interface RenameOutcome {
-  name: string;
-  new_name?: string;
-  blocked_by?: string;
-  blocked_errno?: number | null;
-  already_renamed?: boolean;
-  skipped?: string;
-  note?: string;
-}
+export type { ProjectSummary };
 
 export const api = {
   projects: {
     list: () =>
       call<{
         workspace: string;
-        active: string | null;
-        active_path: string | null;
+        // The id of the project the backend has open, or null.
+        open_id: string | null;
+        // Names a last-opened project no longer in the workspace while nothing is open.
+        last_opened_problem: string | null;
         projects: ProjectSummary[];
-        pending_removal: PendingRemovalEntry[];
-        pending_rename: PendingRenameEntry[];
-        removal_startup_outcomes: RemovalOutcome[];
-        rename_startup_outcomes: RenameOutcome[];
       }>(ROUTES.getProjects),
-    setActive: (name: string) =>
-      call<{ name: string; path: string }>(ROUTES.postProjectsActive, {
+    open: (id: string) =>
+      call<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ id }),
       }),
-    removalPreview: (name: string) =>
-      call<RemovalPreview>(ROUTES.getProjectsByNameRemovalPreview(name)),
-    remove: (body: { name: string; confirm_name: string; user: string }) =>
-      call<RemovalResponse>(ROUTES.postProjectsRemove, {
+    remove: (body: RemovalRequest) =>
+      call<{ archive_path: string; moved_to: string }>(ROUTES.postProjectsRemove, {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    releaseBinding: (name: string, user: string) =>
-      call<ReleaseResponse>(ROUTES.postProjectsByNameReleaseBinding(name), {
-        method: "POST",
-        body: JSON.stringify({ user }),
-      }),
-    renamePreview: (name: string) =>
-      call<RenamePreview>(ROUTES.getProjectsByNameRenamePreview(name)),
-    rename: (body: { name: string; new_name: string; confirm_name: string; user: string }) =>
-      call<RenameResponse>(ROUTES.postProjectsRename, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    withdrawRename: (name: string, user: string) =>
-      call<{ withdrawn: boolean; name: string; new_name: string }>(
-        ROUTES.postProjectsRenameWithdraw,
+    rename: (body: RenameRequest) =>
+      call<{ id: string; display_name: string; previous_display_name: string }>(
+        ROUTES.postProjectsRename,
         {
           method: "POST",
-          body: JSON.stringify({ name, user }),
+          body: JSON.stringify(body),
         },
       ),
   },
@@ -273,7 +182,6 @@ export const api = {
       }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
     select: (body: {
-      project_root: string;
       dataset_root: string;
       subject?: string | null;
       date?: string | null;
@@ -282,8 +190,6 @@ export const api = {
       call<{
         status: string;
         selection: DatasetSelection;
-        // The canvas_open_binding generation this select recorded; adopt alongside `selection`.
-        generation: number;
         // Advisory: whether the resolved (subject,date) has labels / (model,date) has
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
@@ -312,7 +218,7 @@ export const api = {
 
   canvas: {
     // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs.
-    // Not routed through call(): a 409 (the GUI's open project moved) resolves by resync.
+    // Not routed through call(): a 409 (another project open) resolves by resync.
     pushState: async (
       body: CanvasStateBody,
     ): Promise<{ status: string; shapes_written: boolean } | { status: "conflict" }> => {
@@ -322,7 +228,6 @@ export const api = {
         body: JSON.stringify(body),
       });
       if (resp.status === 409) {
-        // Never adopt the generation a 409 carries; resync re-delivers it instead.
         stateSocket.resync();
         return { status: "conflict" };
       }

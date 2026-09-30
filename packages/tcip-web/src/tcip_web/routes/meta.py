@@ -7,27 +7,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from tcip_web.paths import assert_project_root_allowed
+from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
-def _guard(project_root: str) -> str:
-    """Confine a client-supplied project_root and hand back the resolved spelling the reads use."""
-    try:
-        return str(assert_project_root_allowed(project_root))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-
 @router.get("/reports")
-def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
-    """Return recent friction reports, newest stated timestamp first."""
-    root = _guard(project_root)
+def get_reports(limit: int = 50) -> dict[str, Any]:
+    """Return the open project's recent friction reports, newest stated timestamp first."""
+    root = str(store.open_root())
 
     from tcip_mcp.tools.meta_tools import report_document_name, report_documents
 
@@ -47,9 +39,9 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
 
 
 @router.get("/retrospectives")
-def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
-    """Return recent retrospectives (markdown), latest stated section first."""
-    root = _guard(project_root)
+def get_retrospectives(limit: int = 20) -> dict[str, Any]:
+    """Return the open project's recent retrospectives (markdown), latest stated section first."""
+    root = str(store.open_root())
 
     from tcip_mcp.tools.meta_tools import retrospective_documents
 

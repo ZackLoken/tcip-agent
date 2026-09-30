@@ -16,7 +16,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.dataset_layout import bucket_dataset_root, label_filename
 from tcip_mcp.pipelines.data.selection import ClassScope
@@ -27,9 +27,11 @@ from tcip_mcp.pipelines.postprocessing.export import (
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
-    DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE, DeliveryRefused, applied_operating_point,
+    DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE, EVIDENCE_PATHS, DeliveryRefused,
+    applied_operating_point,
 )
-from tcip_mcp.project_paths import project_state_dir, resolve_output_path
+from tcip_mcp.project_paths import project_state_dir
+from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -78,8 +80,8 @@ register_store(
 )
 
 
-def calibration_curve_key(record_digest: str) -> Key:
-    """The full calibration curve one calibration produced.
+def calibration_curve_key(project: Path, record_digest: str) -> Key:
+    """The full calibration curve one calibration of ``project`` produced.
 
     ``record_digest`` is :func:`calibration_curve_identity` over the record's own bytes, not a
     digest of the run's inputs alone. ``last_writer_wins``: only a byte-identical rerun replaces
@@ -90,9 +92,7 @@ def calibration_curve_key(record_digest: str) -> Key:
             f"curve identity {record_digest!r} is not a single name: an identity carrying a path "
             "separator would address a record outside the artifact store"
         )
-    from tcip_mcp.project_paths import platform_state_root
-
-    return Key(CONFIDENCE_SWEEP_STORE, str(platform_state_root().resolve()), (record_digest,))
+    return Key(CONFIDENCE_SWEEP_STORE, str(project.resolve()), (record_digest,))
 
 
 def calibration_curve_identity(body: dict) -> str:
@@ -104,22 +104,28 @@ def calibration_curve_identity(body: dict) -> str:
     return _sha256_of_bytes(RECORD_JSON.encode(body))
 
 
-def keep_calibration_curve(body: dict) -> str:
-    """Keep one calibration's curve under its own identity and return that identity.
+_CURVE_PATHS: PathFields = within(("calibration_evidence",), EVIDENCE_PATHS)
 
-    The key is the body's own digest and the write is create-only, so a record already under it
-    is these same bytes: the write conflicts, writes nothing and leaves no line, and of two
-    concurrent first writes one lands. A write leaves its one ``calibration_curve_written`` line,
-    whatever the calling door does next. Raises what the identity or the store raises.
+
+def keep_calibration_curve(project: Path, body: dict) -> str:
+    """Keep one calibration's curve under its own identity in ``project``, its paths stored
+    against ``project``, and return that identity.
+
+    The key is the stored body's own digest and the write is create-only, so a record already
+    under it is these same bytes: the write conflicts, writes nothing and leaves no line, and of
+    two concurrent first writes one lands. A write leaves its one ``calibration_curve_written``
+    line, whatever the calling door does next. Raises what the identity or the store raises.
     """
     from tcip_mcp.audit import record_event_or_raise
 
+    body = recorded_paths(body, _CURVE_PATHS, project)
     identity = calibration_curve_identity(body)
     try:
-        store.replace(calibration_curve_key(identity), body, expect=Version.ABSENT)
+        store.replace(calibration_curve_key(project, identity), body, expect=Version.ABSENT)
     except VersionConflict:
         return identity
-    record_event_or_raise("calibration_curve_written", {"calibration_evidence_key": identity})
+    record_event_or_raise("calibration_curve_written", {"calibration_evidence_key": identity},
+                          scope=project)
     return identity
 
 
@@ -145,8 +151,9 @@ through, plus one ``batch-<index>`` record per tile batch already predicted, und
 _RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
 
 
-@mcp.tool()
+@tool()
 def run_inference(
+    project: Path,
     checkpoint_path: str,
     images_dir: str | None = None,
     raster_path: str | None = None,
@@ -234,15 +241,15 @@ def run_inference(
     files as they actually landed.
 
     Args:
-        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
-            platform state root (``register_model``, explicit mode for a foreign or bespoke
-            checkpoint) or this door refuses before loading it.
+        checkpoint_path: Path to model .pt checkpoint. Must be registered in this project's
+            registry (``register_model``, explicit mode for a foreign or bespoke checkpoint) or
+            this door refuses before loading it.
         images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
         raster_path: A single raster, georeferenced or not, potentially too large to decode whole
             (mutually exclusive with ``images_dir``).
         output_dir: Directory for output .json prediction file(s). Required, including for
             ``dry_run``, which names the bucket the write would resolve to without writing it. A
-            relative path resolves against the platform state root, never the server process's cwd.
+            relative path is under the project.
         conf_threshold: Minimum confidence score. ``None`` (default) runs at the platform default,
             stamped ``"default"``; a stated value is stamped as an explicit override, including
             when it equals the platform default.
@@ -360,14 +367,14 @@ def run_inference(
     # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
     # still refuse before the file is touched at all.
     out, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
-        output_dir, overwrite=overwrite)
+        project, output_dir, overwrite=overwrite)
     if refusal is not None:
         return refusal
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
     try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
+        checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
 
@@ -378,7 +385,7 @@ def run_inference(
 
         block_calibration_experiment_id = resolve_model_identity(checkpoint)["experiment_id"]
         if block_calibration_experiment_id is None or not reserved_calibration_region_available(
-            block_calibration_experiment_id
+            block_calibration_experiment_id, project=project
         ):
             return {"error": (
                 "trait calibration for a raster_path export requires the checkpoint's own "
@@ -391,7 +398,8 @@ def run_inference(
 
     if raster_path is not None:
         return _export_predictions_raster(
-            checkpoint=checkpoint, raster_path=raster_path, out=out, resolution=resolution,
+            project, checkpoint=checkpoint, raster_path=raster_path, out=out,
+            resolution=resolution,
             output_dir=output_dir, dataset_root=bucket_root, device=device,
             conf_threshold=conf_threshold, tile_size=tile_size, overlap=overlap,
             tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
@@ -401,7 +409,7 @@ def run_inference(
         )
 
     result = _run_inference_verified(
-        checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
+        project, checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
         device=device, tile=tile, tile_size=tile_size, overlap=overlap,
         tile_batch_size=tile_batch_size, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
@@ -414,7 +422,7 @@ def run_inference(
         return result
 
     pub = publish_bucket(
-        result, out=out, trait=trait, dataset_root=bucket_root,
+        project, result, out=out, trait=trait, dataset_root=bucket_root,
         allow_unvalidated_staging=allow_unvalidated_staging, dry_run=dry_run)
     if pub["refusal"] is not None:
         return pub["refusal"]
@@ -433,6 +441,7 @@ def run_inference(
 
 
 def _run_inference_verified(
+    project: Path,
     checkpoint,
     *,
     images_dir: str | None,
@@ -454,8 +463,9 @@ def _run_inference_verified(
     split_holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     selection_dir: str | None = None,
 ) -> dict:
-    """A per-image pass over ``images_dir`` from a loaded checkpoint, calibrated when ``trait``
-    and ``calibration_labels_dir`` are given: the run's own facts (:meth:`_PreparedPass.result`)
+    """A per-image pass over ``images_dir`` from a loaded checkpoint, calibrated for ``project``'s
+    ``trait`` when ``calibration_labels_dir`` is given: the run's own facts
+    (:meth:`_PreparedPass.result`)
     with ``results`` a stream that predicts each image as it is consumed, or ``{"error": ...}``.
     """
     from tcip_mcp.pipelines.operating_point import apply_operating_point
@@ -480,7 +490,7 @@ def _run_inference_verified(
         cal_images = calibration_images_dir or images_dir
         try:
             bundle, cal_hash, n_excluded_incomplete_attribute, evidence = calibrate_operating_point(
-                p, trait, calibration_labels_dir, cal_images,
+                p, trait, calibration_labels_dir, cal_images, project=project,
                 group_by=group_by, group_key_map=group_key_map,
                 experiment_id=p.identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
@@ -564,7 +574,7 @@ def _run_inference_verified(
         }
         # The evidence rides in the curve artifact, read back by identity, never on this response.
         try:
-            curve_identity_hex = keep_calibration_curve(curve_body)
+            curve_identity_hex = keep_calibration_curve(project, curve_body)
         except (TypeError, ValueError) as exc:
             return {"error": f"the operating-point curve for trait {trait!r} could not be kept "
                              f"(its body cannot be recorded): {exc}"}
@@ -729,8 +739,8 @@ _NO_DATASET_ROOT_NOTE = (
     "{bucket} sits under no dataset root, so two guarantees a bucket normally carries are absent "
     "here. The review-verdict immutability guard is inoperative: nothing checks whether a human "
     "has already recorded verdicts against predictions at this path before this run replaced them. "
-    "And a count claim earned for these predictions has no dataset-relative key to be recorded "
-    "under, so this bucket is stamped unvalidated whatever its operating point cleared. The "
+    "And a count claim earned for these predictions has no dataset to be recorded against, so "
+    "this bucket is stamped unvalidated whatever its operating point cleared. The "
     "prediction-document refusal is unaffected by either absence: a bucket here that already holds "
     "a document from a prior run still refuses a second publish the same way one under a dataset "
     "root does. Write into a dataset's own predictions layout "
@@ -740,8 +750,9 @@ _NO_DATASET_ROOT_NOTE = (
 against a verdict store that holds nothing about it or letting it claim a count nothing can verify."""
 
 
-def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
-    """The bucket a run may write for ``output_dir``, its resolution, and its dataset root.
+def _resolve_writable_bucket_for(project: Path, output_dir: str, *, overwrite: bool):
+    """The bucket a run may write for ``output_dir`` (a relative path under ``project``), its
+    resolution, and its dataset root.
 
     Returns ``(out, resolution, dataset_root, refusal)``. ``refusal`` is the door's own error dict
     (``error``, the ``suggested_bucket`` path and its ``suggested_name``, and a ``verdict_count``
@@ -760,7 +771,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
         resolve_writable_bucket,
     )
 
-    out_path = resolve_output_path(output_dir)
+    out_path = Path(project, output_dir)
     parent, base_name = out_path.parent, out_path.name
 
     canonical = canonical_prediction_bucket(out_path)
@@ -800,9 +811,9 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     return out, resolution, dataset_root, None
 
 
-def _calibration_evidence(result: dict) -> dict | None:
+def _calibration_evidence(project: Path, result: dict) -> dict | None:
     """The evidence this run's calibration gate ran over, read back from the artifact it was kept
-    in, or ``None`` for a run that resolved no calibrated operating point.
+    in under ``project``, or ``None`` for a run that resolved no calibrated operating point.
 
     The record read back is re-encoded and its digest compared against ``identity`` (the run's own
     carried key, see :func:`calibration_curve_identity`); a difference raises ``ValueError`` naming
@@ -811,7 +822,7 @@ def _calibration_evidence(result: dict) -> dict | None:
     identity = result.get("calibration_evidence_key")
     if not identity:
         return None
-    body = store.read(calibration_curve_key(identity), default=None)
+    body = store.read(calibration_curve_key(project, identity), default=None)
     if body is None:
         return None
     recomputed = calibration_curve_identity(body)
@@ -821,13 +832,14 @@ def _calibration_evidence(result: dict) -> dict | None:
             f"run's own response carried (recomputed {recomputed!r}): the evidence the count "
             "gate would run over is not what this run wrote."
         )
-    return body.get("calibration_evidence")
+    return runtime_paths(body, _CURVE_PATHS, project).get("calibration_evidence")
 
 
-def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
+def _draft_count_claim(project: Path, result: dict, *, trait: str | None, bucket: Path,
                        dataset_root: Path | None, tile_size_validated: str | None,
                        evidence: dict | None):
-    """The passed gate a validated count is stamped from, for a run that earned one.
+    """The passed gate a validated count is stamped from, for a run of ``project`` that earned
+    one.
 
     ``evidence`` is the reference evidence the claim opens from, or ``None`` to read the run's own
     kept calibration evidence (:func:`_calibration_evidence`). Returns ``(draft, refusal)``.
@@ -841,7 +853,7 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     if not result["validated"] or tile_size_validated == VALIDATED_FALSE:
         return None, None
     try:
-        evidence = evidence or _calibration_evidence(result)
+        evidence = evidence or _calibration_evidence(project, result)
     except ValueError as exc:
         return None, {"error": str(exc)}
     if evidence is None:
@@ -860,7 +872,7 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     assert trait is not None
     try:
         draft = open_validation(
-            document="operating_point",
+            project=project, document="operating_point",
             evidence={"resolver": evidence["resolver"], "inputs": evidence["inputs"]},
             trait=trait, checkpoint_sha256=result["checkpoint_sha256"],
             producing_experiment_id=result["experiment_id"],
@@ -870,8 +882,8 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     return draft, None
 
 
-def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dict, draft, *,
-                         producer: str, dataset_root: Path | None
+def _publish_predictions(project: Path, out: Path, predictions: Iterable[dict], stamp_body: dict,
+                         draft, *, producer: str, dataset_root: Path | None
                          ) -> tuple[list[str], int, dict]:
     """Write one prediction document per result as ``predictions`` yields it, then append the
     record the gate earned over the documents as they landed, write the stamp last (its
@@ -888,7 +900,8 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
     line. A lost audit line (``AuditEntryNotWritten``) propagates as it is. A completed pass leaves
     the stamp's own ``stamp_written`` line, which names every document, and one
     ``prediction_bucket_published`` line. ``dataset_root`` is the bucket's
-    (``bucket_dataset_root``), the root both lines are recorded under.
+    (``bucket_dataset_root``), the root both lines are recorded under, or ``project`` when it is
+    ``None``.
 
     Returns ``(written, dropped_nonpositive_boxes, stamp_body)``.
     """
@@ -916,7 +929,7 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
         if draft is not None:
             stamp_body = seal_validation(
                 draft, dataset_root=draft.dataset_root, bucket_dirs=[out], stamp_body=stamp_body)
-        write_sidecar(out, stamp_body)
+        write_sidecar(out, stamp_body, project=project)
     except AuditEntryNotWritten:
         raise
     except Exception as exc:
@@ -924,18 +937,21 @@ def _publish_predictions(out: Path, predictions: Iterable[dict], stamp_body: dic
             record_event_or_raise(
                 "prediction_bucket_published",
                 {"predictions_dir": str(out), "written": written, "error": str(exc)},
-                status="failed", scope=dataset_root)
+                status="failed", scope=dataset_root or project)
         raise
     record_event_or_raise(
-        "prediction_bucket_published", {"predictions_dir": str(out)}, scope=dataset_root)
+        "prediction_bucket_published", {"predictions_dir": str(out)},
+        scope=dataset_root or project)
     return written, dropped, stamp_body
 
 
-def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: Path | None,
-                   allow_unvalidated_staging: bool, claim_evidence: dict | None = None,
-                   stamp_extras: dict | None = None, dry_run: bool = False) -> dict:
-    """Publish a run's predictions into ``out``: the tile gate and the count claim's own gate,
-    then the writes, the stamp and the publication's line (:func:`_publish_predictions`).
+def publish_bucket(project: Path, result: dict, *, out: Path, trait: str | None,
+                   dataset_root: Path | None, allow_unvalidated_staging: bool,
+                   claim_evidence: dict | None = None, stamp_extras: dict | None = None,
+                   dry_run: bool = False) -> dict:
+    """Publish a run's predictions into ``out`` for ``project``: the tile gate and the count
+    claim's own gate, then the writes, the stamp and the publication's line
+    (:func:`_publish_predictions`).
 
     ``result`` is the run's own facts (:meth:`_PreparedPass.result`) with ``results`` a list or a
     stream that predicts as it is consumed; every gate runs before the first result is drawn.
@@ -961,10 +977,15 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
 
     # The count claim's own gate, run before a single file is written.
     draft, refusal = _draft_count_claim(
-        result, trait=trait, bucket=out, dataset_root=dataset_root,
+        project, result, trait=trait, bucket=out, dataset_root=dataset_root,
         tile_size_validated=tile_size_validated, evidence=claim_evidence)
     if refusal is not None:
         return {"refusal": refusal}
+
+    from tcip_mcp.registry_paths import stored_path
+
+    def _stored(value: str | None) -> str | None:
+        return None if value is None else stored_path(value, project)
 
     sha = result["checkpoint_sha256"]
     op_stamp = operating_point_stamp(
@@ -973,13 +994,13 @@ def publish_bucket(result: dict, *, out: Path, trait: str | None, dataset_root: 
         tile_size_validated=tile_size_validated, shippable_issues=result["shippable_issues"],
         scope=result["scope"], trait=trait, dataset_hash=result["dataset_hash"],
         checkpoint=Path(result["checkpoint"]).stem, checkpoint_sha256=sha,
-        experiment_id=result["experiment_id"], images_dir=result["images_dir"],
-        raster_path=result["raster_path"], produced_at=result["produced_at"],
+        experiment_id=result["experiment_id"], images_dir=_stored(result["images_dir"]),
+        raster_path=_stored(result["raster_path"]), produced_at=result["produced_at"],
         gate_evidence_summary=result["gate_evidence_summary"], **(stamp_extras or {}))
     if dry_run:
         return {"refusal": None, "op_stamp": op_stamp}
     written, dropped_boxes, op_stamp = _publish_predictions(
-        out, result["results"], op_stamp, draft,
+        project, out, result["results"], op_stamp, draft,
         producer=prediction_producer(result["checkpoint"], sha), dataset_root=dataset_root)
     return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
             "op_stamp": op_stamp}
@@ -1167,17 +1188,18 @@ def _newest_cleared_for_source(dataset_root: Path, model: str, date: str | None)
     return None if best is None else best[1]
 
 
-@mcp.tool()
-@audited(scope_arg="predictions_dir", scope_via=resolve_output_path)
+@tool()
+@audited(scope_arg="predictions_dir")
 def clear_prediction_bucket(
-    predictions_dir: str, reason: str, cleared_bucket: str | None = None,
+    project: Path, predictions_dir: str, reason: str, cleared_bucket: str | None = None,
 ) -> dict:
     """Move a published prediction bucket into a dated archive under ``predictions/.cleared/``,
     so the path re-publishes.
 
     ``reason`` is required and non-empty, recorded as this door's own statement (never a ``user:``
-    name minted from the string). The bucket cleared is ``resolve_output_path(predictions_dir)``,
-    and it must be a canonical bucket under a dataset root (``predictions/<model>[/<date>]``).
+    name minted from the string). The bucket cleared is ``predictions_dir``, a relative path under
+    the project, and it must be a canonical bucket under a dataset root
+    (``predictions/<model>[/<date>]``).
 
     Refuses, before any write, each with its own sentence: an empty reason; a bucket already under
     the cleared archive; a bespoke bucket; a bucket carrying no ``operating_point.json`` stamp (and
@@ -1226,7 +1248,7 @@ def clear_prediction_bucket(
         return {"error": "clear_prediction_bucket needs a non-empty reason: the confirmation "
                          "with the person this destructive act requires."}
 
-    source = resolve_output_path(predictions_dir)
+    source = Path(project, predictions_dir)
 
     if is_cleared_bucket(source):
         return {"error": f"{source} is already under the cleared archive; a bucket clears once."}
@@ -1260,7 +1282,7 @@ def clear_prediction_bucket(
 
     if resuming:
         assert cleared_bucket is not None  # resuming is exactly cleared_bucket is not None
-        destination = resolve_output_path(cleared_bucket)
+        destination = Path(project, cleared_bucket)
         resolved = cleared_bucket_of(destination)
         if resolved is None or not _is_cleared_destination_of(
                 str(destination), dataset_root, model, date):
@@ -1409,6 +1431,10 @@ def clear_prediction_bucket(
 # --- resuming an interrupted tiled raster pass (the raster regime only) ---
 
 
+_SNAPSHOT_PATHS: PathFields = within(("block_evidence",), EVIDENCE_PATHS)
+"""The fields of a raster pass's block-calibration snapshot that name a path."""
+
+
 def _raster_pass_key(bucket: Path, segment: str) -> Key:
     """One raster pass' progress record under ``bucket``: the identity (``segment="identity"``)
     or one flushed tile batch (``segment=f"batch-{index:06d}"``)."""
@@ -1499,7 +1525,7 @@ them as the interrupted attempt earned them rather than calibrating again."""
 
 
 def _export_predictions_raster(
-    *, checkpoint, raster_path: str, out: Path, resolution, output_dir: str,
+    project: Path, *, checkpoint, raster_path: str, out: Path, resolution, output_dir: str,
     dataset_root: Path | None, device: str | None, conf_threshold: float | None,
     tile_size: int | None, overlap: float | None, tile_batch_size: int,
     cross_tile_nms: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
@@ -1507,7 +1533,7 @@ def _export_predictions_raster(
     resume: bool = False, overwrite: bool = False, dry_run: bool = False,
 ) -> dict:
     """One always-tiled pass over a raster read window by window
-    (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), published through
+    (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), published for ``project`` through
     :func:`publish_bucket` as one ``<raster stem>.json`` document in full-raster pixel space.
 
     ``out``/``resolution`` are the bucket already resolved for ``output_dir`` and ``dataset_root``
@@ -1604,7 +1630,8 @@ def _export_predictions_raster(
     if trait is None:
         result = p.raw_result()
     elif resume:
-        snapshot = store.read(_raster_pass_key(out, "block-calibration"))
+        snapshot = runtime_paths(store.read(_raster_pass_key(out, "block-calibration")),
+                                 _SNAPSHOT_PATHS, project)
         recorded_op = snapshot["provenance"]["operating_point"]
         p.conf = recorded_op["conf"]["value"]
         p.cross_tile_nms = ResolvedParam.from_provenance(recorded_op["cross_tile_nms"])
@@ -1623,7 +1650,7 @@ def _export_predictions_raster(
 
         try:
             block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
-                p, trait_name=trait, experiment_id=identity["experiment_id"])
+                p, project=project, trait_name=trait, experiment_id=identity["experiment_id"])
         except ValueError as exc:  # a named block refusal, or the run's scope refused
             return {"error": str(exc)}
 
@@ -1717,7 +1744,8 @@ def _export_predictions_raster(
         else:
             store.replace(identity_key, current_pass_identity, expect=Version.ABSENT)
             if snapshot is not None:
-                store.replace(_raster_pass_key(out, "block-calibration"), snapshot,
+                store.replace(_raster_pass_key(out, "block-calibration"),
+                              recorded_paths(snapshot, _SNAPSHOT_PATHS, project),
                               expect=Version.ABSENT)
         assert p.slicing is not None
         # The model's own in_chans is the channel routing hint; the reader's real band count is
@@ -1735,7 +1763,7 @@ def _export_predictions_raster(
 
     result["results"] = raster_pass()
     pub = publish_bucket(
-        result, out=out, trait=trait, dataset_root=dataset_root,
+        project, result, out=out, trait=trait, dataset_root=dataset_root,
         allow_unvalidated_staging=allow_unvalidated_staging, claim_evidence=claim_evidence,
         stamp_extras=stamp_extras, dry_run=dry_run)
     if pub["refusal"] is not None:
@@ -1759,8 +1787,9 @@ def _export_predictions_raster(
     return response
 
 
-@mcp.tool()
+@tool()
 def deliver_per_image_counts(
+    project: Path,
     checkpoint_path: str | None = None,
     images_dir: str | None = None,
     output_path: str = "",
@@ -1838,13 +1867,13 @@ def deliver_per_image_counts(
 
     Args:
         checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
-            absent for the bucket regime). Must be registered under this process's platform state
-            root (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this
-            door refuses before loading it.
+            absent for the bucket regime). Must be registered in this project's registry
+            (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this door
+            refuses before loading it.
         images_dir: Directory containing input images (live regime; required with
             ``checkpoint_path``, absent for the bucket regime).
-        output_path: Path for the output CSV file. Required; a relative path resolves against the
-            platform state root, never the server process's cwd.
+        output_path: Path for the output CSV file. Required; a relative path is under the
+            project.
         trait: The registered trait whose confirmed per-image-count operationalization this
             delivery rests on. Required, in both regimes.
         conf_threshold: Live regime only. Minimum confidence score. ``None`` (default) runs at the
@@ -1876,7 +1905,6 @@ def deliver_per_image_counts(
     """
     from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused
-    from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import PER_IMAGE_COUNT, TraitUnknownError
 
     live = checkpoint_path is not None or images_dir is not None
@@ -1914,9 +1942,9 @@ def deliver_per_image_counts(
             )}
     if not output_path:
         return {"error": "output_path is required"}
-    output_path = str(resolve_output_path(output_path))
+    output_path = str(Path(project, output_path))
     try:
-        revision = confirmed_revision(PER_IMAGE_COUNT, project_root=None, trait=trait)
+        revision = confirmed_revision(PER_IMAGE_COUNT, project=project, trait=trait)
     except (OperationalizationRefused, TraitUnknownError) as exc:
         return {"error": str(exc)}
 
@@ -1924,8 +1952,7 @@ def deliver_per_image_counts(
         assert predictions_dir is not None  # the regime check above already requires it
         try:
             return per_image_counts_from_bucket(
-                predictions_dir, output_path, revision=revision, project_root=None,
-                acknowledgment=None)
+                project, predictions_dir, output_path, revision=revision, acknowledgment=None)
         except OperationalizationRefused as exc:
             return {"error": str(exc)}
         except DeliveryRefused as exc:
@@ -1947,19 +1974,19 @@ def deliver_per_image_counts(
     resolution = None
     if predictions_dir is not None:
         bucket, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
-            predictions_dir, overwrite=False)
+            project, predictions_dir, overwrite=False)
         if refusal is not None:
             return refusal
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
     try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
+        checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
 
     result = _run_inference_verified(
-        checkpoint,
+        project, checkpoint,
         images_dir=images_dir,
         conf_threshold=conf_threshold,
         device=device,
@@ -2002,7 +2029,7 @@ def deliver_per_image_counts(
     else:
         assert resolution is not None  # bucket and resolution are set together, above
         pub = publish_bucket(
-            result, out=bucket, trait=trait, dataset_root=bucket_root,
+            project, result, out=bucket, trait=trait, dataset_root=bucket_root,
             allow_unvalidated_staging=allow_unvalidated_staging)
         if pub["refusal"] is not None:
             return pub["refusal"]
@@ -2023,7 +2050,7 @@ def deliver_per_image_counts(
         csv_path, tail, summary = export_detection_csv(
             csv_rows, output_path, provenance=provenance, revision=revision,
             operating_point_validated=op_ref,
-            pred_dirs=[str(bucket)] if bucket is not None else None,
+            pred_dirs=[str(bucket)] if bucket is not None else None, project=project,
         )
     except StoreError as exc:
         return {"error": str(exc)}
@@ -2128,14 +2155,13 @@ def _bucket_csv_rows(bucket_path: Path, stamp: dict) -> list[dict]:
 
 
 def per_image_counts_from_bucket(
-    predictions_dir: str, output_path: str, *, revision: TraitRevision,
-    project_root: str | Path | None = None,
+    project: Path, predictions_dir: str, output_path: str, *, revision: TraitRevision,
     acknowledgment: Acknowledgment | None = None,
 ) -> dict:
     """Count the detections in each document of the existing prediction bucket
-    ``predictions_dir`` and write them as the per-image count CSV at ``output_path`` through
-    ``export_detection_csv`` under the confirmed trait ``revision``, leaving the bucket untouched;
-    returns the export's tail and counts.
+    ``predictions_dir`` (a relative path under ``project``) and write them as the per-image count
+    CSV at ``output_path`` through ``export_detection_csv`` under the confirmed trait ``revision``,
+    leaving the bucket untouched; returns the export's tail and counts.
 
     The stamp's ``images_dir`` and ``raster_path`` are checked before any document is counted;
     its ``operating_point``, ``checkpoint_sha256`` and ``experiment_id`` are read after counting,
@@ -2154,7 +2180,7 @@ def per_image_counts_from_bucket(
     )
     from tcip_store import StoreError
 
-    bucket_path = resolve_output_path(predictions_dir)
+    bucket_path = Path(project, predictions_dir)
     sidecar = read_operating_point_sidecar(bucket_path)
     if sidecar is None:
         raise CountDeliveryRefused(
@@ -2191,7 +2217,7 @@ def per_image_counts_from_bucket(
         csv_path, tail, summary = export_detection_csv(
             image_results, output_path, provenance=provenance, revision=revision,
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
-            acknowledgment=acknowledgment, project_root=project_root,
+            acknowledgment=acknowledgment, project=project,
         )
     except StoreError as exc:
         raise CountDeliveryRefused(str(exc)) from exc

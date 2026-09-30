@@ -1,132 +1,62 @@
-"""SessionStart ritual hook: inject the session-start ritual directive naming the active project.
+"""SessionStart ritual hook: inject the session-start ritual directive naming the session's project.
 
-Reads the active-project marker through the platform's own storage seam (``tcip_mcp.workspace``,
-``tcip_store.binding``) with a short lock timeout, and injects an ``additionalContext`` directive
-telling the agent to run the ritual (``load_project_memory``/``inspect_project``/``tcip doctor``)
-as its first actions. It spawns no subprocess and counts no reports or retrospectives.
+The agent terminal launches this hook with ``--project <path>``, the project its MCP server was
+started for, and it injects an ``additionalContext`` directive telling the agent to run the ritual
+(``load_project_memory``/``inspect_project``/``tcip doctor``) as its first actions. Without
+``--project`` the directive says the session has no project. It reads the project's record
+through the platform's own storage seam with a short lock timeout, spawns no subprocess and counts
+no reports or retrospectives.
 
 Best-effort: every path swallows its error and exits 0.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
-import os
 import sys
-from pathlib import Path
 
 _LOCK_TIMEOUT_S = 2.0
 """Bounds how long a locked store can hold this hook, well under the store's own 30s default."""
 
+_HEADER = "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
+_FRICTION = ("If any mandated action is blocked or errors, that itself is a report_friction, never "
+             "a silent skip.")
 
-def _resolve_active() -> tuple[str, str]:
-    """What the workspace's active-project marker says, as ``(outcome, detail)``.
 
-    ``outcome`` is one of:
-      - ``"active"``: the marker names a project whose ``.tcip`` exists; ``detail`` is its root.
-      - ``"none"``: no marker is set; ``detail`` is empty.
-      - ``"unreadable"``: the marker could not be read (a store refusal, e.g. a workspace still
-        holding loose files under the database backend) or names a project that is not adoptable;
-        ``detail`` is ``workspace.marker_problem``'s own text.
-      - ``"import_error"``: the platform packages could not be imported from this interpreter;
-        ``detail`` is the error.
-
-    Binds the environment's own backend with a short lock timeout, and reads the marker with
-    ``create=False`` so the read cannot create the workspace root itself. It can still touch disk
-    under an existing ``<workspace>/.tcip/``: opening a database not yet in WAL mode creates that
-    directory (if absent) and a lock file there, and the short timeout bounds only that transition
-    lock, not SQLite's own busy wait on a database another writer holds.
-    """
+def _project_context(project: str) -> str:
+    """The directive for a session started for ``project``: its display name when its record
+    reads, else the reason it does not."""
     try:
-        from tcip_mcp import workspace
         from tcip_store.binding import bind_default
-    except ImportError as exc:
-        return "import_error", str(exc)
-    try:
+
+        from tcip_mcp.project_record import record_fields
+
         bind_default(lock_timeout_s=_LOCK_TIMEOUT_S)
-        found = workspace.active_project_if_present(create=False)
-    except Exception as exc:  # noqa: BLE001, a store refusal or lock timeout is reported, not raised
-        return "unreadable", str(exc)
-    if found is not None:
-        _, path = found
-        return "active", str(path)
-    try:
-        problem = workspace.marker_problem(create=False)
-    except Exception as exc:  # noqa: BLE001, same as above
-        return "unreadable", str(exc)
-    if problem is None:
-        return "none", ""
-    return "unreadable", problem
-
-
-def _root_divergence_note(proj: str) -> str:
-    """A note when this session's inherited platform-state root
-    (``tcip_mcp.project_paths.ENV_VAR``) names a different project than the active marker; ``None``
-    when they agree.
-    """
-    from tcip_mcp.project_paths import ENV_VAR
-
-    inherited = os.environ.get(ENV_VAR)
-    if not inherited or str(Path(inherited)) == str(Path(proj)):
-        return ""
+        record = record_fields(project)
+    except Exception as exc:  # noqa: BLE001, a store refusal or import failure is reported, not raised
+        record = {"display_name": None, "record_problem": str(exc)}
+    if record["display_name"] is None:
+        return (f"{_HEADER}This session's project ({project}) has no readable record: "
+                f"{record['record_problem']}\nFile this with report_friction before any project "
+                f"work.\n{_FRICTION}")
     return (
-        f"This session's inherited {ENV_VAR} ({inherited}) names a different project "
-        f"than the active marker ({proj}). The web backend already binds from the marker at "
-        "its own startup; an MCP server launched in this terminal binds from it only at its "
-        "next start, so restart it, or adopt the marker's project explicitly "
-        "(activate_project) now, before running the ritual.\n\n"
-    )
-
-
-def _active_context(proj: str) -> str:
-    name = Path(proj).name or proj
-    return (
-        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
-        f"Active project: {name} ({proj}).\n\n"
-        f"{_root_divergence_note(proj)}"
-        "If this session continues work on that project, run the ritual first: load_project_memory "
-        "(kind='reports' and kind='retrospectives'), inspect_project, then tcip doctor <project_root>.\n"
-        "If the user's task is to create or switch to a different project, do that first "
-        "(initialize_project(<path>, site=<site>) then activate_project), then run the ritual on the "
-        "project you end up in, do not run it on a stale active project.\n"
-        "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
+        f"{_HEADER}Project: {record['display_name']} ({project}).\n"
+        "Run the ritual first: load_project_memory (kind='reports' and kind='retrospectives'), "
+        f"inspect_project, then tcip doctor {project}.\n{_FRICTION}"
     )
 
 
 def _no_project_context() -> str:
     return (
-        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
-        "No active project yet (.active marker absent). Resolve by the user's intent:\n"
-        "  • New project  → initialize_project(<path>, site=<site>) then activate_project(<name>) to "
-        "make it active (activate_project sets the marker the GUI + ritual read).\n"
-        "  • Resume existing work → activate_project(<name>) (or open it in the GUI).\n"
-        "Once a project is active, run the ritual: load_project_memory (kind='reports' and "
-        "kind='retrospectives') + inspect_project, then tcip doctor <project_root>.\n"
-        "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
+        f"{_HEADER}This session has no project: the GUI had none open when the terminal started, "
+        "so every tool that acts on a project refuses. Create one with initialize_project, or open "
+        "one in the GUI, then restart the terminal to work on it.\n"
+        f"{_FRICTION}"
     )
 
 
-def _unreadable_context(detail: str) -> str:
-    return (
-        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
-        f"The active-project marker could not be adopted: {detail}\n"
-        "This is a mandated action that failed, so file it with report_friction once an MCP client "
-        "is available, rather than treating it as no active project. If the detail names a "
-        "workspace holding loose files with no database, conform it with "
-        "tcip adopt-store before trusting the marker again."
-    )
-
-
-def _import_error_context(detail: str) -> str:
-    return (
-        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
-        f"The active-project marker could not be read from this interpreter: {detail}\n"
-        "This session cannot see whether a project is active; do not assume there is none. "
-        "File this with report_friction once an MCP client is available."
-    )
-
-
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except Exception:
@@ -134,15 +64,10 @@ def main() -> None:
     try:
         if payload.get("source") == "compact":
             return  # mid-session compaction; re-running the ritual is noise
-        outcome, detail = _resolve_active()
-        if outcome == "active":
-            ctx = _active_context(detail)
-        elif outcome == "unreadable":
-            ctx = _unreadable_context(detail)
-        elif outcome == "import_error":
-            ctx = _import_error_context(detail)
-        else:
-            ctx = _no_project_context()
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--project", default=None)
+        project = parser.parse_args(argv).project
+        ctx = _no_project_context() if project is None else _project_context(project)
         print(json.dumps({
             "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}
         }))

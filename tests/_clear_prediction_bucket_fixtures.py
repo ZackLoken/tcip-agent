@@ -97,14 +97,15 @@ def build_published_bucket(
     for stem in stems:
         write_image(images_dir / f"{stem}.png")
 
-    if find_run(experiment_id) is None:
-        finished_run(None, experiment_id=experiment_id)
-    checkpoint = observe(experiment_dir(experiment_id)).checkpoint
+    if find_run(experiment_id, project=tmp_path) is None:
+        finished_run(tmp_path, experiment_id=experiment_id)
+    checkpoint = observe(experiment_dir(experiment_id, project=tmp_path)).checkpoint
     assert checkpoint is not None
     ckpt = Path(checkpoint["path"])
 
     bucket = prediction_dir(root, model, date)
-    result = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
+    result = run_inference(tmp_path, str(ckpt), str(images_dir), output_dir=str(bucket),
+                           tile=False)
     assert "error" not in result, result
 
     return {"dataset_root": root, "bucket": bucket, "images_dir": images_dir,
@@ -129,9 +130,9 @@ def record_review_verdict(bucket: Path, review_state_dir: Path, img_name: str) -
     engine.record_detection_action(bucket_key_of(bucket), det, ctx, action="accepted")
 
 
-def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dict:
-    """Replace ``bucket``'s published stamp's ``operating_point`` with one earned through the
-    same two-phase gate a producer runs (``open_validation``, then ``seal_validation``), keeping
+def earn_validated_stamp(project: Path, bucket: Path, dataset_root: Path, *, trait: str) -> dict:
+    """Replace ``bucket``'s published stamp's ``operating_point`` with one earned for ``project``
+    through the same two-phase gate a producer runs (``open_validation``, then ``seal_validation``), keeping
     the run's own ``experiment_id``, ``checkpoint_sha256`` and ``scope`` so the door's other
     checks stay meaningful; returns the stamp as stored after the merge.
     """
@@ -154,7 +155,7 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
     labels_dir.mkdir(parents=True, exist_ok=True)
 
     draft = open_validation(
-        document="operating_point",
+        project=project, document="operating_point",
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "h1", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01,
@@ -182,7 +183,7 @@ def earn_validated_stamp(bucket: Path, dataset_root: Path, *, trait: str) -> dic
         return {**current, "validated": True, "validated_by": stamped["validated_by"],
                 "operating_point": earned_body["operating_point"], "trait": trait}
 
-    assert update_sidecar(bucket, _merge) is True
+    assert update_sidecar(bucket, _merge, project=project) is True
     updated = read_operating_point_sidecar(bucket)
     assert updated is not None
     assert updated.get("validated_by") is not None

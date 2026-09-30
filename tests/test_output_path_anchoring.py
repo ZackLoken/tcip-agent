@@ -1,10 +1,7 @@
-"""Output artifacts anchor to the platform state root.
+"""Output artifacts anchor to the project they are produced for.
 
-Weights, prediction buckets, delivery CSVs and curated datasets are addressed by caller-supplied
-paths; a relative one resolves under the platform state root (the root the adopted project pins),
-never the server process's cwd, and an absolute one stays the caller's own explicit choice.
-The shared resolver is ``project_paths.resolve_output_path``; every output-writing tool delegates
-to it, so the per-tool checks here are representative, not exhaustive.
+A run's weights and logs, and a sweep's trials, land under the project's own ``.tcip`` tree,
+never under the server process's cwd.
 """
 
 from __future__ import annotations
@@ -15,32 +12,17 @@ from pathlib import Path
 import pytest
 
 
-def test_an_absolute_output_path_is_the_callers_own_choice(tmp_path: Path) -> None:
-    from tcip_mcp.project_paths import resolve_output_path
-
-    explicit = tmp_path / "elsewhere" / "out.csv"
-    assert resolve_output_path(explicit) == explicit
-    assert resolve_output_path(str(explicit)) == explicit
-
-
-def test_a_relative_output_path_resolves_under_the_platform_state_root(tmp_path: Path) -> None:
-    from tcip_mcp.project_paths import resolve_output_path
-
-    assert resolve_output_path("exports/counts.csv") == tmp_path / "exports" / "counts.csv"
-    assert resolve_output_path(Path("runs") / "exp1") == tmp_path / "runs" / "exp1"
-
-
-def test_a_sweeps_directory_lies_under_the_platform_state_root(tmp_path: Path) -> None:
+def test_a_sweeps_directory_lies_under_its_project(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import sweep_dir
 
-    assert sweep_dir("hpo_1") == tmp_path / ".tcip" / "hpo" / "hpo_1"
+    assert sweep_dir("hpo_1", project=tmp_path) == tmp_path / ".tcip" / "hpo" / "hpo_1"
 
 
-def test_launch_training_defaults_into_the_platform_state_roots_experiment_store(
+def test_launch_training_defaults_into_the_projects_experiment_store(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A run's weights and logs land in its own directory under the platform state root's
-    experiments directory, never in the launching process's cwd."""
+    """A run's weights and logs land in its own directory under the project's experiments
+    directory, never in the launching process's cwd."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 
@@ -76,7 +58,7 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu",
     }
-    res = training_tools.launch_training(cfg)
+    res = training_tools.launch_training(tmp_path, cfg)
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]
@@ -86,7 +68,7 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
     deadline = time.monotonic() + 90
     final_status = None
     while time.monotonic() < deadline:
-        final_status = training_tools.monitor_training(res["experiment_id"]).get("status")
+        final_status = training_tools.monitor_training(tmp_path, res["experiment_id"]).get("status")
         if final_status in ("completed", "failed", "canceled"):
             break
         time.sleep(0.5)

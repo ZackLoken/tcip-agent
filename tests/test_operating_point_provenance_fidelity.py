@@ -16,7 +16,7 @@ from tests._regime_fixtures import tiled_regime
 
 pytest.importorskip("torch")
 
-from tests._trait_fixtures import confirm_entry  # noqa: E402
+from tests._trait_fixtures import propose_and_confirm  # noqa: E402
 from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     attach_spatial_split_kind_provenance,
     attach_split_policy_provenance,
@@ -51,12 +51,12 @@ def _records(prefix: str, offset: float, n_images: int = N_IMAGES) -> list[dict]
 
 # -- the split policy a reference was drawn under ----------------------------------------------
 
-def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
+def test_split_policy_provenance_carries_each_locked_field_under_its_own_name(tmp_path):
     """Each locked field is stamped with a value distinct from every other, so a cross-wired read
     is visible rather than hidden behind two fields that happen to agree. The enrichment must also
     leave the resolved value and its validation stamp exactly as the gate produced them.
     """
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     value_before, stamp_before = conf._raw, conf.validated_against
@@ -80,13 +80,13 @@ def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
     assert conf.validated_against == stamp_before
 
 
-def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
+def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry(tmp_path):
     """A block-calibrated bundle has no locked draw to read a policy off, only the mosaic's own
     recorded geometry, and each of those fields likewise has to land under its own name. The
     partition is placed by declared order and share alone, so no seed governs it: a residual
     ``seed`` key in the input manifest is not carried into the written policy.
     """
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     attach_spatial_split_kind_provenance(b, {"seed": 3, "tile_size": 512, "overlap": 0.25})
@@ -98,7 +98,7 @@ def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
 # -- the derivation label stamped on conf ------------------------------------------------------
 
 def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_implementation(
-        monkeypatch):
+        tmp_path, monkeypatch):
     """The conf label is built at runtime from whichever picker ran, so a static scan of the stamp
     site's source cannot see it. Drive every registered count objective, under both accepted
     reference kinds, and check the labels those runs actually produced against the derivation
@@ -113,9 +113,9 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
     labels = set()
     for objective in sorted(COUNT_OBJECTIVE_PICKERS):
         spec = entry("bud_opening", ("leaf_out_50per_date",), count_objective=objective)
-        confirm_entry(spec)
+        propose_and_confirm(tmp_path, spec)
         for reference in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
-            b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
+            b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                         calibration_records=recs, validated_reference=reference)
             labels.add(b.params["conf"].derived_from)
 
@@ -125,7 +125,7 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
 
 # -- the basis a tile edge rests on ------------------------------------------------------------
 
-def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
+def test_a_native_ratio_tile_source_reaches_the_resolver_intact(tmp_path):
     """``native_ratio`` is the fourth tile-size source and the one whose behavior differs from the
     no-basis case: it keeps a real tile edge, stamps a derived source, and clears its own geometry
     reference. Collapsing it into the no-basis case would discard a caller's edge silently.
@@ -133,7 +133,7 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     import tcip_mcp.pipelines.resolution as resolution_mod
 
     native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                 tile_size=300, tile_size_source="native_ratio")
     p = b.params["tile_size"]
     assert p._raw == 300
@@ -141,14 +141,14 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     assert p.validated_against == native_ref
     assert p.is_shippable is True
 
-    no_basis = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h",
+    no_basis = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h",
                                        tile_size=300, tile_size_source="unavailable")
     assert no_basis.params["tile_size"]._raw is None  # the case native_ratio is not
 
 
 # -- the reference's own scores against the asserted floor -------------------------------------
 
-def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
+def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced(tmp_path):
     """The asserted floor is reconciled against both halves of the reference. Here calibration's
     lowest score sits far above the asserted floor while the holdout's sits right at it, so only a
     check that reads the calibration side too can see the gap. The signal is provenance, never a
@@ -158,7 +158,7 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
     hold = _records("h", 100000.0)
     hold[0]["dt"].append({"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05})
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 
@@ -172,7 +172,7 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
 
 # -- what counts as a cloned holdout -----------------------------------------------------------
 
-def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
+def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses(tmp_path):
     """A holdout sharing even one image's content with calibration is not independent for that
     image, so the gate refuses rather than merely reporting the overlap; a holdout sharing no
     image's content still passes, with the overlap (zero) reported.
@@ -182,7 +182,7 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
     hold[0]["gt"] = [dict(a) for a in cal[0]["gt"]]  # one image of genuinely shared content
     hold[0]["dt"] = [dict(d) for d in cal[0]["dt"]]
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 
@@ -210,7 +210,7 @@ def _regression_items(prefix: str, true_values: list[float],
 
 
 def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_placeholder(
-        monkeypatch):
+        tmp_path, monkeypatch):
     """A trait that authors its own agreement bar is held to that bar. The platform's placeholder
     exists only for a trait that has not authored one, and quietly substituting it would admit a
     calibration the breeder's own stated bar refuses, while the record still names the trait as the
@@ -224,13 +224,13 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
         pred[i] = min(4, pred[i] + 2)
 
     authored = entry("bud_opening", ("leaf_out_50per_date",), ordinal_agreement_floor=0.9)
-    confirm_entry(authored)
+    propose_and_confirm(tmp_path, authored)
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), num_ranks=_NUM_RANKS,
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     score = res["gate_evidence"]["score"]
     # Real agreement, above the platform placeholder and below the authored bar: exactly the band
@@ -244,7 +244,7 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
 
 
 def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_placeholder(
-        monkeypatch):
+        tmp_path, monkeypatch):
     """The regression counterpart, on a criterion whose scale is its own: the authored bar is what
     the calibration is judged against.
     """
@@ -255,12 +255,12 @@ def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_plac
     pred_values = [t * 0.5 + 1.0 for t in true_values]
 
     authored = entry("bud_opening", ("leaf_out_50per_date",), regression_skill_floor=0.9)
-    confirm_entry(authored)
+    propose_and_confirm(tmp_path, authored)
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared",
         calibration_items=_regression_items("c", true_values, pred_values),
-        holdout_items=_regression_items("h", true_values, pred_values), experiment_id=None)
+        holdout_items=_regression_items("h", true_values, pred_values), experiment_id=None, project=tmp_path)
 
     score = res["gate_evidence"]["score"]
     assert 0.5 < score < 0.9
@@ -272,7 +272,7 @@ def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_plac
 
 
 def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_placeholder(
-        monkeypatch):
+        tmp_path, monkeypatch):
     """The companion obligation: the placeholder path must keep admitting a calibration that
     clears it, so authoring a floor stays optional rather than a precondition for calibrating at
     all.
@@ -285,13 +285,13 @@ def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_place
         pred[i] = min(4, pred[i] + 2)
 
     unauthored = entry("bud_opening", ("leaf_out_50per_date",))
-    confirm_entry(unauthored)
+    propose_and_confirm(tmp_path, unauthored)
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), num_ranks=_NUM_RANKS,
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     assert res["gate_evidence"]["floor_source"] == "default"
     assert res["failures"] == []

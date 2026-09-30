@@ -1,8 +1,8 @@
 """Image ingestion: turn a raw folder of photos into a structured TCIP project.
 
 ``ingest_images`` copies (or moves) raw images into the canonical layout
-(``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project, bucketing by the capture date each
-file states. It does not annotate, split, choose a task, or write ``subjects.json`` (see
+(``images/<YYYY-MM-DD>/<stem><ext>``) under the project, bucketing by the capture date each file
+states. It does not annotate, split, choose a task, or write ``subjects.json`` (see
 ``packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md``).
 """
 
@@ -15,11 +15,11 @@ from pathlib import Path
 from tcip_store import store
 
 from tcip_annotation.json_io import is_sidecar_name
-from tcip_mcp import dataset_layout, workspace
+from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
 from tcip_mcp.pipelines.image_utils import IMAGE_EXTS, bucket_logical_identities, stem_collision_key
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 
 logger = logging.getLogger(__name__)
 
@@ -203,26 +203,24 @@ def _collision_refusal(
     return "stem collision, refusing the whole call before any byte is copied: " + "; ".join(lines)
 
 
-@mcp.tool()
+@tool()
 @audited
 def ingest_images(
+    project: Path,
     source: str,
-    name: str,
-    site: str,
-    project_path: str = "",
     copy: bool = True,
     date_from: str = "exif",
     recursive: bool = True,
     detect_band_groups: bool = False,
 ) -> dict:
-    """Copy raw images into a structured project, bucketed by the capture date each file states.
+    """Copy raw images into the project, bucketed by the capture date each file states.
 
     Turns a raw folder (or glob) of photos into the canonical layout
-    (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by default; originals
-    are left byte-identical; pass ``copy=False`` to move. Refuses the whole call, before anything
-    is copied, when a source's destination stem would create a second logical image under a key
-    another source, an existing raw file, or an existing band-group manifest already holds in that
-    bucket; re-ingesting the exact same destination file is skipped instead, recorded in
+    (``images/<YYYY-MM-DD>/<stem><ext>``) under the project. Copies by default; originals are left
+    byte-identical; pass ``copy=False`` to move. Refuses the whole call, before anything is copied,
+    when a source's destination stem would create a second logical image under a key another
+    source, an existing raw file, or an existing band-group manifest already holds in that bucket;
+    re-ingesting the exact same destination file is skipped instead, recorded in
     ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
 
     The capture date never gates ingestion: a file whose date cannot be read is copied and counted
@@ -230,16 +228,6 @@ def ingest_images(
 
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
-        name: Project slug; the destination folder is ``<TCIP_WORKSPACE>/<name>/`` unless
-            ``project_path`` overrides it. When that destination is a new directory under the
-            workspace, ``name`` (or the override's basename) must fit ``crop_subject_phenotype``
-            (``workspace.format_project_name``/``parse_project_name``); ingesting another date into
-            an existing project opens it by the name it already has.
-        site: The orchard or station this project's plants stand in, in the breeder's own words;
-            ask the breeder. Refuses before a byte is copied if the project already records a
-            different site. A call with no images under ``source``, and a stem collision, refuse
-            before the site is read.
-        project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
         date_from: ``"exif"`` (each file's own capture date -> ISO date, missing -> ``undated/``; a
             photo's EXIF ``DateTimeOriginal``, a raster's own date metadata), ``"none"`` (all ->
@@ -252,45 +240,19 @@ def ingest_images(
             writes one file per band instead of one multi-band file per capture). Default
             ``False``.
 
-    Returns a manifest: ``{project_path, name, image_root, total, found, copied, moved, buckets,
-    undated, skipped_collisions, reserved_name_skips, errors, unreadable_dates, move,
-    band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date could
+    Returns a manifest: ``{image_root, total, found, copied, moved, buckets, undated,
+    skipped_collisions, reserved_name_skips, errors, unreadable_dates, move, band_groups}``,
+    where ``unreadable_dates`` names each ingested file whose capture date could
     not be read and the reason, and ``reserved_name_skips`` names each source file not ingested
     because its own stem is reserved for a prediction bucket's own provenance stamp.
     ``skipped_collisions`` names only an exact re-ingest. A band group whose formed stem (the
     siblings' common prefix) is reserved the same way is not written as a manifest either;
     ``band_groups.reserved_name_skips`` names each one, in the shape of ``band_groups.formed``.
     """
-    from tcip_store import StoreError
-
-    # Lazy import avoids a module-load import cycle (server → ingest_tools → project_tools).
-    from tcip_mcp.tools.project_tools import _scaffold_project
-
     try:
         _validate_bucket_literal(date_from)
-        if project_path:
-            # Resolve so a relative override is explicit/absolute, not silently CWD-based.
-            dest_root: Path = Path(project_path).expanduser().resolve()
-            # Held to the scheme only when creating: an existing project is opened by the
-            # name it already has, conforming or not.
-            if not dest_root.exists() and dest_root.parent == workspace.workspace_root():
-                workspace.parse_project_name(dest_root.name)
-        else:
-            dest_root = workspace.project_path(name)
-            if not dest_root.exists():
-                workspace.parse_project_name(name)
     except ValueError as exc:
         return {"error": str(exc)}
-
-    pending = workspace.pending_marker_or_none(dest_root)
-    if pending is not None:
-        if pending.kind == "removal":
-            return {"error": f"{dest_root} is pending removal (requested "
-                              f"{pending.record['requested_at']}); no image lands in a tree the "
-                              "archive has already left"}
-        return {"error": f"{dest_root} is pending rename to {pending.record['new_name']!r} "
-                          f"(requested {pending.record['requested_at']}); no image lands in a "
-                          "tree about to move"}
 
     sources = list(_iter_source_images(source, recursive))
     if not sources:
@@ -307,16 +269,9 @@ def ingest_images(
         bucket, date_unreadable = _bucket_for(src_path, date_from)
         resolved_sources.append((src_path, bucket, date_unreadable))
 
-    collision_error = _collision_refusal(dest_root, resolved_sources)
+    collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
         return {"error": collision_error}
-
-    try:
-        # The scaffold's site write refuses before any byte is copied: a project already
-        # recording a different site, or one whose record is damaged, is a full refusal.
-        scaffold = _scaffold_project(str(dest_root), site)
-    except (ValueError, StoreError) as exc:
-        return {"error": str(exc)}
 
     buckets: dict[str, int] = {}
     undated = 0
@@ -328,7 +283,7 @@ def ingest_images(
     touched_buckets: set[str] = set()
 
     for src_path, bucket, date_unreadable in resolved_sources:
-        dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
+        dest = dataset_layout.image_path(project, bucket, src_path.stem, src_path.suffix)
         if dest.exists():
             # No-overwrite: the exact re-ingest of a file already placed; every other stem
             # collision was already refused above, whole-call.
@@ -347,7 +302,7 @@ def ingest_images(
         try:
             data = src_path.read_bytes()
             store.put_blob(
-                dataset_layout.image_key(dest_root, bucket, src_path.stem, src_path.suffix), data
+                dataset_layout.image_key(project, bucket, src_path.stem, src_path.suffix), data
             )
         except OSError as exc:
             errors.append({"source": str(src_path), "error": str(exc)})
@@ -381,7 +336,7 @@ def ingest_images(
         from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
         for bucket in sorted(touched_buckets):
-            bucket_dir = dataset_layout.image_dir(dest_root, bucket)
+            bucket_dir = dataset_layout.image_dir(project, bucket)
             result = detect_and_write_band_groups(bucket_dir)
             for g in result["formed"]:
                 band_groups_result["formed"].append({**g, "bucket": bucket})
@@ -392,9 +347,7 @@ def ingest_images(
                 band_groups_result["reserved_name_skips"].append({**g, "bucket": bucket})
 
     return {
-        "project_path": str(dest_root),
-        "name": name,
-        "image_root": str(dataset_layout.image_dir(dest_root, None)),
+        "image_root": str(dataset_layout.image_dir(project, None)),
         "total": copied + moved,
         "found": len(sources),
         "copied": copied,
@@ -406,12 +359,11 @@ def ingest_images(
         "errors": errors,
         "unreadable_dates": unreadable_dates,
         "move": not copy,
-        "tcip_dir": scaffold["tcip_dir"],
         "band_groups": band_groups_result,
     }
 
 
-@mcp.tool()
+@tool()
 def import_coco(document: str, dataset_root: str, date: str) -> dict:
     """Convert an external dataset-level COCO document into the dataset's per-image label
     documents.

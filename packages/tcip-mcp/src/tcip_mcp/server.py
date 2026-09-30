@@ -1,21 +1,45 @@
-"""MCP server entry point: register all domain tools and run on stdio."""
+"""MCP server entry point: every domain tool, served on stdio for the project named at start
+(``--project <path>``)."""
 
 from __future__ import annotations
 
+import argparse
+import functools
+import inspect
 import logging
-from typing import Mapping
+from pathlib import Path
+from typing import Any, Callable, TypeVar
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from tcip_mcp import agent_identity
 
-mcp = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
-# Records which harness connected, from the handshake, before any tool call is served.
-mcp.middleware.append(agent_identity.record_connecting_client)
 logger = logging.getLogger(__name__)
 
-# Import tool modules to register their handlers with the server. A tool module that needs
-# torch imports it inside its own functions, so every tool registers whether or not torch is installed.
+_Tool = TypeVar("_Tool", bound=Callable[..., Any])
+
+_TOOLS: list[tuple[Callable[..., Any], dict[str, Any]]] = []
+"""Every function a tool module declared with :func:`tool`, with its registration options."""
+
+
+class NoProject(ToolError):
+    """A tool that acts on a project was called on a server started for none; the server hands
+    the agent its message."""
+
+
+def tool(**options: Any) -> Callable[[_Tool], _Tool]:
+    """Declare the decorated function an MCP tool, with ``options`` passed to the server's own
+    registration when :func:`build_server` builds a server, and return it unchanged."""
+    def decorate(fn: _Tool) -> _Tool:
+        _TOOLS.append((fn, options))
+        return fn
+
+    return decorate
+
+
+# Import tool modules to declare their handlers. A tool module that needs torch imports it inside
+# its own functions, so every tool registers whether or not torch is installed.
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
 import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
@@ -38,35 +62,72 @@ import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
 import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 
+def _bound(fn: Callable[..., Any], binding: tuple[Path, Path] | None) -> Callable[..., Any]:
+    """``fn`` as the server registers it: a ``project`` or ``workspace`` parameter is registered
+    without it, every call passing the server's own ``binding``. With no binding, a call to a
+    function taking either raises :class:`NoProject` naming ``--project``."""
+    sig = inspect.signature(fn, eval_str=True)
+    bound = {"project", "workspace"} & sig.parameters.keys()
+    if not bound:
+        return fn
+
+    @functools.wraps(fn)
+    def entry(*args: Any, **kwargs: Any) -> Any:
+        if binding is None:
+            raise NoProject("this MCP server was started for no project, so no tool that acts on "
+                            "one can run; restart it with --project <path> naming the project")
+        values = dict(zip(("project", "workspace"), binding))
+        return fn(*args, **{name: values[name] for name in bound}, **kwargs)
+
+    entry.__signature__ = sig.replace(  # type: ignore[attr-defined]
+        parameters=[p for name, p in sig.parameters.items() if name not in bound])
+    return entry
+
+
+def build_server(binding: tuple[Path, Path] | None) -> MCPServer:
+    """A server registering every declared tool, each acting on the project of ``binding``
+    (``(project, workspace)``, the workspace naming the backend that serves it) or, with
+    ``None``, a server started for no project, which serves only the tools needing neither."""
+    server = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
+    # Records which harness connected, from the handshake, before any tool call is served.
+    server.middleware.append(agent_identity.record_connecting_client)
+    for fn, options in _TOOLS:
+        server.add_tool(_bound(fn, binding), **options)
+    return server
+
+
 def list_registered_tools() -> list[str]:
-    """Return the sorted names of all tools currently registered on the server."""
-    return sorted(t.name for t in mcp._tool_manager.list_tools())
+    """Return the sorted names of all tools a server registers."""
+    return sorted(fn.__name__ if "name" not in options else options["name"]
+                  for fn, options in _TOOLS)
 
 
-def binds_from_marker(environ: Mapping[str, str]) -> bool:
-    """Whether this MCP server should bind its platform-state root from the workspace's
-    active-project marker at startup: true only inside the platform's own agent terminal, named by
-    ``agent_identity.TERMINAL_SESSION_ENV`` in the environment.
-    """
-    from tcip_mcp import agent_identity
-
-    return bool(environ.get(agent_identity.TERMINAL_SESSION_ENV))
-
-
-def main() -> None:
-    """Start the MCP server on stdio transport."""
-    import os
+def main(argv: list[str] | None = None) -> None:
+    """Start the MCP server on stdio for ``--project`` and the workspace ``TCIP_WORKSPACE`` names,
+    or for no project and no workspace when ``--project`` is omitted. Exits naming the path when
+    ``--project`` names a directory holding no project record; refuses what
+    :func:`~tcip_mcp.workspace.workspace_from_environment` refuses when a project is named."""
+    parser = argparse.ArgumentParser(prog="python -m tcip_mcp")
+    parser.add_argument("--project", default=None,
+                        help="the project every project tool acts on; omitted, only the tools "
+                             "that need no project run")
+    args = parser.parse_args(argv)
 
     from tcip_store.binding import bind_default
 
-    bind_default()
-    # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from the
-    # marker, elsewhere the inherited variable or the repo root; activate_project repins later.
-    from tcip_mcp.project_paths import pin_platform_root
+    from tcip_mcp.workspace import workspace_from_environment
 
-    pin_platform_root(from_marker=binds_from_marker(os.environ))
+    bind_default()
+    binding = None
+    if args.project is not None:
+        from tcip_mcp.project_record import existing_project
+
+        try:
+            binding = (existing_project(args.project), workspace_from_environment())
+        except ValueError as exc:
+            raise SystemExit(f"--project: {exc}") from exc
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     configure_gdal_cache()
-    mcp.run(transport="stdio")
+    build_server(binding).run(transport="stdio")

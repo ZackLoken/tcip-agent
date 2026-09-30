@@ -40,7 +40,8 @@ def _identity_fn(image_name: str) -> str:
     return image_name.rsplit("_", 1)[0]
 
 
-def _add_validated_scale(bucket: str, trait: str, *, unit: str = "mm", tag: str = "a") -> str:
+def _add_validated_scale(project: Path, bucket: str, trait: str, *, unit: str = "mm",
+                         tag: str = "a") -> str:
     """Stamp ``bucket`` (already carrying a validated operating_point.json) with a genuine
     physical-measurement-validated resolve_scale.json, and return its images_dir."""
     from PIL import Image
@@ -62,7 +63,7 @@ def _add_validated_scale(bucket: str, trait: str, *, unit: str = "mm", tag: str 
             "validated_against": VALIDATED_PHYSICAL_MEASUREMENT,
         }},
     }
-    write_bound_sidecar(bucket, stamp, document="resolve_scale", dataset_root=root,
+    write_bound_sidecar(project, bucket, stamp, document="resolve_scale", dataset_root=root,
                         images_dir=images_dir, experiment_id=f"exp-scale-{tag}")
     return str(images_dir)
 
@@ -251,7 +252,7 @@ def test_export_aggregated_csv(tmp_path):
     out_path = tmp_path / "out" / "aggregated.csv"
     bucket = validated_bucket(tmp_path, "stem", tag="export")
     export_aggregated_csv(
-        results, str(out_path), delivered_phenotype="stem_count", crop="currant",
+        results, str(out_path), project=tmp_path, delivered_phenotype="stem_count", crop="currant",
         pred_dirs=[bucket],
     )
 
@@ -271,7 +272,7 @@ def test_export_aggregated_csv_refuses_a_record_set_with_no_plant_attribution(tm
                "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
-        export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count")
+        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count")
 
 
 def test_export_aggregated_csv_refuses_when_records_disagree_on_plant_attribution(tmp_path):
@@ -283,7 +284,7 @@ def test_export_aggregated_csv_refuses_when_records_disagree_on_plant_attributio
     ]
     out_path = tmp_path / "out.csv"
     with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
-        export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count")
+        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count")
 
 
 def test_export_aggregated_csv_header_carries_operating_point_validated_not_measurement_validated(
@@ -295,7 +296,7 @@ def test_export_aggregated_csv_header_carries_operating_point_validated_not_meas
                "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "aggregated.csv"
     bucket = validated_bucket(tmp_path, "stem", tag="header")
-    export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
+    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count",
                           pred_dirs=[bucket])
 
     with open(out_path, newline="") as f:
@@ -315,9 +316,9 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
     ]
     out_path = tmp_path / "out.csv"
     bucket = validated_bucket(tmp_path, "plant_surface_area", tag="units")
-    images_dir = _add_validated_scale(bucket, "plant_surface_area", tag="units")
+    images_dir = _add_validated_scale(tmp_path, bucket, "plant_surface_area", tag="units")
     export_aggregated_csv(
-        results, str(out_path), delivered_phenotype="plant_surface_area",
+        results, str(out_path), project=tmp_path, delivered_phenotype="plant_surface_area",
         pred_dirs=[bucket], images_dir=images_dir,
     )
     with open(out_path, newline="") as f:
@@ -330,7 +331,7 @@ def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
                 "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     bucket = validated_bucket(tmp_path, "stem", tag="blank-units")
-    export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
+    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count",
                           pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -354,7 +355,7 @@ def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path)
                 "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     with pytest.raises(ValueError, match="declared units|refusing"):
-        export_aggregated_csv(results, str(out_path), delivered_phenotype=mismatched_trait)
+        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype=mismatched_trait)
 
 
 def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
@@ -373,7 +374,7 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
     out_path = tmp_path / "out.csv"
     bucket = validated_bucket(tmp_path, "bark_thickness", document="regression_operating_point",
                               tag="pixel")
-    export_aggregated_csv(results, str(out_path), delivered_phenotype="bark_thickness",
+    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="bark_thickness",
                           pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -495,8 +496,9 @@ def test_export_aggregated_csv_writes_value_key_column(tmp_path):
                 "scale_document": "resolve_scale"}]
     out_path = tmp_path / "out.csv"
     bucket = validated_bucket(tmp_path, "plant_surface_area", tag="value-key")
-    images_dir = _add_validated_scale(bucket, "plant_surface_area", tag="value-key")
-    export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
+    images_dir = _add_validated_scale(tmp_path, bucket, "plant_surface_area", tag="value-key")
+    export_aggregated_csv(results, str(out_path), project=tmp_path,
+                          delivered_phenotype="plant_surface_area",
                           pred_dirs=[bucket], images_dir=images_dir)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -517,7 +519,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     export_aggregated_csv(
         [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
           "plant_attribution": "image", "measurement_document": "operating_point"}],
-        str(out_path), delivered_phenotype="stem_count", pred_dirs=[bucket])
+        str(out_path), project=tmp_path, delivered_phenotype="stem_count", pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
 

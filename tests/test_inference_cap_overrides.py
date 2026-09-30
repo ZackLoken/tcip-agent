@@ -70,7 +70,7 @@ def inference_call(tmp_path, monkeypatch):
         built.update(kwargs)
         return _StubPredictor()
 
-    def _spy_calibrate(p, trait, labels, images, **kwargs):
+    def _spy_calibrate(p, trait, labels, images, *, project, **kwargs):
         from tcip_mcp.pipelines.calibration import pass_resolver_inputs, resolve_pass_merge
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
@@ -79,7 +79,7 @@ def inference_call(tmp_path, monkeypatch):
         forwarded.update(cross_tile_nms=p.cross_tile_nms,
                          max_dets=p.max_dets if p.max_dets_stated else None)
         inputs = {**pass_resolver_inputs(p), "dataset_hash": "d", "calibration_records": records}
-        bundle = resolve_operating_point(trait, **inputs)
+        bundle = resolve_operating_point(trait, project=project, **inputs)
         evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                     "reference_inputs": {"label_dirs": {"calibration": labels}}}
         return bundle, "d", 0, evidence
@@ -89,7 +89,7 @@ def inference_call(tmp_path, monkeypatch):
 
     def _call(**kwargs):
         result = run_inference_verified(
-            checkpoint, images_dir=str(Path(str(image_path)).parent), device="cpu", **kwargs)
+            tmp_path, checkpoint, images_dir=str(Path(str(image_path)).parent), device="cpu", **kwargs)
         assert "error" not in result, result
         return result
 
@@ -218,11 +218,10 @@ def test_the_dry_run_report_shows_the_applied_conf_never_the_raw_none(tmp_path, 
     from tcip_mcp.tools.inference_tools import run_inference
     from tests.test_sliced_inference import _checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     checkpoint, _verified = _checkpoint(tmp_path)
 
     result = run_inference(
-        checkpoint_path=checkpoint, output_dir=str(tmp_path / "out"), dry_run=True)
+        tmp_path, checkpoint_path=checkpoint, output_dir=str(tmp_path / "out"), dry_run=True)
 
     assert result["operating_point"]["conf"]["value"] == DEFAULT_CONF
 
@@ -240,14 +239,14 @@ def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monk
 
     forwarded: dict = {}
 
-    def _spy_raster(**kwargs):
+    def _spy_raster(project, **kwargs):
         forwarded.update(kwargs)
         return {"image_count": 1}
 
     monkeypatch.setattr(inference_tools, "_export_predictions_raster", _spy_raster)
 
     inference_tools.run_inference(
-        checkpoint_path=checkpoint, raster_path=str(raster),
+        tmp_path, checkpoint_path=checkpoint, raster_path=str(raster),
         output_dir=str(tmp_path / "out"))
 
     assert forwarded["cross_tile_nms"] is None

@@ -25,7 +25,7 @@ def _record(project_root: Path, revision: TraitRevision) -> None:
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=revision,
-        delivery_kind="per_image_count", project_root=project_root, plant_mapping=None,
+        delivery_kind="per_image_count", project=project_root, plant_mapping=None,
     )
 
 

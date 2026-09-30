@@ -183,9 +183,9 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
     # Fast path (no smoke) is structurally valid: the builder imports fine.
-    assert preflight_config(cfg)["valid"] is True
+    assert preflight_config(tmp_path, cfg)["valid"] is True
     # Smoke path builds + runs the contract and catches the measurement-boundary violation.
-    r = preflight_config(cfg, smoke=True)
+    r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
     assert any("model contract" in i for i in r["issues"])
     assert r["smoke"]["dims"]["img_size"] == 224  # the untiled fallback edge, resolved
@@ -203,7 +203,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"}},
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
-    r = preflight_config(cfg, smoke=True, overfit=True)
+    r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     assert r["smoke"]["ok"] is True
     assert "overfit_check" in r  # voluntary diagnostic reported, non-gating
@@ -230,7 +230,7 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, mon
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
 
-    r = preflight_config(cfg, smoke=True)
+    r = preflight_config(tmp_path, cfg, smoke=True)
 
     assert r["smoke"]["dims"]["num_classes"] == 3, r["smoke"]
     assert r["smoke"]["dims"]["in_chans"] == 3
@@ -259,7 +259,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
         "batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
 
-    synthetic = preflight_config(cfg, smoke=True)
+    synthetic = preflight_config(tmp_path, cfg, smoke=True)
 
     assert synthetic["smoke"]["dims"]["num_classes"] == 1
     assert synthetic["smoke"]["batch_source"] == "synthetic"
@@ -270,7 +270,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     from tcip_mcp.pipelines.model_contract import check_model_contract
     from tcip_mcp.tools.training_tools import _one_real_batch
 
-    batch, why = _one_real_batch("semantic_seg", resolve_run(cfg).train_ds)
+    batch, why = _one_real_batch("semantic_seg", resolve_run(cfg, project=tmp_path).train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
     model = build_model(cfg, {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
@@ -291,7 +291,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
-    r = preflight_config(cfg, smoke=True, overfit=True)
+    r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     # The contract actually ran: a real batch stood in for the missing synthetic schema.
     assert r["smoke"]["not_smokeable"] is None
@@ -315,7 +315,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     data = {"images_dir": str(imgs), "labels_dir": str(lbls), "scope": {"subject": "leaf"},
             "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
                                "task": "bunch_compactness"}}
-    resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data})
+    resolution = resolve_run({"model_source": {"task": "bunch_compactness"}, "data": data}, project=tmp_path)
 
     batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why
@@ -336,7 +336,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
                                     "task": "bunch_compactness"}},
         "batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
     }
-    r = preflight_config(cfg, smoke=True)
+    r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
     # Only the builder raises this text, so the refusal is the unbuildable dataset's own.
     assert any("cannot open the source" in i for i in r["issues"]), r["issues"]
@@ -346,18 +346,19 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 # ctx surface: a custom loop self-proves + reuses the craft primitives
 # --------------------------------------------------------------------------
 
-def _ctx_for(task: str, builder: str, data: dict):
-    """A context over a run whose table ground truth recorded the empty scope admission writes."""
+def _ctx_for(project, task: str, builder: str, data: dict):
+    """A context over a run of ``project`` whose table ground truth recorded the empty scope
+    admission writes."""
     config = {"model_source": {"builder": builder, "task": task}, "device": "cpu",
               "data": {"scope": {}, **data}}
-    run = trainer_run(config, "out", has_val_loader=False, id="auto-run-6")
+    run = trainer_run(config, "out", project=project, has_val_loader=False, id="auto-run-6")
     return TrainContext(run=run, train_loader=None, val_loader=None)
 
 
-def test_ctx_check_contract_and_overfit_check():
+def test_ctx_check_contract_and_overfit_check(tmp_path):
     """The model is built and smoked at what the run recorded: its own width and class count, the
     sizes its loaders were built at."""
-    ctx = _ctx_for("classification", "tests.bespoke_models:build_bespoke_classifier",
+    ctx = _ctx_for(tmp_path, "classification", "tests.bespoke_models:build_bespoke_classifier",
                    data={"num_channels": 3, "num_classes": 2})
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
@@ -394,11 +395,11 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     config = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
                                "task": "classification"},
               "device": "cpu", "data": data}
-    train_ds, _val_ds, _partition = auto_train_val("classification", data, None)
+    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "classification", data, None)
     assert (data["num_channels"], data["num_classes"]) == (3, 3)
     loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("classification"))
-    ctx = TrainContext(run=trainer_run(config, tmp_path / "out", has_val_loader=False,
-                                       id="auto-run-62"),
+    ctx = TrainContext(run=trainer_run(config, tmp_path / "out", project=tmp_path,
+                                       has_val_loader=False, id="auto-run-62"),
                        train_loader=loader, val_loader=None)
 
     report = ctx.check_contract()
@@ -410,11 +411,11 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     assert over["issue"] is None, over
 
 
-def test_ctx_refuses_a_classification_run_recording_no_class_count():
+def test_ctx_refuses_a_classification_run_recording_no_class_count(tmp_path):
     """A classification run recording no class count is refused by name by both proofs: a batch
     shaped at a count nobody resolved would prove the model against a class space the run does
     not train in."""
-    ctx = _ctx_for("classification", f"{__name__}:_bespoke_task_model",
+    ctx = _ctx_for(tmp_path, "classification", f"{__name__}:_bespoke_task_model",
                    data={"num_channels": 3})
 
     with pytest.raises(ValueError, match="records no num_classes"):
@@ -423,12 +424,12 @@ def test_ctx_refuses_a_classification_run_recording_no_class_count():
         ctx.overfit_check(steps=2)
 
 
-def test_ctx_apply_stage_freeze_matches_trainer_guard():
+def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
     ctx = TrainContext(run=trainer_run({"model_source": {"task": "regression"}}, "out",
-                                       has_val_loader=False, id="auto-run-7"),
+                                       project=tmp_path, has_val_loader=False, id="auto-run-7"),
                        train_loader=None)
     full = ctx.apply_stage_freeze(model, 0)
     assert full == sum(p.numel() for p in model.parameters())

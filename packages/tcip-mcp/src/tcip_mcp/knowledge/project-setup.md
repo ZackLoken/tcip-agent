@@ -1,6 +1,6 @@
 ---
 name: project-setup
-description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers project naming, ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
+description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name and site), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
 ---
 
 # Project setup: from raw photos to a trainable project
@@ -19,51 +19,41 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
 on any project you're handed. Surface friction with `report_friction` the moment you hit
-it (ambiguous goal, unconfirmed format). `tcip doctor <project_root>` names a stray file
+it (ambiguous goal, unconfirmed format). `tcip doctor <project>` names a stray file
 under `.tcip/state` no store claims; delete one through `delete_stray_state_file` with the
 person's confirmation as `reason`.
 
-## 1. Name the project: `crop_subject_phenotype`
+## 1. Create the project
 
-Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`), one
-folder per project. The shape is declared once, in `workspace.format_project_name`/
-`parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
-within a segment. Neither function checks a segment against a vocabulary (tentative);
-`ingest_images`, `initialize_project` and
-`tcip import-project` refuse a non-conforming name when the directory they create lands
-under the workspace.
+Projects live under the workspace `TCIP_WORKSPACE` names (every process refuses to start without
+it), one folder per project. `initialize_project(project_path, display_name, site)` creates one: its
+`.tcip/` scaffold and its record (`tcip_mcp.project_record`), which holds a freshly minted `id`,
+the `display_name` the picker shows, and the `site`. The id is the project's identity; the
+folder's name and the display name are neither of them identity, so a display name is the
+breeder's own words, for example (hazelnut, one marked example) `Hazelnut catkin counts, north
+block`.
 
-    black-locust_tree_trunk-diameter
+The site (field/orchard) is the breeder's own words too, recorded once on the record and shown
+in the picker. Ask the human for both rather than guessing them from a path or filename; a project
+that already records a different site or display name refuses the call rather than silently
+overwriting it (`tcip write-project-site` corrects a site typed wrong once).
 
-- `crop`: one of the six controlled crops (verify in
-  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`).
-- `subject`: the object the annotations isolate (see step 3 below).
-- `phenotype`: what is being measured (see
-  `packages/tcip-mcp/src/tcip_mcp/knowledge/crop-science.md`), never a `crops.yml` trait name.
+This MCP server acts on the one project it was started for (`--project <path>`); every tool that
+acts on a project takes that one, never a path you pass. A project you create here is worked on
+by a server started for it: the GUI opens it from the picker, and the agent terminal it starts
+runs a server for the project the GUI has open.
 
-The site (field/orchard) is not part of the name: it is a required argument of
-`initialize_project` and `ingest_images`, recorded once on the project's own record
-(`tcip_mcp.project_record`) and shown in the picker. Ask the human for it rather than
-guessing it from a path or filename; a project that already records a different site
-refuses the call rather than silently overwriting it.
-
-Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
-
-A name that turns out wrong is corrected from the project picker's own Rename control, which the
-breeder drives by typing the project's name, the way removal already works. Rename before the
-project trains, maps or delivers: the door refuses outright once the project holds a training
-run, a plant mapping, a plant registry, a delivery event or a tuning sweep, since those records
-carry the project's own path and no door re-points them. A dependent project's
-registered dataset entry keeps pointing at the old path after a rename, warned rather than
-refused, until that project's own owner re-registers it.
+A display name that turns out wrong is corrected from the project picker's own Rename control. A
+rename changes the display name alone: the folder, every run, mapping, registry and delivery stay
+where they are, since each record names in-project paths relative to the project.
 
 ## 2. Ingest: `ingest_images`
 
-Structure the raw pile into the canonical layout. One auditable primitive:
+Structure the raw pile into the canonical layout of the project this server was started for. One
+auditable primitive:
 
 ```python
-from tcip_mcp.tools.ingest_tools import ingest_images
-ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diameter", site="<the breeder's site>")
+ingest_images(source="<raw folder or glob>")
 ```
 
 - Copies by default (originals are left byte-identical); pass `copy=False` only when
@@ -85,13 +75,6 @@ ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diame
 
 `ingest_images` does not annotate, split, choose a task, or write `subjects.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
-
-`ingest_images` scaffolds `.tcip/` (`artifacts/`, `models/`) as a side effect of
-structuring images. If you need that scaffold before there are images to ingest, call
-`initialize_project(project_path, site=<site>)` directly; it creates the identical layout without
-touching image files. Both share the same internal scaffolding, so calling one after the other
-with the same site is idempotent, not additive; calling either with a different site than the
-one already recorded refuses rather than silently changing it.
 
 After ingest, `register_dataset(dataset_root, crop)` records the dataset's identity (a minted
 `id` plus a whole-dataset content fingerprint) in `<dataset_root>/dataset.json` and the project's
@@ -175,41 +158,27 @@ own floor.
 ## 7. Prioritize review + deliver
 
 `prioritize_review_queue` to focus the breeder's attention on the model's weakest
-predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`. Set the
-workspace's active project so the GUI opens what you built.
+predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`.
 
 ## Reading the live session: `view_gui_state`
 
-The GUI (a separate process) and you share the workspace, not memory. `view_gui_state`
-is the bridge: it reads the active-project marker (`<workspace>/.active`) plus that
-project's `<project_root>/.tcip/state/gui.json` and returns what the human is looking at
-right now: `active_project`, `project_root`, `subject`, `date`, `active_tab`, and
+The GUI (a separate process) and you share the project's files, not memory. `view_gui_state`
+is the bridge: it reads this project's `.tcip/state/gui.json` and returns what the human is
+looking at right now: `dataset_root`, `subject`, `date`, `active_tab`, and
 `current_image_index` / `current_image`. Call it when the human says "this image" or "the
 one I'm on" without a path. The nav index is persisted debounced as they page through
 frames, so it lags a beat; treat it as "roughly where they are," not a frame-exact cursor.
+It reads this project's own snapshot: while the GUI has another project open, that snapshot is
+where the human last was in this project, not what they are looking at now.
 
-Adopt the project with `activate_project` before doing project work. Adoption writes the
-active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
-the experiment store and the model registry live under that one project's `.tcip/` alongside its
-data, and the platform's own audit log is now this project's own, one file at one key
-(self-contained and portable; a dataset's own audit log stays beside that dataset, unaffected by
-adoption; `tcip archive-project <project_path> --output-path <path>` bundles the
-project into a ZIP at the destination you name, or `--output-dir <dir>` writes the identical
-bundle as a directory tree; `tcip import-project <bundle_path> <destination>`
-restores either container into a destination dir, round-tripping back to an
-`inspect_project`-visible project). After
-adoption, `inspect_project`, `rank_registered_models` (listing with `metric=""` or ranking with
-one stated) and `register_model` all default (`project_path=""`) to that project, and a
-training run auto-registers there, so the model you trained is the one you retrieve. Pass an
-explicit `project_path` only to reach a *different* project's registry: that holds for
-`inspect_project`, `rank_registered_models`, and `register_model`'s explicit
-mode. `register_model`'s experiment mode binds only in the experiment's own root; a
-`project_path` there must name that same root or the call refuses by name. The repin reaches
-only the calling process, so a training run in flight keeps writing to the project it started
-under even if you (or the human, in the GUI) adopt another one meanwhile. The web backend
-converges on your adopt as soon as it delivers; an MCP server
-you are already running converges only at its next start inside the platform's own agent
-terminal, so `inspect_project`'s divergence report is the guard in between.
+Everything a project holds lives under its own `.tcip/` beside its data: the experiment store,
+the model registry and its audit log (a dataset's own audit log stays beside that dataset).
+`tcip archive-project <project> --output-path <path>` bundles the project into a ZIP at the
+destination you name, or `--output-dir <dir>` writes the identical bundle as a directory tree;
+`tcip import-project <bundle_path> <destination>` restores either container into a destination
+dir, keeping the project's id, round-tripping back to an `inspect_project`-visible project. A
+training run started for a project keeps writing to that project whatever the GUI opens
+meanwhile.
 
 ## Invariants (from CLAUDE.md)
 

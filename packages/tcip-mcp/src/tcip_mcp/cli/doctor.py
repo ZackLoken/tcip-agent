@@ -485,14 +485,11 @@ def check_traits(root: Path, findings: list) -> None:
 def check_project_record(root: Path, findings: list) -> None:
     """An error for a project record that is absent, damaged, or on a root the store refuses to
     read."""
-    from tcip_store import StoreError
+    from tcip_mcp.project_record import record_fields
 
-    from tcip_mcp.project_record import ProjectRecordInvalid, ProjectRecordMissing, read_record
-
-    try:
-        read_record(root)
-    except (ProjectRecordMissing, ProjectRecordInvalid, StoreError, OSError) as exc:
-        findings.append(("error", str(exc)))
+    problem = record_fields(root)["record_problem"]
+    if problem is not None:
+        findings.append(("error", problem))
 
 
 def check_stray_state_files(root: Path, findings: list) -> None:

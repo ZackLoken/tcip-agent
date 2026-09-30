@@ -32,7 +32,7 @@ from tests.test_tcip_web_results_routes import _expected_validation_record, _phe
 # A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
 # so it carries every key the writer's cells read even as that shape grows.
 _NO_MAPPING = MappingBuild(
-    name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
+    name="none", dataset_root="", dataset_id="", built_by="test", built_at="",
     dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "stated"},
     plant_registry={"name": "unregistered", "digest": "0" * 64},
     capture_identity={}, capture_digests={}, unreadable={}, assignments={},
@@ -68,7 +68,7 @@ def test_a_kind_the_confirmed_revision_does_not_state_refuses_and_names_the_prop
     project: Path,
 ):
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT)
+        confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT)
 
     message = str(excinfo.value)
     assert "states no operationalization for a state_crossing_dates delivery" in message
@@ -81,7 +81,7 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(tmp_p
         fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT))
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(PER_IMAGE_COUNT, project_root=tmp_path, trait=fx.COUNT_TRAIT)
+        confirmed_revision(PER_IMAGE_COUNT, project=tmp_path, trait=fx.COUNT_TRAIT)
 
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
     assert excinfo.value.as_detail() == {"kind": "operationalization", "message": str(excinfo.value)}
@@ -91,7 +91,7 @@ def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
     _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
 
     with pytest.raises(OperationalizationRefused, match="leaf_length"):
-        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project_root=project, trait=fx.COUNT_TRAIT,
+        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=project, trait=fx.COUNT_TRAIT,
                            value_keys=["stem_count", "leaf_length"])
 
 
@@ -99,7 +99,7 @@ def test_a_row_carrying_no_value_key_refuses_and_counts_them(project: Path):
     _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
 
     with pytest.raises(OperationalizationRefused, match="2 row"):
-        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project_root=project, trait=fx.COUNT_TRAIT,
+        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=project, trait=fx.COUNT_TRAIT,
                            value_keys=["stem_count", "", None])
 
 
@@ -107,7 +107,7 @@ def test_a_delivered_phenotype_outside_the_confirmed_set_refuses(project: Path):
     _confirmed_crossing(project)
 
     with pytest.raises(OperationalizationRefused, match="bloom_95per_date"):
-        confirmed_revision(STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            delivered_phenotype="bloom_95per_date")
 
 
@@ -131,7 +131,7 @@ def test_a_registry_no_longer_declaring_the_positive_class_refuses_with_its_prob
         cr.Attribute(name="state", type="categorical", values=("shed",)),)),))
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=registry)
 
     problem = cr.positive_value_problem(registry, "flower", "open")
@@ -147,7 +147,7 @@ def test_an_unconfirmed_trait_reports_that_rather_than_a_binding(tmp_path: Path)
         delivered_value_keys=("stem_count",)))
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project_root=tmp_path, trait=fx.COUNT_TRAIT,
+        confirmed_revision(PER_PLANT_COUNT_AGGREGATE, project=tmp_path, trait=fx.COUNT_TRAIT,
                            value_keys=["not_covered"])
 
     assert "is confirmed" in str(excinfo.value) and "not_covered" not in str(excinfo.value)
@@ -160,7 +160,7 @@ def test_a_confirmed_revision_passes_every_binding_it_covers(project: Path):
     crossing = _confirmed_crossing(project)
 
     assert confirmed_revision(
-        STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
         delivered_phenotype="bloom_50per_date") == crossing
 
 
@@ -172,26 +172,15 @@ def test_an_aggregate_revision_admits_its_named_value_keys(project: Path, delive
     revision = _confirmed_aggregate(project, delivery_kind)
 
     assert confirmed_revision(
-        delivery_kind, project_root=project, trait=fx.COUNT_TRAIT,
+        delivery_kind, project=project, trait=fx.COUNT_TRAIT,
         delivered_phenotype="stem_count", value_keys=["stem_count"]) == revision
-
-
-def test_the_revision_is_read_from_the_project_the_caller_names(
-    project: Path, monkeypatch: pytest.MonkeyPatch,
-):
-    """The pinned platform root is somewhere else entirely, and the revision still resolves."""
-    crossing = _confirmed_crossing(project)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project.parent / "unrelated"))
-
-    assert confirmed_revision(
-        STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT) == crossing
 
 
 def test_a_trait_the_named_project_does_not_hold_refuses(project: Path, tmp_path: Path):
     with pytest.raises(TraitUnknownError):
-        confirmed_revision(PER_IMAGE_COUNT, project_root=project, trait="not_here")
+        confirmed_revision(PER_IMAGE_COUNT, project=project, trait="not_here")
     with pytest.raises(TraitUnknownError):
-        confirmed_revision(PER_IMAGE_COUNT, project_root=tmp_path / "empty", trait=fx.COUNT_TRAIT)
+        confirmed_revision(PER_IMAGE_COUNT, project=tmp_path / "empty", trait=fx.COUNT_TRAIT)
 
 
 # ── the crossing delivery doors ──────────────────────────────────────────────
@@ -205,8 +194,9 @@ def _extract_produced_at(written: bytes) -> bytes:
     return rows[0]["produced_at"].encode()
 
 
-def delivered_golden(body: dict, produced_at: bytes) -> bytes:
-    """What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
+def delivered_golden(project: Path, body: dict, produced_at: bytes) -> bytes:
+    """What a confirmed crossing delivery from ``project`` writes, byte for byte, for the golden
+    inputs below.
 
     ``produced_at`` is the tail composition's own write-time stamp, read back from the delivery
     just written; ``validation_record`` and ``plant_mapping_sha256`` are read from the buckets'
@@ -214,13 +204,13 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
 
-    build = pm.load_mapping(Path(body["project_root"]), body["mapping_name"])
+    build = pm.load_mapping(project, body["mapping_name"])
     assert build is not None
     mapping_sha = build.record_sha256.encode()
     dates_delivered = ";".join(build.dates).encode()
 
     record = _expected_validation_record(body).encode()
-    sha = producer_checkpoint_sha256("exp-1").encode()
+    sha = producer_checkpoint_sha256(project, "exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,0.4,held_out_annotations,held_out_annotations,,"
            + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
@@ -248,12 +238,12 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _compute(body: dict, out_csv: Path, **kwargs) -> dict:
+def _compute(project: Path, body: dict, out_csv: Path, **kwargs) -> dict:
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     return deliver_phenology_milestones(
-        trait=body["trait"],
-        mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
+        project, trait=body["trait"],
+        mapping_name=body["mapping_name"], plants=mapped_plants(project, body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"],
         output_csv_path=str(out_csv),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
@@ -283,7 +273,7 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
     _withdraw(tmp_path, "bud_opening")
     out_csv = tmp_path / "delivered.csv"
 
-    res = _compute(body, out_csv)
+    res = _compute(tmp_path, body, out_csv)
 
     assert "is confirmed by the breeder" in res["error"]
     assert "Setup tab" in res["error"]
@@ -313,7 +303,7 @@ def test_acknowledge_does_not_clear_the_meaning_check_at_every_door(
     out_csv = tmp_path / "delivered.csv"
 
     with pytest.raises(TypeError, match="acknowledge_unvalidated"):
-        _compute(body, out_csv, acknowledge_unvalidated=True)
+        _compute(tmp_path, body, out_csv, acknowledge_unvalidated=True)
     assert not out_csv.exists()
 
     for route in ("phenology_measurement", "export_csv"):
@@ -343,11 +333,11 @@ def test_a_confirmed_delivery_writes_the_golden_bytes(tmp_path: Path):
     body = _phenology_fixture(tmp_path, validated=True, **GOLDEN_INPUTS)
     out_csv = tmp_path / "delivered.csv"
 
-    res = _compute(body, out_csv)
+    res = _compute(tmp_path, body, out_csv)
 
     assert "error" not in res, res
     written = out_csv.read_bytes()
-    assert written == delivered_golden(body, _extract_produced_at(written))
+    assert written == delivered_golden(tmp_path, body, _extract_produced_at(written))
 
 
 def test_the_web_export_door_writes_the_golden_bytes(client: TestClient, tmp_path: Path):
@@ -358,7 +348,7 @@ def test_the_web_export_door_writes_the_golden_bytes(client: TestClient, tmp_pat
                        json={**body, "payload": "milestones", "filename": "x.csv"})
 
     assert resp.status_code == 200, resp.text
-    golden = delivered_golden(body, _extract_produced_at(resp.content))
+    golden = delivered_golden(tmp_path, body, _extract_produced_at(resp.content))
     assert resp.content == golden
     assert (tmp_path / "results_export" / "x.csv").read_bytes() == golden
 
@@ -373,13 +363,14 @@ def test_write_phenology_csv_writes_the_confirmed_revisions_schema(tmp_path: Pat
     )
 
     body = _phenology_fixture(tmp_path, validated=True)
-    revision = confirmed_revision(STATE_CROSSING_DATES, project_root=tmp_path, trait="bud_opening")
+    revision = confirmed_revision(STATE_CROSSING_DATES, project=tmp_path, trait="bud_opening")
     pred_dirs = list(body["predictions_by_date"].values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
-    classifier_recon = reconcile_classifier_validity(pred_dirs)
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
+    classifier_recon = reconcile_classifier_validity(pred_dirs, project=tmp_path)
     classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], pred_dirs, pred_dirs, trait="bud_opening")
-    tile_recon = reconcile_tile_size_validity(pred_dirs)
+        classifier_recon["validated"], pred_dirs, pred_dirs, trait="bud_opening",
+        project=tmp_path)
+    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
@@ -392,7 +383,7 @@ def test_write_phenology_csv_writes_the_confirmed_revisions_schema(tmp_path: Pat
             },
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=body["predictions_by_date"], project_root=tmp_path,
+        predictions_by_date=body["predictions_by_date"], project=tmp_path,
         plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "out.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
@@ -409,7 +400,7 @@ def test_a_changed_majority_crossing_ships_only_once_its_revision_is_confirmed(t
     changed = fx.propose(tmp_path, fx.with_fields(shipped, majority_milestone="50per"))
 
     def majority(out: Path) -> tuple[str, str]:
-        assert "error" not in _compute(body, out)
+        assert "error" not in _compute(tmp_path, body, out)
         row = next(_csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
         return row["bud_majority_date"], row["bud_95per_date"]
 
@@ -455,7 +446,7 @@ def test_a_confirmed_delivery_with_an_unbound_classifier_stamp_reports_that_refu
     from tests.test_tcip_web_results_routes import _rewrite_classifier_sidecars
 
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, trait="chestnut_bur")
+    _rewrite_classifier_sidecars(tmp_path, body, trait="chestnut_bur")
 
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
@@ -494,7 +485,8 @@ def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
     bucket.mkdir(parents=True)
     subject = next(iter(id_map)) if len(id_map) == 1 else None
     write_sidecar(bucket, complete_stamp({"validated": False, "scope": {
-        "subject": subject, "attribute": None, "id_map": id_map}}), "operating_point")
+        "subject": subject, "attribute": None, "id_map": id_map}}), "operating_point",
+        project=tmp_path)
     return str(bucket)
 
 
@@ -517,13 +509,13 @@ def _validated_bucket(
                                         "validated_against": VALIDATED_HELD_OUT}},
         "scope": {"subject": subject, "attribute": None, "id_map": id_map},
     }
-    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root)
+    write_bound_sidecar(tmp_path, bucket, stamp, document=document, dataset_root=root)
     return str(bucket)
 
 
 def test_a_count_under_a_revision_stating_no_count_refuses(delivery_root: Path):
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(PER_IMAGE_COUNT, project_root=delivery_root, trait=fx.COUNT_TRAIT)
+        confirmed_revision(PER_IMAGE_COUNT, project=delivery_root, trait=fx.COUNT_TRAIT)
 
     assert "states no operationalization" in str(excinfo.value)
     assert PER_IMAGE_COUNT in str(excinfo.value)
@@ -549,7 +541,7 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
 
     monkeypatch.setattr(itools, "_run_inference_verified", inference)
 
-    res = itools.deliver_per_image_counts(ckpt, str(tmp_path), str(tmp_path / "o.csv"),
+    res = itools.deliver_per_image_counts(tmp_path, ckpt, str(tmp_path), str(tmp_path / "o.csv"),
                                           trait=fx.COUNT_TRAIT)
 
     assert ran == []
@@ -566,7 +558,8 @@ def test_measured_subject_absent_from_id_maps_refuses(delivery_root: Path, tmp_p
     out_csv = tmp_path / "counts.csv"
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        export_detection_csv(_count_rows(), str(out_csv), revision=revision, pred_dirs=[bucket])
+        export_detection_csv(_count_rows(), str(out_csv), revision=revision, pred_dirs=[bucket],
+                             project=tmp_path)
 
     assert fx.COUNT_SUBJECT in str(excinfo.value)
     assert bucket in str(excinfo.value)
@@ -586,12 +579,12 @@ def test_every_bucket_must_count_the_measured_subject(delivery_root: Path, tmp_p
     unscoped.mkdir(parents=True)
 
     export_detection_csv(_count_rows(), str(tmp_path / "recorded.csv"), revision=revision,
-                         pred_dirs=[matching])
+                         pred_dirs=[matching], project=tmp_path)
     assert (tmp_path / "recorded.csv").exists()
     for name, buckets in (("mixed.csv", [matching, other]), ("unscoped.csv", [str(unscoped)])):
         with pytest.raises(OperationalizationRefused):
             export_detection_csv(_count_rows(), str(tmp_path / name), revision=revision,
-                                 pred_dirs=buckets)
+                                 pred_dirs=buckets, project=tmp_path)
         assert not (tmp_path / name).exists(), name
 
 
@@ -602,7 +595,8 @@ def test_row_without_value_key_refuses(delivery_root: Path, tmp_path: Path):
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(OperationalizationRefused, match="1 row"):
-        export_aggregated_csv(_aggregate_rows(None), str(out_csv), delivered_phenotype="stem_count")
+        export_aggregated_csv(_aggregate_rows(None), str(out_csv), delivered_phenotype="stem_count",
+                              project=tmp_path)
 
     assert not out_csv.exists()
 
@@ -615,7 +609,7 @@ def test_value_key_outside_confirmed_set_refuses(delivery_root: Path, tmp_path: 
 
     with pytest.raises(OperationalizationRefused, match="leaf_length"):
         export_aggregated_csv(_aggregate_rows("leaf_length"), str(out_csv),
-                              delivered_phenotype="stem_count")
+                              delivered_phenotype="stem_count", project=tmp_path)
 
     assert not out_csv.exists()
 
@@ -630,7 +624,8 @@ def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing
     fx.propose(tmp_path, fx.entry("nut", ("cluster_nut_count",)))
     out_csv = tmp_path / "agg.csv"
     with pytest.raises(OperationalizationRefused) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="cluster_nut_count")
+        export_aggregated_csv(_aggregate_rows(), str(out_csv),
+                              delivered_phenotype="cluster_nut_count", project=tmp_path)
 
     assert "0 traits with a confirmed revision deliver" in str(excinfo.value)
     assert "'nut'" in str(excinfo.value) and "cluster_nut_count" in str(excinfo.value)
@@ -647,7 +642,8 @@ def test_a_phenotype_two_confirmed_traits_deliver_refuses_as_ambiguous(
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="stem_count")
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="stem_count",
+                              project=tmp_path)
 
     assert "2 traits with a confirmed revision deliver" in str(excinfo.value)
     assert "second_deliverer" in str(excinfo.value)
@@ -666,19 +662,20 @@ def test_a_revision_states_each_aggregate_kind_it_delivers(delivery_root: Path, 
     ordinal_rows = _aggregate_rows("astringency", measurement_document="ordinal_operating_point")
     ordinal_csv = tmp_path / "ordinal.csv"
     export_aggregated_csv(ordinal_rows, str(ordinal_csv), delivered_phenotype="astringency",
-                          pred_dirs=[ordinal_bucket])
+                          pred_dirs=[ordinal_bucket], project=tmp_path)
     assert ordinal_csv.exists()
 
     count_rows = _aggregate_rows("astringency")
     count_csv = tmp_path / "count.csv"
     with pytest.raises(OperationalizationRefused, match=PER_PLANT_COUNT_AGGREGATE):
-        export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency")
+        export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
+                              project=tmp_path)
     assert not count_csv.exists()
 
     fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"])
     count_bucket = _validated_bucket(tmp_path, "count", trait="astringency")
     export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
-                          pred_dirs=[count_bucket])
+                          pred_dirs=[count_bucket], project=tmp_path)
 
     assert count_csv.exists()
     confirmed = traits.read_trait("astringency", tmp_path).latest_confirmed
@@ -692,7 +689,7 @@ def test_export_detection_csv_refuses_with_no_revision_argument(delivery_root: P
 
     out_csv = tmp_path / "counts.csv"
     with pytest.raises(TypeError, match="'revision'"):
-        export_detection_csv(_count_rows(), str(out_csv))  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to revision
+        export_detection_csv(_count_rows(), str(out_csv), project=tmp_path)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to revision
 
     assert not out_csv.exists()
 
@@ -708,7 +705,7 @@ def test_deliver_per_image_counts_refuses_with_no_trait_argument(
     out_csv = tmp_path / "o.csv"
 
     with pytest.raises(TypeError, match="'trait'"):
-        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv))  # type: ignore[call-arg]
+        itools.deliver_per_image_counts(tmp_path, "m.pt", str(tmp_path), str(out_csv))  # type: ignore[call-arg]
 
     assert not out_csv.exists()
 
@@ -720,6 +717,6 @@ def test_export_aggregated_csv_refuses_with_no_delivered_phenotype_argument(
 
     out_csv = tmp_path / "agg.csv"
     with pytest.raises(TypeError, match="'delivered_phenotype'"):
-        export_aggregated_csv(_aggregate_rows(), str(out_csv))  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to delivered_phenotype
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), project=tmp_path)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to delivered_phenotype
 
     assert not out_csv.exists()

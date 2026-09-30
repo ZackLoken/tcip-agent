@@ -49,12 +49,11 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     from tests._producer_fixtures import admit_over
     from tests._verified_checkpoint_fixtures import finished_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     scope = admit_over(images_dir, labels_dir, subject="leaf").scope
     data = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "num_channels": 3,
             "scope": asdict(scope)}
-    run_dir = finished_run(None, experiment_id="auto-run-28", data=data)
+    run_dir = finished_run(tmp_path, experiment_id="auto-run-28", data=data)
 
     captured: dict = {}
 
@@ -64,7 +63,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
-    res = evaluate_model(run_dir.name, str(images_dir), str(labels_dir))
+    res = evaluate_model(tmp_path, run_dir.name, str(images_dir), str(labels_dir))
     assert "error" not in res, res
 
     dataset = captured["ds"]

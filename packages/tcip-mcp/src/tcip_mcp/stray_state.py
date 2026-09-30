@@ -22,8 +22,8 @@ def _under_normcased(path: Path, root: Path) -> bool:
     return p == r or p.startswith(r + os.sep)
 
 
-def stray_state_files(project_root: "Path | str") -> tuple[Path, ...]:
-    """Every stray file under ``project_root``'s ``.tcip/state``: a path
+def stray_state_files(project: "Path | str") -> tuple[Path, ...]:
+    """Every stray file under ``project``'s ``.tcip/state``: a path
     :func:`~tcip_mcp.tools.bundle.account_for` calls unaccounted, that lies under the state root
     and not under the state root's own ``.tcip`` (its database home).
 
@@ -32,7 +32,7 @@ def stray_state_files(project_root: "Path | str") -> tuple[Path, ...]:
     """
     from tcip_mcp.tools import bundle
 
-    resolved_root = Path(project_root).resolve()
+    resolved_root = Path(project).resolve()
     accounting = bundle.account_for(resolved_root)
     state_root = project_state_dir(resolved_root)
     database_home = state_root / ".tcip"
@@ -68,9 +68,9 @@ def _first_link_on(target: Path, state_root: Path) -> "Path | None":
 
 
 def stray_state_file_refusal(
-    project_root: "Path | str", relative_path: str,
+    project: "Path | str", relative_path: str,
 ) -> "tuple[Path, str | None]":
-    """The reason ``<project_root>/.tcip/state/<relative_path>`` may not be deleted, or ``None``
+    """The reason ``<project>/.tcip/state/<relative_path>`` may not be deleted, or ``None``
     when it is a stray and the deletion may proceed; always paired with the resolved target path.
 
     The target path is joined onto the state root and normalized lexically
@@ -91,7 +91,7 @@ def stray_state_file_refusal(
     from tcip_mcp.registry_paths import is_external_form
     from tcip_mcp.tools import bundle
 
-    resolved_root = Path(project_root).resolve()
+    resolved_root = Path(project).resolve()
     state_root = project_state_dir(resolved_root)
     database_home = state_root / ".tcip"
 

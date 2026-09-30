@@ -122,7 +122,6 @@ function setupDataset() {
       active_subject: "subject_a",
       dataset: {
         ...s.gui.dataset,
-        project_root: "C:/proj",
         dataset_root: "C:/data",
         subject: "subject_a",
         date: "2026-01-01",
@@ -131,8 +130,13 @@ function setupDataset() {
         images_dir: "C:/data/images/2026-01-01",
         annotations_dir: "C:/data/annotations/2026-01-01",
         predictions_dir: null,
+        label_paths: {
+          "img1.jpg": "C:/data/annotations/2026-01-01/img1.json",
+          "img2.jpg": "C:/data/annotations/2026-01-01/img2.json",
+        },
       },
     },
+    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
   }));
 }
 
@@ -241,13 +245,11 @@ describe("AnnotateTab save/load race", () => {
     // ...but the per-image status for the image actually saved is still recorded, scoped to the
     // selected subject, so it cannot mark the image negative under another subject.
     expect(subjectsApi.setImageStatus).toHaveBeenCalledWith(
-      "C:/proj",
       "img1.jpg",
       "partial",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
 
@@ -296,7 +298,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     expect(useStore.getState().user).toBe("breeder");
-    expect(vi.mocked(subjectsApi.setImageStatus).mock.calls[0][7]).toBe("breeder");
+    expect(vi.mocked(subjectsApi.setImageStatus).mock.calls[0][5]).toBe("breeder");
   });
 
   it("never rewrites a confirmed negative to partial, even when the save adds content", async () => {
@@ -856,10 +858,10 @@ describe("AnnotateTab AttributePanel authoring", () => {
     await declareAttribute();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][1]).toEqual({
+    expect(saveSpy.mock.calls[0][0]).toEqual({
       subject_a: { attributes: { size: { type: "categorical", values: ["small", "large"] } } },
     });
-    expect(saveSpy.mock.calls[0][4]).toBeNull(); // no version was ever loaded in this test
+    expect(saveSpy.mock.calls[0][2]).toBeNull(); // no version was ever loaded in this test
     expect(useStore.getState().registry.version).toBe("v2");
     expect(useStore.getState().registry.subjects.subject_a.attributes?.size.values).toEqual([
       "small",
@@ -1133,7 +1135,6 @@ describe("AnnotateTab legend", () => {
     expect(subjectColor("subject_a")).toBe("#123456");
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", "#123456");
 
-    useStore.setState({ bindingGeneration: 1 });
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
@@ -1307,7 +1308,6 @@ describe("Cut tool arming", () => {
 
   it("arming and disarming each schedule a push carrying the current cut_armed value", async () => {
     await renderPolygonCanvas();
-    useStore.setState({ bindingGeneration: 1 });
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
@@ -1615,7 +1615,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
   it("refuses to save locally when the dataset has no annotations directory", async () => {
     useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, annotations_dir: null } },
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, annotations_dir: null, label_paths: {} } },
     }));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1849,25 +1849,23 @@ describe("AnnotateTab labels show on selection or hover only", () => {
   });
 });
 
-describe("AnnotateTab canvas-push binding-presence gate", () => {
-  it("blocks the push and sets canvasBindingMissing when no generation is adopted", async () => {
-    useStore.setState({ bindingGeneration: null });
+describe("AnnotateTab canvas push names its project", () => {
+  it("pushes nothing while the backend has no project open", async () => {
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+    useStore.setState({ openProject: null });
 
     act(() => notifyCanvasStateRequest());
     await flush();
 
     expect(pushSpy).not.toHaveBeenCalled();
-    expect(useStore.getState().canvasBindingMissing).toBe(true);
   });
 
-  it("pushes with the adopted generation and clears canvasBindingMissing", async () => {
-    useStore.setState({ bindingGeneration: 3, canvasBindingMissing: true });
+  it("pushes carrying the open project's id", async () => {
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
@@ -1879,8 +1877,7 @@ describe("AnnotateTab canvas-push binding-presence gate", () => {
     await flush();
 
     expect(pushSpy).toHaveBeenCalled();
-    expect(pushSpy.mock.calls[0][0].binding_generation).toBe(3);
-    expect(useStore.getState().canvasBindingMissing).toBe(false);
+    expect(pushSpy.mock.calls[0][0].project_id).toBe("a1b2c3d4e5f6");
   });
 });
 

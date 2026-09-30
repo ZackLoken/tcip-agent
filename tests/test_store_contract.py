@@ -62,7 +62,6 @@ from tcip_store.file_backend import (
     creation_temp_name,
 )
 from tcip_store.sqlite_backend import SqliteBackend, database_path, encode_parts
-from tcip_web import state as web_state
 from tcip_web.routes import canvas
 from tests._store_worker import (
     BACKEND_ENV,
@@ -183,27 +182,73 @@ def store(request, tmp_path, monkeypatch):
 # ── process lifecycle ───────────────────────────────────────────────────────────
 
 
-def test_close_connections_releases_a_handle_so_the_root_can_be_renamed(store):
-    """``close_connections`` is the seam's one process-lifecycle operation: on a single thread,
-    it releases whatever a prior read opened so the root directory can be renamed out from under
-    the bound backend. This proves the single-threaded contract only, nothing about a connection
-    another thread is mid-statement on; the denial assertion has content only on the sqlite
-    backend under Windows, where CI's own job selects this test by node id.
+def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(store):
+    """``release_root`` releases whatever a prior read of one root opened, on a single thread, so
+    that root can be renamed out from under the bound backend, and leaves another root's handle
+    open. This proves the single-threaded contract only, nothing about a connection another thread
+    is mid-statement on; the denial assertions have content only on the sqlite backend under
+    Windows, where CI's own job selects this test by node id.
     """
     key = store.key(LWW, "before-close")
+    other_root = store.root.parent / f"{store.root.name}-other"
+    other_root.mkdir()
+    other = ts.Key(key.store, str(other_root), key.parts)
     ts.replace(key, {"n": 1})
-    assert ts.read(key) == {"n": 1}
+    ts.replace(other, {"n": 2})
+    assert ts.read(key) == {"n": 1} and ts.read(other) == {"n": 2}
 
     moved = store.root.parent / f"{store.root.name}-moved"
-    if store.name == SQLITE and os.name == "nt":
+    denies_an_open_root = store.name == SQLITE and os.name == "nt"
+    if denies_an_open_root:
         with pytest.raises(OSError):
             os.rename(str(store.root), str(moved))
 
-    ts.close_connections()
+    ts.release_root(store.root)
 
     os.rename(str(store.root), str(moved))
     moved_key = ts.Key(key.store, str(moved), key.parts)
     assert ts.read(moved_key) == {"n": 1}
+    if denies_an_open_root:
+        with pytest.raises(OSError):
+            os.rename(str(other_root), str(other_root.parent / f"{other_root.name}-moved"))
+    assert ts.read(other) == {"n": 2}
+
+
+def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
+    """A release issued while another thread is inside a transaction on the root returns only
+    once that transaction has committed, and the commit lands."""
+    import threading
+
+    if store.name != SQLITE:
+        pytest.skip("the file backend holds no handles for a release to wait on")
+    key = store.key(LWW, "in-flight")
+    ts.replace(key, {"n": 1})
+    inside, finish = threading.Event(), threading.Event()
+    order: list[str] = []
+
+    def hold() -> None:
+        with ts.transaction(key) as txn:
+            inside.set()
+            finish.wait(30)
+            txn.write(key, {"n": 2})
+        order.append("committed")
+
+    def release() -> None:
+        ts.release_root(store.root)
+        order.append("released")
+
+    worker = threading.Thread(target=hold)
+    worker.start()
+    assert inside.wait(30)
+    releaser = threading.Thread(target=release)
+    releaser.start()
+    releaser.join(0.5)
+    assert releaser.is_alive(), "the release returned while a transaction on the root was open"
+    finish.set()
+    worker.join(30)
+    releaser.join(30)
+    assert order == ["committed", "released"]
+    assert ts.read(key) == {"n": 2}
 
 
 # ── atomicity and durability ────────────────────────────────────────────────────
@@ -1804,17 +1849,20 @@ def test_a_write_commits_at_the_synchronous_level_its_store_declares(store):
         relaxed = store.key(RELAXED, "heartbeat")
         durable = store.key(LWW, "durable")
         ts.replace(durable, {"n": 0})
-        conn = backend._connection(str(store.root), (LWW,))
+
+        def synchronous() -> int:
+            with backend._connection(str(store.root), (LWW,)) as conn:
+                return conn.execute("pragma synchronous").fetchone()[0]
 
         backend.levels.clear()
         ts.replace(relaxed, {"n": 1})
         assert backend.levels == ["NORMAL"]
-        assert conn.execute("pragma synchronous").fetchone()[0] == 1
+        assert synchronous() == 1
 
         backend.levels.clear()
         ts.replace(durable, {"n": 1})
         assert backend.levels == ["FULL"]
-        assert conn.execute("pragma synchronous").fetchone()[0] == 2
+        assert synchronous() == 2
     finally:
         backend.close()
         ts.bind(store.backend)
@@ -1904,14 +1952,6 @@ def _stamp_bucket(root: Path) -> Path:
     return dataset_layout.prediction_dir(root, "live", "2026-03-04")
 
 
-def _pin_platform_root(root: Path, monkeypatch) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
-
-
-def _pin_workspace(root: Path, monkeypatch) -> None:
-    monkeypatch.setenv("TCIP_WORKSPACE", str(root))
-
-
 @dataclass(frozen=True)
 class Registered:
     """One registered store: a value of the shape it holds, and how the seam addresses it.
@@ -1927,14 +1967,12 @@ class Registered:
 
     ``relative`` is the path under the root the store is given. ``root_of`` is the root the
     store's own keys hang off, which for the review shards and the experiment members is a
-    directory below that. ``pin`` sets the environment a store's key constructor resolves
-    against, for the stores addressed relative to the platform root or the workspace.
+    directory below that.
     """
 
     golden: object
     key_of: Callable[[Path], ts.Key]
     relative: str
-    pin: Callable[[Path, object], None] | None = None
     root_of: Callable[[Path], Path] = lambda root: root
 
 
@@ -1954,25 +1992,26 @@ def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
 
 
 def _real_selection() -> dict:
-    """The shape ``selection.write_selection`` writes today, called for real into a throwaway
-    directory so this golden cannot drift from the writer silently."""
+    """The record ``selection.write_selection`` writes today, called for real into a throwaway
+    project so this golden cannot drift from the writer silently."""
     from tcip_mcp.pipelines.data.selection import (
-        ClassScope, Sample, Selection, selection_document, write_selection,
+        ClassScope, Sample, Selection, selection_key, write_selection,
     )
 
-    return _construct_via_scratch_backend(lambda scratch: selection_document(write_selection(
-        scratch,
-        Selection(
+    def build(scratch: Path) -> dict:
+        write_selection(scratch, Selection(
             samples=(
-                Sample(member="a_1", source="ü/images/2026-03-04/a_1.jpg",
-                       ground_truth="ü/annotations/2026-03-04/a_1.json",
+                Sample(member="a_1", source=str(scratch / "ü/images/2026-03-04/a_1.jpg"),
+                       ground_truth=str(scratch / "ü/annotations/2026-03-04/a_1.json"),
                        group="a", side="train", confirmation_bucket="bud/2026-03-04",
                        ground_truth_digest="7f3a1b9c2d4e5f60"),
             ),
             scope=ClassScope(subject="bud", id_map={"bud": 0}), seed=42,
             group_by="stem", dataset_fingerprint="7ac1",
-        ),
-    )))
+        ), project=scratch)
+        return ts.read(selection_key(scratch))
+
+    return _construct_via_scratch_backend(build)
 
 
 def _real_cal_holdout_lock() -> dict:
@@ -2013,7 +2052,7 @@ REGISTERED = {
         SUBJECT_REGISTRY_BYTES, dataset_layout.subject_registry_key, "subjects.json"),
     "dataset_identity": Registered(
         DATASET_IDENTITY_BYTES,
-        dataset_layout.dataset_identity_key, "dataset.json", pin=_pin_platform_root),
+        dataset_layout.dataset_identity_key, "dataset.json"),
     "review_verdicts": Registered(
         {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
         lambda root: review_engine.review_verdict_key(
@@ -2028,17 +2067,17 @@ REGISTERED = {
     "model_registry": Registered(
         [{"name": "detector_v1", "sha256": "0" * 64, "metrics": {"val_map50": 0.61}}],
         model_registry.registry_index_key, ".tcip/models/registry.json"),
-    "workspace_active_project": Registered(
-        "currant_bud_valley\n", lambda root: workspace.active_project_key(), ".active",
-        pin=_pin_workspace),
+    "workspace_last_opened": Registered(
+        "3f9a1c7e5b20\n", workspace.last_opened_key, ".tcip/state/last_opened.txt"),
     "gui_snapshot": Registered(
         {"active_tab": "annotate", "dataset": {"subject": "büsch"}},
-        lambda root: web_state.gui_snapshot_key(root), ".tcip/state/gui.json"),
+        web_client.gui_snapshot_key, ".tcip/state/gui.json"),
     "project_status": Registered(
         {"last_activity": "2026-03-04T12:00:00+00:00", "reports_since_last_retrospective": 2},
         lambda root: project_status.project_status_key(root), ".tcip/state/project_status.json"),
     "project_record": Registered(
-        {"site": "north orchard"}, project_record.project_record_key, ".tcip/project.json"),
+        {"id": "3f9a1c7e5b20", "display_name": "Nördliche Reihe", "site": "north orchard"},
+        project_record.project_record_key, ".tcip/project.json"),
     "friction_reports": Registered(
         {"timestamp": "2026-03-04T12:00:00+00:00", "category": "missing_tool", "detail": "ü",
          "context": {}, "user_disagreement": False},
@@ -2053,13 +2092,7 @@ REGISTERED = {
         lambda root: proposal_tools.proposal_staging_key(root, "2026-03-04", PROPOSAL_STEM),
         f".tcip/state/proposals/2026-03-04/{PROPOSAL_STEM}.json"),
     "backend_port": Registered(
-        "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
-        pin=_pin_workspace),
-    "canvas_open_binding": Registered(
-        {"generation": 1, "root": "C:/orchards/bud", "project_name": "currant_bud_valley",
-         "issued_at": "2026-03-04T12:00:00+00:00"},
-        lambda root: web_client.canvas_open_binding_key(),
-        ".tcip/state/canvas_open_binding.json", pin=_pin_workspace),
+        "8765", web_client.backend_port_key, ".tcip/state/web_port.txt"),
     "operating_point_sidecar": Registered(
         {"trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
@@ -2101,7 +2134,6 @@ REGISTERED = {
          "validated": True, "validated_by": None, "failures": [],
          "gate_evidence": {"calibration_implied_scales": {"a_1": 0.27}},
          "trait": "büsch_length", "reference_subject": "reference_object",
-         "reference_csv": "references/scale_reference.csv",
          "produced_at": "2026-03-04T12:00:00+00:00"},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
         "predictions/live/2026-03-04/resolve_scale.json", root_of=_stamp_bucket),
@@ -2173,22 +2205,11 @@ REGISTERED = {
         lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=root),
         f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
     "ray_dashboard": Registered(
-        {"url": "http://127.0.0.1:8265", "pid": 4242, "started_at": "2026-01-01T00:00:00+00:00"},
-        lambda root: hpo.ray_dashboard_key(), ".tcip/state/ray_dashboard.json",
-        pin=_pin_platform_root),
+        {"url": "http://127.0.0.1:8265", "pid": 4242},
+        hpo.ray_dashboard_key, ".tcip/state/ray_dashboard.json"),
     "dataset_registry": Registered(
         [{"id": "a1", "path": "dü", "crop": "currant", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
-    "pending_removal": Registered(
-        {"requested_at": "20260304T120000Z", "requested_by": "user:ü",
-         "archive_path": "C:/orchards/.removed/bud_orchard_valley-20260304T120000Z.zip",
-         "holding_dir": "C:/orchards/.removed/bud_orchard_valley-20260304T120000Z",
-         "external_roots": [], "dependent_projects": []},
-        workspace.pending_removal_key, ".tcip/pending_removal.json"),
-    "pending_rename": Registered(
-        {"requested_at": "20260304T120000Z", "requested_by": "user:ü",
-         "old_name": "bud_orchard_valley", "new_name": "bud_orchard_ridge"},
-        workspace.pending_rename_key, ".tcip/pending_rename.json"),
     "selection": Registered(
         _real_selection(),
         lambda root: selection.selection_key(_split_dir(root)),
@@ -2196,7 +2217,7 @@ REGISTERED = {
     "curated_manifest": Registered(
         {"created": "2026-03-04T00:00:00+00:00", "subject": "bud", "subjects": ["bud"],
          "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,
-                     "rejected_count": 1, "label": "labels/ü_2.json"}]},
+                     "rejected_count": 1}]},
         lambda root: materialize.curated_manifest_key(_curated_dir(root)),
         "curated/curated_manifest.json", root_of=_curated_dir),
     "audit_log": Registered(
@@ -2213,8 +2234,8 @@ REGISTERED = {
         {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
          "checkpoint_sha256": "0" * 64,
          "gate_evidence": [{"conf": 0.1, "f1": 0.4}, {"conf": 0.2, "f1": 0.6}]},
-        lambda root: inference_tools.calibration_curve_key(SWEEP_IDENTITY),
-        f".tcip/artifacts/operating_point_sweep_{SWEEP_IDENTITY}.json", pin=_pin_platform_root),
+        lambda root: inference_tools.calibration_curve_key(root, SWEEP_IDENTITY),
+        f".tcip/artifacts/operating_point_sweep_{SWEEP_IDENTITY}.json"),
     "imagery": Registered(
         IMAGE_BYTES,
         lambda root: dataset_layout.image_key(root, IMAGE_DATE, IMAGE_STEM, IMAGE_EXT),
@@ -2249,7 +2270,7 @@ REGISTERED = {
          "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
          "acknowledged_by": None, "acknowledgment_reason": None,
          "plant_mapping": {
-             "name": "valley", "project_root": "P:/valley", "dataset_id": "ds-1",
+             "name": "valley", "dataset_id": "ds-1",
              "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",
              "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3.0, "source": "stated"},
              "capture_identity": {"2026-03-04": "0" * 16}, "captures_unverified": [],
@@ -2288,7 +2309,7 @@ REGISTERED = {
 CODEC_EXEMPT = {
     "backend_port": "the value is the port text itself",
     "retrospectives": "the value is the markdown document itself",
-    "workspace_active_project": "the value is the active project's name",
+    "workspace_last_opened": "the value is the last-opened project's id",
 }
 """Every registered record or log whose codec is deliberately not the canonical constant.
 
@@ -2357,8 +2378,7 @@ def test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out():
 def test_a_text_store_refuses_a_value_that_is_not_text_and_accepts_one_that_is(store, monkeypatch):
     """Calling str() on whatever arrived would fabricate a value out of its repr, the way a
     JSON default does, so a text store takes text and the caller formats the rest."""
-    _pin_workspace(store.root, monkeypatch)
-    key = web_client.backend_port_key()
+    key = web_client.backend_port_key(store.root)
 
     with pytest.raises(ts.StoreError):
         ts.replace(key, 8765)
@@ -2404,8 +2424,6 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
     descriptor = ts.get_descriptor(name)
     seam_root = tmp_path / "seam"
 
-    if case.pin is not None:
-        case.pin(seam_root, monkeypatch)
     key = case.key_of(seam_root)
     if descriptor.kind == "log":
         ts.append(key, case.golden)

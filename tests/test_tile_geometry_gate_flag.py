@@ -99,13 +99,13 @@ def test_a_native_ratio_bucket_ranks_against_the_other_tiers_and_floors_beside_n
     explicit = _bucket(tmp_path / "b3", _provenance(tile_size=512, tile_size_source="explicit"))
     no_basis = _bucket(tmp_path / "b4", _provenance(tile_size=640, tile_size_source="unavailable"))
 
-    persisted_native = reconcile_tile_size_validity([persisted, native])
+    persisted_native = reconcile_tile_size_validity([persisted, native], project=tmp_path)
     assert persisted_native["validated"] == native_ref
 
-    native_explicit = reconcile_tile_size_validity([native, explicit])
+    native_explicit = reconcile_tile_size_validity([native, explicit], project=tmp_path)
     assert native_explicit["validated"] == VALIDATED_EXPLICIT_GEOMETRY
 
-    native_no_basis = reconcile_tile_size_validity([native, no_basis])
+    native_no_basis = reconcile_tile_size_validity([native, no_basis], project=tmp_path)
     assert native_no_basis["operative"] is True
     assert native_no_basis["validated"] == VALIDATED_FALSE
     assert native_no_basis["unvalidated_buckets"] == [no_basis]
@@ -122,7 +122,7 @@ def test_a_delivery_of_only_native_frame_buckets_reads_back_as_native_never_pers
     a = _bucket(tmp_path / "a", _provenance(tile_size=64, tile_size_source="native_ratio"))
     b = _bucket(tmp_path / "b", _provenance(tile_size=64, tile_size_source="native_ratio"))
 
-    recon = reconcile_tile_size_validity([a, b])
+    recon = reconcile_tile_size_validity([a, b], project=tmp_path)
 
     assert recon["validated"] == native_ref
     assert recon["validated"] != VALIDATED_PERSISTED_GEOMETRY

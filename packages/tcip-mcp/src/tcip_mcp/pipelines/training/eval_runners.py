@@ -4,9 +4,14 @@ its scored result; ``evaluation.py`` keeps the metrics computation itself.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF, DEFAULT_POSTPROCESS, DEFAULT_TILE_BATCH_SIZE,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 
 def _producer_identity(checkpoint) -> dict:
@@ -46,10 +51,11 @@ def run_test_evaluation(
     checkpoint, model, loader, device, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    tiling: dict | None = None, trait: str | None = None,
+    tiling: dict | None = None, trait: TraitEntry | None = None,
     selection_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
-    """Evaluate ``loader`` against ``model`` and return the result (:func:`evaluation_result`).
+    """Evaluate ``loader`` against ``model`` and return the result (:func:`evaluation_result`);
+    ``trait`` is the confirmed entry whose criterion governs the count, as ``evaluate`` reads it.
 
     ``model`` is the caller's own built model, scored at the in-model operating point it was built
     with. ``checkpoint`` is that model's ``VerifiedCheckpoint``
@@ -99,10 +105,10 @@ def run_full_frame_evaluation(
     tile_size: int | None = None, overlap: float | None = None,
     cross_tile_nms: float | None = None,
     max_dets: int | None = None, postprocess: str = DEFAULT_POSTPROCESS, device: str | None = None,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame, matched to
-    full-frame GT.
+    full-frame GT, under ``trait``'s confirmed entry's criterion when given.
 
     Exercises the cross-tile merge and scores against un-fragmented GT. Tile-level
     (``run_test_evaluation`` with ``tiling``) is a diagnostic, never the delivery metric; for a

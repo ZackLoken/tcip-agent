@@ -38,7 +38,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def _propose(project: Path, **kwargs) -> dict:
-    return propose_trait(str(project), _CROSSING, rationale="the breeder's words", **kwargs)
+    return propose_trait(project, _CROSSING, rationale="the breeder's words", **kwargs)
 
 
 # ── the predicate ─────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ def test_a_count_entry_needs_no_registry(tmp_path: Path) -> None:
     """Only a crossing operationalization is checked against a registry; a project with none
     still takes a count entry."""
     result = propose_trait(
-        str(tmp_path), fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT),
+        tmp_path, fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT),
         rationale="the breeder's words")
 
     assert "error" not in result, result
@@ -99,8 +99,8 @@ def test_the_tool_refuses_a_project_registering_two_datasets_with_no_dataset_roo
     dataset_a, dataset_b = tmp_path / "dataset_a", tmp_path / "dataset_b"
     dataset_a.mkdir()
     dataset_b.mkdir()
-    register_dataset(str(dataset_a), "chestnut", project_root=str(project))
-    register_dataset(str(dataset_b), "currant", project_root=str(project))
+    register_dataset(project, str(dataset_a), "chestnut")
+    register_dataset(project, str(dataset_b), "currant")
 
     result = _propose(project)
 
@@ -142,7 +142,7 @@ def test_a_confirmed_crossing_whose_delivered_registry_lost_the_class_refuses_wi
     fx.propose_and_confirm(project, _CROSSING)
 
     with pytest.raises(OperationalizationRefused) as excinfo:
-        confirmed_revision(STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=_WITHOUT_OPEN)
 
     problem = cr.positive_value_problem(_WITHOUT_OPEN, "flower", "open")
@@ -154,7 +154,7 @@ def test_confirming_a_new_revision_does_not_clear_a_live_registry_problem(projec
     fx.propose_and_confirm(project, fx.with_fields(_CROSSING, notes="confirmed again"))
 
     with pytest.raises(OperationalizationRefused):
-        confirmed_revision(STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=_WITHOUT_OPEN)
 
 
@@ -164,7 +164,7 @@ def test_a_confirmed_crossing_whose_registry_still_declares_the_class_delivers(
     revision = fx.propose_and_confirm(project, _CROSSING)
 
     assert confirmed_revision(
-        STATE_CROSSING_DATES, project_root=project, trait=fx.CROSSING_TRAIT,
+        STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
         registry=cr.registry_for_dataset_root(project)) == revision
 
 
@@ -212,7 +212,8 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
 
     def deliver(out: str) -> dict:
         return deliver_phenology_milestones(
-            trait=fx.CROSSING_TRAIT, mapping_name="valley", plants=mapped_plants("valley"),
+            tmp_path, trait=fx.CROSSING_TRAIT, mapping_name="valley",
+            plants=mapped_plants(tmp_path, "valley"),
             predictions_by_date={"2026-02-11": str(bucket)}, output_csv_path=str(tmp_path / out))
 
     res = deliver("out.csv")

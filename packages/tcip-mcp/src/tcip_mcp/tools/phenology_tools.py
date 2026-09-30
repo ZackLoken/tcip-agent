@@ -17,16 +17,20 @@ fraction → crossings).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 
-@mcp.tool()
+@tool()
 @audited
-def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site: str) -> dict:
+def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, crop: str,
+                            site: str) -> dict:
     """Register a plant-locations CSV set under a name that later doors cite instead of file paths.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
@@ -57,14 +61,12 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
     from tcip_store.layout_claims import NAME_SEGMENT
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import platform_state_root
 
     if not NAME_SEGMENT.fullmatch(name):
         return {"error": (
             f"name {name!r} is not lowercase letters, digits and single hyphens "
             f"({NAME_SEGMENT.pattern})")}
 
-    platform_root = platform_state_root()
     missing = [p for p in csv_paths if not Path(p).is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
@@ -80,7 +82,7 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
 
     try:
         record = plant_mapping.register_plant_registry_record(
-            platform_root, name, [Path(p) for p in csv_paths],
+            project, name, [Path(p) for p in csv_paths],
             crop=crop, site=site, registered_by="register_plant_registry",
         )
     except (plant_mapping.NoGeoreferencedPlantsRefusal,
@@ -89,7 +91,6 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
 
     return {
         "name": record["name"],
-        "project_root": str(platform_root),
         "crop": record["crop"],
         "site": record["site"],
         "n_plants": record["n_plants"],
@@ -100,8 +101,9 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
     }
 
 
-@mcp.tool()
+@tool()
 def build_plant_mapping(
+    project: Path,
     name: str,
     images_root: str,
     plant_registry: str,
@@ -114,8 +116,7 @@ def build_plant_mapping(
     Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
     large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
     signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no fabricated
-    "confidence"). The mapping is project state, persisted under the resolved platform state root
-    by ``name``.
+    "confidence"). The mapping is project state, persisted under the project by ``name``.
 
     Args:
         name: The mapping's name within this project (``plant_mapping_key``'s own naming rule). A
@@ -135,9 +136,8 @@ def build_plant_mapping(
             that digest. An uncited rebuild replaces as it always has, ignoring this.
 
     Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not a
-    registered dataset's own ``images/`` directory, naming
-    ``initialize_project``/``activate_project`` when the resolved platform state root carries no
-    project record, and naming ``register_plant_registry`` when ``plant_registry`` names no stored
+    registered dataset's own ``images/`` directory, and naming ``register_plant_registry`` when
+    ``plant_registry`` names no stored
     registry. A name outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits,
     single hyphens) refuses at the door. No capture at all under the requested dates, or captures
     that carry no position this door reads (no GPS EXIF, or a raster/band-group capture), also
@@ -148,7 +148,7 @@ def build_plant_mapping(
     ``False``, refuses naming those events.
 
     Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS distance)
-    plus totals, the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``,
+    plus totals, the mapping's ``name``, the resolved ``dataset_root``,
     ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``),
     ``max_match_distance_m`` (the tolerance's own loosest accepted distance, derived from it
     through ``plant_mapping.match_gates``), and ``unreadable`` (per date, the captures PIL could
@@ -161,14 +161,12 @@ def build_plant_mapping(
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import platform_state_root
 
     if not NAME_SEGMENT.fullmatch(name):
         return {"error": (
             f"name {name!r} is not lowercase letters, digits and single hyphens "
             f"({NAME_SEGMENT.pattern})")}
 
-    platform_root = platform_state_root()
     resolved_images_root = Path(images_root).resolve()
     if not resolved_images_root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
@@ -183,19 +181,20 @@ def build_plant_mapping(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    registry_record = plant_mapping.load_registry(platform_root, plant_registry)
+    registry_record = plant_mapping.load_registry(project, plant_registry)
     if registry_record is None:
         return {"error": (
-            f"plant registry not found: {plant_registry!r} under {platform_root}; register it "
+            f"plant registry not found: {plant_registry!r} under {project}; register it "
             "with register_plant_registry before build_plant_mapping reads it")}
     registry_ref = {"name": plant_registry, "digest": registry_record["digest"]}
-    registry_paths = [Path(e["path"]) for e in plant_mapping.registry_csv_entries(registry_record)]
+    registry_paths = [Path(e["path"])
+                      for e in plant_mapping.registry_csv_entries(registry_record, project)]
 
     try:
         build = plant_mapping.build_mapping(
             resolved_images_root, registry_paths,
             name=name, dataset_root=candidate, dataset_id=identity["id"],
-            project_root=platform_root, built_by="build_plant_mapping",
+            project=project, built_by="build_plant_mapping",
             plant_registry=registry_ref, dates=dates, nn_tolerance_m=nn_tolerance_m,
         )
     except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal,
@@ -203,7 +202,7 @@ def build_plant_mapping(
         return {"error": str(exc)}
 
     try:
-        plant_mapping.persist_mapping(build, platform_root, name, supersede=supersede)
+        plant_mapping.persist_mapping(build, project, name, supersede=supersede)
     except AuditEntryNotWritten as exc:
         return {"error": str(exc)}
     except plant_mapping.MappingRebuildRefusal as exc:
@@ -212,7 +211,6 @@ def build_plant_mapping(
     summary = build.summary()
     return {
         "name": name,
-        "project_root": str(platform_root),
         "dataset_root": str(candidate),
         "unreadable": build.unreadable,
         "n_dates": summary["totals"]["n_dates"],
@@ -286,13 +284,14 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
                          tolerance=iou_threshold)
 
 
-def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str | None,
+def _classification_items(gt_dir: str, pred_dir: str, *, trait: TraitEntry, subject: str | None,
                           attribute: str | None, positive_value: str) -> list[dict]:
     """Build classification calibration/holdout items for one split from paired GT + prediction
     dirs.
 
     For every ``<stem>.json`` present in both dirs, matches GT annotations against predictions by
-    the trait's own localization criterion (``_match_gt_to_predictions``) and yields one item per
+    ``trait``'s (a confirmed entry's) own localization criterion (``_match_gt_to_predictions``)
+    and yields one item per
     matched pair: ``{"image_id": stem, "is_true_positive": <the GT's attribute value ==
     positive_value>, "is_pred_positive": <the prediction's attribute value == positive_value>,
     "bbox": <the GT box, x1,y1,x2,y2>}``. The class space's subject scopes the GT side, and its attribute names
@@ -359,7 +358,7 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     gt_boxes = {f: [a for a in instances(json_io.read_annotations(str(f)))
                     if a.subject == subject and isinstance(a.geometry, BBox)] for f in paired}
     per_image = [records_from_annotation(gt_boxes[f], [], width=0, height=0)[1] for f in paired]
-    criterion = resolve_match_criterion(trait_name, per_image)
+    criterion = resolve_match_criterion(trait, per_image)
     kind = criterion["kind"]
     center_match_tolerance = criterion.get("tolerance")
     iou_threshold = criterion.get("iou_threshold", 0.5)
@@ -415,8 +414,9 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
     return None
 
 
-@mcp.tool()
+@tool()
 def calibrate_classifier_operating_point(
+    project: Path,
     trait_name: str,
     calibration_gt_dir: str,
     calibration_pred_dir: str,
@@ -455,7 +455,8 @@ def calibrate_classifier_operating_point(
         split (same stems).
         holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out
         split.
-        output_dir: Where to write ``classifier_operating_point.json``.
+        output_dir: Where to write ``classifier_operating_point.json``; a relative path is under
+            the project.
         dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
             record's reference locations are written against it, and it is the root a reader
             resolves them from. Refuses when either GT dir's own layout places it under a different
@@ -471,7 +472,7 @@ def calibrate_classifier_operating_point(
     from tcip_mcp.traits import TraitUnknownError
 
     try:
-        spec = latest_confirmed(trait_name).entry
+        spec = latest_confirmed(trait_name, project).entry
     except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
     if not spec.positive_value:
@@ -486,15 +487,13 @@ def calibrate_classifier_operating_point(
 
     try:
         cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir,
-                                          trait_name=trait_name, subject=subject,
+                                          trait=spec, subject=subject,
                                           attribute=attribute, positive_value=spec.positive_value)
         hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir,
-                                           trait_name=trait_name, subject=subject,
+                                           trait=spec, subject=subject,
                                            attribute=attribute, positive_value=spec.positive_value)
     except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
-
-    from tcip_mcp.project_paths import resolve_output_path
 
     from tcip_mcp.pipelines.resolution import (
         ProducerDiffers, open_validation, seal_validation, stamped_producer, write_sidecar,
@@ -511,8 +510,8 @@ def calibrate_classifier_operating_point(
         "calibration_items": cal_items, "holdout_items": hold_items,
         "calibration_labels_dir": calibration_gt_dir}
     result = resolve_classifier_operating_point(
-        trait_name, experiment_id=experiment_id, **resolver_inputs)
-    out = resolve_output_path(output_dir)
+        trait_name, project=project, experiment_id=experiment_id, **resolver_inputs)
+    out = Path(project, output_dir)
     stamp = {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_value}},
@@ -526,7 +525,7 @@ def calibrate_classifier_operating_point(
     }
     if result["passed"]:
         draft = open_validation(
-            document="classifier_operating_point",
+            project=project, document="classifier_operating_point",
             # Named off the function this door reported from, so record and report share one gate.
             evidence={"resolver": resolve_classifier_operating_point.__name__,
                       "inputs": resolver_inputs},
@@ -541,7 +540,7 @@ def calibrate_classifier_operating_point(
         )
         stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
                                    stamp_body=stamp)
-    write_sidecar(out, stamp, "classifier_operating_point")
+    write_sidecar(out, stamp, "classifier_operating_point", project=project)
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
@@ -553,8 +552,9 @@ def calibrate_classifier_operating_point(
     }
 
 
-@mcp.tool()
+@tool()
 def deliver_phenology_milestones(
+    project: Path,
     trait: str,
     mapping_name: str,
     predictions_by_date: dict[str, str],
@@ -579,8 +579,7 @@ def deliver_phenology_milestones(
         predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image JSON prediction
             files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
-            ``<phenology_prefix>_phenology.csv``). A relative path resolves against the platform
-            state root.
+            ``<phenology_prefix>_phenology.csv``); a relative path is under the project.
         plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) this
             delivery is for: the CSV carries exactly one row per id, in this order, and a plant the
             mapping never covers ships as a row with no observed dates. Required; an empty list
@@ -611,14 +610,13 @@ def deliver_phenology_milestones(
     """
     from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
     from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
-    from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import STATE_CROSSING_DATES, TraitUnknownError
 
-    output_csv_path = str(resolve_output_path(output_csv_path))
+    output_csv_path = str(Path(project, output_csv_path))
     # Ahead of the positive class id, so an unstated trait's class-id failure never names the wrong problem.
     try:
         revision = confirmed_revision(
-            STATE_CROSSING_DATES, project_root=None, trait=trait,
+            STATE_CROSSING_DATES, project=project, trait=trait,
             registry=registry_for_pred_dirs(list(predictions_by_date.values())))
     except (TraitUnknownError, RegistryError, OperationalizationRefused) as e:
         return {"error": str(e), "n_plants": 0}
@@ -626,12 +624,10 @@ def deliver_phenology_milestones(
     pos = spec.positive_value
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import platform_state_root
 
-    platform_root = platform_state_root()
     try:
         mapping_build, verified = plant_mapping.resolve_delivery_mapping(
-            platform_root, mapping_name, predictions_by_date)
+            project, mapping_name, predictions_by_date)
     except plant_mapping.MappingDeliveryRefusal as e:
         return {"error": str(e), "n_plants": 0}
 
@@ -680,17 +676,18 @@ def deliver_phenology_milestones(
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
     # (stamped by run_inference), with no caller floor to reconcile: this door takes no assertion.
-    recon = reconcile_operating_point_validity(list(predictions_by_date.values()), trait=trait)
+    recon = reconcile_operating_point_validity(list(predictions_by_date.values()),
+                                               project=project, trait=trait)
     op_state = recon["validated"]
 
     # The tile scale is the second gating dimension of the same count operating point: a tile edge
     # with no real basis at all is as untrustworthy as an uncalibrated conf.
-    tile_recon = reconcile_tile_size_validity(list(predictions_by_date.values()))
+    tile_recon = reconcile_tile_size_validity(list(predictions_by_date.values()), project=project)
 
     # The classifier's validity is read the same way, from classifier_operating_point.json, never a
     # caller-asserted string. No producer stamp anywhere -> floors to unvalidated, same as
     # the count dimension with no on-disk backing.
-    classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
+    classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [], project=project)
     classifier_state = classifier_recon["validated"]
 
     # Bind the classifier stamp to this delivery: unlike the count dimension (which reconciles from
@@ -701,7 +698,8 @@ def deliver_phenology_milestones(
     # with what's actually being delivered here; a foreign/unregistered checkpoint calibration
     # (experiment_id=None) is deliberately not rejected for lacking one to compare against.
     classifier_state, classifier_binding_note = bind_classifier_validity(
-        classifier_state, classifier_pred_dirs, list(predictions_by_date.values()), trait=trait,
+        classifier_state, classifier_pred_dirs, list(predictions_by_date.values()),
+        project=project, trait=trait,
     )
 
     # A delivered phenotype needs both dimensions validated; this tool passes no acknowledgment.
@@ -755,8 +753,6 @@ def deliver_phenology_milestones(
     except ProducerDiffers as exc:
         return {"error": str(exc), "n_plants": len(rows)}
 
-    from tcip_mcp.project_paths import platform_state_root
-
     cells = phenology.write_phenology_csv(
         "deliver_phenology_milestones", rows, Path(output_csv_path), revision,
         flags=flags, acknowledgment=None,
@@ -768,7 +764,7 @@ def deliver_phenology_milestones(
             },
         },
         producer=producer, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=predictions_by_date, project_root=platform_state_root(),
+        predictions_by_date=predictions_by_date, project=project,
         plant_mapping=disclosure)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}

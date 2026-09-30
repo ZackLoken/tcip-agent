@@ -25,6 +25,7 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.model_registry import ModelRegistry
 from tests import _trait_fixtures as fx
+from tests._web_fixtures import new_project
 
 PY_EXE = sys.executable
 
@@ -256,9 +257,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
         fixture_data_dir(root, "exp1"),
         model_source={**BUILT_DETECTOR, "source_files": ["agent_helper.py"]}),
         experiment_id="exp1")
-    from tcip_mcp.project_record import record_site
-
-    record_site(str(root), "north orchard")
+    new_project(root)
 
     res = _run(root)
     assert res.returncode == 1  # warning only, no error
@@ -266,8 +265,6 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
 
 
 def test_doctor_clean_project_exits_zero(tmp_path):
-    from tcip_mcp.project_record import record_site
-
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
     ann = root / "annotations" / "d"
@@ -278,7 +275,7 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     json_io.write_annotations(
         ann / "IMG_A.json",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
-    record_site(str(root), "north orchard")  # a clean project also carries a site record
+    new_project(root)
     res = _run(root)
     assert res.returncode == 0, res.stdout
 
@@ -500,11 +497,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path):
 
 
 def _leaf_project(tmp_path: Path) -> Path:
-    from tcip_mcp.project_record import record_site
-
-    root = _layout_project(tmp_path, "2026-03-04")
-    record_site(str(root), "north orchard")
-    return root
+    return new_project(_layout_project(tmp_path, "2026-03-04"))
 
 
 def test_doctor_is_silent_on_a_confirmed_latest_revision(tmp_path: Path):
@@ -568,11 +561,10 @@ def test_doctor_reports_a_version_refused_trait_record_without_aborting(tmp_path
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     """A damaged record is a check that could not run, not a clean project: an error, and exit 2."""
-    from tcip_mcp.project_record import project_record_key, record_site
+    from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    root = _layout_project(tmp_path, "2026-03-04")
-    record_site(str(root), "north orchard")
+    root = new_project(_layout_project(tmp_path, "2026-03-04"))
     key = project_record_key(str(root))
     # A genuinely undecodable byte string, written under the record's own key, so the finding
     # is the store's own decode error rather than "not a site record".
@@ -647,9 +639,7 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     baselines.mkdir()
     json_io.write_annotations(baselines / "IMG_B.json", [], 48, 32, keep_empty=True)
     json_io.write_annotations(baselines / "IMG_D.json", [], 48, 32, keep_empty=True)
-    from tcip_mcp.project_record import record_site
-
-    record_site(str(root), "north orchard")  # a clean project also carries a site record
+    new_project(root)
 
     res = _run(root)
     assert res.returncode == 0, res.stdout

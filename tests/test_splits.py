@@ -270,31 +270,6 @@ def test_resolve_locked_cal_holdout_split_force_redraw_records_history(tmp_path)
     assert third == second
 
 
-def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
-    """A locked split belongs to the dataset it was drawn over, not to the adopted project.
-
-    ``activate_project`` repins the platform state root inside a live process. A lock scoped to
-    that root reads as absent once it moves, and the next call cuts a fresh split for the same
-    identity, which is the silent re-cut this lock exists to prevent.
-    """
-    dataset_root = tmp_path / "ds"
-    dataset_root.mkdir()
-    stems = _grouped(8)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
-    first = resolve_locked_cal_holdout_split(
-        stems, identity_hash="repin-test", scope_root=dataset_root, seed=1)
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
-    after = resolve_locked_cal_holdout_split(
-        stems, identity_hash="repin-test", scope_root=dataset_root, seed=2, group_by="stem")
-
-    assert after["calibration"] == first["calibration"]
-    assert after["holdout"] == first["holdout"]
-    # The lock was read, not redrawn: the declared policy is reported as diverging from it.
-    assert after["policy_divergence"]["locked"]["seed"] == 1
-    assert ts.exists(cal_holdout_lock_key("repin-test", scope_root=dataset_root))
-
-
 # --- spatial_strip_split ---
 
 def _kept_tiles(split, width, height):

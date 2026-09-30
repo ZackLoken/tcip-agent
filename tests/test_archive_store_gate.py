@@ -76,7 +76,7 @@ def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
 
-    result = archive_project(str(root), str(tmp_path / "bundle.zip"))
+    result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
@@ -94,7 +94,7 @@ def test_a_project_whose_files_are_current_archives(tmp_path):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
 
-    result = archive_project(str(root), str(tmp_path / "bundle.zip"))
+    result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     assert (tmp_path / "bundle.zip").is_file()
@@ -124,7 +124,7 @@ def test_a_project_written_during_the_copy_takes_its_own_output_back(tmp_path, m
             return counters
 
         monkeypatch.setattr(project_tools, "_database_counters", moving)
-        result = archive_project(str(root), str(tmp_path / "bundle.zip"))
+        result = archive_project(root, str(tmp_path / "bundle.zip"))
         del backend
 
     assert "error" in result
@@ -140,7 +140,7 @@ def test_a_file_that_is_not_a_database_refuses_the_archive_rather_than_traceback
     (root / ".tcip").mkdir(parents=True, exist_ok=True)
     (root / ".tcip" / "store.db").write_bytes(b"not a database, just some bytes\n")
 
-    result = archive_project(str(root), str(tmp_path / "bundle.zip"))
+    result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" in result
     assert "not a SQLite database" in result["error"]
@@ -154,7 +154,7 @@ def test_no_database_file_travels_in_the_bundle(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
-    archive_project(str(root), str(tmp_path / "bundle.zip"))
+    archive_project(root, str(tmp_path / "bundle.zip"))
 
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
         names = zf.namelist()
@@ -168,28 +168,18 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
     """The whole round trip the gate exists for: rows out to files, files into a bundle, bundle
     into a fresh directory, and that directory adopted back into a database with the human's
     negative still saying negative.
-
-    The archive and the import take separate platform roots. An audited call records under the
-    root its process is pinned to, so one platform root written through both backends would be
-    the mixed binding the ownership rails refuse, which is not the subject here.
     """
     from tcip_store.adoption import adopt_root
     from tcip_store.layout_claims import ROOT
 
     root = _project(tmp_path)
-    platform_database = tmp_path / "platform_database"
-    platform_files = tmp_path / "platform_files"
-    platform_database.mkdir()
-    platform_files.mkdir()
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
-    archive_project(str(root), str(tmp_path / "bundle.zip"))
+    archive_project(root, str(tmp_path / "bundle.zip"))
 
     restored = tmp_path / "restored"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_files))
     with bound(FileBackend()):
         assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
@@ -216,7 +206,7 @@ def test_a_render_cache_and_hash_cache_are_not_bundled_and_are_counted(tmp_path)
     (root / ".tcip" / "state" / "image_hash_cache.json").write_text("{}", encoding="utf-8")
     (root / "an_unbundled_stray.txt").write_text("stray", encoding="utf-8")
 
-    result = archive_project(str(root), str(tmp_path / "bundle.zip"))
+    result = archive_project(root, str(tmp_path / "bundle.zip"))
 
     assert "error" not in result
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
@@ -230,11 +220,12 @@ def test_a_render_cache_and_hash_cache_are_not_bundled_and_are_counted(tmp_path)
 def test_the_tcip_bundle_carries_a_retrospective(tmp_path):
     """A retrospective is prose the platform writes and every reader of it reads it as a file,
     so a bundle that drops it drops the project's own account of itself."""
-    root = _project(tmp_path)
-    (root / ".tcip" / "retrospectives").mkdir(parents=True)
-    (root / ".tcip" / "retrospectives" / "session.md").write_text("what happened", encoding="utf-8")
+    from tcip_mcp.tools.meta_tools import write_retrospective
 
-    archive_project(str(root), str(tmp_path / "bundle.zip"))
+    root = _project(tmp_path)
+    write_retrospective(root, "session", task="a task", worked="what happened", did_not_work="")
+
+    archive_project(root, str(tmp_path / "bundle.zip"))
 
     with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
         names = zf.namelist()

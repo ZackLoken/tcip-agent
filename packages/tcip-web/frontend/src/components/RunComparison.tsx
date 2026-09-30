@@ -184,7 +184,7 @@ export function RunComparison({
     setSeriesByRun({});
     if (!projectRoot) return;
     const stops = marked.map(({ experimentId }) =>
-      openTrainingStream(projectRoot, experimentId, (msg) => {
+      openTrainingStream(experimentId, (msg) => {
         if (msg.type !== "metric" || !msg.row) return;
         setSeriesByRun((prev) => ({
           ...prev,

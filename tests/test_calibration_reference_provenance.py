@@ -80,19 +80,21 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-def _calibrate(labels_dir, images_dir):
+def _calibrate(project, labels_dir, images_dir):
     import tcip_mcp.pipelines.calibration as calibration
     from tests._regime_fixtures import stub_pass
 
     return calibration.calibrate_operating_point(
         stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=0, holdout_ratio=0.5)
+        project=project, group_by="stem", seed=0, holdout_ratio=0.5)
 
 
-def _classification_items(gt_dir, pred_dir):
+def _classification_items(project, gt_dir, pred_dir):
+    from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.tools.phenology_tools import _classification_items
 
-    return _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    return _classification_items(str(gt_dir), str(pred_dir),
+                                 trait=latest_confirmed("bud_opening", project).entry,
                                  subject="bud", attribute="state", positive_value="open")
 
 
@@ -106,7 +108,7 @@ def test_detection_calibration_refuses_a_reference_of_the_models_own_predictions
         tmp_path / "ds", stems, lambda s: [_prediction(), _prediction(box=(15, 15, 25, 25))])
 
     with pytest.raises(ValueError) as exc:
-        _calibrate(labels_dir, images_dir)
+        _calibrate(tmp_path, labels_dir, images_dir)
 
     message = str(exc.value)
     assert "16 of 16 annotations" in message  # the whole reference, counted, not a sampled subset
@@ -123,7 +125,7 @@ def test_classifier_calibration_refuses_a_gt_dir_of_the_models_own_predictions(t
                                         lambda s: [_prediction(subject="open")])
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(gt_dir, pred_dir)
+        _classification_items(tmp_path, gt_dir, pred_dir)
 
     assert str(gt_dir) in str(exc.value)
     assert "measures the model against itself" in str(exc.value)
@@ -139,7 +141,7 @@ def test_the_classifier_tool_reports_an_inadmissible_reference_as_a_refusal(tmp_
                                         lambda s: [_prediction(subject="open")])
 
     result = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="state",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="state",
         calibration_gt_dir=str(gt_dir), calibration_pred_dir=str(pred_dir),
         holdout_gt_dir=str(gt_dir), holdout_pred_dir=str(pred_dir),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path / "gt"))
@@ -155,7 +157,7 @@ def test_a_mixed_reference_refuses_whole_rather_than_calibrating_on_its_clean_su
         lambda s: [_hand_annotation()] + ([_prediction()] if s == "src0_0_0" else []))
 
     with pytest.raises(ValueError, match="1 of 9 annotations"):
-        _calibrate(labels_dir, images_dir)
+        _calibrate(tmp_path, labels_dir, images_dir)
 
 
 # --- the reference reads refuse ground truth an agent authored and nobody ruled on ------------
@@ -169,7 +171,7 @@ def test_detection_calibration_refuses_ground_truth_an_agent_authored_that_nobod
         lambda s: [_hand_annotation(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00")])
 
     with pytest.raises(ValueError) as exc:
-        _calibrate(labels_dir, images_dir)
+        _calibrate(tmp_path, labels_dir, images_dir)
 
     message = str(exc.value)
     assert "8 of 8 annotations" in message
@@ -200,7 +202,7 @@ def test_one_agent_authored_record_refuses_the_whole_reference(tmp_path):
                                           if s == "src0_0_0" else []))
 
     with pytest.raises(ValueError, match="1 of 9 annotations"):
-        _calibrate(labels_dir, images_dir)
+        _calibrate(tmp_path, labels_dir, images_dir)
 
 
 # --- the rail's third arm: a rule-admitted record with no person's sign-off, hand-written
@@ -257,22 +259,25 @@ def test_a_calibrations_lock_draw_leaves_its_one_receipt_and_a_reuse_none(tmp_pa
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _reference(tmp_path / "ds", stems, lambda s: [_hand_annotation()])
-    keys = dict.fromkeys([audit_log_key(), audit_log_key(tmp_path / "ds"), audit_log_key(labels_dir)])
+    keys = dict.fromkeys([audit_log_key(tmp_path), audit_log_key(tmp_path / "ds"),
+                          audit_log_key(labels_dir)])
 
     def drawn() -> list[dict]:
         return [row for key in keys for row in ts.read_log(key).records
                 if row["tool"] == "calibration_holdout_drawn"]
 
-    _calibrate(labels_dir, images_dir)
+    _calibrate(tmp_path, labels_dir, images_dir)
     (row,) = drawn()
     assert row["old_membership"] is None
     assert sorted(row["new_membership"]["calibration"] + row["new_membership"]["holdout"]) == stems
 
-    _calibrate(labels_dir, images_dir)
+    _calibrate(tmp_path, labels_dir, images_dir)
     assert len(drawn()) == 1
 
 
-def test_a_calibration_curves_first_write_leaves_one_receipt_and_an_identical_rewrite_none():
+def test_a_calibration_curves_first_write_leaves_one_receipt_and_an_identical_rewrite_none(
+    tmp_path,
+):
     """The curve is kept under its own body's identity: the first write is an act with its one
     receipt, and keeping the same body again writes nothing and leaves no line."""
     import tcip_store as ts
@@ -284,17 +289,19 @@ def test_a_calibration_curves_first_write_leaves_one_receipt_and_an_identical_re
             "gate_evidence": {"conf": [0.1, 0.2]}}
 
     def receipts() -> list[dict]:
-        return [r for r in ts.read_log(audit_log_key()).records
+        return [r for r in ts.read_log(audit_log_key(tmp_path)).records
                 if r["tool"] == "calibration_curve_written"]
 
-    identity = keep_calibration_curve(body)
-    assert ts.read(calibration_curve_key(identity)) == body
+    identity = keep_calibration_curve(tmp_path, body)
+    assert ts.read(calibration_curve_key(tmp_path, identity)) == body
     assert [r["arguments"]["calibration_evidence_key"] for r in receipts()] == [identity]
-    assert keep_calibration_curve(dict(body)) == identity
+    assert keep_calibration_curve(tmp_path, dict(body)) == identity
     assert len(receipts()) == 1
 
 
-def test_two_concurrent_first_writes_of_one_curve_leave_one_record_and_one_receipt(monkeypatch):
+def test_two_concurrent_first_writes_of_one_curve_leave_one_record_and_one_receipt(
+    tmp_path, monkeypatch,
+):
     """Two calibrations keeping one body at once write it once: the write is create-only, so the
     second is the no-op an identical rewrite already is. An existence check ahead of the write is
     held open here until both callers have made it, the window two first writes share."""
@@ -318,17 +325,18 @@ def test_two_concurrent_first_writes_of_one_curve_leave_one_record_and_one_recei
 
     monkeypatch.setattr(inference_tools.store, "exists", exists_then_wait)
     identities: list[str] = []
-    threads = [threading.Thread(target=lambda: identities.append(keep_calibration_curve(body)))
-               for _ in range(2)]
+    threads = [threading.Thread(
+        target=lambda: identities.append(keep_calibration_curve(tmp_path, body)))
+        for _ in range(2)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(10)
 
     assert len(set(identities)) == 1 and len(identities) == 2
-    assert ts.read(calibration_curve_key(identities[0])) == body
+    assert ts.read(calibration_curve_key(tmp_path, identities[0])) == body
     assert [r["arguments"]["calibration_evidence_key"]
-            for r in ts.read_log(audit_log_key()).records
+            for r in ts.read_log(audit_log_key(tmp_path)).records
             if r["tool"] == "calibration_curve_written"] == identities[:1]
 
 
@@ -339,7 +347,7 @@ def test_hand_annotated_ground_truth_still_calibrates(tmp_path):
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _reference(tmp_path / "ds", stems, lambda s: [_hand_annotation()])
 
-    bundle, dataset_hash, n_excluded, _evidence = _calibrate(labels_dir, images_dir)
+    bundle, dataset_hash, n_excluded, _evidence = _calibrate(tmp_path, labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
     assert dataset_hash and n_excluded == 0
@@ -353,7 +361,7 @@ def test_ground_truth_a_person_authored_still_calibrates(tmp_path):
         lambda s: [_hand_annotation(created_by="user:breeder",
                                     created_at="2026-01-01T00:00:00+00:00")])
 
-    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(tmp_path, labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
 
@@ -368,7 +376,7 @@ def test_a_prediction_a_reviewer_accepted_still_calibrates(tmp_path):
                                     accepted_by="user:breeder",
                                     accepted_at="2026-01-02T00:00:00+00:00")])
 
-    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(tmp_path, labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
 
@@ -382,7 +390,7 @@ def test_a_rule_admitted_record_with_a_persons_sign_off_still_calibrates(tmp_pat
                                     accepted_at="2026-01-02T00:00:00+00:00",
                                     accepted_by_rule="exp-1:0123456789abcdef")])
 
-    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(tmp_path, labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
 
@@ -412,7 +420,7 @@ def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction
         lambda s: [_prediction(box=(2, 2, 12, 12), state="open"),
                    _prediction(box=(16, 16, 26, 26), state="closed")])
 
-    items = _classification_items(gt_dir, pred_dir)
+    items = _classification_items(tmp_path, gt_dir, pred_dir)
 
     assert len(items) == 4  # two matched instances per image, both images
     assert {i["is_true_positive"] for i in items} == {True, False}
@@ -420,7 +428,7 @@ def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction
 
 # --- the conf-floor mismatch travels to the delivery surface without becoming a gate ----------
 
-def _floor_mismatched_bundle():
+def _floor_mismatched_bundle(project):
     """A reference that passes its held-out gate while its own lowest score sits far above the
     floor the calibration asserts it was staged at."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -438,7 +446,8 @@ def _floor_mismatched_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9),
         "slicing": None, "staged_conf_floor": 0.001,
     }
-    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
+    return resolve_operating_point("bud_opening", project=project, experiment_id=None,
+                                   **inputs), inputs
 
 
 class _OneDetectionStub(_CalStub):
@@ -464,12 +473,11 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _OneDetectionStub())
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     image = tmp_path / "capture.png"
     _save_png(image)
     ckpt = foreign_checkpoint(tmp_path)
     return run_inference_verified(
-        str(ckpt), images_dir=str(tmp_path), device="cpu", tile=False,
+        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu", tile=False,
         trait="bud_opening", calibration_labels_dir=str(tmp_path))
 
 
@@ -478,7 +486,7 @@ def test_a_conf_floor_mismatch_reaches_the_delivered_issues_without_changing_the
 ):
     """The mismatch is provenance about the reference, not a reason to refuse: it has to be
     readable at the delivery surface, and the run it describes still validates."""
-    bundle, inputs = _floor_mismatched_bundle()
+    bundle, inputs = _floor_mismatched_bundle(tmp_path)
     assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is True
     assert "conf_floor_mismatch" not in (bundle.get("conf").gate_evidence["failures"] or [])
 
@@ -507,7 +515,7 @@ def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkey
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "slicing": None, "staged_conf_floor": 0.01,
     }
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
     assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is False
 
     r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))

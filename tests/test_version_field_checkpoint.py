@@ -33,7 +33,7 @@ def _bespoke_checkpoint(path: Path) -> str:
 def _register(tmp_path: Path, ckpt_path: str, name: str) -> None:
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(name=name, checkpoint_path=ckpt_path, config={}, project_path=str(tmp_path))
+    result = register_model(name=name, checkpoint_path=ckpt_path, config={}, project=tmp_path)
     assert "error" not in result, result
 
 
@@ -43,5 +43,5 @@ def test_a_version_one_checkpoint_loads_through_the_platforms_own_registration(t
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     _register(tmp_path, ckpt, "version-one-model")
 
-    verified = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    verified = load_registered_checkpoint(ckpt, project=tmp_path)
     assert "model_state_dict" in verified.payload

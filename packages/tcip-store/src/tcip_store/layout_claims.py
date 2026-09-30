@@ -257,8 +257,8 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "ray_dashboard": Claim(ROOT, (_named(".tcip", "state", name="ray_dashboard", suffix=".json"),)),
     "backend_port": Claim(WORKSPACE, (_named(".tcip", "state", name="web_port", suffix=".txt"),)),
-    "canvas_open_binding": Claim(
-        WORKSPACE, (_named(".tcip", "state", name="canvas_open_binding", suffix=".json"),)
+    "workspace_last_opened": Claim(
+        WORKSPACE, (_named(".tcip", "state", name="last_opened", suffix=".txt"),)
     ),
     "proposal_staging": Claim(
         ROOT,
@@ -270,8 +270,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "model_registry": Claim(ROOT, (_named(".tcip", "models", name="registry", suffix=".json"),)),
     "dataset_registry": Claim(ROOT, (_named(".tcip", name="datasets", suffix=".json"),)),
     "project_record": Claim(ROOT, (_named(".tcip", name="project", suffix=".json"),)),
-    "pending_removal": Claim(ROOT, (_named(".tcip", name="pending_removal", suffix=".json"),)),
-    "pending_rename": Claim(ROOT, (_named(".tcip", name="pending_rename", suffix=".json"),)),
     "audit_log": Claim(ROOT, (_named(".tcip", name="audit", suffix=".jsonl"),)),
     "learning_capture": Claim(ROOT, (_named(".tcip", name="learning_capture", suffix=".jsonl"),)),
     "friction_reports": Claim(ROOT, (_rooted(".tcip", "reports", suffix=".json"),)),
@@ -322,7 +320,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "delivery_events": Claim(
         STATE, ((Constant("delivery_events"), Patterned(ANY, tail=".json")),)
     ),
-    "workspace_active_project": Claim(WORKSPACE, ((Patterned(literal(".active")),),)),
     "selection": Claim(SPLITS, (_named(name="selection", suffix=".json"),)),
     "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
     "operating_point_sidecar": Claim(

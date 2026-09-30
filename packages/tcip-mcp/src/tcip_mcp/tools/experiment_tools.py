@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from tcip_mcp.server import mcp
+from pathlib import Path
+
+from tcip_mcp.server import tool
 
 
-@mcp.tool()
+@tool()
 def get_experiment(
-    experiment_id: str, view: str = "full",
+    project: Path, experiment_id: str, view: str = "full",
     metrics_limit: int | None = None, metrics_offset: int = 0,
 ) -> dict:
     """Read one run's directory.
@@ -34,14 +36,15 @@ def get_experiment(
         if metrics_limit is not None or metrics_offset != 0:
             return {"error": "metrics_limit/metrics_offset apply only to view='full'; "
                              "view='lineage' has no metrics rows to page."}
-        return _lineage(experiment_id)
+        return _lineage(experiment_id, project=project)
     if view != "full":
         return {"error": f"Invalid view: {view!r} (expected 'full' or 'lineage')"}
-    return _get(experiment_id, metrics_limit=metrics_limit, metrics_offset=metrics_offset)
+    return _get(experiment_id, project=project, metrics_limit=metrics_limit,
+                metrics_offset=metrics_offset)
 
 
-@mcp.tool()
-def list_experiments(launched_only: bool = False) -> dict:
+@tool()
+def list_experiments(project: Path, launched_only: bool = False) -> dict:
     """Enumerate every run directory of the project: a training run and a calibration run of a
     checkpoint no run produced alike. Use this to rediscover the project's runs after a session is
     lost, before reaching for ``get_experiment`` (one run's full detail).
@@ -59,8 +62,8 @@ def list_experiments(launched_only: bool = False) -> dict:
     if launched_only:
         from tcip_mcp.tools.training_tools import _all_training_runs
 
-        return {"runs": _all_training_runs()}
+        return {"runs": _all_training_runs(project)}
 
     from tcip_mcp.experiments import list_experiments as _list
 
-    return {"experiments": _list()}
+    return {"experiments": _list(project)}

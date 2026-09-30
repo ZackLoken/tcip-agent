@@ -18,14 +18,15 @@ export interface Retrospective {
   content: string;
 }
 
+/** Both read the project the backend has open. */
 export const metaApi = {
-  reports: (project_root: string) =>
+  reports: () =>
     getJson<{ reports: FrictionReport[]; count: number; total_available: number }>(
-      `${ROUTES.getMetaReports}?project_root=${encodeURIComponent(project_root)}`,
+      ROUTES.getMetaReports,
     ),
 
-  retrospectives: (project_root: string) =>
+  retrospectives: () =>
     getJson<{ retrospectives: Retrospective[]; count: number; total_available: number }>(
-      `${ROUTES.getMetaRetrospectives}?project_root=${encodeURIComponent(project_root)}`,
+      ROUTES.getMetaRetrospectives,
     ),
 };

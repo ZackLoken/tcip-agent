@@ -10,15 +10,16 @@ which that earlier refusal answers first.
 
 from __future__ import annotations
 
+from pathlib import Path
 
-def mapped_plants(mapping_name: str) -> list[str]:
-    """Every plant id the mapping ``mapping_name`` under the pinned platform root names, in
-    first-seen order; ``[]`` when no such mapping loads."""
+
+def mapped_plants(project: Path, mapping_name: str) -> list[str]:
+    """Every plant id the mapping ``mapping_name`` under ``project`` names, in first-seen order;
+    ``[]`` when no such mapping loads."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import assignment_is_attributed, load_mapping
-    from tcip_mcp.project_paths import platform_state_root
 
     try:
-        build = load_mapping(platform_state_root(), mapping_name)
+        build = load_mapping(project, mapping_name)
     except Exception:
         return []
     if build is None:

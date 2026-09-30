@@ -44,13 +44,14 @@ def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
             "split": cfg}
 
 
-def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
-    """The spatial manifest the run ``experiment_id`` over ``data_cfg`` resolved and recorded."""
+def _persisted_split(project: Path, experiment_id: str, data_cfg: dict) -> dict:
+    """The spatial manifest the run ``experiment_id`` under ``project`` over ``data_cfg``
+    resolved and recorded."""
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import partition_side, resolved_run
 
-    resolved_run(None, data_cfg, experiment_id=experiment_id)
-    resolved = run_resolution(experiment_id)
+    resolved_run(project, data_cfg, experiment_id=experiment_id)
+    resolved = run_resolution(experiment_id, project=project)
     assert partition_side(resolved["partition"], "train") == ["mosaic"]
     return {"spatial": resolved["data"]["split"]["spatial_manifest"]}
 
@@ -62,7 +63,7 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     images_dir, labels_dir, _ = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(images_dir, labels_dir)
 
-    split = _persisted_split("exp_membership", data_cfg)
+    split = _persisted_split(tmp_path, "exp_membership", data_cfg)
 
     train, val = split["spatial"]["train_identities"], split["spatial"]["val_identities"]
     assert train and val
@@ -88,7 +89,7 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     data_cfg = _data_cfg(images_dir, labels_dir, val_ratio=0.2, test_ratio=0.1,
                          reserve_calibration_fraction=0.15)
 
-    split = _persisted_split("exp_reserved_cal", data_cfg)
+    split = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)
     spatial = split["spatial"]
     cal_region = [tuple(r) for r in spatial["calibration_region"]]
     train_region = [tuple(r) for r in spatial["train_region"]]
@@ -101,11 +102,11 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
         x0, y0, x1, y1 = rect
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
-    clean = _train_disjointness("exp_reserved_cal", {stem}, set(),
+    clean = _train_disjointness("exp_reserved_cal", {stem}, set(), project=tmp_path,
                                 cal_rects={stem: _shrunk(cal_region[0])})
     assert clean["leaked_groups"] == []
     assert clean["group_check"] == "spatial_strip_geometric"
 
-    leaked = _train_disjointness("exp_reserved_cal", {stem}, set(),
+    leaked = _train_disjointness("exp_reserved_cal", {stem}, set(), project=tmp_path,
                                  cal_rects={stem: _shrunk(train_region[0])})
     assert leaked["leaked_groups"] == [stem]

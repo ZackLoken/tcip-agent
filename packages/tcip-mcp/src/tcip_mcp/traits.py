@@ -320,32 +320,32 @@ register_store(
 )
 
 
-def trait_key(project_root: str | Path | None, trait: str) -> Key:
-    """One trait's record in a project's state; ``None`` names the process's pinned root."""
+def trait_key(project: str | Path, trait: str) -> Key:
+    """One trait's record in a project's state."""
     from tcip_mcp.project_paths import project_state_dir
 
-    return Key(TRAITS_STORE, str(project_state_dir(project_root)), (trait,))
+    return Key(TRAITS_STORE, str(project_state_dir(project)), (trait,))
 
 
-def trait_names(project_root: str | Path | None = None) -> list[str]:
+def trait_names(project: str | Path) -> list[str]:
     """Every trait with a record in the project, sorted."""
     from tcip_mcp.project_paths import project_state_dir
 
-    return sorted(k.parts[0] for k in ts.keys(TRAITS_STORE, str(project_state_dir(project_root))))
+    return sorted(k.parts[0] for k in ts.keys(TRAITS_STORE, str(project_state_dir(project))))
 
 
-def _record(trait: str, project_root: str | Path | None, value: dict | None) -> TraitRecord:
+def _record(trait: str, project: str | Path, value: dict | None) -> TraitRecord:
     """``trait``'s stored ``value`` read through its schema. An absent value raises
     :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises."""
     if value is None:
         raise TraitUnknownError(
-            f"Unknown trait {trait!r}. Traits in this project: {trait_names(project_root)}")
+            f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}")
     return TraitRecord.model_validate(value)
 
 
-def read_trait(trait: str, project_root: str | Path | None = None) -> TraitRecord:
+def read_trait(trait: str, project: str | Path) -> TraitRecord:
     """One trait's record, read through its schema; refuses as :func:`_record` does."""
-    return _record(trait, project_root, ts.read(trait_key(project_root, trait), default=None))
+    return _record(trait, project, ts.read(trait_key(project, trait), default=None))
 
 
 # ── the proposal and the confirmation ────────────────────────────────────────
@@ -355,12 +355,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> SubjectRegistry:
+def resolve_statement_registry(project: str | Path, dataset_root: str) -> SubjectRegistry:
     """The registry a ``state_crossing_dates`` operationalization's positive class is checked
     against.
 
     ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
-    served when ``project_root`` is unambiguously the one dataset the project uses (its own
+    served when ``project`` is unambiguously the one dataset the project uses (its own
     ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
     Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
     """
@@ -377,26 +377,26 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> S
                 "(write_subject_registry) before a crossing's classes can be checked against it."
             ) from exc
 
-    registered = read_datasets(project_root)
+    registered = read_datasets(project)
     # The resolved root, never the registry's own stored spelling ("." for the project's own tree).
-    roots = [str(dataset_entry_path(project_root, d)) for d in registered]
+    roots = [str(dataset_entry_path(project, d)) for d in registered]
     if len(registered) > 1:
         raise ValueError(
-            f"project {project_root!r} registers {len(registered)} datasets {roots}, so which one "
+            f"project {project!r} registers {len(registered)} datasets {roots}, so which one "
             "this crossing's classes belong to cannot be guessed. Pass dataset_root naming it."
         )
     try:
-        return read_registry(subjects_path(project_root))
+        return read_registry(subjects_path(project))
     except FileNotFoundError as exc:
         raise ValueError(
-            f"project root {project_root!r} carries no subject registry of its own (registered "
+            f"project root {project!r} carries no subject registry of its own (registered "
             f"datasets: {roots}). Pass dataset_root naming the dataset this crossing's classes "
             "belong to."
         ) from exc
 
 
 def propose_trait(
-    project_root: str | Path,
+    project: str | Path,
     entry: TraitEntry,
     *,
     rationale: str,
@@ -418,7 +418,7 @@ def propose_trait(
     check_proposed_entry(entry)
     crossing = entry.operationalizations.get(STATE_CROSSING_DATES)
     if crossing is not None:
-        registry = resolve_statement_registry(project_root, dataset_root)
+        registry = resolve_statement_registry(project, dataset_root)
         problem = positive_value_problem(registry, crossing.measured_subject, entry.positive_value)
         if problem is not None:
             raise ValueError(
@@ -426,10 +426,10 @@ def propose_trait(
                 f"class {entry.positive_value!r} for subject {crossing.measured_subject!r}, and "
                 f"{problem}. Name a class the registry declares, or update the registry first."
             )
-    key = trait_key(project_root, entry.name)
+    key = trait_key(project, entry.name)
     with ts.transaction(key) as txn:
         stored = txn.read(key, default=None)
-        revisions = () if stored is None else _record(entry.name, project_root, stored).revisions
+        revisions = () if stored is None else _record(entry.name, project, stored).revisions
         revision = TraitRevision(
             number=len(revisions) + 1, entry=entry, entry_sha256=entry_sha256(entry),
             rationale=rationale, relayed_note=relayed_note, proposed_at=_now(),
@@ -441,7 +441,7 @@ def propose_trait(
     record_event_or_raise(
         "propose_trait",
         {"trait": entry.name, "revision": revision.number, "entry_sha256": revision.entry_sha256},
-        scope=project_root,
+        scope=project,
     )
     return revision
 
@@ -452,7 +452,7 @@ class RevisionMoved(ValueError):
 
 
 def confirm_revision(
-    project_root: str | Path,
+    project: str | Path,
     trait: str,
     number: int,
     entry_sha256: str,
@@ -472,9 +472,9 @@ def confirm_revision(
     """
     from tcip_mcp.audit import record_event_or_raise
 
-    key = trait_key(project_root, trait)
+    key = trait_key(project, trait)
     with ts.transaction(key) as txn:
-        revisions = list(_record(trait, project_root, txn.read(key, default=None)).revisions)
+        revisions = list(_record(trait, project, txn.read(key, default=None)).revisions)
         if not 1 <= number <= len(revisions):
             raise ValueError(f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}")
         revision = revisions[number - 1]
@@ -499,6 +499,6 @@ def confirm_revision(
         "confirm_trait_revision",
         {"trait": trait, "revision": number, "entry_sha256": entry_sha256,
          "confirmed": confirmed, "identity_from_request": identity_from_request},
-        scope=project_root, user=who,
+        scope=project, user=who,
     )
     return revisions[number - 1]

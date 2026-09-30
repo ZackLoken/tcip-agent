@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-from tcip_mcp.server import mcp
+from pathlib import Path
+
+from tcip_mcp.server import tool
 from tcip_mcp.model_registry import ModelRegistry, best_model
 
 
-def _registry_root(project_path: str) -> str:
-    """Explicit path wins; empty falls back to the platform root (the adopted project)."""
-    from tcip_mcp.project_paths import platform_state_root
-
-    return project_path or str(platform_state_root())
-
-
-@mcp.tool()
+@tool()
 def register_model(
+    project: Path,
     name: str = "",
     checkpoint_path: str = "",
     config: dict | None = None,
-    project_path: str = "",
     metrics: dict | None = None,
     tags: list[str] | None = None,
 ) -> dict:
@@ -33,11 +28,10 @@ def register_model(
         name: Model name (e.g. '<crop>_<trait>_v1').
         checkpoint_path: Path to the .pt checkpoint.
         config: Training configuration used.
-        project_path: Project root directory. Empty defaults to the platform state root.
         metrics: Evaluation metrics.
         tags: Tags for filtering.
     """
-    registry = ModelRegistry(_registry_root(project_path))
+    registry = ModelRegistry(str(project))
     return registry.register_model(name, checkpoint_path, config or {}, metrics, tags)
 
 
@@ -73,9 +67,9 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
     return result
 
 
-@mcp.tool()
+@tool()
 def rank_registered_models(
-    project_path: str = "", metric: str = "",
+    project: Path, metric: str = "",
     higher_is_better: bool | None = None, include_unverified: bool = False,
     experiment_ids: list[str] | None = None, tag: str | None = None,
 ) -> dict:
@@ -98,7 +92,6 @@ def rank_registered_models(
     every-carrier-unverified refusal carries ``all_unverified: True``.
 
     Args:
-        project_path: Project root directory. Empty defaults to the platform state root.
         metric: Metric key to rank by; empty lists instead of ranking.
         higher_is_better: Overrides the declared direction
             (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, keyed by the ``val_``-stripped name) when
@@ -114,7 +107,7 @@ def rank_registered_models(
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC, VAL_METRIC_PREFIX
 
-    registry = ModelRegistry(_registry_root(project_path))
+    registry = ModelRegistry(str(project))
     models = registry.list_models(tag)
     if experiment_ids is not None:
         wanted = set(experiment_ids)

@@ -78,6 +78,7 @@ const initialStoreState = useStore.getState();
 
 const PRED_DIR_A = "C:/data/predictions/model_a/2026-01-01";
 const PRED_DIR_B = "C:/data/predictions/model_b/2026-01-01";
+const MODEL_OF_DIR: Record<string, string> = { [PRED_DIR_A]: "model_a", [PRED_DIR_B]: "model_b" };
 
 function setupDataset(opts: { predDir?: string | null } = {}) {
   const predDir = opts.predDir !== undefined ? opts.predDir : PRED_DIR_A;
@@ -86,17 +87,25 @@ function setupDataset(opts: { predDir?: string | null } = {}) {
       ...s.gui,
       dataset: {
         ...s.gui.dataset,
-        project_root: "C:/proj",
         dataset_root: "C:/data",
         subject: "subject_a",
         date: "2026-01-01",
+        model_name: predDir ? (MODEL_OF_DIR[predDir] ?? null) : null,
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
         images_dir: "C:/data/images/2026-01-01",
         annotations_dir: "C:/data/annotations/2026-01-01",
         predictions_dir: predDir,
+        label_paths: {
+          "img1.jpg": "C:/data/annotations/2026-01-01/img1.json",
+          "img2.jpg": "C:/data/annotations/2026-01-01/img2.json",
+        },
+        prediction_paths: (predDir
+          ? { "img1.jpg": `${predDir}/img1.json`, "img2.jpg": `${predDir}/img2.json` }
+          : {}) as Record<string, string>,
       },
     },
+    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
   }));
 }
 
@@ -534,7 +543,7 @@ describe("ReviewTab audit-gap handling", () => {
     fireEvent.click(screen.getByLabelText("Reviewed"));
 
     await waitFor(() => expect(mirrorSpy).toHaveBeenCalledTimes(1));
-    expect(mirrorSpy.mock.calls[0][2]).toBe("complete");
+    expect(mirrorSpy.mock.calls[0][1]).toBe("complete");
     expect(useStore.getState().toasts.map((t) => t.message)).toContain(gapMessage);
   });
 
@@ -1170,7 +1179,17 @@ describe("ReviewTab matches-recompute effect", () => {
     // without changing imgPath; the tab must not keep showing the old model's matches.
     act(() => {
       const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, predictions_dir: PRED_DIR_B } });
+      s.patchGui({
+        dataset: {
+          ...s.gui.dataset,
+          model_name: "model_b",
+          predictions_dir: PRED_DIR_B,
+          prediction_paths: {
+            "img1.jpg": `${PRED_DIR_B}/img1.json`,
+            "img2.jpg": `${PRED_DIR_B}/img2.json`,
+          },
+        },
+      });
     });
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
     expect(matchesSpy.mock.calls[1][0].pred_path).toBe(`${PRED_DIR_B}/img1.json`);
@@ -2424,24 +2443,22 @@ describe("ReviewTab zoom-to-detection clamping", () => {
   });
 });
 
-describe("ReviewTab canvas-push binding-presence gate", () => {
-  it("blocks the push and sets canvasBindingMissing when no generation is adopted", async () => {
-    useStore.setState({ bindingGeneration: null });
+describe("ReviewTab canvas push names its project", () => {
+  it("pushes nothing while the backend has no project open", async () => {
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+    useStore.setState({ openProject: null });
 
     act(() => notifyCanvasStateRequest());
     await act(async () => {});
 
     expect(pushSpy).not.toHaveBeenCalled();
-    expect(useStore.getState().canvasBindingMissing).toBe(true);
   });
 
-  it("pushes with the adopted generation and clears canvasBindingMissing", async () => {
-    useStore.setState({ bindingGeneration: 5, canvasBindingMissing: true });
+  it("pushes carrying the open project's id", async () => {
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });
@@ -2452,8 +2469,7 @@ describe("ReviewTab canvas-push binding-presence gate", () => {
     await act(async () => {});
 
     expect(pushSpy).toHaveBeenCalled();
-    expect(pushSpy.mock.calls[0][0].binding_generation).toBe(5);
-    expect(useStore.getState().canvasBindingMissing).toBe(false);
+    expect(pushSpy.mock.calls[0][0].project_id).toBe("a1b2c3d4e5f6");
   });
 });
 
@@ -2468,7 +2484,6 @@ describe("ReviewTab subject colors", () => {
 
   it("a per-browser recolor reaches the pushed canvas_meta swatch", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
-    useStore.setState({ bindingGeneration: 1 });
     const pushSpy = vi
       .spyOn(api.canvas, "pushState")
       .mockResolvedValue({ status: "ok", shapes_written: true });

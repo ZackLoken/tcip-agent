@@ -14,8 +14,9 @@ beforeEach(() => {
   useStore.setState((s) => ({
     gui: {
       ...s.gui,
-      dataset: { ...s.gui.dataset, project_root: "C:/proj", dataset_root: "C:/data" },
+      dataset: { ...s.gui.dataset, dataset_root: "C:/data" },
     },
+    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
   }));
   vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: [], unreadable: [], definitions: {} });
   vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
@@ -64,7 +65,6 @@ describe("SetupTab trait revisions", () => {
 
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     expect(confirmSpy.mock.calls[0][0]).toEqual({
-      project_root: "C:/proj",
       trait: "stem",
       revision: 2,
       entry_sha256: SECOND.entry_sha256,

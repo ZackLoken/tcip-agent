@@ -27,7 +27,7 @@ def test_an_entry_delivering_a_vocabulary_phenotype_is_admitted_and_reads_back(t
     propose(tmp_path, entry("leaf", ("leaf_length",), localization="iou_match",
                             count_objective="detection_f1"))
 
-    spec = latest("leaf")
+    spec = latest("leaf", tmp_path)
     assert spec.delivers == ("leaf_length",) and spec.localization == "iou_match"
 
 
@@ -81,7 +81,7 @@ def test_resolve_operating_point_defaults_an_unset_count_objective_instead_of_re
     from tcip_mcp.traits import COUNT_UNBIASED
 
     propose_and_confirm(tmp_path, entry("undecided", ("leaf_length",)))
-    bundle = OP.resolve_operating_point("undecided", **tiled_regime(), dataset_hash="h1",
+    bundle = OP.resolve_operating_point("undecided", project=tmp_path, **tiled_regime(), dataset_hash="h1",
                                         calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == COUNT_UNBIASED
@@ -95,7 +95,7 @@ def test_resolve_operating_point_stamps_a_stated_count_objective_as_trait_author
     import tcip_mcp.pipelines.operating_point as OP
 
     propose_and_confirm(tmp_path, entry("decided", ("leaf_length",), count_objective="detection_f1"))
-    bundle = OP.resolve_operating_point("decided", **tiled_regime(), dataset_hash="h1",
+    bundle = OP.resolve_operating_point("decided", project=tmp_path, **tiled_regime(), dataset_hash="h1",
                                         calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == "detection_f1"
@@ -108,7 +108,7 @@ def test_resolve_operating_point_refuses_an_unregistered_count_objective(tmp_pat
     propose_and_confirm(
         tmp_path, entry("custom", ("leaf_length",), count_objective="a_brand_new_objective"))
     with pytest.raises(ValueError, match="no registered picker"):
-        OP.resolve_operating_point("custom", **tiled_regime(), dataset_hash="h1",
+        OP.resolve_operating_point("custom", project=tmp_path, **tiled_regime(), dataset_hash="h1",
                                    calibration_records=[])
 
 
@@ -119,13 +119,13 @@ def test_every_trait_record_is_read_and_the_latest_revision_answers(tmp_path: Pa
     propose(tmp_path, entry("leaf", ("leaf_length",), count_bias_tolerance_frac=1.0))
     propose(tmp_path, entry("leaf", ("leaf_length",), count_bias_tolerance_frac=99.0))
 
-    assert set(trait_names()) == {"bud_opening", "leaf"}
-    assert latest("leaf").count_bias_tolerance_frac == 99.0
+    assert set(trait_names(tmp_path)) == {"bud_opening", "leaf"}
+    assert latest("leaf", tmp_path).count_bias_tolerance_frac == 99.0
 
 
-def test_an_unknown_trait_hard_fails():
+def test_an_unknown_trait_hard_fails(tmp_path: Path):
     with pytest.raises(TraitUnknownError):
-        traits.read_trait("banana")
+        traits.read_trait("banana", tmp_path)
 
 
 def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name(tmp_path: Path):
@@ -136,12 +136,12 @@ def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name
 
     propose(tmp_path, entry("pending", ("leaf_length",), count_objective="detection_f1"))
     with pytest.raises(OperationalizationRefused, match="'pending'"):
-        OP.resolve_operating_point("pending", **tiled_regime(), dataset_hash="h1",
+        OP.resolve_operating_point("pending", project=tmp_path, **tiled_regime(), dataset_hash="h1",
                                    calibration_records=[])
 
     propose_and_confirm(tmp_path, entry("leaf", ("leaf_length",), count_objective="detection_f1"))
     propose(tmp_path, entry("leaf", ("leaf_length",), count_objective="count_unbiased"))
-    bundle = OP.resolve_operating_point("leaf", **tiled_regime(), dataset_hash="h1",
+    bundle = OP.resolve_operating_point("leaf", project=tmp_path, **tiled_regime(), dataset_hash="h1",
                                         calibration_records=[])
     assert bundle.params["count_objective"]._raw == "detection_f1"
 
@@ -173,14 +173,14 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     mine = propose(tmp_path, entry("leaf", ("leaf_length",), notes="this writer"))
     assert other_landed.wait(timeout=30)
 
-    record = traits.read_trait("leaf")
+    record = traits.read_trait("leaf", tmp_path)
     assert [(r.number, r.entry.notes) for r in record.revisions] == [
         (1, "this writer"), (2, "the other writer")]
     assert (mine.number, other[0].number) == (1, 2)
 
 
-def test_bud_opening_reads_back_as_the_reference_fixture():
-    t = latest_confirmed("bud_opening").entry
+def test_bud_opening_reads_back_as_the_reference_fixture(tmp_path: Path):
+    t = latest_confirmed("bud_opening", tmp_path).entry
     assert t == BUD_OPENING
     assert t.positive_value == "open"
     assert t.localization_tolerance_frac == 0.5
@@ -204,7 +204,7 @@ def test_the_file_backend_places_a_trait_record_at_the_state_traits_path(tmp_pat
 
 # ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
-def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path,
+def _op_sidecar(project: Path, dir_path: Path, id_map: dict | None, *, dataset_root: Path,
                 subject: str = "bud", attribute: str | None = "opening") -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
@@ -213,14 +213,14 @@ def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path,
         "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
     }
-    write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+    write_bound_sidecar(project, dir_path, stamp, dataset_root=dataset_root,
                         experiment_id=f"exp-record-{dir_path.name}",
                         producing_experiment_id="exp-trait-authoring")
 
 
 def test_resolve_positive_class_id_by_name(tmp_path: Path):
     d = tmp_path / "preds"
-    _op_sidecar(d, {"closed": 0, "open": 1}, dataset_root=tmp_path)
+    _op_sidecar(tmp_path, d, {"closed": 0, "open": 1}, dataset_root=tmp_path)
     cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2026-02-11": str(d)})
     assert cid == 1
     assert "open" in msg
@@ -228,7 +228,7 @@ def test_resolve_positive_class_id_by_name(tmp_path: Path):
 
 def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
     d = tmp_path / "preds"
-    _op_sidecar(d, {"closed": 0, "bud": 1}, dataset_root=tmp_path)  # no 'open' class
+    _op_sidecar(tmp_path, d, {"closed": 0, "bud": 1}, dataset_root=tmp_path)  # no 'open' class
     cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2026-02-11": str(d)})
     assert cid is None  # never silently defaults to 1
     assert "open" in msg
@@ -258,7 +258,7 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
             d / "P1.json",
             [Annotation(subject="bud", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                        attributes=attrs)], 8, 8)
-        _op_sidecar(d, id_map, dataset_root=root, subject="bud", attribute=attribute)
+        _op_sidecar(tmp_path, d, id_map, dataset_root=root, subject="bud", attribute=attribute)
     from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"
@@ -281,13 +281,13 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
                                            "validated_against": "held_out_annotations"}},
         "trait": "bud_opening",
     }
-    write_bound_sidecar(d1, classifier_stamp, document="classifier_operating_point",
+    write_bound_sidecar(tmp_path, d1, classifier_stamp, document="classifier_operating_point",
                         dataset_root=tmp_path / "ds", experiment_id="exp-classifier-derives-id",
                         producing_experiment_id="exp-trait-authoring", trait="bud_opening")
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -305,8 +305,8 @@ def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_pat
 
     mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'open' anywhere
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
     )

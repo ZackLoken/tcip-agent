@@ -134,7 +134,7 @@ def test_score_predictions_over_a_conformed_classified_bucket_scores_the_object_
         100, 80,
     )
     write_sidecar(preds, {"scope": {"subject": "bud", "attribute": "opening",
-                                    "id_map": {"open": 0}}})
+                                    "id_map": {"open": 0}}}, project=tmp_path)
 
     res = score_predictions(str(img))
 

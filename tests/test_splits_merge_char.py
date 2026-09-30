@@ -58,7 +58,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     result.pop("selection_dir")
     assert result.pop("scope") == {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
@@ -81,7 +81,7 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["splits"] == {"train": 3, "val": 3, "calibration": 6}
     assert result["total_stems"] == 12
@@ -92,7 +92,7 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
                      if p.is_file() and p.suffix != ".lock")
     assert written == ["selection.json"]
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert drawn.counts() == {"train": 3, "val": 3, "calibration": 6}
     assert {s.group: s.side for s in drawn.samples} == GOLDEN_SIDE_BY_GROUP
     for sample in drawn.samples:

@@ -1,9 +1,10 @@
 """Write the trait listings the frontend tests read, produced by the platform itself.
 
-In a scratch project, each trait entry is proposed through ``traits.propose_trait``, confirmed
-through ``POST /api/results/traits/confirm`` and served by ``GET /api/results/traits``; the served
-listings are written, :func:`normalized`, to ``frontend/src/test/traitListings.json`` under the
-names the tests import.
+In scratch projects, each created through ``initialize_project`` and opened through
+``POST /api/projects/open``, each trait entry is proposed through ``traits.propose_trait``,
+confirmed through ``POST /api/results/traits/confirm`` and served by ``GET /api/results/traits``;
+the served listings are written, :func:`normalized`, to ``frontend/src/test/traitListings.json``
+under the names the tests import.
 
     python tools/generate_trait_fixture.py
 """
@@ -11,7 +12,6 @@ names the tests import.
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -57,64 +57,69 @@ def normalized(served: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def listings(root: Path) -> dict[str, dict]:
-    """Propose and confirm the fixture traits under ``root``, serving the listing at each stage,
-    :func:`normalized`. ``root`` must lie under the pinned workspace and state root."""
+def listings(workspace: Path) -> dict[str, dict]:
+    """Propose and confirm the fixture traits in projects created under ``workspace``, the
+    workspace the web backend is started with here, serving the listing at each stage,
+    :func:`normalized`."""
     from fastapi.testclient import TestClient
     from tcip_mcp import traits
+    from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.app import app
+    from tcip_web.state import store
 
+    store.configure(workspace, ())
     client = TestClient(app, base_url="http://127.0.0.1")
+
+    def opened(name: str) -> Path:
+        created = initialize_project(str(workspace / name), name, "fixture orchard")
+        response = client.post("/api/projects/open", json={"id": created["id"]})
+        response.raise_for_status()
+        return Path(created["project_path"])
 
     def propose(project: Path, entry: dict) -> traits.TraitRevision:
         return traits.propose_trait(
             project, traits.TraitEntry.model_validate(entry),
             rationale="The breeder counts every stem.", relayed_note="")
 
-    def confirm(project: Path, revision: traits.TraitRevision) -> None:
+    def confirm(revision: traits.TraitRevision) -> None:
         response = client.post("/api/results/traits/confirm", json={
-            "project_root": str(project), "trait": revision.entry.name,
-            "revision": revision.number, "entry_sha256": revision.entry_sha256,
-            "user": "grower", "confirmed": True})
+            "trait": revision.entry.name, "revision": revision.number,
+            "entry_sha256": revision.entry_sha256, "user": "grower", "confirmed": True})
         response.raise_for_status()
 
-    def listing(project: Path) -> dict:
-        response = client.get("/api/results/traits", params={"project_root": str(project)})
+    def listing() -> dict:
+        response = client.get("/api/results/traits")
         response.raise_for_status()
         return response.json()
 
     served: dict[str, dict] = {}
-    setup = root / "setup"
-    setup.mkdir()
-    confirm(setup, propose(setup, _STEM_ENTRY))
+    setup = opened("setup")
+    confirm(propose(setup, _STEM_ENTRY))
     second = json.loads(json.dumps(_STEM_ENTRY))
     second["operationalizations"]["per_image_count"]["statement"] = (
         "Only stems above the graft union.")
     propose(setup, second)
-    served["setup"] = listing(setup)
+    served["setup"] = listing()
 
-    results = root / "results"
-    results.mkdir()
+    results = opened("results")
     revision = propose(results, _MILESTONE_ENTRY)
-    served["unconfirmed"] = listing(results)
-    confirm(results, revision)
-    served["results"] = listing(results)
+    served["unconfirmed"] = listing()
+    confirm(revision)
+    served["results"] = listing()
     return normalized(served)
 
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as scratch:
-        workspace = Path(scratch) / "workspace"
+        workspace = (Path(scratch) / "workspace").resolve()
         workspace.mkdir()
-        os.environ["TCIP_WORKSPACE"] = str(workspace)
-        os.environ["TCIP_STATE_ROOT"] = str(workspace)
         from tcip_store.binding import bind_default
 
         bind_default()
         served = listings(workspace)
         import tcip_store
 
-        tcip_store.close_connections()
+        tcip_store.release_root(workspace)
     GENERATED_PATH.write_text(json.dumps(served, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {GENERATED_PATH}")
     return 0

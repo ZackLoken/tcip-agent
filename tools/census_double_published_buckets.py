@@ -120,7 +120,7 @@ def census_bucket(bucket: Path) -> BucketCensus:
 def census_project(project_root: Path) -> ProjectCensus:
     """Every bucket and every validation row the project's own records name, judged."""
     from tcip_mcp import dataset_layout
-    from tcip_mcp.experiments import VALIDATIONS_FILE, read_rows, run_dirs
+    from tcip_mcp.experiments import observe, run_dirs, validations
     from tcip_mcp.prediction_buckets import bucket_content_digest
     from tcip_mcp.store_catalog import project_roots
 
@@ -154,17 +154,16 @@ def census_project(project_root: Path) -> ProjectCensus:
     for run_dir in run_dirs(project_root):
         experiment_id = run_dir.name
         try:
-            rows = read_rows(run_dir / VALIDATIONS_FILE)[0]
+            rows = validations(observe(run_dir))
         except StoreError as exc:
             result.read_errors.append(f"{experiment_id} validations: {exc}")
             continue
-        for row in rows:
+        for _digest, row in rows:
             covered = row.get("covered_buckets")
-            dataset_root = row.get("dataset_root")
-            if not isinstance(covered, dict) or not isinstance(dataset_root, str):
+            if not isinstance(covered, dict):
                 continue
             for key, sealed in covered.items():
-                bucket = (Path(dataset_root) / key).resolve()
+                bucket = Path(key).resolve()
                 if bucket not in mixed_by_path:
                     continue
                 document = str(row.get("document"))

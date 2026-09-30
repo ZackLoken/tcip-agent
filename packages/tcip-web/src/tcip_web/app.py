@@ -1,23 +1,13 @@
-"""FastAPI application: REST API for MCP tools + WebSocket for GUI state sync.
-
-This backend is the single source of truth for live GUI state across the
-TCIP tabs (Annotate / Review / Training / Tuning / Inference / Results).
-Claude agent and browser clients both connect through here.
-
-Domain endpoints live in ``tcip_web.routes`` (mounted via ``register_all``). This module
-keeps only the app-level surface: GUI state snapshot + WS, the agent panel-event hub,
-static-file serving, and health/index.
-"""
+"""FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built
+frontend and the health probe; every domain route is mounted from ``tcip_web.routes``."""
 
 from __future__ import annotations
 
 import asyncio
 import itertools
 import logging
-import sys
-import threading
 import uuid
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,12 +22,10 @@ from pydantic import BaseModel
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import (
-    PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
     VALID_PANELS,
 )
-from tcip_mcp.workspace import configured_workspace
 from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in
 
 logger = logging.getLogger(__name__)
@@ -45,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Bind the startup root, read the canvas-open binding once, size GDAL's block cache and warm
-    the agent terminal, before the app serves."""
+    """Open the project the last-opened pointer of the workspace the backend was configured with
+    names, size GDAL's block cache and warm the agent terminal, before the app serves. Refuses a
+    backend configured with no workspace (``StateStore.workspace``)."""
     log_exposure_opt_in()
-    await asyncio.to_thread(_bind_startup_root_serialized)
-    # The canvas-open binding record outlives this process's restart; read it once now so the
-    # first connect-time replay answers from the durable record rather than a fresh None.
-    await asyncio.to_thread(_gui_store.refresh_binding_generation_from_record)
+    from tcip_web.routes.projects import open_last_opened
+
+    await open_last_opened()
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -64,9 +52,8 @@ async def _lifespan(_app: FastAPI):
     except Exception:  # pragma: no cover - prewarm is best-effort
         logger.exception("agent terminal prewarm failed to start")
     yield
-    # Kill any live agent terminals so no Claude Code process orphans the backend.
-    # Off-loop: terminate can block seconds (taskkill / SIGTERM grace), and stalling the
-    # event loop here would break the in-flight WebSocket close handshakes.
+    # Kill live agent terminals off the loop: terminate can block seconds, and stalling the loop
+    # would break in-flight WebSocket close handshakes.
     try:
         from tcip_web.routes import terminal as terminal_routes
 
@@ -78,125 +65,6 @@ async def _lifespan(_app: FastAPI):
 # At import, not in the lifespan: a route may be exercised against this app without one running,
 # and a route that reaches a store with no backend bound would refuse rather than write.
 bind_default()
-
-
-class WorkspaceUnsetUnderTest(RuntimeError):
-    """Raised in place of pinning a platform-state root, when this app is served under a test with
-    no ``TCIP_WORKSPACE`` bound.
-    """
-
-
-def _running_under_pytest() -> bool:
-    """True once a pytest process has begun collection, for the whole run.
-
-    pytest inserts itself into ``sys.modules`` at startup and never removes itself.
-    """
-    return "pytest" in sys.modules
-
-
-def _in_process_test_client_loaded() -> bool:
-    """True once this process has imported starlette's ``TestClient`` module, for the whole run."""
-    return "starlette.testclient" in sys.modules
-
-
-_IN_PROCESS_TEST_TRANSPORT_CLIENTS = frozenset({("testclient", 50000), ("127.0.0.1", 123)})
-"""The client addresses an in-process ASGI test transport stamps on the scope it hands the app.
-``starlette.testclient.TestClient.__init__`` defaults its ``client`` argument to
-``("testclient", 50000)``, and ``httpx.ASGITransport.__init__`` defaults its own ``client``
-argument to ``("127.0.0.1", 123)`` (both verified against the installed packages); real network
-traffic never arrives with either identity, source port 123 least of all, a privileged port."""
-
-
-def _scope_is_in_process_test_client(scope: dict[str, Any]) -> bool:
-    """True when an ASGI scope's client address matches an in-process test transport's default
-    identity (:data:`_IN_PROCESS_TEST_TRANSPORT_CLIENTS`), naming both starlette's ``TestClient``
-    and httpx's ``ASGITransport``.
-    """
-    client = scope.get("client")
-    return client is not None and tuple(client) in _IN_PROCESS_TEST_TRANSPORT_CLIENTS
-
-
-def raise_if_workspace_unset_under_test(scope: dict[str, Any] | None = None) -> None:
-    """Refuse to pin a platform-state root under a test that never set ``TCIP_WORKSPACE``.
-
-    Passes silently once ``TCIP_WORKSPACE`` is configured
-    (:func:`tcip_mcp.workspace.configured_workspace`) or nothing signals a test is running.
-    ``scope``, when given, adds the request's client-address signal to the process-wide ones.
-    """
-    if configured_workspace() is not None:
-        return
-    process_signal = _running_under_pytest() or _in_process_test_client_loaded()
-    scope_signal = scope is not None and _scope_is_in_process_test_client(scope)
-    if not (process_signal or scope_signal):
-        return
-    raise WorkspaceUnsetUnderTest(
-        "TCIP_WORKSPACE is unset. This served app would otherwise pin the workspace's "
-        "active project and write into it. Set TCIP_WORKSPACE and TCIP_STATE_ROOT to "
-        "scratch directories before starting a test client against it."
-    )
-
-
-def bind_startup_root() -> None:
-    """Pin this process's platform-state root once, only when nothing has bound one yet
-    (:func:`tcip_mcp.project_paths.root_binding`).
-
-    Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is a
-    pytest run or has loaded an in-process test client with no ``TCIP_WORKSPACE`` bound.
-
-    Before the marker pin, once per process: ``tcip_mcp.project_rename.complete_pending_renames``
-    renames every project carrying a pending-rename marker, then
-    ``tcip_mcp.project_removal.complete_pending_removals`` moves every project carrying a
-    pending-removal marker. A failure inside either walk other than its own per-project folds is
-    logged and swallowed.
-    """
-    raise_if_workspace_unset_under_test()
-
-    from tcip_mcp.project_paths import pin_platform_root, root_binding
-
-    if root_binding() is not None:
-        return
-
-    from tcip_mcp import project_removal, project_rename
-    from tcip_mcp.workspace import workspace_root
-
-    try:
-        project_rename.complete_pending_renames(workspace_root(create=False))
-    except Exception:
-        logger.exception("complete_pending_renames failed at startup")
-
-    try:
-        project_removal.complete_pending_removals(workspace_root(create=False))
-    except Exception:
-        logger.exception("complete_pending_removals failed at startup")
-
-    pin_platform_root(from_marker=True)
-
-
-_bind_startup_root_lock = threading.Lock()
-
-
-def _bind_startup_root_serialized() -> None:
-    """:func:`bind_startup_root` under the module thread lock, so concurrent first requests
-    serialize onto one marker read.
-    """
-    with _bind_startup_root_lock:
-        bind_startup_root()
-
-
-class _BindStartupRootMiddleware:
-    """ASGI middleware that calls :func:`bind_startup_root` ahead of every request, off the event
-    loop in a worker thread, after :func:`raise_if_workspace_unset_under_test` with this request's
-    own scope.
-    """
-
-    def __init__(self, app: Any) -> None:
-        self.app = app
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] in ("http", "websocket"):
-            raise_if_workspace_unset_under_test(scope)
-            await asyncio.to_thread(_bind_startup_root_serialized)
-        await self.app(scope, receive, send)
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
@@ -212,16 +80,14 @@ app.add_middleware(TrustBoundaryMiddleware)
 # polygon count (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Added last: Starlette's add_middleware makes the most recently added the outermost, so this
-# pin resolves ahead of every other middleware and route.
-app.add_middleware(_BindStartupRootMiddleware)
-
 # ── Tab routes ──
 from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
 _register_routes(app)
 
 # ── State snapshot + WS ──
-from tcip_web.state import GuiMutationInvalid, store as _gui_store  # noqa: E402  (needs `app`)
+from tcip_web.state import (  # noqa: E402  (needs `app`)
+    GuiMutationInvalid, NoProjectOpen, ProjectNotOpen, store as _gui_store,
+)
 _state_watchers: set[WebSocket] = set()
 
 
@@ -231,26 +97,40 @@ async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInval
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+@app.exception_handler(NoProjectOpen)
+async def _no_project_open_handler(_request: Request, exc: NoProjectOpen) -> JSONResponse:
+    """Every route that acts on the open project answers 409 while none is open."""
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(ProjectNotOpen)
+async def _project_not_open_handler(_request: Request, exc: ProjectNotOpen) -> JSONResponse:
+    """A request built for a project the backend does not have open answers 409 naming the one it
+    has open."""
+    return JSONResponse(status_code=409, content={"detail": {
+        "error": str(exc), "open_project_id": exc.open_project_id}})
+
+
 # This process's launch identity, minted once at import: rides every snapshot envelope so a
 # restarted backend's lower-numbered first snapshot is accepted across a client's wsVersion guard.
 SERVER_EPOCH = uuid.uuid4().hex
 
 
 def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
-    """The state-snapshot envelope: state, version and binding generation (read off
-    ``StateStore``).
-    """
+    """The state-snapshot envelope: state, version, the open project (``{id, path}``, or null
+    when none is open) and this process's epoch."""
+    root = _gui_store.project_root
     return {
         "type": "state_snapshot",
         "state": state,
         "version": version,
-        "generation": _gui_store.binding_generation,
+        "project": None if root is None else {"id": _gui_store.project_id, "path": str(root)},
         "epoch": SERVER_EPOCH,
     }
 
 
 async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
-    """Push the new state, version and binding generation to every connected browser."""
+    """Push the new state, version and open project to every connected browser."""
     msg = state_snapshot_message(payload["state"], payload["version"])
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
@@ -291,8 +171,6 @@ async def state_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
-        # Connects are rare: re-read the binding record before replaying, off the event loop.
-        await asyncio.to_thread(_gui_store.refresh_binding_generation_from_record)
         await websocket.send_json(
             state_snapshot_message(_gui_store.snapshot(), _gui_store.version)
         )
@@ -306,12 +184,8 @@ async def state_ws(websocket: WebSocket) -> None:
 
 # ── Panel event hub ──
 
-# Recent events per panel, kept in memory for replay on reconnect.
-_recent_events: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=64))
-# Per-event identity, so a browser can tell an event it has already acted on (dismissed a
-# banner, say) from a new one with the same text. The timestamp keeps ids distinct across a
-# backend restart, which the counter alone would not: it restarts at 0 while browsers keep
-# their dismissals.
+# Per-event identity; the timestamp keeps ids distinct across a restart, where the counter resets
+# while browsers keep their dismissals.
 _event_counter = itertools.count(1)
 # Open WebSocket subscribers per panel.
 _panel_subscribers: dict[str, set[WebSocket]] = defaultdict(set)
@@ -321,6 +195,8 @@ class PanelEvent(BaseModel):
     panel: str | None = None
     event_type: str
     data: dict[str, Any] = {}
+    # The id of the project the sender acts on.
+    project_id: str
 
 
 async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
@@ -362,9 +238,8 @@ def _find_static_dir() -> Path:
 # Serve static files (web frontend)
 STATIC_DIR = _find_static_dir()
 if STATIC_DIR.exists():
-    # The built frontend references absolute /assets/... paths (Vite's default
-    # base="/"), so mount that subdirectory at /assets. Keep /static available
-    # for any ad-hoc static resources.
+    # The built frontend references absolute /assets/... paths (Vite's default base="/"), so
+    # mount that subdirectory at /assets; /static stays for ad-hoc static resources.
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -410,48 +285,22 @@ def index():
 # ── Panel events: POST endpoint (MCP tools) + WS subscription (browsers) ──
 
 
-def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
-    """Re-read the workspace's active-project marker and repin this process to it.
-
-    Never trusts ``sent_name``: an unauthenticated event is a signal to re-read the marker the
-    breeder controls, not a name to act on. Returns the fields the event route's response carries:
-    ``platform_root`` on a repin, or ``platform_root_problem`` naming why the marker could not be
-    used (a store refusal, a lock timeout, or a marker naming a project that is not adoptable),
-    never both. A repin's ``platform_root_disagreement`` says when the event's own name differed
-    from what the marker actually named.
-    """
-    from tcip_mcp import workspace
-    from tcip_mcp.project_paths import repin_platform_root
-
-    try:
-        found = workspace.active_project_if_present(create=False)
-        if found is None:
-            problem = workspace.marker_problem(create=False)
-            return {"platform_root_problem": problem} if problem else {}
-        marker_name, marker_root = found
-    except Exception as exc:  # noqa: BLE001 - reported in the response, never raised
-        return {"platform_root_problem": str(exc)}
-
-    repin_platform_root(marker_root)
-    result: dict[str, Any] = {"platform_root": str(marker_root)}
-    if sent_name is not None and sent_name != marker_name:
-        result["platform_root_disagreement"] = {"event_name": sent_name, "marker_name": marker_name}
-    return result
-
-
 @app.post("/api/events/{panel}")
 async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     """Accept an event pushed from an MCP tool and broadcast to subscribers.
 
-    Payload shape: ``{panel, event_type, data}``. The broadcast and replay payload, not this
-    route's response, carries every agent identity field the sender declared in its headers
-    (``agent_identity.HEADERS``, each ``None`` when not sent). Declared, not verified: any sender
-    can set the headers.
+    Payload shape: ``{panel, event_type, data, project_id}``. An event naming any project but the
+    open one answers 409 with ``open_project_id`` (``StateStore.admit``) and is neither retained
+    nor broadcast. The broadcast
+    and replay payload, not this route's response, carries every agent identity field the sender
+    declared in its headers (``agent_identity.HEADERS``, each ``None`` when not sent). Declared,
+    not verified: any sender can set the headers.
     """
     from tcip_mcp import agent_identity
 
     if panel not in VALID_PANELS:
         return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
+    _gui_store.admit(event.project_id)
     payload = {
         "panel": panel,
         "event_type": event.event_type,
@@ -459,10 +308,9 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         "event_id": f"{datetime.now(timezone.utc).isoformat()}#{next(_event_counter)}",
         **agent_identity.fields_from_headers(request.headers),
     }
-    _recent_events[panel].append(payload)
-    # Agent focus events also update the advisory GuiState slice, so gui.json (what the
-    # agent reads back via view_gui_state) reflects where it pointed the human: the
-    # browser applies the event locally and never syncs these fields back itself.
+    _gui_store.retain_event(panel, payload)
+    # Agent focus events also update the advisory GuiState slice, so gui.json reflects where the
+    # agent pointed the human: the browser applies the event locally and never syncs these back.
     if event.event_type == PANEL_EVENT_REVIEW_FOCUS:
         review = _gui_store.state.review.model_copy(
             update={
@@ -479,15 +327,8 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         if "active_subject" in event.data:
             mutation["active_subject"] = event.data["active_subject"]
         await _gui_store.mutate(mutation)
-    root_fields: dict[str, Any] = {}
-    if event.event_type == PANEL_EVENT_ACTIVE_PROJECT_CHANGED:
-        import asyncio
-
-        root_fields = await asyncio.to_thread(
-            _repin_from_active_project_event, event.data.get("name")
-        )
     await _broadcast_to_panel(panel, payload)
-    return {"status": "ok", "panel": panel, "event_type": event.event_type, **root_fields}
+    return {"status": "ok", "panel": panel, "event_type": event.event_type}
 
 
 @app.websocket("/ws/panel/{panel}")
@@ -498,8 +339,8 @@ async def panel_ws(websocket: WebSocket, panel: str):
         return
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
-    # Replay recent events so late-joining browsers see the current state
-    for event in list(_recent_events.get(panel, ())):
+    # Replay the open project's retained events so a late-joining browser sees the current state.
+    for event in _gui_store.retained_events(panel):
         try:
             await websocket.send_json(event)
         except Exception:

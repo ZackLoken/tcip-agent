@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -11,8 +12,8 @@ from pydantic import BaseModel
 
 from tcip_store.errors import BadKey
 
-from tcip_web.paths import assert_project_root_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
+from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,10 @@ router = APIRouter(prefix="/api/training", tags=["training"])
 
 @router.get("/configs")
 def list_configs_route() -> dict:
-    """Every experiment in this project a run can be started or relaunched from."""
+    """Every experiment in the open project a run can be started or relaunched from."""
     from tcip_mcp.tools.training_tools import list_launchable_configs
 
-    return {"configs": list_launchable_configs()}
+    return {"configs": list_launchable_configs(store.open_root())}
 
 
 @router.get("/configs/{experiment_id}/splits")
@@ -34,7 +35,7 @@ def list_split_choices_route(experiment_id: str) -> dict:
     own splits directory hold, compatibility-checked as the launch itself would check them."""
     from tcip_mcp.tools.training_tools import list_split_choices
 
-    result = list_split_choices(experiment_id)
+    result = list_split_choices(store.open_root(), experiment_id)
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -67,12 +68,13 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     )
     from tcip_store import canonical_path
 
-    config = stated_config(payload.experiment_id)
+    project = store.open_root()
+    config = stated_config(project, payload.experiment_id)
     if config is None:
         raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
 
     if payload.selection_dir:
-        choices = list_split_choices(payload.experiment_id)
+        choices = list_split_choices(project, payload.experiment_id)
         enabled = {canonical_path(s["selection_dir"])
                    for s in choices.get("selections", []) if s.get("enabled")}
         if canonical_path(payload.selection_dir) not in enabled:
@@ -83,7 +85,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
         config = candidate_config_with_selection(config, payload.selection_dir)
     try:
         with declare_launcher("gui"):
-            result = launch_training(config, parent_experiment=payload.experiment_id)
+            result = launch_training(project, config, parent_experiment=payload.experiment_id)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
     if result.get("error"):
@@ -96,14 +98,14 @@ def list_runs_route() -> dict:
     """Every training run directory of the project (``training_tools._all_training_runs``)."""
     from tcip_mcp.tools.training_tools import _all_training_runs
 
-    return {"runs": _all_training_runs()}
+    return {"runs": _all_training_runs(store.open_root())}
 
 
 @router.get("/runs/{experiment_id}")
 def get_run(experiment_id: str) -> dict:
     from tcip_mcp.tools.training_tools import monitor_training
 
-    return monitor_training(experiment_id)
+    return monitor_training(store.open_root(), experiment_id)
 
 
 @router.post("/runs/{experiment_id}/tensorboard")
@@ -115,12 +117,10 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
     already carries an error is checked for events first: with none it reads as no-logs (with that
     reason attached); with real event files it keeps the plain refusal.
     """
-    from pathlib import Path
-
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
     from tcip_mcp.tools.training_tools import monitor_training
 
-    status = monitor_training(experiment_id)
+    status = monitor_training(store.open_root(), experiment_id)
     if "status" not in status:
         raise HTTPException(404, status.get("error") or f"Run not found: {experiment_id}")
     output_dir = status.get("output_dir")
@@ -148,7 +148,7 @@ def cancel_run_route(experiment_id: str, payload: EmptyBodyPayload) -> dict:
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
-    result = cancel_training(experiment_id)
+    result = cancel_training(store.open_root(), experiment_id)
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -162,7 +162,7 @@ class ExperimentComparePayload(BaseModel):
 def compare_runs_route(payload: ExperimentComparePayload) -> dict:
     from tcip_mcp.experiments import compare_experiments
 
-    return compare_experiments(payload.experiment_ids)
+    return compare_experiments(payload.experiment_ids, project=store.open_root())
 
 
 class CompareBestPayload(BaseModel):
@@ -185,18 +185,18 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     from tcip_store.errors import DecodeError, SchemaVersionRefused
 
     from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
-    from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.tools.model_tools import rank_registered_models
 
+    project = store.open_root()
     try:
-        entries = registered_entries(platform_state_root())
+        entries = registered_entries(project)
     except (DecodeError, RegistryVersionRefused, SchemaVersionRefused) as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if not entries:
         raise HTTPException(404, "no model registry in this project")
 
     result = rank_registered_models(
-        metric=payload.metric, higher_is_better=payload.higher_is_better,
+        project, metric=payload.metric, higher_is_better=payload.higher_is_better,
         include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
     )
     if "error" in result:
@@ -245,7 +245,7 @@ class TrainingStatusFrame(BaseModel):
 
 
 async def _stream_metrics(
-    ws: WebSocket, project_root: str, experiment_id: str, poll_seconds: float = 1.0
+    ws: WebSocket, project: Path, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
     """Push every row of a run's ``metrics.jsonl`` to the browser as it is appended.
 
@@ -254,7 +254,7 @@ async def _stream_metrics(
     a row still being written is replayed once it is complete. Rows are read after the
     observation, so a run the observation found in a terminal state has every row sent before its
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream. An id naming no run
-    directory under ``project_root`` ends the stream with one status frame naming it, and one that
+    directory under ``project`` ends the stream with one status frame naming it, and one that
     is not a single directory name raises ``BadKey``. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
@@ -262,7 +262,7 @@ async def _stream_metrics(
     )
 
     observation = await asyncio.to_thread(find_observation, run_name(experiment_id),
-                                          root=project_root)
+                                          project=project)
     if observation is None:
         await ws.send_json(TrainingStatusFrame(
             type="status", experiment_id=experiment_id, status=None,
@@ -288,16 +288,16 @@ async def _stream_metrics(
 
 
 @router.websocket("/runs/{experiment_id}/stream")
-async def training_stream_ws(websocket: WebSocket, experiment_id: str, project_root: str) -> None:
-    """Tail ``experiment_id``'s metrics log and push new rows to the browser."""
-    try:
-        assert_project_root_allowed(project_root)
-    except ValueError as exc:
-        await websocket.close(code=1008, reason=str(exc))
+async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
+    """Tail ``experiment_id``'s metrics log, a run of the open project, and push new rows to the
+    browser; closes with 1008 while no project is open."""
+    project = store.project_root
+    if project is None:
+        await websocket.close(code=1008, reason="no project is open")
         return
     await websocket.accept()
     try:
-        await _stream_metrics(websocket, project_root, experiment_id)
+        await _stream_metrics(websocket, project, experiment_id)
     except BadKey as exc:
         await websocket.close(code=1008, reason=str(exc))
     except WebSocketDisconnect:

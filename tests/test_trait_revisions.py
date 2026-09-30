@@ -23,7 +23,6 @@ from tcip_mcp.operationalization import OperationalizationRefused, confirmed_rev
 from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 from tcip_mcp.pipelines.resolution import Acknowledgment, read_delivery_events
 from tcip_web.app import app
-from tcip_web.state import store
 from tests import _trait_fixtures as fx
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +34,8 @@ _ACK = Acknowledgment(acknowledged_by="user:tester", reason="no bucket backs the
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project: Path) -> TestClient:
+    """A client of the backend with ``tmp_path`` open as its project."""
     return TestClient(app, base_url="http://127.0.0.1")
 
 
@@ -49,14 +49,14 @@ def _deliver_counts(root: Path, name: str) -> dict:
     out = root / f"{name}.csv"
     export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
                          revision=confirmed_revision(
-                             traits.PER_IMAGE_COUNT, project_root=root, trait=fx.COUNT_TRAIT),
-                         acknowledgment=_ACK, project_root=root)
+                             traits.PER_IMAGE_COUNT, project=root, trait=fx.COUNT_TRAIT),
+                         acknowledgment=_ACK, project=root)
     (event,) = [e for e in read_delivery_events(root) if e["output_path"] == str(out)]
     return event
 
 
-def _confirm(client: TestClient, root: Path, revision: traits.TraitRevision, **extra):
-    body = {"project_root": str(root), "trait": revision.entry.name,
+def _confirm(client: TestClient, revision: traits.TraitRevision, **extra):
+    body = {"trait": revision.entry.name,
             "revision": revision.number, "entry_sha256": revision.entry_sha256,
             "confirmed": True, **extra}
     return client.post(CONFIRM_ROUTE, json=body)
@@ -127,7 +127,7 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(tmp_pat
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "image"}],
         str(tmp_path / "per_plant.csv"), delivered_phenotype="stem_count",
-        acknowledgment=_ACK, project_root=tmp_path)
+        acknowledgment=_ACK, project=tmp_path)
 
     kinds = {e["delivery_kind"]: e["trait_revision"] for e in read_delivery_events(tmp_path)}
     assert kinds == {traits.PER_IMAGE_COUNT: 1, traits.PER_PLANT_COUNT_AGGREGATE: 1}
@@ -315,14 +315,14 @@ def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_con
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
 
-    refused = _confirm(client, tmp_path, revision, entry_sha256="0" * 64, user="rosalind")
+    refused = _confirm(client, revision, entry_sha256="0" * 64, user="rosalind")
 
     assert refused.status_code == 409
     assert refused.json()["detail"]["record"]["revisions"][0]["entry_sha256"] == (
         revision.entry_sha256)
     assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
-    confirmed = _confirm(client, tmp_path, revision, user="rosalind")
+    confirmed = _confirm(client, revision, user="rosalind")
 
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["confirmed_by"] == "user:rosalind"
@@ -337,7 +337,7 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
     fx.propose_and_confirm(tmp_path, _count_entry())
     fx.propose(tmp_path, _count_entry(statement="a second reading"))
 
-    body = client.get(TRAITS_ROUTE, params={"project_root": str(tmp_path)}).json()
+    body = client.get(TRAITS_ROUTE).json()
 
     (record,) = body["traits"]
     assert record["trait"] == fx.COUNT_TRAIT
@@ -353,7 +353,7 @@ def test_a_nameless_confirmation_records_the_backend_identity_and_says_so(
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
 
-    body = _confirm(client, tmp_path, revision).json()
+    body = _confirm(client, revision).json()
 
     assert body["identity_from_request"] is False
     assert body["confirmed_by"].startswith("user:")
@@ -363,8 +363,8 @@ def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
     client: TestClient, tmp_path: Path,
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
-    assert _confirm(client, tmp_path, revision, user="rosalind").status_code == 200
-    assert _confirm(client, tmp_path, revision, user="rosalind", confirmed=False).status_code == 200
+    assert _confirm(client, revision, user="rosalind").status_code == 200
+    assert _confirm(client, revision, user="rosalind", confirmed=False).status_code == 200
 
     entries = [e for e in ts.read_log(audit_log_key(tmp_path)).records
                if e["tool"] == "confirm_trait_revision"]
@@ -401,7 +401,7 @@ def test_the_door_refuses_an_unknown_trait_and_a_revision_that_does_not_exist(
 ) -> None:
     revision = fx.propose(tmp_path, _count_entry())
 
-    body = {"project_root": str(tmp_path), "trait": fx.COUNT_TRAIT, "revision": 1,
+    body = {"trait": fx.COUNT_TRAIT, "revision": 1,
             "entry_sha256": revision.entry_sha256, "confirmed": True}
     unknown = client.post(CONFIRM_ROUTE, json={**body, "trait": "not_a_trait"})
     missing = client.post(CONFIRM_ROUTE, json={**body, "revision": 2})
@@ -417,27 +417,20 @@ def test_a_committed_confirmation_returns_its_audit_failure_as_a_warning(
 
     revision = fx.propose(tmp_path, _count_entry())
     refuse_audit_appends(monkeypatch)
-    resp = _confirm(client, tmp_path, revision, user="rosalind")
+    resp = _confirm(client, revision, user="rosalind")
 
     assert resp.status_code == 200, resp.text
     assert "do not retry it blind" in resp.json()["audit_warning"]
     assert traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 
-def test_a_project_root_outside_the_allowed_roots_is_refused_at_both_trait_routes(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    allowed = tmp_path / "workspace"
-    allowed.mkdir()
-    outside = tmp_path_factory.mktemp("outside")
-    revision = fx.propose(outside, _count_entry())
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    store.open_project(tmp_path.resolve())
+def test_both_trait_routes_refuse_while_no_project_is_open(tmp_path: Path) -> None:
+    revision = fx.propose(tmp_path, _count_entry())
+    client = TestClient(app, base_url="http://127.0.0.1")
 
-    assert client.get(TRAITS_ROUTE, params={"project_root": str(outside)}).status_code == 403
-    assert _confirm(client, outside, revision).status_code == 403
-    assert not traits.read_trait(fx.COUNT_TRAIT, outside).latest.confirmed
+    assert client.get(TRAITS_ROUTE).status_code == 409
+    assert _confirm(client, revision).status_code == 409
+    assert not traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed
 
 
 def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:

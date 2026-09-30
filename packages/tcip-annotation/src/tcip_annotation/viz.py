@@ -1,7 +1,7 @@
 """Visualization rendering: draws annotations and predictions on images.
 
-All functions return the output file path for the agent's own image-capable read tool to consume.
-Default output directory: .tcip/artifacts/viz/
+All functions write to the ``output_path`` their caller names and return it, for the agent's own
+image-capable read tool to consume.
 
 The renderers take display pixels, never a path. Annotation coordinates stay in the raster's own
 full-resolution frame, so a renderer handed reduced pixels also takes the ``native_size`` those
@@ -13,7 +13,6 @@ Coordinates: functions accept pixel coordinates.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,30 +46,6 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 255, 128),   # cream
     (255, 128, 255),   # pink
 ]
-
-_PLATFORM_ROOT_ENV = "TCIP_STATE_ROOT"
-"""Mirrors ``tcip_mcp.project_paths.ENV_VAR``. This package must not import ``tcip_mcp`` (see
-packages/tcip-annotation/CLAUDE.md), so the platform-state-root variable name is restated here
-rather than imported; a test holds the two strings equal."""
-
-
-def _viz_base() -> Path:
-    """The ``.tcip`` base for viz output: ``TCIP_STATE_ROOT`` when set, else the process CWD."""
-    import os
-
-    root = os.environ.get(_PLATFORM_ROOT_ENV)
-    return (Path(root) if root else Path(".")) / ".tcip"
-
-
-def _default_output(func_name: str, suffix: str = ".png") -> str:
-    """Generate an absolute default output path under ``<root>/.tcip/artifacts/viz/``."""
-    viz_dir = (_viz_base() / "artifacts" / "viz").resolve()
-    viz_dir.mkdir(parents=True, exist_ok=True)
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    # Include microseconds to avoid collision when many images render in one second
-    us = time.time_ns() % 1_000_000
-    return str(viz_dir / f"{ts}_{us:06d}_{func_name}{suffix}")
-
 
 def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
     """The caller's display pixels as an RGB frame this module can draw on.
@@ -118,7 +93,7 @@ def render_detections(
     *,
     native_size: tuple[int, int],
     class_names: dict[int, str] | None = None,
-    output_path: str | None = None,
+    output_path: str,
     line_width: int = 2,
     conf_key: str | None = "confidence",
 ) -> str:
@@ -130,11 +105,10 @@ def render_detections(
                Optionally include 'confidence' for score display.
         native_size: ``(width, height)`` of the frame ``boxes`` are measured in.
         class_names: Mapping from class_id to display name.
-        output_path: Where to save. Defaults to .tcip/artifacts/viz/.
+        output_path: Where to save.
         line_width: Box outline width in pixels.
         conf_key: Key for confidence score in box dicts. None to hide scores.
     """
-    output_path = output_path or _default_output("detections")
     class_names = class_names or {}
 
     orig_w, orig_h = native_size
@@ -174,7 +148,7 @@ def render_segmentations(
     *,
     native_size: tuple[int, int],
     class_names: dict[int, str] | None = None,
-    output_path: str | None = None,
+    output_path: str,
     alpha: float = 0.3,
 ) -> str:
     """Draw filled polygons on display pixels. Returns output path.
@@ -189,7 +163,6 @@ def render_segmentations(
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
     """
-    output_path = output_path or _default_output("segmentations")
     class_names = class_names or {}
 
     orig_w, orig_h = native_size
@@ -229,7 +202,7 @@ def render_comparison(
     native_size: tuple[int, int],
     matches: list[dict] | None = None,
     class_names: dict[int, str] | None = None,
-    output_path: str | None = None,
+    output_path: str,
 ) -> str:
     """Overlay GT (green) vs predictions (red) with optional match lines.
 
@@ -243,7 +216,6 @@ def render_comparison(
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
     """
-    output_path = output_path or _default_output("comparison")
     class_names = class_names or {}
 
     orig_w, orig_h = native_size
@@ -295,7 +267,8 @@ def render_grid(
     titles: list[str] | None = None,
     cols: int = 4,
     cell_size: int = 256,
-    output_path: str | None = None,
+    *,
+    output_path: str,
 ) -> str:
     """Tile multiple images into a grid. Returns output path.
 
@@ -306,7 +279,6 @@ def render_grid(
         cell_size: Size of each cell (images resized to fit).
         output_path: Where to save.
     """
-    output_path = output_path or _default_output("grid")
     n = len(image_paths)
     if n == 0:
         # Empty grid: create a small placeholder
@@ -358,7 +330,7 @@ def render_candidates(
     candidates: list[dict],
     *,
     native_size: tuple[int, int],
-    output_path: str | None = None,
+    output_path: str,
     alpha: float = 0.35,
 ) -> str:
     """Render numbered proposal-engine candidate masks on display pixels for agent review.
@@ -372,13 +344,12 @@ def render_candidates(
         candidates: Neutral candidate dicts, each with candidate_id, bbox, rings, area, score
             (SAM populates these via its proposer adapter); coordinates in the native frame.
         native_size: ``(width, height)`` of the frame the candidates are measured in.
-        output_path: Where to save. Defaults to .tcip/artifacts/viz/.
+        output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
 
     Returns:
         Output path to the rendered image.
     """
-    output_path = output_path or _default_output("candidates")
 
     orig_w, orig_h = native_size
     img = _rgb_frame(image)
@@ -439,7 +410,7 @@ def render_grid_overlay(
     cells: list,
     *,
     native_size: tuple[int, int],
-    output_path: str | None = None,
+    output_path: str,
 ) -> str:
     """Render display pixels with the caller's labeled reference-grid cells overlaid.
 
@@ -464,7 +435,6 @@ def render_grid_overlay(
 
     if not cells:
         raise ValueError("cells is empty: there is no grid to render")
-    output_path = output_path or _default_output("grid_overlay")
 
     img = _rgb_frame(image)
     rw, rh = img.size
@@ -555,7 +525,7 @@ def render_canvas_state(
     *,
     origin: tuple[float, float],
     scale: float,
-    output_path: str | None = None,
+    output_path: str,
 ) -> str:
     """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
 
@@ -567,11 +537,8 @@ def render_canvas_state(
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
     and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in the
-    native grid and are placed by those two.
+    native grid and are placed by those two. The render is written to ``output_path`` as JPEG.
     """
-    if output_path is None:
-        output_path = _default_output("canvas", suffix=".jpg")
-
     img = _rgb_frame(image)
     ox, oy = float(origin[0]), float(origin[1])
     k = float(scale)

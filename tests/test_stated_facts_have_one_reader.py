@@ -143,15 +143,17 @@ def test_every_stamp_write_leaves_its_one_line_and_a_merge_that_writes_nothing_l
 
     root = tmp_path / "orchard"
     bucket = root / "predictions" / "m" / "2025-09-14"
-    write_sidecar(bucket, {"validated": False, "scope": {"subject": SUBJECT, "attribute": None}})
-    assert update_sidecar(bucket, lambda stored: {**stored, "shippable_issues": ["merged"]})
-    assert not update_sidecar(bucket, lambda stored: None)
+    write_sidecar(bucket, {"validated": False, "scope": {"subject": SUBJECT, "attribute": None}},
+                  project=tmp_path)
+    assert update_sidecar(bucket, lambda stored: {**stored, "shippable_issues": ["merged"]},
+                          project=tmp_path)
+    assert not update_sidecar(bucket, lambda stored: None, project=tmp_path)
 
     rows = ts.read_log(audit_log_key(root)).records
     assert [(r["tool"], r["arguments"]["pred_dir"]) for r in rows] == [
         ("stamp_written", str(bucket)), ("stamp_written", str(bucket))]
     assert rows[1]["stamp"]["shippable_issues"] == ["merged"]
-    assert ts.read_log(audit_log_key()).records == []
+    assert ts.read_log(audit_log_key(tmp_path)).records == []
 
 
 def test_a_split_lock_missing_a_recorded_field_raises_naming_it(tmp_path: Path):

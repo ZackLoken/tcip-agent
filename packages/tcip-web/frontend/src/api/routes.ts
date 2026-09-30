@@ -21,10 +21,6 @@ export const ROUTES = {
   getMetaReports: "/api/meta/reports",
   getMetaRetrospectives: "/api/meta/retrospectives",
   getProjects: "/api/projects",
-  getProjectsByNameRemovalPreview: (name: string) =>
-    `/api/projects/${encodeURIComponent(name)}/removal-preview`,
-  getProjectsByNameRenamePreview: (name: string) =>
-    `/api/projects/${encodeURIComponent(name)}/rename-preview`,
   getResultsDeliveryEvents: "/api/results/delivery-events",
   getResultsModelsRegistered: "/api/results/models/registered",
   getResultsPlantMappingList: "/api/results/plant_mapping/list",
@@ -65,12 +61,9 @@ export const ROUTES = {
   postInferenceJobsByJobIdCancel: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
   postInferenceLaunch: "/api/inference/launch",
-  postProjectsActive: "/api/projects/active",
-  postProjectsByNameReleaseBinding: (name: string) =>
-    `/api/projects/${encodeURIComponent(name)}/release-binding`,
+  postProjectsOpen: "/api/projects/open",
   postProjectsRemove: "/api/projects/remove",
   postProjectsRename: "/api/projects/rename",
-  postProjectsRenameWithdraw: "/api/projects/rename/withdraw",
   postResultsExportCountCsv: "/api/results/export_count_csv",
   postResultsExportCsv: "/api/results/export_csv",
   postResultsPhenologyMeasurement: "/api/results/phenology_measurement",

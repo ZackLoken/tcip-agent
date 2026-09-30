@@ -49,13 +49,11 @@ describe("image-status writes carry the app-set identity", () => {
   it("names the person in the single-image body, so the backend stamps them and not itself", async () => {
     stubFetch();
     await subjectsApi.setImageStatus(
-      "C:/proj",
       "img1.jpg",
       "negative",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       "breeder",
     );
 
@@ -66,12 +64,10 @@ describe("image-status writes carry the app-set identity", () => {
   it("names the person in the bulk body, which writes the same store one call wider", async () => {
     stubFetch();
     await subjectsApi.setImageStatusBulk(
-      "C:/proj",
       { "img1.jpg": "partial" },
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       "breeder",
     );
 
@@ -82,16 +78,39 @@ describe("image-status writes carry the app-set identity", () => {
   it("leaves the field out when no name is set, which is what the backend fallback answers", async () => {
     stubFetch();
     await subjectsApi.setImageStatus(
-      "C:/proj",
       "img1.jpg",
       "complete",
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
 
     expect("user" in sentBody()).toBe(false);
+  });
+});
+
+describe("loadImageStatus admits only the whole declared response", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns a response of known statuses and string stale names", async () => {
+    const body = { statuses: { "a.jpg": "complete" }, stale_definition: ["a.jpg"] };
+    stubFetch(body);
+    await expect(subjectsApi.loadImageStatus("subject_a", null, "C:/data")).resolves.toEqual(body);
+  });
+
+  it.each([
+    [{ statuses: [], stale_definition: [] }],
+    [{ statuses: { "a.jpg": 42 }, stale_definition: [] }],
+    [{ statuses: { "a.jpg": "done" }, stale_definition: [] }],
+    [{ statuses: {}, stale_definition: [7] }],
+    [{ statuses: {} }],
+  ])("refuses %j, naming it", async (body) => {
+    stubFetch(body);
+    await expect(subjectsApi.loadImageStatus("subject_a", null, "C:/data")).rejects.toThrow(
+      /another shape/,
+    );
   });
 });

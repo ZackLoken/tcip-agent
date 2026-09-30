@@ -149,7 +149,7 @@ def test_save_annotations_refuses_an_inverted_box(tmp_path):
     out_path = tmp_path / "annotations" / "img_001.json"
 
     result = save_annotations(
-        str(img), annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
+        tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
         path=str(out_path),
     )
 
@@ -165,7 +165,7 @@ def test_save_annotations_admits_an_ordered_box(tmp_path):
     out_path = tmp_path / "annotations" / "img_001.json"
 
     result = save_annotations(
-        str(img), annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
+        tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
         path=str(out_path),
     )
 
@@ -438,7 +438,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     _write_image(image)
 
     result = stage_proposals(
-        str(image), model_name="sam",
+        tmp_path, str(image), model_name="sam",
         boxes=[
             {"subject": "leaf", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2},
             {"subject": "leaf", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.0, "h": 0.2},
@@ -462,7 +462,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(tmp_path, shape):
                 if shape == "box" else
                 {"polygons": [{"subject": "leaf", "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})
 
-    result = stage_proposals(str(image), model_name="sam", **unscored)
+    result = stage_proposals(tmp_path, str(image), model_name="sam", **unscored)
 
     assert "conf" in result.get("error", ""), result
 
@@ -479,7 +479,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(tmp_pat
                 if shape == "box" else
                 {"polygons": [{"conf": 0.9, "points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4]]}]})
 
-    result = stage_proposals(str(image), model_name="sam", **unstated)
+    result = stage_proposals(tmp_path, str(image), model_name="sam", **unstated)
 
     assert result.get("error", "").startswith(f"{shape} 0: "), result
     assert "subject" in result["error"] and "Field required" in result["error"]

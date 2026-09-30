@@ -38,9 +38,8 @@ def children(monkeypatch) -> list:
 
 @pytest.fixture
 def launch(tmp_path, monkeypatch, children):
-    """``launch_training`` under ``tmp_path`` as the pinned root, over a tiny regression dataset,
-    with ``epochs`` stages and any other top-level keys; TensorBoard is not started."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    """``launch_training`` in the project ``tmp_path``, over a tiny regression dataset, with
+    ``epochs`` stages and any other top-level keys; TensorBoard is not started."""
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     from tcip_mcp.tools.training_tools import launch_training
@@ -59,7 +58,7 @@ def launch(tmp_path, monkeypatch, children):
             "mixed_precision": False, "device": "cpu",
             "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
         }
-        return launch_training(config, resume_from=resume_from)
+        return launch_training(tmp_path, config, resume_from=resume_from)
 
     return _launch
 
@@ -110,11 +109,11 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(launch,
     (entry,) = [m for m in ModelRegistry(str(tmp_path)).list_models()
                 if m["name"] == run_dir.name]
     assert entry["sha256"] == checkpoint["sha256"]
-    loaded = load_registered_checkpoint(checkpoint["path"], project_path=str(tmp_path))
+    loaded = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
     assert resolve_model_identity(loaded)["experiment_id"] == run_dir.name
 
 
-def test_a_cancel_requested_by_id_ends_the_child_canceled(launch):
+def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
     """A cancel requested once the child is training (its first epoch row logged) ends it
     canceled, completing no checkpoint."""
     from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
@@ -125,15 +124,16 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(launch):
     run_dir = Path(res["output_dir"])
     _until("the child's first epoch row", lambda: read_rows(run_dir / METRICS_FILE)[0])
 
-    assert cancel_training(res["experiment_id"])["cancel_requested"] is True
+    assert cancel_training(tmp_path, res["experiment_id"])["cancel_requested"] is True
     final = _wait_final(run_dir)
 
     assert final["state"] == "canceled", final
     assert observe(run_dir).checkpoint is None
 
 
-def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(launch):
+def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(launch, tmp_path):
     from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.registry_paths import stored_path
 
     first = launch(epochs=2, checkpoint_every_n_epochs=1)
     source = Path(first["output_dir"])
@@ -148,7 +148,8 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(launch):
     assert run_dir != source
     assert _wait_final(run_dir)["state"] == "completed"
 
-    assert read_record(run_dir / RUN_FILE)["resume_from"] == str(epoch_checkpoints[-1])
+    assert read_record(run_dir / RUN_FILE)["resume_from"] == stored_path(epoch_checkpoints[-1],
+                                                                         tmp_path)
     assert (run_dir / "model_final.pt").is_file()
     assert _contents(source) == before
 
@@ -173,7 +174,7 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
     assert experiments.observe(run_dir).state == "interrupted"
 
 
-def test_progress_logged_after_the_final_status_never_reopens_the_run(launch):
+def test_progress_logged_after_the_final_status_never_reopens_the_run(launch, tmp_path):
     """Once the child wrote its final status the run's metrics writer refuses a row, leaving the
     log and the final status as they were; the completed run's summary is the best selection over
     its own rows under its recorded objective."""
@@ -191,7 +192,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch):
     observation = observe(run_dir)
     run = TrainRun(id=run_dir.name, config=observation.record["config"],
                    objective=observation.record["resolved"]["objective"],
-                   output_dir=str(run_dir))
+                   project=tmp_path, output_dir=str(run_dir))
 
     with pytest.raises(RunEnded):
         TrainContext(run=run, train_loader=None).log_metrics(
@@ -199,7 +200,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(launch):
 
     assert {name: (run_dir / name).read_bytes() for name in before} == before
     rows = read_rows(observation.metrics_log)[0]
-    summary = monitor_training(res["experiment_id"])
+    summary = monitor_training(tmp_path, res["experiment_id"])
     assert summary["status"] == "completed"
     assert summary["best_metric"] is not None
     assert summary["best_metric"] == best_selection(
@@ -212,8 +213,7 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(tmp_path,
     from tcip_mcp import experiments
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    run_dir = opened_run(None, detection_config(tmp_path / "data"))
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     seen: list = []
     real_publish = experiments.publish_once
 
@@ -231,15 +231,14 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(tmp_path,
     assert experiments.observe(run_dir).state == "failed"
 
 
-def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path, monkeypatch):
+def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
     """A completed run's checkpoint is read by whatever loads it; with that file gone the load
     refuses naming it rather than answering from anything else."""
     from tcip_mcp.model_registry import checkpoint_payload
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    checkpoint = Path(registered_checkpoint(None, experiment_id="exp-lost-weights"))
+    checkpoint = Path(registered_checkpoint(tmp_path, experiment_id="exp-lost-weights"))
     named = observe(checkpoint.parent).checkpoint
     checkpoint.unlink()
 
@@ -247,7 +246,7 @@ def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path, monk
         checkpoint_payload(named["path"], named["sha256"])
 
 
-def test_a_launch_into_an_existing_directory_refuses_and_writes_nothing(launch):
+def test_a_launch_into_an_existing_directory_refuses_and_writes_nothing(launch, tmp_path):
     """Every launch is a new run: naming a directory that exists, a run's or one left holding no
     launch record at all, refuses by name and leaves it as it was."""
     from tcip_mcp.experiments import RUN_FILE, experiment_dir
@@ -261,7 +260,7 @@ def test_a_launch_into_an_existing_directory_refuses_and_writes_nothing(launch):
     assert "already exists" in again["error"], again
     assert _contents(run_dir) == before
 
-    leftover = experiment_dir("leftover-run")
+    leftover = experiment_dir("leftover-run", project=tmp_path)
     leftover.mkdir(parents=True)
     (leftover / "notes.txt").write_text("left by hand", encoding="utf-8")
 
@@ -275,7 +274,6 @@ def _trial(tmp_path, monkeypatch, **extra) -> tuple[Path, list[float]]:
     """One HPO trial over a tiny regression dataset, run through the sweep's own trial body under
     the sweep's objective (``loss``, lower better); its run directory and every value it
     reported."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import sweeps_dir
     from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -292,10 +290,10 @@ def _trial(tmp_path, monkeypatch, **extra) -> tuple[Path, list[float]]:
         "mixed_precision": False, "device": "cpu",
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}, **extra,
     }
-    trial_dir = sweeps_dir() / "hpo_study" / "trial_a"
+    trial_dir = sweeps_dir(tmp_path) / "hpo_study" / "trial_a"
     trial_dir.parent.mkdir(parents=True)
     reported: list[float] = []
-    _run_hpo_trial({"lr": 0.01}, reported.append, base_config, trial_dir,
+    _run_hpo_trial({"lr": 0.01}, reported.append, base_config, trial_dir, project=tmp_path,
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    launched_by={"launcher": "process"})
     return trial_dir, reported
@@ -379,9 +377,9 @@ def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
         return str(Path(kw["storage_path"]) / kw["study_name"])
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial)
-    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1,
-                                          search_seed=0, auto_tensorboard=False)
-    sweep = tt.sweep_observation(result["study_name"])
+    result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
+                                          n_trials=1, search_seed=0, auto_tensorboard=False)
+    sweep = tt.sweep_observation(result["study_name"], project=tmp_path)
     (trial_dir,) = [d for d in sweep.directory.iterdir() if d.name.startswith("trial_")]
     trial = observe(trial_dir)
 
@@ -399,8 +397,7 @@ def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(tmp_path, monk
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context, run_directory
     from tests._verified_checkpoint_fixtures import finished_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    run_dir = finished_run(None, experiment_id="exp-ended")
+    run_dir = finished_run(tmp_path, experiment_id="exp-ended")
     before = _contents(run_dir)
 
     with pytest.raises(RunEnded):
