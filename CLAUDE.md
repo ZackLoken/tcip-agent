@@ -204,8 +204,11 @@ the loose-file layout, any other value refuses. `tests/test_store_contract.py` r
 run; the rest runs on whichever is bound, and CI runs both, so a local `pytest tests/` binds the
 database backend only.
 A root with loose records is refused by the database backend until `tcip adopt-store` conforms it.
-The MCP server auto-launches from `.mcp.json`; a stale tool index means restart the client. Durable
-state resolves via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.
+The MCP server auto-launches from `.mcp.json`; a stale tool index means restart the client. A
+project is the only root: the web backend holds the project it has open, the MCP server takes
+`--project <path>` at start, and every other entry point obtains its project once and passes it.
+The repository's own `.mcp.json` names no project, so there the project tools refuse naming
+`--project` and the knowledge tools work.
 
 ## Conventions
 

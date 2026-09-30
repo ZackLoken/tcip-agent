@@ -34,15 +34,15 @@ class _FakePredictor:
                 for p in paths]
 
 
-def _job(job_id, images_dir, out_dir, ckpt, platform_root):
+def _job(job_id, images_dir, out_dir, ckpt, project):
     from tcip_mcp.dataset_layout import bucket_dataset_root
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
-        job_id=job_id, checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
-        platform_root=str(platform_root), dataset_root=bucket_dataset_root(out_dir),
+        job_id=job_id, project=str(project), checkpoint_path=str(ckpt),
+        images_dir=str(images_dir), output_dir=str(out_dir), tile=False, conf=0.25,
+        cross_tile_nms=0.7, overlap=0.2, postprocess="nms",
+        dataset_root=bucket_dataset_root(out_dir),
     )
 
 
@@ -95,15 +95,15 @@ def test_the_gui_worker_and_the_mcp_pass_prepare_the_same_run(tmp_path, monkeypa
     real_publish = itools.publish_bucket
     handed: list[dict] = []
 
-    def spy(result, **kwargs):
+    def spy(project, result, **kwargs):
         handed.append(dict(result))
-        return real_publish(result, **kwargs)
+        return real_publish(project, result, **kwargs)
 
     monkeypatch.setattr(itools, "publish_bucket", spy)
     job = _job("prepared", images_dir, tmp_path / "out", ckpt, tmp_path)
     _worker(job)
     assert job.status == "completed", job.error
-    mcp = run_inference_verified(ckpt, images_dir=str(images_dir), conf_threshold=job.conf,
+    mcp = run_inference_verified(tmp_path, ckpt, images_dir=str(images_dir), conf_threshold=job.conf,
                                  cross_tile_nms=job.cross_tile_nms, tile=job.tile, overlap=job.overlap)
 
     outcome = {"results", "image_count", "total_detections", "produced_at"}
@@ -113,7 +113,7 @@ def test_the_gui_worker_and_the_mcp_pass_prepare_the_same_run(tmp_path, monkeypa
 
 
 def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each_door(
-    tmp_path, monkeypatch,
+    tmp_path, opened_project, monkeypatch,
 ):
     """A pass that dies between images keeps the document it wrote and no stamp, and the library
     records that document and the error under a failed status, the GUI's pass and the MCP door's
@@ -146,7 +146,7 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
 
     mcp_out = prediction_dir(dataset, "mcp", DATE)
     with pytest.raises(OSError, match="disk full"):
-        itools.run_inference(ckpt, str(images_dir), output_dir=str(mcp_out), tile=False)
+        itools.run_inference(tmp_path, ckpt, str(images_dir), output_dir=str(mcp_out), tile=False)
     mcp_rows = _dataset_rows(dataset)[len(gui_rows):]
 
     def shape(rows: list[dict]) -> list[tuple]:
@@ -163,7 +163,7 @@ def test_a_pass_failing_after_its_first_document_leaves_one_failure_line_on_each
 
 
 def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_written(
-    tmp_path, monkeypatch,
+    tmp_path, opened_project, monkeypatch,
 ):
     """A gate the publisher runs before its first write refuses a GUI run as it refuses the MCP
     door's: the same reason, no document, no stamp, no line."""
@@ -178,12 +178,12 @@ def test_a_publish_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_writt
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
     ckpt = registered_checkpoint(tmp_path)
     # A raw GUI pass earns no claim, so this gate's refusal is stood in for at the gate itself.
-    monkeypatch.setattr(itools, "_draft_count_claim", lambda result, **kw: (
+    monkeypatch.setattr(itools, "_draft_count_claim", lambda project, result, **kw: (
         None, {"error": "the count claim for trait 'leaf count' was not earned: stand-in"}))
 
     job = _launch_through_the_route(dataset, ckpt, "run")
     bucket = Path(job.output_dir)
-    mcp = itools.run_inference(ckpt, str(images_dir), output_dir=str(bucket), tile=False)
+    mcp = itools.run_inference(tmp_path, ckpt, str(images_dir), output_dir=str(bucket), tile=False)
 
     assert job.status == "failed"
     assert job.error == mcp["error"]
@@ -267,11 +267,13 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
 
     import tcip_store as ts
     from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_mcp.registry_paths import stored_path
+
     sidecar = ts.read(sidecar_key(out_dir))
     assert sidecar["operating_point"]["conf"]["value"] == pytest.approx(0.25)
     assert sidecar["checkpoint"] == Path(ckpt).stem
     assert sidecar["checkpoint_sha256"] and sidecar["produced_at"]
-    assert sidecar["images_dir"] == str(images_dir)
+    assert sidecar["images_dir"] == stored_path(images_dir, tmp_path)
     assert sidecar["validated"] is False
     assert sidecar["image_filenames"] == {"a": "a.jpg", "b": "b.jpg"}
 
@@ -304,7 +306,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_records(tmp_path, m
         if door == "gui":
             _worker(_job(door, images_dir, out, ckpt, tmp_path))
         else:
-            result = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+            result = run_inference(tmp_path, ckpt, str(images_dir), output_dir=str(out), tile=False)
             assert "error" not in result, result
         rows[door] = ts.read_log(audit_log_key(dataset)).records[before:]
         assert read_operating_point_sidecar(out)["experiment_id"] == Path(ckpt).parent.name

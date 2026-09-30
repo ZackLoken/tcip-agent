@@ -25,8 +25,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections import Counter
 from collections.abc import Generator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -327,6 +328,9 @@ class SqliteBackend:
         self._checked: dict[tuple[int, int, str], tuple[set[str], int]] = {}
         self._marked: dict[str, set[str]] = {}
         self._guard = threading.Lock()
+        # How many operations are using each connection right now; a release waits on it.
+        self._busy: Counter[tuple[int, int, str]] = Counter()
+        self._idle = threading.Condition(self._guard)
 
     def capabilities(self) -> Capabilities:
         """What this backend guarantees on the platform it is running on.
@@ -356,16 +360,35 @@ class SqliteBackend:
             self._marked.clear()
         self._files.close()
 
+    def release(self, root: str) -> None:
+        """Close every connection this backend holds on the canonical ``root`` or on a root under
+        it, on every thread, once every operation using one of them has returned; every other
+        root's connections stay open and in use."""
+        prefix = os.path.join(root, "")
+
+        def under(slot: tuple[int, int, str]) -> bool:
+            return slot[2] == root or slot[2].startswith(prefix)
+
+        with self._idle:
+            self._idle.wait_for(lambda: not any(under(slot) for slot in self._busy))
+            for slot in [s for s in self._connections if under(s)]:
+                self._connections.pop(slot).close()
+                self._checked.pop(slot, None)
+            for marked in [m for m in self._marked if m == root or m.startswith(prefix)]:
+                del self._marked[marked]
+
     # ── database lifecycle ──────────────────────────────────────────────────────
 
+    @contextmanager
     def _connection(
         self,
         root: str,
         stores: Sequence[str],
         keys: tuple[Key, ...] = (),
         timeout_s: float | None = None,
-    ) -> sqlite3.Connection:
-        """This process, thread and root's connection, creating the database if it is absent.
+    ) -> Generator[sqlite3.Connection]:
+        """This process, thread and root's connection, creating the database if it is absent,
+        held in use (so :meth:`release` waits for it) until the block returns.
 
         One connection per (pid, thread, root): a forked worker never reuses the parent's handles,
         and a write on one thread never joins another thread's read. ``stores`` is what the
@@ -376,23 +399,27 @@ class SqliteBackend:
         db_path = database_path(root)
         slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
-            existing = self._connections.get(slot)
-        if existing is not None:
-            self._verify_layouts(existing, root, layouts, slot)
-            return existing
-        if not db_path.is_file():
-            for layout in layouts:
-                self._refuse_unconformed(root, layout)
-            self._publish(db_path, root, layouts, keys, timeout_s)
-        conn = open_verified(db_path, root, self.lock_timeout_s)
+            conn = self._connections.get(slot)
+            if conn is not None:
+                self._busy[slot] += 1
+        if conn is None:
+            if not db_path.is_file():
+                for layout in layouts:
+                    self._refuse_unconformed(root, layout)
+                self._publish(db_path, root, layouts, keys, timeout_s)
+            conn = open_verified(db_path, root, self.lock_timeout_s)
+            with self._guard:
+                self._connections[slot] = conn
+                self._busy[slot] += 1
         try:
             self._verify_layouts(conn, root, layouts, slot)
-        except BaseException:
-            conn.close()
-            raise
-        with self._guard:
-            self._connections[slot] = conn
-        return conn
+            yield conn
+        finally:
+            with self._idle:
+                self._busy[slot] -= 1
+                if not self._busy[slot]:
+                    del self._busy[slot]
+                self._idle.notify_all()
 
     def require_conformed(self, root: str, stores: Sequence[str]) -> None:
         """The database backend's half of the conform rail: refuse an unconformed root, whose
@@ -411,20 +438,24 @@ class SqliteBackend:
             for layout in layouts:
                 self._refuse_unconformed(root, layout)
             return
-        self._connection(root, stores)
+        with self._connection(root, stores):
+            pass
 
+    @contextmanager
     def _serving(
         self, root: str, stores: Sequence[str], keys: tuple[Key, ...] = ()
-    ) -> sqlite3.Connection | None:
-        """The checked connection for these stores, or None when this root holds no database; a
-        read never creates a database.
+    ) -> Generator[sqlite3.Connection | None]:
+        """The checked connection for these stores, held in use for the block, or None when this
+        root holds no database; a read never creates a database.
         """
         layouts = layouts_of(stores)
         if not database_path(root).is_file():
             for layout in layouts:
                 self._refuse_unconformed(root, layout)
-            return None
-        return self._connection(root, stores, keys)
+            yield None
+            return
+        with self._connection(root, stores, keys) as conn:
+            yield conn
 
     def _verify_layouts(
         self,
@@ -660,26 +691,26 @@ class SqliteBackend:
         (:meth:`_guard_first_marker`).
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
-        with self._mapped(keys):
-            conn = self._connection(
-                keys[0].root, tuple(key.store for key in keys), keys, timeout
-            )
-            self._set_busy_timeout(conn, timeout)
-            self._apply_synchronous(conn, self._synchronous_for(keys))
-        started = time.monotonic()
-        try:
-            conn.execute("begin immediate")
-        except sqlite3.Error as exc:
-            raise self._translate(exc, keys, time.monotonic() - started) from exc
-        try:
+        with ExitStack() as held:
             with self._mapped(keys):
-                self._guard_first_marker(conn, keys)
-                yield conn
-                conn.execute("commit")
-        except BaseException:
-            if conn.in_transaction:
-                conn.execute("rollback")
-            raise
+                conn = held.enter_context(self._connection(
+                    keys[0].root, tuple(key.store for key in keys), keys, timeout))
+                self._set_busy_timeout(conn, timeout)
+                self._apply_synchronous(conn, self._synchronous_for(keys))
+            started = time.monotonic()
+            try:
+                conn.execute("begin immediate")
+            except sqlite3.Error as exc:
+                raise self._translate(exc, keys, time.monotonic() - started) from exc
+            try:
+                with self._mapped(keys):
+                    self._guard_first_marker(conn, keys)
+                    yield conn
+                    conn.execute("commit")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("rollback")
+                raise
 
     def _synchronous_for(self, keys: tuple[Key, ...]) -> str:
         durable = any(get_descriptor(key.store).durable for key in keys)
@@ -741,8 +772,7 @@ class SqliteBackend:
     def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
         descriptor = get_descriptor(key.store)
         data = None
-        with self._mapped((key,)):
-            conn = self._serving(key.root, (key.store,), (key,))
+        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
             if conn is not None:
                 data = self._stored(conn, key)
         if data is None:
@@ -754,8 +784,7 @@ class SqliteBackend:
     def exists(self, key: Key) -> bool:
         if get_descriptor(key.store).kind == "blob":
             return self._files.exists(key)
-        with self._mapped((key,)):
-            conn = self._serving(key.root, (key.store,), (key,))
+        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
             return conn is not None and self._stored(conn, key) is not None
 
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
@@ -794,8 +823,7 @@ class SqliteBackend:
         descriptor = get_descriptor(store)
         if descriptor.kind == "blob":
             return self._files.keys(store, root, prefix)
-        with self._mapped(()):
-            conn = self._serving(root, (store,))
+        with self._mapped(()), self._serving(root, (store,)) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
@@ -836,8 +864,7 @@ class SqliteBackend:
         """
         descriptor = get_descriptor(key.store)
         start = int(after) if after else 0
-        with self._mapped((key,)):
-            conn = self._serving(key.root, (key.store,), (key,))
+        with self._mapped((key,)), self._serving(key.root, (key.store,), (key,)) as conn:
             if conn is None:
                 return LogPage(records=[], cursor=str(start))
             rows = conn.execute(

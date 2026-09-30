@@ -28,14 +28,14 @@ def test_parse_validation_reference(value: str, expected: tuple[str, str] | None
 def test_admission_rule_of_answers_none_for_no_stamp(tmp_path: Path) -> None:
     """An absent stamp reads as its own reason, distinct from a stamp claiming nothing: the file
     itself does not exist, so nothing here asserts what its content says."""
-    resolution = admission_rule_of(None, tmp_path)
+    resolution = admission_rule_of(None, tmp_path, project=tmp_path)
     assert resolution.rule is None
     assert "no operating_point.json" in resolution.reason
     assert "does not claim validated" not in resolution.reason
 
 
 def test_admission_rule_of_answers_none_for_a_stamp_claiming_nothing(tmp_path: Path) -> None:
-    resolution = admission_rule_of({"validated": False}, tmp_path)
+    resolution = admission_rule_of({"validated": False}, tmp_path, project=tmp_path)
     assert resolution.rule is None
     assert "does not claim validated" in resolution.reason
 
@@ -54,6 +54,6 @@ def test_admission_rule_of_answers_none_for_a_bound_claim_with_no_readable_conf(
 
     monkeypatch.setattr(resolution_mod, "verify_stamp_binding", fake_binding)
     stamp = {"validated": True, "operating_point": {"conf": {"value": "not-a-number"}}}
-    resolution = admission_rule_of(stamp, tmp_path)
+    resolution = admission_rule_of(stamp, tmp_path, project=tmp_path)
     assert resolution.rule is None
     assert "no readable conf" in resolution.reason

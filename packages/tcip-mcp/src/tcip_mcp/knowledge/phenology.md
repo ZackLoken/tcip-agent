@@ -96,7 +96,7 @@ definition, change it there; never fork a second copy. So the agent composes too
 `deliver_phenology_milestones`.
 
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
-count objective exists for this trait, record it with `propose_trait(project_root, entry,
+count objective exists for this trait, record it with `propose_trait(entry,
 rationale)`, the one write path for a trait: it takes the complete entry (the spec fields, such as
 `count_objective`, `localization` and `positive_value`, and the operationalization per delivery
 kind) and appends it as a new, unconfirmed revision. The positive value must be a value one of

@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.operationalization import latest_confirmed
 from tcip_mcp.pipelines.resolution import read_delivery_events
-from tcip_mcp.project_paths import platform_state_root
 from tcip_web.app import app
 
 from tests._population import mapped_plants
@@ -36,8 +35,8 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
 
     out_csv = tmp_path / "mcp_delivery.csv"
     result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"],
-        plants=mapped_plants(body["mapping_name"]),
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
+        plants=mapped_plants(tmp_path, body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -45,8 +44,8 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
     with out_csv.open(newline="", encoding="utf-8") as fh:
         mcp_row = next(iter(csv.DictReader(fh)))
 
-    column = f"bud_{latest_confirmed('bud_opening').entry.majority_label}_date"
+    column = f"bud_{latest_confirmed('bud_opening', tmp_path).entry.majority_label}_date"
     assert web_row[column] == mcp_row[column]
     revisions = {(e["trait_revision"], e["trait_revision_sha256"])
-                 for e in read_delivery_events(platform_state_root())}
+                 for e in read_delivery_events(tmp_path)}
     assert len(revisions) == 1, revisions

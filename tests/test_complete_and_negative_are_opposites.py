@@ -47,7 +47,7 @@ def _derive(client: TestClient, root: Path, subject: str, images: list[str],
             done: list[str]) -> dict[str, str]:
     resp = client.post(
         "/api/subjects/image_status/derive",
-        json={"project_root": str(root), "annotations_dir": str(root / "annotations"),
+        json={"annotations_dir": str(root / "annotations"),
               "subject": subject, "image_list": images, "complete_override": done},
     )
     assert resp.status_code == 200, resp.text
@@ -57,7 +57,7 @@ def _derive(client: TestClient, root: Path, subject: str, images: list[str],
 def _store(client: TestClient, root: Path, subject: str, statuses: dict[str, str]) -> None:
     resp = client.post(
         "/api/subjects/image_status/bulk",
-        json={"project_root": str(root), "dataset_root": str(root), "subject": subject,
+        json={"dataset_root": str(root), "subject": subject,
               "statuses": statuses},
     )
     assert resp.status_code == 200, resp.text
@@ -66,7 +66,7 @@ def _store(client: TestClient, root: Path, subject: str, statuses: dict[str, str
 def _read_back(client: TestClient, root: Path, subject: str) -> dict[str, str]:
     resp = client.get(
         "/api/subjects/image_status",
-        params={"project_root": str(root), "dataset_root": str(root), "subject": subject},
+        params={"dataset_root": str(root), "subject": subject},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()["statuses"]
@@ -119,14 +119,14 @@ def test_confirmations_recorded_under_different_dates_stay_separate(
     for date, status in (("2026-03-02", "negative"), ("2026-03-09", "complete")):
         resp = client.post(
             "/api/subjects/image_status",
-            json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+            json={"dataset_root": str(tmp_path),
                   "image_name": "IMG_0007.JPG", "status": status, "subject": "bud",
                   "date": date},
         )
         assert resp.status_code == 200, resp.text
 
     def read(date: str | None) -> dict[str, str]:
-        params = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+        params = {"dataset_root": str(tmp_path),
                   "subject": "bud"}
         if date:
             params["date"] = date

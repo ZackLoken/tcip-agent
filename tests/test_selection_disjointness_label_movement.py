@@ -58,14 +58,14 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
     return root
 
 
-def _draw(root: Path, out: Path, *, seed: int = 2):
+def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
+    result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
-    return read_selection(out)
+    return read_selection(out, project=project)
 
 
 def _calibration_stems(selection, date: str = DATES[0]) -> list[str]:
@@ -77,23 +77,24 @@ def _label_path(root: Path, date: str, stem: str) -> Path:
     return root / "annotations" / date / f"{stem}.json"
 
 
-def _rewrite_label(root: Path, date: str, stem: str, *, offset: float) -> None:
+def _rewrite_label(project: Path, root: Path, date: str, stem: str, *, offset: float) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image_path = str(root / "images" / date / f"{stem}.jpg")
     res = save_annotations(
-        image_path,
+        project, project.parent, image_path,
         annotations=[{"subject": SUBJECT, "bbox": [2 + offset, 2, 10 + offset, 10]}],
     )
     assert "error" not in res, res
 
 
-def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]) -> Path:
-    """A run bound to the selection at ``out``, its data resolved and recorded by the launcher's
-    own producer, so no training body runs. Returns the run directory."""
+def _bind_run(project: Path, root: Path, out: Path, experiment_id: str, *,
+              date: str = DATES[0]) -> Path:
+    """A run of ``project`` bound to the selection at ``out``, its data resolved and recorded by
+    the launcher's own producer, so no training body runs. Returns the run directory."""
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    return resolved_run(None, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
+    return resolved_run(project, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
 
 
 def _seal(
@@ -134,7 +135,7 @@ def _seal(
         n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
         miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
     bundle = resolve_operating_point(
-        TRAIT, experiment_id=experiment_id, dataset_hash=dh, slicing=None,
+        TRAIT, project=project_root, experiment_id=experiment_id, dataset_hash=dh, slicing=None,
         staged_conf_floor=0.01,
         calibration_records=cal_records, holdout_records=hold_records,
         selection_dir=str(out),
@@ -147,15 +148,19 @@ def _seal(
 
 
 def _manifest(out: Path):
+    """The selection drawn at ``out``, a directory of the project that holds it."""
     from tcip_mcp.pipelines.data.selection import read_selection
 
-    return read_selection(out)
+    return read_selection(out, project=out.parent)
 
 
 def _manifest_sha256(out: Path) -> str:
-    from tcip_mcp.pipelines.data.selection import selection_document
+    """The sha256 of the selection record at ``out`` as the store holds it."""
+    import tcip_store
 
-    return hashlib.sha256(RECORD_JSON.encode(selection_document(_manifest(out)))).hexdigest()
+    from tcip_mcp.pipelines.data.selection import selection_key
+
+    return hashlib.sha256(RECORD_JSON.encode(tcip_store.read(selection_key(out)))).hexdigest()
 
 
 # -- rail: a label rewritten between the draw and the run's bind ------------------------------
@@ -164,14 +169,13 @@ def _manifest_sha256(out: Path) -> str:
 def test_a_label_rewritten_between_draw_and_bind_names_the_stem_and_still_seals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out)
+    manifest = _draw(tmp_path, root, out)
     stem = _calibration_stems(manifest)[0]
 
-    _rewrite_label(root, DATES[0], stem, offset=1.0)
-    _bind_run(root, out, "exp_moved_before_bind")
+    _rewrite_label(tmp_path, root, DATES[0], stem, offset=1.0)
+    _bind_run(tmp_path, root, out, "exp_moved_before_bind")
     sd, shippable = _seal(root, out, "exp_moved_before_bind", tmp_path)
 
     assert sd["labels_moved_draw_to_run"] == [stem]
@@ -186,16 +190,15 @@ def test_a_label_rewritten_between_draw_and_bind_names_the_stem_and_still_seals(
 def test_a_label_restored_before_calibration_is_named_in_both_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out)
+    manifest = _draw(tmp_path, root, out)
     stem = _calibration_stems(manifest)[0]
     label_path = _label_path(root, DATES[0], stem)
     original = label_path.read_bytes()
 
-    _rewrite_label(root, DATES[0], stem, offset=1.0)
-    _bind_run(root, out, "exp_restored")
+    _rewrite_label(tmp_path, root, DATES[0], stem, offset=1.0)
+    _bind_run(tmp_path, root, out, "exp_restored")
     label_path.write_bytes(original)
     assert hashlib.sha256(label_path.read_bytes()).hexdigest()[:16] == hashlib.sha256(
         original).hexdigest()[:16]
@@ -215,14 +218,13 @@ def test_a_label_restored_before_calibration_is_named_in_both_windows(
 def test_a_label_rewritten_after_the_run_names_the_run_to_now_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out)
+    manifest = _draw(tmp_path, root, out)
     stem = _calibration_stems(manifest)[0]
 
-    _bind_run(root, out, "exp_moved_after_run")
-    _rewrite_label(root, DATES[0], stem, offset=1.0)
+    _bind_run(tmp_path, root, out, "exp_moved_after_run")
+    _rewrite_label(tmp_path, root, DATES[0], stem, offset=1.0)
     sd, shippable = _seal(root, out, "exp_moved_after_run", tmp_path,
                          calibration_labels_dir=str(root / "annotations" / DATES[0]))
 
@@ -254,7 +256,7 @@ def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_
                       "calibration")]
     at_run = {s.ground_truth: s.ground_truth_digest for s in scoped}
 
-    moved = _resolve_label_movement(scoped, at_run, {"c1"}, str(cal_dir), None, None)
+    moved = _resolve_label_movement(scoped, at_run, {"c1"}, None, None)
 
     assert moved["labels_moved_run_to_now"] == []
     assert moved["calibration_labels_moved"] == []
@@ -282,7 +284,7 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
               _sample("c1", cal_dir / "c1.json", stale, "calibration")]
     at_run = {s.ground_truth: s.ground_truth_digest for s in scoped}
 
-    moved = _resolve_label_movement(scoped, at_run, {"c1"}, str(cal_dir), None, None)
+    moved = _resolve_label_movement(scoped, at_run, {"c1"}, None, None)
 
     assert moved["labels_moved_run_to_now"] == ["c1"]
     assert moved["calibration_labels_moved"] == ["c1"]
@@ -294,11 +296,10 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
 def test_nothing_touched_delivers_with_every_list_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
-    _bind_run(root, out, "exp_untouched")
+    _draw(tmp_path, root, out)
+    _bind_run(tmp_path, root, out, "exp_untouched")
     manifest_sha = _manifest_sha256(out)
 
     sd, shippable = _seal(root, out, "exp_untouched", tmp_path,
@@ -345,16 +346,15 @@ def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothin
     caller-named-selection calibration does."""
     from tcip_mcp.pipelines.feedback import resolve_operating_point_from_review
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
-    _bind_run(root, out, "exp_review_untouched", date=DATES[0])
+    _draw(tmp_path, root, out)
+    _bind_run(tmp_path, root, out, "exp_review_untouched", date=DATES[0])
     _seed_trait_spec(tmp_path)
 
     state = _review_state_over_stems(list(_STEMS))
     bundle = resolve_operating_point_from_review(
-        state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
+        state, TRAIT, project=tmp_path, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, slicing=None, experiment_id="exp_review_untouched",
         calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
@@ -375,18 +375,17 @@ def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
     the only exercise, in the repository, of ``_selection_movement_sentence``."""
     from tcip_mcp.pipelines.feedback import describe_review_validation, resolve_operating_point_from_review
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     for stem in _STEMS:
-        _rewrite_label(root, DATES[0], stem, offset=1.0)
-    _bind_run(root, out, "exp_review_moved", date=DATES[0])
+        _rewrite_label(tmp_path, root, DATES[0], stem, offset=1.0)
+    _bind_run(tmp_path, root, out, "exp_review_moved", date=DATES[0])
     _seed_trait_spec(tmp_path)
 
     state = _review_state_over_stems(list(_STEMS))
     bundle = resolve_operating_point_from_review(
-        state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
+        state, TRAIT, project=tmp_path, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, slicing=None, experiment_id="exp_review_moved",
         calibration_labels_dir=str(root / "annotations" / DATES[0]))
     sd = bundle.get("conf").gate_evidence["selection_disjointness"]
@@ -408,17 +407,16 @@ def test_a_withdrawn_calibration_member_is_named_through_the_absent_file_digest(
 ) -> None:
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out)
+    manifest = _draw(tmp_path, root, out)
     stem = _calibration_stems(manifest)[0]
 
     _label_path(root, DATES[0], stem).unlink()
     record_image_statuses(
         root, status_bucket(SUBJECT, DATES[0]), {f"{stem}.jpg": "negative"}, recorded_by="user:t")
 
-    _bind_run(root, out, "exp_withdrawn")
+    _bind_run(tmp_path, root, out, "exp_withdrawn")
     sd, _shippable = _seal(root, out, "exp_withdrawn", tmp_path)
 
     assert sd["labels_moved_draw_to_run"] == [stem]
@@ -431,17 +429,16 @@ def test_a_withdrawn_calibration_member_is_named_through_the_absent_file_digest(
 def test_a_redraw_between_run_and_calibration_is_named_beside_a_moved_label(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = _draw(root, out, seed=2)
+    manifest = _draw(tmp_path, root, out, seed=2)
     stem = _calibration_stems(manifest)[0]
 
-    _rewrite_label(root, DATES[0], stem, offset=1.0)
-    _bind_run(root, out, "exp_redrawn")
+    _rewrite_label(tmp_path, root, DATES[0], stem, offset=1.0)
+    _bind_run(tmp_path, root, out, "exp_redrawn")
     original_manifest_sha = _manifest_sha256(out)
 
-    _draw(root, out, seed=7)  # a redraw into the same directory, after the run bound
+    _draw(tmp_path, root, out, seed=7)  # a redraw into the same directory, after the run bound
     redrawn_manifest_sha = _manifest_sha256(out)
     assert redrawn_manifest_sha != original_manifest_sha
 
@@ -462,18 +459,17 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
-    resolved_run(None, {
+    resolved_run(tmp_path, {
         "images_dir": str(root / "images" / DATES[0]),
         "labels_dir": str(root / "annotations" / DATES[0]),
         "scope": {"subject": SUBJECT},
     }, experiment_id="exp_unbound")
     # A drawn run records a partition of its own; what it must not carry is a selection binding.
-    partition = run_resolution("exp_unbound")["partition"]
+    partition = run_resolution("exp_unbound", project=tmp_path)["partition"]
     assert partition["samples"]
     assert partition["selection"] is None
 
@@ -496,11 +492,10 @@ def test_every_drawn_sample_carries_its_own_label_digest(
 ) -> None:
     """The digest a later movement check reads rides on each sample, so a selection cannot be
     written whose samples the check has nothing to compare against."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     assert drawn.samples
     assert all(sample.ground_truth_digest for sample in drawn.samples)
@@ -536,21 +531,21 @@ def test_selection_digest_is_the_one_function_the_bind_write_and_the_calibration
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``resolution.selection_digest`` is the sha256 hex digest over ``RECORD_JSON.encode`` of the
-    selection's own document, and the run's resolved partition carries that value once in its
-    binding block for the selection it bound to, never on a sample."""
+    selection's own document as the store holds it, and the run's resolved partition carries that
+    value once in its binding block for the selection it bound to, never on a sample."""
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.resolution import selection_digest
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
-    resolved = run_resolution(_bind_run(root, out, "exp_selection_digest").name)
+    _draw(tmp_path, root, out)
+    resolved = run_resolution(_bind_run(tmp_path, root, out, "exp_selection_digest").name,
+                              project=tmp_path)
 
     selection = _manifest(out)
-    assert selection_digest(selection) == _manifest_sha256(out)
+    assert selection_digest(selection, tmp_path) == _manifest_sha256(out)
     binding = resolved["partition"]["selection"]
-    assert binding["selection_sha256"] == selection_digest(selection)
+    assert binding["selection_sha256"] == selection_digest(selection, tmp_path)
     assert not any("selection_sha256" in sample for sample in resolved["partition"]["samples"])
 
 
@@ -563,7 +558,6 @@ def test_draw_splits_digests_each_document_once(
 
     from tcip_mcp.pipelines import resolution
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
@@ -576,7 +570,7 @@ def test_draw_splits_digests_each_document_once(
         return real_digest(path)
 
     with mock.patch("tcip_mcp.pipelines.resolution.ground_truth_digest", spy):
-        _draw(root, out)
+        _draw(tmp_path, root, out)
 
     assert opened, "the draw digested nothing"
     assert len(opened) == len(set(opened)), opened
@@ -593,12 +587,12 @@ def test_the_partition_alone_carries_the_per_sample_digests(
     section recorded beside it (the one every checkpoint embeds) never gains them."""
     from tcip_mcp.experiments import run_resolution
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
-    resolved = run_resolution(_bind_run(root, out, "exp_split_config_readback").name)
+    resolved = run_resolution(_bind_run(tmp_path, root, out, "exp_split_config_readback").name,
+                              project=tmp_path)
 
     assert resolved["partition"]["samples"]
     assert all(sample["ground_truth_digest"] for sample in resolved["partition"]["samples"])

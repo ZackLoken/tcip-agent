@@ -215,7 +215,7 @@ class TrainContext:
         the required ``slicing`` (the slicing record of the pass that produced your records,
         ``None`` untiled) and ``cross_tile_nms`` (the provenance of the merge threshold it ran at,
         ``resolution.resolve_cross_tile_nms``). ``experiment_id`` defaults to this run's own id; a
-        caller-supplied one wins.
+        caller-supplied one wins. The trait is read from the project this run lies under.
 
         ``staged_conf_floor`` (pass it, or this can never validate): the confidence threshold your
             own inference pass floored detections to when it produced
@@ -227,7 +227,7 @@ class TrainContext:
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
         kwargs.setdefault("experiment_id", self.run.id)
-        return resolve_operating_point(trait_name, **kwargs)
+        return resolve_operating_point(trait_name, project=self.run.project, **kwargs)
 
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.measurement import mask_geometry
@@ -284,7 +284,8 @@ class TrainContext:
             self.tb.flush()
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Write ``state`` once under ``tag``, stamped with ``kind`` and this run's ``config``,
+        """Write ``state`` once under ``tag``, stamped with ``kind`` and this run's ``config``
+        without its data locations (``experiments.DATA_PATHS``; the run's own record keeps them),
         record it in ``run.saved``, and return the path written. A tag already written refuses
         with ``FileExistsError``. A ``metrics`` key in ``state`` is the deliverable's metrics,
         sourced ``training_source``.
@@ -301,10 +302,20 @@ class TrainContext:
                 "launch config, the record every publishing door reads this run's scope from; "
                 "name a bespoke loop's own field something else."
             )
+        import copy
+
+        from tcip_mcp.experiments import DATA_PATHS
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path, write_checkpoint
 
-        payload = stamp_model_ref({**state, "config": self.config})
+        config = copy.deepcopy(self.config)
+        for field in DATA_PATHS:
+            *parents, leaf = (step for step in field if step != "[]")
+            node = config.get("data") or {}
+            for parent in parents:
+                node = node.get(parent) or {}
+            node.pop(leaf, None)
+        payload = stamp_model_ref({**state, "config": config})
         self.run.saved[tag] = write_checkpoint(payload, checkpoint_path(self.run_dir, tag))
         return str(self.run.saved[tag])
 
@@ -373,7 +384,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
     run = ctx.run
     audit_args = {"experiment_id": run.id, "task": ctx.task}
 
-    record_event("training_run", audit_args, status="running")
+    record_event("training_run", audit_args, status="running", scope=run.project)
     t0 = time.monotonic()
     try:
         dispatch_train_body(ctx)
@@ -387,7 +398,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
         _finalize_run(ctx)
     finally:
         record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
-                     status=run.status or "failed",
+                     status=run.status or "failed", scope=run.project,
                      duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
@@ -411,7 +422,7 @@ def _finalize_run(ctx: TrainContext) -> None:
         run.error = "training completed but saved no final weights"
     elif run.status == "completed":
         try:
-            checkpoint = {"path": run.deliverable.name,
+            checkpoint = {"path": str(run.deliverable),
                           "sha256": admitted_digest(run.deliverable)}
         except (OSError, ValueError) as exc:
             run.status, run.error = "failed", f"final weights could not be admitted: {exc}"

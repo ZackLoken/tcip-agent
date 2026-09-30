@@ -51,13 +51,13 @@ def _read_until(ws, needle: str, tries: int = 200) -> str:
 
 def test_resolve_command_override(monkeypatch):
     monkeypatch.setenv("TCIP_TERMINAL_CMD", "python fake.py")
-    assert pty_host.resolve_terminal_command()[-1] == "fake.py"
+    assert pty_host.resolve_terminal_command(None)[-1] == "fake.py"
 
 
 def test_resolve_command_none_when_cli_absent(monkeypatch):
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
     monkeypatch.setenv("TCIP_TERMINAL_CLI", "definitely-not-a-real-cli-xyz")
-    assert pty_host.resolve_terminal_command() is None
+    assert pty_host.resolve_terminal_command(None) is None
 
 
 def test_status_available_with_fake(client):
@@ -326,7 +326,7 @@ def test_create_session_registers_a_survivor_and_answers_503(
 
     from tcip_mcp.audit import AuditEntryNotWritten
 
-    def _refuse_record_start(session_id: str, launched: dict) -> None:
+    def _refuse_record_start(session_id: str, launched: dict, project: Path | None) -> None:
         raise AuditEntryNotWritten("agent_terminal_started", RuntimeError("audit log unwritable"))
 
     monkeypatch.setattr(terminal_routes, "_record_start", _refuse_record_start)
@@ -352,7 +352,7 @@ def test_restart_session_answers_503_on_a_survivor_with_no_new_spawn(
     survivor_stub = _StubPty(survives=True)
     monkeypatch.setattr(session, "_pty", survivor_stub)
 
-    def _refuse_record_start(session_id: str, launched: dict) -> None:
+    def _refuse_record_start(session_id: str, launched: dict, project: Path | None) -> None:
         from tcip_mcp.audit import AuditEntryNotWritten
         raise AuditEntryNotWritten(
             "agent_terminal_started", RuntimeError("audit log unwritable"))
@@ -385,7 +385,7 @@ def test_restart_session_answers_503_after_the_process_dies_cleanly(
     relaunch_stub = _StubPty(survives=False)
     _wire_stub_spawn(monkeypatch, relaunch_stub)
 
-    def _refuse_record_start(session_id: str, launched: dict) -> None:
+    def _refuse_record_start(session_id: str, launched: dict, project: Path | None) -> None:
         from tcip_mcp.audit import AuditEntryNotWritten
         raise AuditEntryNotWritten(
             "agent_terminal_started", RuntimeError("audit log unwritable"))
@@ -470,11 +470,11 @@ def test_concurrent_creates_spawn_single_session():
 # ── what a session records about the program it launched ───────────────
 
 
-def _terminal_start_rows() -> list[dict]:
+def _terminal_start_rows(project: Path) -> list[dict]:
     import tcip_mcp.audit as audit_module
     import tcip_store as ts
 
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+    key = audit_module.audit_log_key(project)
     return [row for row in ts.read_log(key).records if row["tool"] == "agent_terminal_started"]
 
 
@@ -491,7 +491,7 @@ def test_create_answers_the_launched_executable_and_no_version_for_an_override(c
 def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
     monkeypatch.setenv("TCIP_TERMINAL_CLI", Path(sys.executable).name)
-    argv = pty_host.resolve_terminal_command()
+    argv = pty_host.resolve_terminal_command(None)
     assert argv is not None
 
     launched = pty_host.launched_program(argv)
@@ -509,7 +509,7 @@ def test_the_spawned_process_inherits_the_terminal_session_id(client):
     assert f"[session:{sid}]" in banner
 
 
-def test_each_launch_leaves_one_platform_audit_line_naming_the_session_and_program(client):
+def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(client, opened_project):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
     with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
@@ -517,14 +517,14 @@ def test_each_launch_leaves_one_platform_audit_line_naming_the_session_and_progr
         _read_until(ws, "Claude Code exited")
     client.post(f"/api/terminal/sessions/{sid}/restart", json={})
 
-    rows = _terminal_start_rows()
+    rows = _terminal_start_rows(opened_project)
     assert [row["arguments"]["session_id"] for row in rows] == [sid, sid]
     assert Path(rows[0]["arguments"]["executable"]).name == Path(sys.executable).name
     assert rows[0]["arguments"]["version"] is None
 
 
 def test_create_session_answers_503_and_terminates_the_process_when_the_start_line_fails(
-    client, monkeypatch,
+    client, monkeypatch, opened_project,
 ):
     """A spawn whose own launch line fails to append must not leave an orphaned, untracked
     process: the PTY is terminated and, once it is gone, no session is registered as live."""
@@ -537,7 +537,7 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
     resp = client.post("/api/terminal/sessions", json={})
     assert resp.status_code == 503
     assert "could not be written" in resp.json()["detail"]
-    assert _terminal_start_rows() == []
+    assert _terminal_start_rows(opened_project) == []
     assert all(not s.alive() for s in terminal_routes._SESSIONS.values())
 
 

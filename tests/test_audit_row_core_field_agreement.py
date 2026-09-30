@@ -24,19 +24,19 @@ def client() -> TestClient:
 
 
 def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path: Path
 ) -> None:
     dataset_root = tmp_path / "shared_dataset"
     dataset_root.mkdir()
-    monkeypatch.setattr(audit_module, "AUDIT_ROOT", dataset_root)
 
     resp = client.post(
         "/api/subjects/image_status",
-        json={"project_root": str(tmp_path / "project"), "dataset_root": str(dataset_root),
+        json={"dataset_root": str(dataset_root),
               "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert resp.status_code == 200, resp.text
-    audit_module.record_event("scan_dataset", {"dataset_root": str(dataset_root)})
+    audit_module.record_event("scan_dataset", {"dataset_root": str(dataset_root)},
+                              scope=dataset_root)
 
     rows = ts.read_log(audit_module.audit_log_key(dataset_root)).records
     assert len(rows) == 2

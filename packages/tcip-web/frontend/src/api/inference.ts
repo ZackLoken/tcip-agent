@@ -341,17 +341,11 @@ export type DeliveryEventRecord = StoredDeliveryEventRecord & {
 };
 
 export const resultsApi = {
-  registeredModels: (project_path: string) =>
-    getJson<{ models: RegisteredModel[] }>(
-      `${ROUTES.getResultsModelsRegistered}?project_path=${encodeURIComponent(project_path)}`,
-    ),
+  registeredModels: () => getJson<{ models: RegisteredModel[] }>(ROUTES.getResultsModelsRegistered),
 
-  // The project's own trait records, so a tab resolves which trait it works on from the project
-  // instead of assuming one, and the Setup tab shows each revision for confirmation.
-  traits: (project_root: string) =>
-    getJson<TraitsListing>(
-      `${ROUTES.getResultsTraits}?project_root=${encodeURIComponent(project_root)}`,
-    ),
+  // The open project's own trait records, so a tab resolves which trait it works on from the
+  // project instead of assuming one, and the Setup tab shows each revision for confirmation.
+  traits: () => getJson<TraitsListing>(ROUTES.getResultsTraits),
 
   // Refuses with 409 when the hash is not the revision's own: the revision shown was not the one
   // on file.
@@ -391,11 +385,9 @@ export const resultsApi = {
   phenologyMeasurement: (body: PhenologyPayload) =>
     postJson<PhenologyMeasurementResponse>(ROUTES.postResultsPhenologyMeasurement, body),
 
-  /** Every delivery event this project holds: what shipped, under which trait and kind. */
-  deliveryEvents: (project_root: string) =>
-    getJson<{ records: DeliveryEventRecord[] }>(
-      `${ROUTES.getResultsDeliveryEvents}?project_root=${encodeURIComponent(project_root)}`,
-    ),
+  /** Every delivery event the open project holds: what shipped, under which trait and kind. */
+  deliveryEvents: () =>
+    getJson<{ records: DeliveryEventRecord[] }>(ROUTES.getResultsDeliveryEvents),
 
   // The server computes what it exports, never a caller-composed table of rows. Its own request
   // shape is distinct from the measurement request's shape, never a spread of it.

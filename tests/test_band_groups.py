@@ -376,9 +376,9 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tm
         src / "capB_R.tif", "gidB", "Red", 650, utc=utc, lat=lat, lon=lon,
     )
 
+    project = tmp_path / "proj_bandcollide_case"
     manifest = ingest_images(
-        source=str(src), name="proj_bandcollide_case", site="north orchard",
-        date_from="none", detect_band_groups=True,
+        project, source=str(src), date_from="none", detect_band_groups=True,
     )
     assert "error" not in manifest
     bg = manifest["band_groups"]
@@ -388,7 +388,7 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tm
     assert "capA.tif" in refusal["reason"]
     assert refusal["bucket"] == "undated"
     assert {g["stem"] for g in bg["formed"]} == {"capB"}
-    bucket_dir = Path(manifest["project_path"]) / "images" / "undated"
+    bucket_dir = project / "images" / "undated"
     assert not (bucket_dir / "capA.bandgroup").exists()
     assert (bucket_dir / "capB.bandgroup").exists()
 
@@ -544,16 +544,15 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from tcip_mcp.tools.ingest_tools import ingest_images
 
+    proj = tmp_path / "ms_valley_farm"
     manifest = ingest_images(
-        source=str(REAL_DJI_DIR), name="ms_valley_farm", site="north orchard",
-        date_from="2023-05-23", detect_band_groups=True,
+        proj, source=str(REAL_DJI_DIR), date_from="2023-05-23", detect_band_groups=True,
     )
     assert "error" not in manifest
     assert manifest["copied"] == 64
     assert len(manifest["band_groups"]["formed"]) == 16
     assert manifest["band_groups"]["refused"] == []
 
-    proj = Path(manifest["project_path"])
     images_dir = proj / "images" / "2023-05-23"
     assert len(list(images_dir.glob("*.bandgroup"))) == 16
     assert len(list(images_dir.glob("*.TIF"))) == 64  # originals untouched, still all present
@@ -571,7 +570,7 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     src.mkdir()
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
-    manifest = ingest_images(source=str(src), name="plain_proj_default", site="north orchard")
+    manifest = ingest_images(tmp_path / "plain_proj_default", source=str(src))
     assert manifest["band_groups"] == {
         "formed": [], "refused": [], "manifests": [], "reserved_name_skips": [],
     }

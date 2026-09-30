@@ -222,7 +222,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
         "data": data,
         "batch_size": 1,
     }
-    result = preflight_config(config, smoke=False)
+    result = preflight_config(tmp_path, config, smoke=False)
     assert not result["valid"]
     assert sorted(result["issues"]) == ["Missing 'data.images_dir'", "Missing 'data.labels_dir'"]
 
@@ -232,12 +232,12 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     _admitted_samples(root)
     located_data = {**data, "images_dir": str(root / "images"),
                     "labels_dir": str(root / "annotations"), "scope": {"subject": "leaf"}}
-    admitted = preflight_config({**config, "data": located_data}, smoke=False)
+    admitted = preflight_config(tmp_path, {**config, "data": located_data}, smoke=False)
     assert admitted["issues"] == [], admitted["issues"]
 
     # A non-importable builder is caught honestly, over that same real place.
     bad_data = {**located_data, "dataset_source": {"builder": "no.such:fn"}}
-    result = preflight_config({**config, "data": bad_data}, smoke=False)
+    result = preflight_config(tmp_path, {**config, "data": bad_data}, smoke=False)
     assert not result["valid"]
     assert any("dataset_source.builder not importable" in i for i in result["issues"])
 

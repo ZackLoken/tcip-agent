@@ -13,7 +13,6 @@ import { useStore } from "@/store";
 import type { Mode } from "@/store/types";
 
 export interface AnnotateFocusData {
-  project_root?: string;
   dataset_root?: string;
   subject?: string | null;
   date?: string | null;
@@ -29,15 +28,15 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date);
-  if (needsSwitch) {
+  const project = useStore.getState().openProject;
+  if (needsSwitch && project) {
     const res = await api.dataset.select({
-      project_root: d.project_root ?? d.dataset_root!,
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
       date: d.date ?? null,
       model_name: null,
     });
-    useStore.getState().applyRestoredDataset(res.selection, res.generation);
+    useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);
   }
   // Apply the view controls after any dataset switch has resolved, so a same-identity

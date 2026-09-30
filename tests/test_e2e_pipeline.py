@@ -91,12 +91,13 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        initialize_project(root, site="north orchard")
+        initialize_project(root, "North orchard", site="north orchard")
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 
-        status = inspect_project(root)
-        assert status["initialized"] is True
+        status = inspect_project(project_dir)
+        assert status["record_problem"] is None
+        assert status["display_name"] == "North orchard"
 
         # ── Step 3: Load dataset ─────────────────────────────────────
         ds = scan_dataset(root)
@@ -124,7 +125,8 @@ class TestE2EPipeline:
             {"subject": "bud", "bbox": [128, 112, 160, 136]},
             {"subject": "bud", "bbox": [400, 300, 440, 340]},
         ]
-        save_result = save_annotations(img_path, annotations=new_anns)
+        save_result = save_annotations(project_dir, project_dir.parent, img_path,
+                                       annotations=new_anns)
         assert save_result["count"] == 3  # 3 annotations written
         assert len(save_result["written"]) == 1
 
@@ -163,11 +165,11 @@ class TestE2EPipeline:
         from tcip_mcp.pipelines.data.selection import read_selection
 
         split_dir = tmp_path / "splits"
-        split_result = draw_splits(root, output_path=str(split_dir),
+        split_result = draw_splits(project_dir, root, output_path=str(split_dir),
                                    subject="bud", train_ratio=0.5, val_ratio=0.25,
                                    calibration_ratio=0.25)
         assert split_result["total_stems"] == 5
-        drawn = read_selection(split_dir)
+        drawn = read_selection(split_dir, project=project_dir)
         assert drawn.on("train")
         assert drawn.on("val")
         assert sum(split_result["splits"].values()) == 5
@@ -187,7 +189,7 @@ class TestE2EPipeline:
 
             export_root(root, report=lambda line: None)
         zip_path = str(tmp_path / "export.zip")
-        export_result = archive_project(root, zip_path)
+        export_result = archive_project(project_dir, zip_path)
         assert "error" not in export_result
         assert Path(zip_path).is_file()
         assert Path(zip_path).stat().st_size > 0
@@ -198,8 +200,8 @@ class TestE2EPipelineEdgeCases:
 
     def test_empty_project(self, tmp_path: Path):
         """Pipeline tools handle an uninitialized project gracefully."""
-        status = inspect_project(str(tmp_path))
-        assert status["initialized"] is False
+        status = inspect_project(tmp_path)
+        assert status["id"] is None and status["record_problem"]
 
     def test_dataset_with_missing_labels(self, tmp_path: Path):
         """scan_dataset reports unlabeled images correctly."""
@@ -251,7 +253,7 @@ class TestE2EPipelineEdgeCases:
         img.save(img_path)
 
         # No labels dir exists yet
-        result = save_annotations(str(img_path), annotations=[
+        result = save_annotations(tmp_path, tmp_path.parent, str(img_path), annotations=[
             {"subject": "bud", "bbox": [10, 10, 50, 50]},
         ])
         assert result["count"] == 1

@@ -18,6 +18,8 @@ class TrainRun:
     # The run's resolved objective, ``{"selection_metric", "higher_is_better"}``
     # (``generic_trainer.resolve_objective``), read by the body and never resolved again.
     objective: dict
+    # The project the run belongs to, obtained once by the process running it.
+    project: Path
     status: str = "running"
     current_epoch: int = 0
     current_stage: int = 0

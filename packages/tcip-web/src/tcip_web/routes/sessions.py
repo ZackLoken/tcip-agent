@@ -1,7 +1,7 @@
 """Session-tracking routes: annotation_stats.json equivalent.
 
-A per-image annotation timer + session aggregate at
-``<project_root>/.tcip/state/annotation_stats.json`` with this shape::
+A per-image annotation timer + session aggregate at the open project's
+``.tcip/state/annotation_stats.json`` with this shape::
 
     {
         "sessions": [
@@ -40,35 +40,23 @@ import tcip_store
 from tcip_store import Key
 
 from tcip_mcp.web_client import annotation_stats_key
+from tcip_web.paths import allowed_path
+from tcip_web.routes._body_common import EmptyBodyPayload
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
-def _guarded_stats_key(project_root: str) -> Key:
-    """The stats key of a client-supplied project root, confined first (403 on escape)."""
-    from tcip_web.paths import assert_project_root_allowed
+def _stats_key() -> Key:
+    """The open project's stats key; raises ``NoProjectOpen`` when none is open."""
+    from tcip_web.state import store
 
-    try:
-        return annotation_stats_key(str(assert_project_root_allowed(project_root)))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-
-def _guarded_dataset_root(dataset_root: str) -> str:
-    """A client-supplied dataset root, confined and resolved before it is persisted."""
-    from tcip_web.paths import assert_path_allowed
-
-    try:
-        return str(assert_path_allowed(dataset_root))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    return annotation_stats_key(str(store.open_root()))
 
 
 # ── Per-image session telemetry ─────────────────────────────────────────
 
 
 class ImageEventPayload(BaseModel):
-    project_root: str
     image_name: str
     session_seconds_delta: float = 0.0       # incremental time added
     annotations_added_delta: int = 0         # new annotations created during this slice
@@ -84,8 +72,8 @@ class ImageEventPayload(BaseModel):
 @router.post("/image_event")
 def image_event(payload: ImageEventPayload) -> dict:
     """Record per-image session activity, adding this call's deltas to the image's totals."""
-    key = _guarded_stats_key(payload.project_root)
-    dataset_root = _guarded_dataset_root(payload.dataset_root) if payload.dataset_root else None
+    key = _stats_key()
+    dataset_root = str(allowed_path(payload.dataset_root)) if payload.dataset_root else None
     with tcip_store.transaction(key) as txn:
         data = txn.read(key, default={"sessions": []})
         sessions: list[dict[str, Any]] = data["sessions"]
@@ -137,14 +125,13 @@ def image_event(payload: ImageEventPayload) -> dict:
 
 
 class StartSessionPayload(BaseModel):
-    project_root: str
     user: str = ""
 
 
 @router.post("/start")
 def start_session(payload: StartSessionPayload) -> dict:
     """Insert a new session row."""
-    key = _guarded_stats_key(payload.project_root)
+    key = _stats_key()
     with tcip_store.transaction(key) as txn:
         data = txn.read(key, default={"sessions": []})
         sessions: list[dict[str, Any]] = data["sessions"]
@@ -157,14 +144,10 @@ def start_session(payload: StartSessionPayload) -> dict:
     return {"status": "ok", "session": entry}
 
 
-class EndSessionPayload(BaseModel):
-    project_root: str
-
-
 @router.post("/end")
-def end_session(payload: EndSessionPayload) -> dict:
+def end_session(payload: EmptyBodyPayload) -> dict:
     """Mark the latest session as ended and roll up totals."""
-    key = _guarded_stats_key(payload.project_root)
+    key = _stats_key()
     with tcip_store.transaction(key) as txn:
         data = txn.read(key, default={"sessions": []})
         sessions = data["sessions"]
@@ -178,8 +161,8 @@ def end_session(payload: EndSessionPayload) -> dict:
 
 
 @router.get("/load")
-def load_sessions(project_root: str) -> dict:
-    data = tcip_store.read(_guarded_stats_key(project_root), default={"sessions": []})
+def load_sessions() -> dict:
+    data = tcip_store.read(_stats_key(), default={"sessions": []})
     for s in data["sessions"]:
         s.update(_classify_session_seconds(s))
     return data

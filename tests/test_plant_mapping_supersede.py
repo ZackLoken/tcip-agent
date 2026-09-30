@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import tcip_store as ts
 from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -21,33 +19,35 @@ from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 from tests._population import mapped_plants
 
 
-def _cited_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, str]]:
+def _deliver(project: Path, preds_by_date: dict[str, str], out_csv: Path) -> dict:
+    return deliver_phenology_milestones(
+        project, trait="currant_bloom", mapping_name="valley",
+        plants=mapped_plants(project, "valley"), predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
+
+
+def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:
     """A mapping built, delivered from (so a delivery event cites its digest), and the plant CSV
     it was built over, for a rebuild under the same name to then be tried against."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    out_csv = tmp_path / "out.csv"
-    _validate_buckets(preds_by_date, dataset_root)
-    res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
+    res = _deliver(tmp_path, preds_by_date, tmp_path / "out.csv")
     assert "error" not in res, res
     return str(images_root), preds_by_date
 
 
-def test_a_cited_rebuild_refuses_naming_the_citing_events(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_cited_rebuild_refuses_naming_the_citing_events(tmp_path: Path) -> None:
     """A guard: a same-name rebuild whose current record a delivery event cites refuses unless
     supersede=True."""
-    images_root, _ = _cited_mapping(tmp_path, monkeypatch)
+    images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -59,7 +59,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
     ]
     assert citing_ids
 
-    res = build_plant_mapping(name="valley", images_root=images_root, plant_registry=(
+    res = build_plant_mapping(tmp_path, name="valley", images_root=images_root, plant_registry=(
         before.plant_registry["name"]))
 
     assert "error" in res
@@ -74,20 +74,20 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
 
 
 def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_readable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Admits valid work: supersede=True archives the current record under
     <name>@<digest[:12]>, the new record's own supersedes names the archived digest, the
     archived record stays readable, and plant_mapping_names never lists it."""
-    images_root, preds_by_date = _cited_mapping(tmp_path, monkeypatch)
+    images_root, preds_by_date = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
     archived_digest = before.record_sha256
     archived_name = f"valley@{archived_digest[:12]}"
 
     res = build_plant_mapping(
-        name="valley", images_root=images_root, plant_registry=before.plant_registry["name"],
-        supersede=True)
+        tmp_path, name="valley", images_root=images_root,
+        plant_registry=before.plant_registry["name"], supersede=True)
 
     assert "error" not in res, res
     after = plant_mapping.load_mapping(tmp_path, "valley")
@@ -104,19 +104,16 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     assert "valley" in plant_mapping.plant_mapping_names(tmp_path)
 
     # The delivery event's own citation still resolves to the archived record's own content.
-    out_csv2 = tmp_path / "out2.csv"
-    res2 = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv2), classifier_pred_dirs=list(preds_by_date.values()))
+    res2 = _deliver(tmp_path, preds_by_date, tmp_path / "out2.csv")
     assert "error" not in res2, res2
 
 
 def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Coverage: a delivery event's own cited digest resolves to the current name while
     unmoved, and to the archived key once a supersede rebuild has moved the name on."""
-    images_root, _ = _cited_mapping(tmp_path, monkeypatch)
+    images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -124,8 +121,8 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
         tmp_path, "valley", before.record_sha256) == "valley"
 
     res = build_plant_mapping(
-        name="valley", images_root=images_root, plant_registry=before.plant_registry["name"],
-        supersede=True)
+        tmp_path, name="valley", images_root=images_root,
+        plant_registry=before.plant_registry["name"], supersede=True)
     assert "error" not in res, res
 
     archived_name = f"valley@{before.record_sha256[:12]}"
@@ -134,53 +131,52 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
 
 
 def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The panel route's own plant_mapping_resolved_key names the archive once a supersede
     rebuild has moved the cited name on, and the plain name while it has not."""
+    import asyncio
+
     from fastapi.testclient import TestClient
     from tcip_web.app import app
     from tcip_web.state import store
 
-    images_root, _ = _cited_mapping(tmp_path, monkeypatch)
+    images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
-    store.open_project(tmp_path.resolve())
+    asyncio.run(store.open_project(tmp_path))
     client = TestClient(app, base_url="http://127.0.0.1")
-    resp = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
     record = next(r for r in resp.json()["records"] if r.get("plant_mapping"))
     assert record["plant_mapping_resolved_key"] == "valley"
 
     res = build_plant_mapping(
-        name="valley", images_root=images_root, plant_registry=before.plant_registry["name"],
-        supersede=True)
+        tmp_path, name="valley", images_root=images_root,
+        plant_registry=before.plant_registry["name"], supersede=True)
     assert "error" not in res, res
 
-    resp2 = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    resp2 = client.get("/api/results/delivery-events")
     assert resp2.status_code == 200, resp2.text
     record2 = next(r for r in resp2.json()["records"] if r.get("plant_mapping"))
     assert record2["plant_mapping_resolved_key"] == f"valley@{before.record_sha256[:12]}"
 
 
-def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _init(tmp_path, monkeypatch)
+def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(tmp_path: Path) -> None:
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATES[0]])
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     first = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in first, first
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
     second = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in second, second
 
     after = plant_mapping.load_mapping(tmp_path, "valley")

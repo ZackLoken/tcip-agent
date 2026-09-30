@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_web.app import app
-from tcip_web.state import store
 
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
@@ -81,12 +80,13 @@ def _capture_fixture(root: Path) -> dict:
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
 
-    register_dataset(str(root), crop=sorted(registered_crops())[0])
     from tests._binding_fixtures import register_plant_registry_for
+    from tests._web_fixtures import open_new_project
 
-    registry = register_plant_registry_for([csv_path])
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
-    store.open_project(root.resolve())
+    open_new_project(root)
+    register_dataset(root, str(root), sorted(registered_crops())[0])
+    registry = register_plant_registry_for(root, [csv_path])
     return {
         "name": "valley", "images_root": str(images), "plant_registry": registry,
         # Not a BuildMappingPayload field (ignored by the route); carried for a test that needs
@@ -176,7 +176,7 @@ def test_build_response_carries_the_persisted_record_own_tolerance_dict(
     assert body["nn_tolerance_m"] == build.nn_tolerance_m
 
 
-def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_project(
+def test_a_mapping_is_persisted_and_audited_into_the_open_project(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """A mapping is project state: the build always lands under the open project's own

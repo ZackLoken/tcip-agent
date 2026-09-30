@@ -8,12 +8,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset, reviewed_image_names, select_unreviewed,
 )
-from tcip_mcp.project_paths import resolve_output_path
 
 
 def _review_state_exists(review_state_dir: str) -> bool:
@@ -42,20 +41,22 @@ def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
     return project_state_dir(dataset_root)
 
 
-def _load_or_refuse(checkpoint_path: str, project_path: str):
+def _load_or_refuse(checkpoint_path: str, project: Path):
     """The verified checkpoint either review-queue door builds its predictor from, or the door's
-    own refusal dict when the registry names no entry for it. Returns ``(checkpoint, refusal)``."""
+    own refusal dict when ``project``'s registry names no entry for it. Returns ``(checkpoint,
+    refusal)``."""
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
     try:
-        return load_registered_checkpoint(checkpoint_path, project_path=project_path or None), None
+        return load_registered_checkpoint(checkpoint_path, project=project), None
     except UnregisteredCheckpoint as exc:
         return None, {"error": str(exc)}
 
 
-def _calibration_stems(checkpoint, images_dir: Path) -> set[str] | None:
-    """The calibration-side member stems the producing run of ``checkpoint`` froze in its
-    partition (``experiments.run_resolution``) whose own image sits in ``images_dir``, or ``None``
+def _calibration_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | None:
+    """The calibration-side member stems the producing run of ``checkpoint`` in ``project`` froze
+    in its partition (``experiments.run_resolution``) whose own image sits in ``images_dir``, or
+    ``None``
     for a checkpoint no run of this project produced (``checkpoint.experiment_id``) and for a run
     that bound no selection. A calibration sample from another directory the selection also spans
     is not one of this queue's candidates.
@@ -67,7 +68,7 @@ def _calibration_stems(checkpoint, images_dir: Path) -> set[str] | None:
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
 
-    partition = run_resolution(checkpoint.experiment_id)["partition"]
+    partition = run_resolution(checkpoint.experiment_id, project=project)["partition"]
     if partition["selection"] is None:
         return None
     return {stem_of(s.source) for s in partition_samples(partition)
@@ -98,9 +99,10 @@ def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str 
     )
 
 
-@mcp.tool()
-@audited(scope_arg="output_dir", scope_via=resolve_output_path)
+@tool()
+@audited(scope_arg="output_dir")
 def materialize_review_dataset(
+    project: Path,
     dataset_root: str,
     source_images_dir: str,
     output_dir: str,
@@ -131,8 +133,8 @@ def materialize_review_dataset(
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
             store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``).
         source_images_dir: Directory of the reviewed source images.
-        output_dir: Destination for the curated dataset (distinct from the source). A relative path
-            resolves against the platform state root, never the server process's cwd.
+        output_dir: Destination for the curated dataset (distinct from the source); a relative
+            path is under the project.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
@@ -149,7 +151,7 @@ def materialize_review_dataset(
             default) derives the store from ``dataset_root``; stated, it is read verbatim and the
             response names it. A stated store holding no shards is refused.
     """
-    output_dir = str(resolve_output_path(output_dir))
+    output_dir = str(Path(project, output_dir))
     if not dataset_root:
         return {"error": "dataset_root is required: it names the dataset whose review this curates"}
     store_dir = _verdict_store_of(dataset_root, review_state_dir)
@@ -192,7 +194,7 @@ def materialize_review_dataset(
         result = materialize_dataset(
             review_state, source_images_dir, output_dir,
             scope=scope,
-            review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
+            include_hard_negatives=include_hard_negatives,
             copy_files=copy_files, only_completed=only_completed,
         )
     except ValueError as exc:
@@ -265,8 +267,9 @@ def _prepare_queue_sources(
     return sources, reviewed_skipped, build_predictor, None
 
 
-@mcp.tool()
+@tool()
 def prioritize_review_queue(
+    project: Path,
     checkpoint_path: str,
     images_dir: str,
     dataset_root: str = "",
@@ -275,7 +278,6 @@ def prioritize_review_queue(
     skip_reviewed: bool = True,
     bucket: str | None = None,
     review_state_dir: str = "",
-    project_path: str = "",
 ) -> dict:
     """Rank un-reviewed images by active-learning informativeness for the next review batch.
 
@@ -304,15 +306,13 @@ def prioritize_review_queue(
             and refuses, naming them, when it holds several.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim.
-        project_path: Project root the checkpoint's registry entry is looked up under. Empty
-            (default) resolves to the process's own root.
     """
     sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
         checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
     if error is not None:
         return error
 
-    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+    checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
     try:
@@ -341,7 +341,7 @@ def prioritize_review_queue(
     from tcip_mcp.pipelines.image_utils import BandGroupRef
 
     scored = scorer.score(sources, predictor)[:budget]
-    calibration_stems = _calibration_stems(checkpoint, Path(images_dir))
+    calibration_stems = _calibration_stems(checkpoint, Path(images_dir), project)
     marks: Sequence[bool | None] = [None] * len(scored)
     if calibration_stems is not None:
         marks = _calibration_marks([p for p, _ in scored], calibration_stems)
@@ -364,6 +364,7 @@ def prioritize_review_queue(
 
 
 def triage_predictions(
+    project: Path,
     checkpoint_path: str,
     images_dir: str,
     dataset_root: str = "",
@@ -373,7 +374,6 @@ def triage_predictions(
     auto_threshold: float | None = None,
     bucket: str | None = None,
     review_state_dir: str = "",
-    project_path: str = "",
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and
     unscoreable queues.
@@ -403,8 +403,6 @@ def triage_predictions(
             and refuses, naming them, when it holds several.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim.
-        project_path: Project root the checkpoint's registry entry is looked up under. Empty
-            (default) resolves to the process's own root.
     """
     sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
         checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
@@ -417,7 +415,7 @@ def triage_predictions(
         return {"total_images": 0, "reviewed_skipped": reviewed_skipped,
                 "auto_accepted": 0, "needs_review": 0, "review_images": [],
                 "unscoreable_images": [], "auto_accepted_images": []}
-    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+    checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
     predictor = build_predictor(checkpoint)

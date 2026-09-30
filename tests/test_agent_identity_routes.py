@@ -28,23 +28,23 @@ IDENTITY_FIELDS = ("agent_client_name", "agent_client_version", "agent_session",
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _post_and_capture_broadcast(
     client: TestClient, event_type: str, data: dict, headers: dict | None = None
 ) -> tuple[Any, dict]:
-    """Post a panel event while subscribed to its live broadcast, returning the HTTP response
-    and what the broadcast carried: the replacement for reading the event back through the
-    since-deleted recent-events route."""
-    from tcip_web import app as web_app
+    """Post a panel event for the open project while subscribed to its live broadcast,
+    returning the HTTP response and what the broadcast carried."""
+    from tcip_web.state import store
 
     with client.websocket_connect("ws://127.0.0.1/ws/panel/meta") as ws:
-        for _ in range(len(web_app._recent_events.get("meta", ()))):
-            ws.receive_json()  # drain whatever earlier tests already posted to this panel
+        for _ in store.retained_events("meta"):
+            ws.receive_json()  # drain what the open project already retained on this panel
         posted = client.post(
-            "/api/events/meta", json={"event_type": event_type, "data": data},
+            "/api/events/meta",
+            json={"event_type": event_type, "data": data, "project_id": store.project_id},
             headers=headers or {},
         )
         event = ws.receive_json()

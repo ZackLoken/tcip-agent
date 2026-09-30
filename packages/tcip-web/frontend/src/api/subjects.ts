@@ -32,11 +32,30 @@ export type Registry = Record<string, SubjectDef>;
 // "negative" = the breeder marked the image Complete with no objects: a confirmed negative,
 // recorded in image_status.json. An empty label file alone is not this: it reads as
 // "unannotated" until that Complete, which is the whole negative-sample rail.
-export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
+const IMAGE_STATUSES = ["complete", "partial", "negative", "unannotated"] as const;
+export type ImageStatus = (typeof IMAGE_STATUSES)[number];
 
 // The two statuses a human's own confirmation ends on: the frontend's declaration of
 // dataset_layout.FINISHED_STATUSES, held equal to it by test_frontend_dataset_vocabulary.py.
 export const FINISHED_STATUSES: readonly ImageStatus[] = ["complete", "negative"];
+
+export interface ImageStatusResponse {
+  statuses: Record<string, ImageStatus>;
+  stale_definition: string[];
+}
+
+function isImageStatusResponse(body: unknown): body is ImageStatusResponse {
+  if (typeof body !== "object" || body === null) return false;
+  const { statuses, stale_definition } = body as Record<string, unknown>;
+  return (
+    typeof statuses === "object" &&
+    statuses !== null &&
+    !Array.isArray(statuses) &&
+    Object.values(statuses).every((s) => (IMAGE_STATUSES as readonly unknown[]).includes(s)) &&
+    Array.isArray(stale_definition) &&
+    stale_definition.every((name) => typeof name === "string")
+  );
+}
 
 /** What a registry save's attribute-vocabulary change did to existing confirmations: for each
  *  affected subject, how many of its confirmations were stamped with the outgoing schema (so a
@@ -54,11 +73,10 @@ export const subjectsApi = {
   // The registry lives in the dataset (not the project); pass dataset_root so a shared image
   // set carries its own subject names.
 
-  // The annotations dir lets the server derive a draft registry (detection-only, no attributes)
-  // from the labels when no subjects.json is saved yet.
-  load: (project_root: string, dataset_root?: string | null, annotations_dir?: string | null) => {
-    const params = new URLSearchParams({ project_root });
-    if (dataset_root) params.set("dataset_root", dataset_root);
+  // The annotations dir is the labels the server scans for a draft registry (detection-only, no
+  // attributes) when no subjects.json is saved yet.
+  load: (dataset_root: string, annotations_dir: string | null) => {
+    const params = new URLSearchParams({ dataset_root });
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
     return getJson<{ subjects: Registry; version: string | null; unreadable: string[] }>(
       `${ROUTES.getSubjectsLoad}?${params.toString()}`,
@@ -67,83 +85,70 @@ export const subjectsApi = {
 
   // `version`: the token `load` returned beside this registry, required on every call.
   // `null` asserts the registry was absent at load, never an unconditional write.
-  save: (
-    project_root: string,
-    subjects: Registry,
-    dataset_root: string | null | undefined,
-    annotations_dir: string | null | undefined,
-    version: string | null,
-  ) =>
+  save: (subjects: Registry, dataset_root: string, version: string | null) =>
     postJson<{
       status: string;
       n_subjects: number;
       subjects_path: string;
       version: string;
       schema_change_sweep: SchemaChangeSweep;
-    }>(ROUTES.postSubjectsSave, { project_root, subjects, dataset_root, annotations_dir, version }),
+    }>(ROUTES.postSubjectsSave, { subjects, dataset_root, version }),
 
-  // A Complete is a statement about one subject on one date, read and written scoped to it, so
-  // confirming while annotating leaf cannot mark an image negative for a subject nobody saw.
+  // A Complete is a statement about one subject on one date of one dataset, read and written
+  // scoped to all three, so confirming leaf cannot mark an image negative for another subject.
 
-  // Confirmations are dataset-native (like the registry), not project-private, so
-  // dataset_root/annotations_dir resolve where the store lives, same as subjectsApi.load/save.
-  loadImageStatus: (
-    project_root: string,
-    subject: string | null,
-    date: string | null,
-    dataset_root?: string | null,
-    annotations_dir?: string | null,
-  ) => {
-    const params = new URLSearchParams({ project_root });
+  /** The subject/date's stored statuses and the finished names stale under its current attribute
+   *  schema; a response that is not that whole shape (a status object of known statuses, a list
+   *  of names) throws, naming it. */
+  loadImageStatus: (subject: string | null, date: string | null, dataset_root: string) => {
+    const params = new URLSearchParams({ dataset_root });
     if (subject) params.set("subject", subject);
     if (date) params.set("date", date);
-    if (dataset_root) params.set("dataset_root", dataset_root);
-    if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ statuses: Record<string, ImageStatus>; stale_definition: string[] }>(
-      `${ROUTES.getSubjectsImageStatus}?${params.toString()}`,
+    return getJson<unknown>(`${ROUTES.getSubjectsImageStatus}?${params.toString()}`).then(
+      (body) => {
+        if (!isImageStatusResponse(body)) {
+          throw new Error(
+            `the image-status route answered a response of another shape: ${JSON.stringify(body)}`,
+          );
+        }
+        return body;
+      },
     );
   },
 
   /** `user` is the GUI-set identity; omitting it stamps the backend's process identity instead. */
   setImageStatus: (
-    project_root: string,
     image_name: string,
     status: ImageStatus,
     subject: string | null,
     date: string | null,
-    dataset_root?: string | null,
-    annotations_dir?: string | null,
+    dataset_root: string,
     user?: string,
   ) =>
     postJson<{ status: string; digest_stamped: boolean }>(ROUTES.postSubjectsImageStatus, {
-      project_root,
       image_name,
       status,
       subject,
       date,
       dataset_root,
-      annotations_dir,
       user,
     }),
 
   setImageStatusBulk: (
-    project_root: string,
     statuses: Record<string, ImageStatus>,
     subject: string | null,
     date: string | null,
-    dataset_root?: string | null,
-    annotations_dir?: string | null,
+    dataset_root: string,
     user?: string,
   ) =>
     // digest_unstamped names the statuses passed whose digest stamp did not land, empty once
     // every one does.
     postJson<{ status: string; n: number; digest_unstamped: string[] }>(
       ROUTES.postSubjectsImageStatusBulk,
-      { project_root, statuses, subject, date, dataset_root, annotations_dir, user },
+      { statuses, subject, date, dataset_root, user },
     ),
 
   deriveImageStatus: (body: {
-    project_root: string;
     annotations_dir: string | null;
     subject: string;
     image_list: string[];

@@ -28,17 +28,13 @@ export interface SessionEntry {
   >;
 }
 
+/** Every call records against the project the backend has open. */
 export const sessionsApi = {
-  start: (project_root: string, user: string) =>
-    postJson<unknown>(ROUTES.postSessionsStart, { project_root, user }),
+  start: (user: string) => postJson<unknown>(ROUTES.postSessionsStart, { user }),
 
-  load: (project_root: string) =>
-    getJson<{ sessions: SessionEntry[] }>(
-      `${ROUTES.getSessionsLoad}?project_root=${encodeURIComponent(project_root)}`,
-    ),
+  load: () => getJson<{ sessions: SessionEntry[] }>(ROUTES.getSessionsLoad),
 
   imageEvent: (body: {
-    project_root: string;
     image_name: string;
     session_seconds_delta: number;
     annotations_added_delta: number;

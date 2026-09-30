@@ -77,7 +77,7 @@ def _train_config(model_source: dict, data: dict) -> dict:
 def _run(model_source: dict, data: dict, tmp_path: Path, run_id: str):
     """A run of :func:`_train_config` writing into ``tmp_path / "out"``, with no val loader."""
     return trainer_run(_train_config(model_source, data), tmp_path / "out",
-                       has_val_loader=False, id=run_id)
+                       has_val_loader=False, id=run_id, project=tmp_path)
 
 
 def _assert_trained(run, output_dir: Path) -> None:
@@ -288,7 +288,6 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):
@@ -306,10 +305,10 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
     reg = register_model(name="ordinal-model", checkpoint_path=ckpt_path, config={},
-                         project_path=str(tmp_path))
+                         project=tmp_path)
     assert "error" not in reg, reg
 
-    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path))
+    result = evaluate_model(tmp_path, ckpt_path, str(images_dir), str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "quadratic_weighted_kappa" in result
@@ -320,7 +319,6 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):
@@ -338,10 +336,10 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
     reg = register_model(name="regression-model", checkpoint_path=ckpt_path, config={},
-                         project_path=str(tmp_path))
+                         project=tmp_path)
     assert "error" not in reg, reg
 
-    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path))
+    result = evaluate_model(tmp_path, ckpt_path, str(images_dir), str(csv_path))
     assert "error" not in result, result
     assert "mae" in result
     assert "r_squared" in result

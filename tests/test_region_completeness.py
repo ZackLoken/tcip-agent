@@ -206,7 +206,7 @@ class TestStaleCells:
         self._write_label(tmp_path / "annotations", "mosaic",
                           [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))])
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(record, record_annotations(tmp_path, record),{}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record), {}, "bud") == ["A1"]
 
     def test_matching_stamp_is_not_stale(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -215,7 +215,7 @@ class TestStaleCells:
         a1 = next(c for c in cells if c.name == "A1")
         digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == []
+        assert stale_cells(record, record_annotations(tmp_path, record), {"A1": digest}, "bud") == []
 
     def test_an_edit_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -227,7 +227,7 @@ class TestStaleCells:
         edited = [Annotation(subject="bud", geometry=BBox(1, 1, 30, 30))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record), {"A1": digest}, "bud") == ["A1"]
 
     def test_a_deletion_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -237,7 +237,7 @@ class TestStaleCells:
         digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         self._write_label(tmp_path / "annotations", "mosaic", [], keep_empty=True)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == ["A1"]
+        assert stale_cells(record, record_annotations(tmp_path, record), {"A1": digest}, "bud") == ["A1"]
 
     def test_an_edit_outside_the_attested_cell_does_not_flag_it(self, tmp_path):
         grid, cells = self._grid_and_cells()
@@ -250,4 +250,4 @@ class TestStaleCells:
         edited = original + [Annotation(subject="bud", geometry=BBox(70, 70, 80, 80))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(record, record_annotations(tmp_path, record),{"A1": digest}, "bud") == []
+        assert stale_cells(record, record_annotations(tmp_path, record), {"A1": digest}, "bud") == []

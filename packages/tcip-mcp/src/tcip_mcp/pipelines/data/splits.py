@@ -902,7 +902,6 @@ def resolve_locked_cal_holdout_split(
     seed: int = DEFAULT_CAL_SEED,
     force_redraw: bool = False,
     timestamp: str | None = None,
-    selection_dir: str | None = None,
     reason: str | None = None,
 ) -> dict:
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
@@ -914,15 +913,12 @@ def resolve_locked_cal_holdout_split(
     unstated ``group_by`` is :data:`DEFAULT_GROUP_BY`.
 
     If a lock already exists and the caller's declared policy
-    (``group_by``/``group_key_map``/``seed``/``holdout_ratio``/``selection_dir``) differs from what
-    is recorded in it, the divergence is logged as a warning and returned under
-    ``"policy_divergence"`` (``{"requested": ..., "locked": ...}``) and the locked split is
-    returned unchanged. Stems the caller has that the lock doesn't cover are returned under
-    ``"unlocked_stems"``.
-
-    ``selection_dir`` names the selection a caller drew ``stems`` from (``None`` for a
-    whole-directory draw); it is recorded in the lock and in every ``redraw_history`` entry, never
-    resolved or compared here.
+    (``group_by``/``group_key_map``/``seed``/``holdout_ratio``) differs from what is recorded in
+    it, the divergence is logged as a warning and returned under ``"policy_divergence"``
+    (``{"requested": ..., "locked": ...}``) and the locked split is returned unchanged. Stems the
+    caller has that the lock doesn't cover are returned under ``"unlocked_stems"``. A selection's
+    universe is its own identity (``identity_hash`` is hashed over its stems), so the lock names
+    no selection.
 
     ``stems`` ``None`` names the existing lock's own members as the universe; with no lock to read
     them from it raises ``ValueError``.
@@ -940,7 +936,7 @@ def resolve_locked_cal_holdout_split(
     caller's ``reason``; returning an existing lock writes nothing and leaves none.
 
     Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
-    group_key_map, seed, holdout_ratio, selection_dir, redraw_history}``, plus the optional
+    group_key_map, seed, holdout_ratio, redraw_history}``, plus the optional
     ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed, or,
     on a draw, the ``old_membership`` it replaced (``None`` for a first draw).
     """
@@ -972,7 +968,6 @@ def resolve_locked_cal_holdout_split(
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,
         "seed": seed, "holdout_ratio": holdout_ratio,
-        "selection_dir": selection_dir,
     }
 
     if existing is not None and not force_redraw:
@@ -1022,7 +1017,7 @@ def resolve_locked_cal_holdout_split(
         "redraw_history": redraw_history,
     }
     store.replace(lock_key, locked)
-    from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+    from tcip_mcp.audit import record_event_or_raise
 
     old_membership = ({"calibration": existing["calibration"], "holdout": existing["holdout"]}
                       if existing else None)
@@ -1030,7 +1025,7 @@ def resolve_locked_cal_holdout_split(
     record_event_or_raise(
         "calibration_holdout_drawn",
         {"identity_hash": identity_hash, **declared_policy, "reason": reason},
-        scope=dataset_scope_of(str(scope_root)), old_membership=old_membership,
+        scope=scope_root, old_membership=old_membership,
         new_membership={"calibration": parts["calibration"], "holdout": parts["holdout"]},
     )
     return {**locked, "old_membership": old_membership}

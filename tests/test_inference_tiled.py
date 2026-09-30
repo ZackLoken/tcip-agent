@@ -38,7 +38,7 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
 
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     r = pred.predict_sliced(img, **SLICED)
 
@@ -59,7 +59,7 @@ def test_predict_sliced_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_pat
 
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     uncapped = pred.predict_sliced(img, **SLICED)
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
@@ -92,7 +92,7 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path)
 
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     empty_prior = {"slices": [], "boxes": [], "scores": [], "labels": []}
 
@@ -105,17 +105,16 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path)
 def test_run_inference_tile_flag(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
-    r = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=True, tile_size=TILE, conf_threshold=0.0)
+    r = run_inference_verified(tmp_path, ckpt, images_dir=str(Path(img).parent), tile=True, tile_size=TILE, conf_threshold=0.0)
     assert r["slicing"] is not None
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
     assert r["operating_point"]["conf"]["validated_against"] == "false"
 
-    r2 = run_inference_verified(ckpt, images_dir=str(Path(img).parent), tile=False, conf_threshold=0.0)
+    r2 = run_inference_verified(tmp_path, ckpt, images_dir=str(Path(img).parent), tile=False, conf_threshold=0.0)
     assert r2["slicing"] is None
     assert len(r2["results"]) == 1  # non-tiled path still works
 
@@ -160,7 +159,7 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
     path = tmp_path / "rgba.png"
     Image.new("RGBA", (128, 128), (10, 20, 30, 255)).save(path)
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     result = pred.predict_sliced(str(path), **SLICED)
     assert result["width"] == 128 and result["height"] == 128
@@ -174,7 +173,6 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
     recorded_id_map = {"closed": 0, "open": 1}
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt_path = registered_checkpoint(
         tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -184,5 +182,5 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
                                            "id_map": recorded_id_map}})
     img = _image(tmp_path)
 
-    r = run_inference_verified(str(ckpt_path), images_dir=str(Path(img).parent), conf_threshold=0.0)
+    r = run_inference_verified(tmp_path, str(ckpt_path), images_dir=str(Path(img).parent), conf_threshold=0.0)
     assert r["scope"].id_map == recorded_id_map  # the recorded map, not a fresh registry re-derivation

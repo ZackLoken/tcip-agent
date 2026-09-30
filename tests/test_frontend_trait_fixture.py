@@ -12,4 +12,4 @@ from tools.generate_trait_fixture import GENERATED_PATH, listings
 def test_the_checked_in_listings_are_what_the_producers_serve_today(tmp_path: Path) -> None:
     checked_in = json.loads(GENERATED_PATH.read_text(encoding="utf-8"))
 
-    assert listings(tmp_path) == checked_in
+    assert listings(tmp_path.parent) == checked_in

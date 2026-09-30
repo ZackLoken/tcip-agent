@@ -21,8 +21,8 @@ import pytest
 from tests._clear_prediction_bucket_fixtures import write_image
 from tests._regime_fixtures import stub_pass, tiled_regime
 
-# no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+# no built-in traits, seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's
+# tmp_path project so trait="bud_opening" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
@@ -105,14 +105,14 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     assert {s.group for s in train}.isdisjoint({s.group for s in val})
 
     # A calibration reference drawn from val's own stems must not be permanently blocked.
-    td = _train_disjointness("e1", {s.member for s in val}, set(),
+    td = _train_disjointness("e1", {s.member for s in val}, set(), project=tmp_path,
                              calibration_labels_dir=str(labels_dir))
     assert td["unresolvable"] is False
     assert td["group_check"] == "performed"  # every stem covered by the recorded groups
     assert td["leaked_groups"] == []
 
     # A training stem named as calibration is caught at its recorded group.
-    td_leak = _train_disjointness("e1", {train[0].member}, set(),
+    td_leak = _train_disjointness("e1", {train[0].member}, set(), project=tmp_path,
                                   calibration_labels_dir=str(labels_dir))
     assert td_leak["leaked_groups"] == [train[0].group]
 
@@ -134,14 +134,14 @@ def test_a_drawn_validation_side_is_checked_end_to_end(tmp_path):
     val_member = _side(run_dir, "val")[0].member
 
     leaked = _selection_disjointness(
-        "exp-drawn-val", {val_member}, set(), selection_dir="some/selection",
+        "exp-drawn-val", {val_member}, set(), project=tmp_path, selection_dir="some/selection",
         calibration_labels_dir=str(labels_dir))
     assert leaked["applicable"] is True
     assert leaked["leaked_stems"] == [val_member] or leaked["leaked_groups"] == [val_member]
 
     # Admits valid work: a calibration over that same directory sharing no member is clean.
     clean = _selection_disjointness(
-        "exp-drawn-val", {"unrelated"}, set(), selection_dir="some/selection",
+        "exp-drawn-val", {"unrelated"}, set(), project=tmp_path, selection_dir="some/selection",
         calibration_labels_dir=str(labels_dir))
     assert clean["applicable"] is True
     assert clean["leaked_stems"] == [] and clean["leaked_groups"] == []
@@ -187,15 +187,15 @@ def test_a_drawn_run_and_a_drawn_selection_spell_one_group_key(tmp_path):
     images_dir, labels_dir, _stems = _dated_detection_dataset(root)
 
     _train_ds, val_ds, partition = auto_train_val(
-        "detection", _dated_run_config(images_dir, labels_dir), None)
+        tmp_path, "detection", _dated_run_config(images_dir, labels_dir), None)
     assert val_ds is not None
     drawn_keys = {Path(s.ground_truth).stem: s.group for s in partition_samples(partition)}
 
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
-    selection_keys = {Path(s.ground_truth).stem: s.group for s in read_selection(out).samples}
+    selection_keys = {Path(s.ground_truth).stem: s.group for s in read_selection(out, project=tmp_path).samples}
 
     assert drawn_keys == selection_keys
     assert set(drawn_keys.values()) == {f"{DATE}/{parent}" for parent in PARENTS}
@@ -210,7 +210,6 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
     from tcip_mcp.tools.training_tools import launch_training, preflight_config
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
@@ -238,13 +237,13 @@ def test_the_launch_door_admits_the_map_the_draw_requires(tmp_path, monkeypatch)
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
-    assert preflight_config(copy.deepcopy(config))["issues"] == []
-    launched = launch_training(copy.deepcopy(config))
+    assert preflight_config(tmp_path, copy.deepcopy(config))["issues"] == []
+    launched = launch_training(tmp_path, copy.deepcopy(config))
     assert "error" not in launched, launched
 
     # The same config the door admitted is one the real draw accepts.
     _train_ds, val_ds, _partition = auto_train_val(
-        "detection", copy.deepcopy(config)["data"], None)
+        tmp_path, "detection", copy.deepcopy(config)["data"], None)
     assert val_ds is not None
 
 
@@ -269,7 +268,7 @@ def test_a_crop_annotated_after_a_drawn_run_is_caught_as_its_parents_group(tmp_p
         [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], IMG, IMG, keep_empty=True)
 
     resolved = _train_disjointness(
-        "e-dated-drawn", {late_crop}, set(), calibration_labels_dir=str(labels_dir))
+        "e-dated-drawn", {late_crop}, set(), project=tmp_path, calibration_labels_dir=str(labels_dir))
 
     assert resolved["leaked_groups"] == [trained[0].group]
 
@@ -292,7 +291,7 @@ def test_no_group_is_reproduced_for_a_directory_the_record_names_nothing_under(t
     elsewhere.mkdir(parents=True)
 
     resolved = _train_disjointness(
-        "e-other-date", {f"{parent}_9_0"}, set(), calibration_labels_dir=str(elsewhere))
+        "e-other-date", {f"{parent}_9_0"}, set(), project=tmp_path, calibration_labels_dir=str(elsewhere))
 
     assert resolved["unresolvable"] is False
     assert resolved["leaked_groups"] == []
@@ -319,7 +318,7 @@ def test_train_disjointness_named_group_by_resolves_every_stem_to_its_recorded_g
     trained = _side(run_dir, "train")[0]
 
     result = _train_disjointness(
-        "exp_named", {trained.member}, set(), calibration_labels_dir=str(labels_dir))
+        "exp_named", {trained.member}, set(), project=tmp_path, calibration_labels_dir=str(labels_dir))
     assert result == {
         "checked": True, "unresolvable": False,
         "leaked_groups": [trained.group], "leaked_stems": [], "group_check": "performed",
@@ -347,16 +346,16 @@ def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path):
 
     # A reference drawn from the same source is a real leak: region-scoping aside, the trained
     # pixels and the reference still share one source image.
-    leaked = _train_disjointness("exp_spatial", {stem}, set())
+    leaked = _train_disjointness("exp_spatial", {stem}, set(), project=tmp_path)
     assert leaked == {
         "checked": True, "unresolvable": False,
         "leaked_groups": [stem], "leaked_stems": [], "group_check": "spatial_strip",
     }
     # cal_rects/hold_rects default to None: stating them as None answers the same.
-    assert _train_disjointness("exp_spatial", {stem}, set(),
+    assert _train_disjointness("exp_spatial", {stem}, set(), project=tmp_path,
                                cal_rects=None, hold_rects=None) == leaked
 
-    clean = _train_disjointness("exp_spatial", {"other_mosaic"}, set())
+    clean = _train_disjointness("exp_spatial", {"other_mosaic"}, set(), project=tmp_path)
     assert clean["leaked_groups"] == []
 
 
@@ -402,11 +401,11 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
     clean = _train_disjointness(
-        "exp_geo_e2e", {stem}, set(), cal_rects={stem: _shrunk(val_region[0])})
+        "exp_geo_e2e", {stem}, set(), project=tmp_path, cal_rects={stem: _shrunk(val_region[0])})
     assert clean["leaked_groups"] == []
 
     leaked = _train_disjointness(
-        "exp_geo_e2e", set(), {stem}, hold_rects={stem: _shrunk(train_region[0])})
+        "exp_geo_e2e", set(), {stem}, project=tmp_path, hold_rects={stem: _shrunk(train_region[0])})
     assert leaked["leaked_groups"] == [stem]
 
 
@@ -441,7 +440,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
     assert stem not in trained  # the bare stem itself is never a member
     assert all("::strip_" in s for s in trained)
 
-    clean = _train_disjointness("exp_spatial_e2e", {"a_different_mosaic"}, set())
+    clean = _train_disjointness("exp_spatial_e2e", {"a_different_mosaic"}, set(), project=tmp_path)
     assert clean["leaked_groups"] == []
 
 
@@ -494,7 +493,8 @@ def test_train_disjointness_matches_extensioned_review_ids_to_train_group(tmp_pa
             _entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
-        review_state, "bud_opening", **tiled_regime(), group_by="stem", experiment_id="exp_review",
+        review_state, "bud_opening", project=tmp_path, **tiled_regime(), group_by="stem",
+        experiment_id="exp_review",
         bucket_identities=[_IDENTITY], scope_root=tmp_path,
         calibration_labels_dir=labels_dir)
     td = bundle.get("conf").gate_evidence["train_disjointness"]
@@ -617,9 +617,8 @@ def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path, monkeypatc
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path, resolve_locked_cal_holdout_split
 
     tcip_store.bind(FileBackend())
-    # The module's seeded trait put the pinned root in the database, so this case uses its own.
+    # The module's seeded trait put tmp_path in the database, so this case uses its own root.
     scope = tmp_path / "file_backend_scope"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(scope))
     lock_path = cal_holdout_lock_path("corrupt-test", scope_root=scope)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("{not valid json", encoding="utf-8")
@@ -679,13 +678,13 @@ def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
 
     # First call locks the split over all 4 stems.
     calibration.calibrate_operating_point(
-        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir))
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), project=tmp_path)
 
     (images_dir / "b_0_1.png").unlink()  # an image vanishes after the lock
 
     with pytest.raises(ValueError, match="no longer present"):
         calibration.calibrate_operating_point(
-            stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir))
+            stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), project=tmp_path)
 
 
 def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(tmp_path, monkeypatch):
@@ -715,7 +714,7 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
     stub = _CalStub()
     calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-        seed=1, holdout_ratio=0.5,
+        project=tmp_path, seed=1, holdout_ratio=0.5,
     )
     assert captured["annotation_counts"]["b_0_1"] == 0
 
@@ -731,7 +730,7 @@ def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     (images_dir / "b_0_1.png").unlink()  # labeled but no image
 
     result = redraw_calibration_holdout(
-        dataset_root=str(tmp_path / "ds"), labels_dir=str(labels_dir),
+        tmp_path, dataset_root=str(tmp_path / "ds"), labels_dir=str(labels_dir),
         images_dir=str(images_dir), seed=1,
         reason="labels-intersect-images coverage test")
     assert "error" not in result
@@ -751,37 +750,36 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
 
     bundle, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
         stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
-        seed=7, holdout_ratio=0.75,
+        project=tmp_path, seed=7, holdout_ratio=0.75,
     )
     policy = bundle.get("conf").gate_evidence["split_policy"]
     assert policy["seed"] == 7
     assert policy["holdout_ratio"] == pytest.approx(0.75)  # not the 0/0.5 defaults
 
 
-def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_path, monkeypatch):
-    """The count-calibration door reads one lock for a labeled dir, before and after an adoption.
-
-    Adopting a project repins the platform state root inside a live process. A lock scoped to that
-    root reads as absent once it moves, so a second calibration over the same labels cuts a fresh
-    holdout and the held-out claim rests on a split the first pass never held back.
-    """
+def test_the_calibration_lock_belongs_to_the_labels_not_to_the_project_calibrating(tmp_path):
+    """The count-calibration door reads one lock for a labeled dir, whichever project calibrates
+    over it: a lock scoped to the project would read as absent from the second, so a second
+    calibration over the same labels would cut a fresh holdout and the held-out claim would rest
+    on a split the first pass never held back."""
     import shutil
 
     import tcip_mcp.pipelines.calibration as calibration
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
-    # Each root carries the trait spec an adopted project of its own would hold.
-    for root in (tmp_path / "before_adoption", tmp_path / "adopted_project"):
+    # Each project carries the trait spec the calibration reads.
+    first_project, second_project = tmp_path / "first_project", tmp_path / "second_project"
+    for root in (first_project, second_project):
         shutil.copytree(tmp_path / ".tcip", root / ".tcip")
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
     first, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), seed=1)
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
+        project=first_project, seed=1)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
     second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
-        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir), seed=2)
+        stub_pass(_CalStub()), "bud_opening", str(labels_dir), str(images_dir),
+        project=second_project, seed=2)
 
     assert first.get("conf").gate_evidence["split_policy"]["seed"] == 1
     assert second.get("conf").gate_evidence["split_policy"]["seed"] == 1
@@ -826,7 +824,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
 
     _bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=0, holdout_ratio=0.5,
+        project=tmp_path, group_by="stem", seed=0, holdout_ratio=0.5,
     )
 
     assert n_excluded == 2  # partial_a + partial_b, wherever the split put them
@@ -869,7 +867,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     # using only the recorded map, never re-deriving from the registry when `subject` is set.
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=0, holdout_ratio=0.5,
+        project=tmp_path, group_by="stem", seed=0, holdout_ratio=0.5,
     )
     assert n_excluded == 0
     assert bundle is not None
@@ -885,7 +883,7 @@ def test_minor_resolve_model_identity_reads_the_codebase_own_stamped_checkpoints
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path, experiment_id="exp_abc")
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     identity = resolve_model_identity(checkpoint)
     assert identity["experiment_id"] == "exp_abc"
 

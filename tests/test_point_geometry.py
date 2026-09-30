@@ -278,7 +278,7 @@ def test_visualize_annotations_renders_the_box_and_reports_the_point(tmp_path: P
         Annotation(subject="bud", geometry=Point(60.0, 60.0)),
     ], 100, 80)
 
-    res = _viz_annotations(str(img), task="detect")
+    res = _viz_annotations(tmp_path, str(img), task="detect")
     assert "error" not in res  # the point did not crash the box renderer
     assert res["count"] == 1
     assert res["points_not_rendered"] == 1
@@ -325,7 +325,7 @@ def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
 
     img = _img(tmp_path)
     out = tmp_path / "IMG_0001.json"
-    res = save_annotations(str(img), annotations=[{"subject": "bud", "point": [12.0, 34.0]}],
+    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[{"subject": "bud", "point": [12.0, 34.0]}],
                            path=str(out))
     assert "error" not in res
     (stored,) = json_io.read_annotations(out)
@@ -340,7 +340,7 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -
 
     img = _img(tmp_path)
     out = tmp_path / "IMG_0001.json"
-    save_annotations(str(img), annotations=[
+    save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[
         {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
         {"subject": "bud", "point": [12.0, 34.0]},
     ], path=str(out))

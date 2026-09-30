@@ -24,20 +24,20 @@ from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 from tests._population import mapped_plants
 
 
-def _delivered_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+def _delivered_scene(tmp_path: Path) -> dict[str, str]:
     """A real phenology delivery, through the platform's own doors, whose delivery event this
     module's tests then supersede."""
     from tests.test_plant_mapping_binding import _write_scene
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
-    _validate_buckets(preds_by_date, dataset_root)
+    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     return preds_by_date
 
 
@@ -54,10 +54,10 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 ) -> None:
     """Coverage: the same digest, end to end through the real phenology delivery door (the
     isolated guard for the writer itself lives in test_delivery_output_digest_guard.py)."""
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
 
@@ -72,7 +72,7 @@ def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=seed_confirmed_count(tmp_path),
-        delivery_kind="per_image_count", project_root=tmp_path, plant_mapping=None,
+        delivery_kind="per_image_count", project=tmp_path, plant_mapping=None,
     )
     event = _one_event(tmp_path, door="test_door")
     assert event["output_sha256"] is None
@@ -82,16 +82,15 @@ def test_supersede_delivery_over_a_real_event_records_the_withdrawal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: supersede_delivery over an event the platform's own writer recorded."""
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     event = _one_event(tmp_path)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    outcome = supersede_delivery(event["event_id"], "a mis-stated crop was corrected upstream")
+    outcome = supersede_delivery(tmp_path, event["event_id"], "a mis-stated crop was corrected upstream")
 
     assert "error" not in outcome, outcome
     assert outcome["superseded_event_id"] == event["event_id"]
@@ -108,25 +107,24 @@ def test_supersede_delivery_over_a_real_event_records_the_withdrawal(
 def test_supersede_delivery_names_a_replacement_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     first_csv = tmp_path / "first.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(first_csv), classifier_pred_dirs=list(preds_by_date.values()))
     first_event = _one_event(tmp_path)
 
     second_csv = tmp_path / "second.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(second_csv), classifier_pred_dirs=list(preds_by_date.values()))
     scope = project_state_dir(tmp_path)
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
              if ts.read(k)["door"] == "deliver_phenology_milestones"]
     second_event = next(e for e in events if e["event_id"] != first_event["event_id"])
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     outcome = supersede_delivery(
-        first_event["event_id"], "re-delivered with a corrected mapping",
+        tmp_path, first_event["event_id"], "re-delivered with a corrected mapping",
         replacement_event_id=second_event["event_id"])
 
     assert "error" not in outcome, outcome
@@ -136,10 +134,9 @@ def test_supersede_delivery_names_a_replacement_event(
 def test_supersede_delivery_refuses_an_unknown_event_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     (tmp_path / ".tcip").mkdir(parents=True, exist_ok=True)
 
-    res = supersede_delivery("does-not-exist", "some reason")
+    res = supersede_delivery(tmp_path, "does-not-exist", "some reason")
 
     assert "error" in res
     assert "not found" in res["error"]
@@ -148,9 +145,8 @@ def test_supersede_delivery_refuses_an_unknown_event_id(
 def test_supersede_delivery_refuses_an_empty_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
-    res = supersede_delivery("whatever", "   ")
+    res = supersede_delivery(tmp_path, "whatever", "   ")
 
     assert "error" in res
     assert "reason" in res["error"]
@@ -159,16 +155,15 @@ def test_supersede_delivery_refuses_an_empty_reason(
 def test_supersede_delivery_refuses_an_unknown_replacement_event_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     res = supersede_delivery(
-        event["event_id"], "some reason", replacement_event_id="also-does-not-exist")
+        tmp_path, event["event_id"], "some reason", replacement_event_id="also-does-not-exist")
 
     assert "error" in res
     assert "replacement_event_id" in res["error"]
@@ -177,17 +172,16 @@ def test_supersede_delivery_refuses_an_unknown_replacement_event_id(
 def test_supersede_delivery_refuses_a_second_supersession_of_the_same_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    assert "error" not in supersede_delivery(event["event_id"], "first reason")
+    assert "error" not in supersede_delivery(tmp_path, event["event_id"], "first reason")
 
-    res = supersede_delivery(event["event_id"], "second reason")
+    res = supersede_delivery(tmp_path, event["event_id"], "second reason")
 
     assert "error" in res
     assert "already carries a supersession" in res["error"]
@@ -198,10 +192,10 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_a_recorded_field
 ) -> None:
     """The replacement event is read through the identical validating check as the superseded
     one, so a malformed replacement refuses by name rather than being cited unread."""
-    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    preds_by_date = _delivered_scene(tmp_path)
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
@@ -214,9 +208,8 @@ def test_supersede_delivery_refuses_a_replacement_event_missing_a_recorded_field
         "plant_mapping": None, "produced_at": "2026-02-11T00:00:00+00:00",
     })
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     res = supersede_delivery(
-        event["event_id"], "some reason", replacement_event_id=replacement_id)
+        tmp_path, event["event_id"], "some reason", replacement_event_id=replacement_id)
 
     assert "error" in res
     assert "does not validate" in res["error"]

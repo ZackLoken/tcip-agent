@@ -207,7 +207,9 @@ function TraitRow({
   );
 }
 
-export function TraitRevisionPanel({ projectRoot }: { projectRoot: string }) {
+/** The open project's trait revisions; its parent keys it by the open project so a switch
+ *  remounts it. */
+export function TraitRevisionPanel() {
   const [listing, setListing] = useState<TraitsListing | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingTrait, setPendingTrait] = useState<string | null>(null);
@@ -216,7 +218,7 @@ export function TraitRevisionPanel({ projectRoot }: { projectRoot: string }) {
 
   const reload = useCallback(async () => {
     try {
-      setListing(await resultsApi.traits(projectRoot));
+      setListing(await resultsApi.traits());
       setLoadError(null);
     } catch (e) {
       setListing(null);
@@ -224,7 +226,7 @@ export function TraitRevisionPanel({ projectRoot }: { projectRoot: string }) {
         `Could not load this project's traits: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-  }, [projectRoot]);
+  }, []);
 
   useEffect(() => {
     void reload();
@@ -236,7 +238,6 @@ export function TraitRevisionPanel({ projectRoot }: { projectRoot: string }) {
     setAuditWarnings((prev) => ({ ...prev, [trait]: null }));
     try {
       const res = await resultsApi.confirmTraitRevision({
-        project_root: projectRoot,
         trait,
         revision: revision.number,
         entry_sha256: revision.entry_sha256,

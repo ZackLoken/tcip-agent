@@ -36,6 +36,7 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_mcp.dataset_layout import bucket_dataset_root
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.project_paths import project_state_dir
+from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.predictor import TileGeometry
@@ -609,13 +610,15 @@ def moved_since_run(samples: Iterable[Any], at_run: Mapping[str, str]) -> list[s
     return sorted({s.member for s in samples if now[s.ground_truth] != at_run[s.ground_truth]})
 
 
-def selection_digest(selection: Any) -> str:
-    """The digest a selection earns: sha256 over the document it is written as, the one a bound
-    run's partition records as its ``selection["selection_sha256"]``.
+def selection_digest(selection: Any, project: str | Path) -> str:
+    """The digest a selection of ``project`` earns: sha256 over the document it is stored as
+    (``selection.stored_selection_document``), the one a bound run's partition records as its
+    ``selection["selection_sha256"]``.
     """
-    from tcip_mcp.pipelines.data.selection import selection_document
+    from tcip_mcp.pipelines.data.selection import stored_selection_document
 
-    return hashlib.sha256(RECORD_JSON.encode(selection_document(selection))).hexdigest()
+    document = stored_selection_document(selection, project)
+    return hashlib.sha256(RECORD_JSON.encode(document)).hexdigest()
 
 
 def csv_dataset_hash(csv_path: str | Path) -> str:
@@ -765,33 +768,34 @@ def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None
         )
 
 
-def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point") -> None:
+def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point", *,
+                  project: Path) -> None:
     """Write one bucket's stamp whole, under the stamp's own lock, checked through
     :func:`_check_stamp_claim`. Leaves the write's one ``stamp_written`` line.
     """
     check_json_value(stamp, path="stamp")
     _check_stamp_claim(stamp, document, pred_dir)
-    scope = bucket_dataset_root(pred_dir)
     Path(pred_dir).mkdir(parents=True, exist_ok=True)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
         txn.write(key, stamp)
-    _record_stamp_written(pred_dir, document, stamp, scope)
+    _record_stamp_written(pred_dir, document, stamp, project)
 
 
 def _record_stamp_written(pred_dir: str | Path, document: str, stamp: dict,
-                          scope: Path | None) -> None:
+                          project: Path) -> None:
     """A stamp write's one audit line, ``stamp_written``: the bucket, the document and the stamp
-    as stored, written by the library that stored it for every door alike."""
+    as stored, written by the library that stored it for every door alike, in the log of the
+    dataset the bucket lies in, or of ``project`` when it lies in none."""
     from tcip_mcp.audit import record_event_or_raise
 
     record_event_or_raise("stamp_written", {"pred_dir": str(pred_dir), "document": document},
-                          scope=scope, stamp=stamp)
+                          scope=bucket_dataset_root(pred_dir) or project, stamp=stamp)
 
 
 def update_sidecar(
     pred_dir: str | Path, updater: Callable[[dict], dict | None],
-    document: str = "operating_point",
+    document: str = "operating_point", *, project: Path,
 ) -> bool:
     """Merge into one bucket's existing stamp, reading and writing inside one lock hold.
 
@@ -802,7 +806,6 @@ def update_sidecar(
     what is actually stored rather than against a value read before the lock. A merge that
     writes leaves its ``stamp_written`` line; one that leaves the stamp as it was leaves none.
     """
-    scope = bucket_dataset_root(pred_dir)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
         updated = updater(txn.read(key, default={}))
@@ -811,7 +814,7 @@ def update_sidecar(
         check_json_value(updated, path="stamp")
         _check_stamp_claim(updated, document, pred_dir)
         txn.write(key, updated)
-    _record_stamp_written(pred_dir, document, updated, scope)
+    _record_stamp_written(pred_dir, document, updated, project)
     return True
 
 
@@ -997,8 +1000,8 @@ def _sidecar_reference(
     """Which reference the sidecar's named param cleared, for its ``validation_kind``, or
     ``VALIDATED_FALSE``.
 
-    A param whose own recorded reference is absent, unrecognized, or of a different validation kind
-    floors to ``false``; the sidecar's top-level ``validated`` bool is never read. ``param_key``
+    A sidecar whose top-level ``validated`` is not true, and a param whose own recorded reference
+    is absent, unrecognized, or of a different validation kind, floor to ``false``. ``param_key``
     lets a differently-shaped sidecar (e.g. a classifier stamp's ``classifier`` param) reuse this
     same read.
     """
@@ -1111,6 +1114,15 @@ stems (``{role: {"path": dir, "stems": [...]}}``) rather than whole, for a calib
 to a selection's calibration side, where the whole directory was never what the reference
 swept."""
 
+EVIDENCE_PATHS: PathFields = (
+    ("inputs", "selection_dir"), ("inputs", "calibration_labels_dir"),
+    *((("reference_inputs", group, "*") for group in _REFERENCE_INPUT_GROUPS[:4])),
+    ("reference_inputs", "label_stems", "*", "path"),
+    ("reference_inputs", "stated_values", "selection_dir"),
+)
+"""The fields of a calibration's evidence (``{"resolver", "inputs", "reference_inputs"}``, the
+shape :func:`open_validation` opens from) that name a path, for a record that keeps it."""
+
 _UNCOMPARED = object()
 """A resolver result that publishes no value of its own for its parameter, so the claim's value has
 nothing here to be compared against and the reference alone carries the agreement."""
@@ -1175,9 +1187,8 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked selection-disjointness (the
     checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
     same shape live gate evidence carries, ``applicable``, ``reason``, ``checked``,
-    ``unresolvable``, ``leaked_groups``, ``leaked_stems``, ``group_check`` and, when the
-    calibration read a label directory, the four label-movement keys plus
-    ``calibration_labels_dir`` beside them.
+    ``unresolvable``, ``leaked_groups``, ``leaked_stems``, ``group_check`` and the four
+    label-movement keys.
     """
     evidence = _disjointness_evidence(result, document, "resolver_selection_disjointness")
     sd = (evidence or {}).get("selection_disjointness")
@@ -1195,30 +1206,18 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
         "labels_moved_run_to_now": sd.get("labels_moved_run_to_now"),
         "calibration_labels_moved": sd.get("calibration_labels_moved"),
         "selection_redrawn": sd.get("selection_redrawn"),
-        "calibration_labels_dir": sd.get("calibration_labels_dir"),
     }
 
 
-def _relative_location(path: str | Path, dataset_root: Path) -> str:
-    """Where an input sits, expressed against the dataset root the record hangs off, for an auditor
-    recomputing a reference. An input outside the dataset root comes back as a path stepping out of
-    the root, or as an absolute path when the two share no anchor at all.
-    """
-    resolved = Path(path).resolve()
-    try:
-        return resolved.relative_to(dataset_root, walk_up=True).as_posix()
-    except ValueError:
-        return resolved.as_posix()
-
-
-def _reference_identity(reference_inputs: dict, dataset_root: Path) -> dict:
+def _reference_identity(reference_inputs: dict) -> dict:
     """The identity of the evidence a claim was earned against, hashed here rather than stated.
 
     Every location the platform can hash for itself is hashed here (labels through
     :func:`dataset_hash`, a CSV-sourced reference through :func:`csv_dataset_hash`, a reference
     prediction bucket through ``bucket_content_digest``), so a caller cannot hand over an identity
-    for evidence it did not present. Each entry records where the input was as well as what it
-    hashed to, so the reference stays resolvable to someone auditing offline.
+    for evidence it did not present. Each entry records where the input was, as well as what it
+    hashed to; a record keeping it stores those locations against its project
+    (``experiments.RECORD_PATHS``).
     """
     from tcip_mcp.prediction_buckets import bucket_content_digest
 
@@ -1232,19 +1231,19 @@ def _reference_identity(reference_inputs: dict, dataset_root: Path) -> dict:
     identity: dict[str, Any] = {}
     for role, d in sorted((reference_inputs.get("label_dirs") or {}).items()):
         identity.setdefault("label_dirs", {})[role] = {
-            "path": _relative_location(d, dataset_root), "dataset_hash": dataset_hash(d)}
+            "path": str(d), "dataset_hash": dataset_hash(d)}
     for role, p in sorted((reference_inputs.get("label_csvs") or {}).items()):
         identity.setdefault("label_csvs", {})[role] = {
-            "path": _relative_location(p, dataset_root), "dataset_hash": csv_dataset_hash(p)}
+            "path": str(p), "dataset_hash": csv_dataset_hash(p)}
     for role, d in sorted((reference_inputs.get("reference_buckets") or {}).items()):
         identity.setdefault("reference_buckets", {})[role] = {
-            "path": _relative_location(d, dataset_root), "content_digest": bucket_content_digest(d)}
+            "path": str(d), "content_digest": bucket_content_digest(d)}
     for role, d in sorted((reference_inputs.get("scope_roots") or {}).items()):
-        identity.setdefault("scope_roots", {})[role] = _relative_location(d, dataset_root)
+        identity.setdefault("scope_roots", {})[role] = str(d)
     for role, spec in sorted((reference_inputs.get("label_stems") or {}).items()):
         stems = sorted(spec["stems"])
         identity.setdefault("label_stems", {})[role] = {
-            "path": _relative_location(spec["path"], dataset_root),
+            "path": str(spec["path"]),
             "dataset_hash": dataset_hash(spec["path"], stems=stems),
             "count": len(stems),
         }
@@ -1268,8 +1267,10 @@ class ValidationDraft:
     evidence that produced it, and it is handed to :func:`seal_validation` once the predictions it
     covers have been written. The split is what lets the gate run exactly once, before anything is
     published, while the content identity is taken over the files as they actually landed.
+    ``project`` is the one whose trait the gate read and whose run the record is appended to.
     """
 
+    project: Path
     document: str
     trait: str
     validated_against: str
@@ -1288,6 +1289,7 @@ resolver result a record is minted from is one this process watched a gate produ
 
 def open_validation(
     *,
+    project: Path,
     document: str,
     evidence: dict,
     trait: str,
@@ -1302,8 +1304,9 @@ def open_validation(
     reference ``accepted_references`` recognizes for the document's kind. Nothing is written here.
 
     ``evidence`` is ``{"resolver": <name>, "inputs": {...}}``: which of the document's resolvers
-    ran the gate, and the arguments it ran over. The trait and the producing experiment are this
-    function's own arguments; ``inputs`` restating either is refused.
+    ran the gate, and the arguments it ran over. The trait, the producing experiment and, for a
+    resolver that reads a trait, ``project`` are this function's own arguments; ``inputs``
+    restating any of them is refused.
 
     ``reference_inputs`` names the evidence's own locations (see :func:`_reference_identity`), and
     must include the ``dataset_root`` the claim, its covered buckets and its reference all hang
@@ -1343,15 +1346,17 @@ def open_validation(
         )
     spec = resolvers[name]
     inputs = dict(evidence.get("inputs") or {})
-    owned = {p for p in (spec.trait_param, spec.experiment_param) if p is not None} & set(inputs)
+    params = (spec.trait_param, spec.experiment_param, "project" if spec.trait_param else None)
+    owned = {p for p in params if p is not None} & set(inputs)
     if owned:
         raise ValueError(
-            f"evidence inputs for {document} restate {', '.join(sorted(owned))}: the trait and the "
-            "producing run are open_validation's own arguments, so a second spelling of them could "
-            "disagree with the record they are written into."
+            f"evidence inputs for {document} restate {', '.join(sorted(owned))}: the trait, the "
+            "producing run and the project are open_validation's own arguments, so a second "
+            "spelling of them could disagree with the record they are written into."
         )
     if spec.trait_param:
         inputs[spec.trait_param] = trait
+        inputs["project"] = project
     if spec.experiment_param:
         inputs[spec.experiment_param] = producing_experiment_id
 
@@ -1362,7 +1367,7 @@ def open_validation(
             "reference locations are recorded against one, so the claim cannot be placed without it."
         )
     dataset_root = Path(root).resolve()
-    reference_identity = _reference_identity(reference_inputs, dataset_root)
+    reference_identity = _reference_identity(reference_inputs)
 
     result = getattr(importlib.import_module(spec.module), spec.function)(**inputs)
     param_key, validation_kind = _DOCUMENT_PARAM[document]
@@ -1381,7 +1386,7 @@ def open_validation(
     token = secrets.token_hex(16)
     _OPEN_DRAFTS.add(token)
     return ValidationDraft(
-        document=document, trait=trait, validated_against=cleared,
+        project=project, document=document, trait=trait, validated_against=cleared,
         checkpoint_sha256=checkpoint_sha256, producing_experiment_id=producing_experiment_id,
         reference_identity=reference_identity, dataset_root=str(dataset_root), result=result,
         token=token,
@@ -1398,21 +1403,17 @@ by ``None`` for every document with no more specific sentence of its own (every 
 ``resolve_scale`` today)."""
 
 
-def bucket_relative_key(bucket: str | Path, root: str | Path, *, document: str) -> str:
-    """``bucket``'s path relative to ``root``, or refuse: the under-root check every caller that
-    records a claim against a bucket applies.
-    """
-    resolved = Path(bucket).resolve()
-    root_resolved = Path(root).resolve()
-    try:
-        return resolved.relative_to(root_resolved).as_posix()
-    except ValueError:
+def require_bucket_under(bucket: str | Path, root: str | Path, *, document: str) -> None:
+    """Refuse (``ValueError``) a ``bucket`` that does not lie under the dataset ``root`` a
+    ``document`` claim covering it is recorded against."""
+    resolved, root_resolved = Path(bucket).resolve(), Path(root).resolve()
+    if not resolved.is_relative_to(root_resolved):
         raise ValueError(
             f"prediction bucket {str(resolved)!r} is not under dataset_root {str(root_resolved)!r}, "
-            f"so a {document} claim covering it has no dataset-relative key to record. Write the "
-            "predictions into the dataset's own predictions layout (resolve_prediction_bucket) to "
-            "earn a validated claim."
-        ) from None
+            f"so a {document} claim covering it answers for a dataset it is not part of. Write "
+            "the predictions into the dataset's own predictions layout (resolve_prediction_bucket) "
+            "to earn a validated claim."
+        )
 
 
 _REGIME_PARAMS = ("tile_size", "cross_tile_nms")
@@ -1465,9 +1466,9 @@ def seal_validation(
     leaves prediction files with no stamp, which floors; a crash after it leaves a record no stamp
     names, which is inert. Only a stamp that names a row a reader can find and recompute delivers.
 
-    ``covered_buckets`` is keyed by each bucket's path relative to ``dataset_root``, so a dataset
-    moved or copied whole still verifies while a bucket moved to a different place inside it does
-    not. A bucket outside the stated dataset root is refused.
+    ``covered_buckets`` is keyed by each bucket's path, stored against the project like every
+    other location the row names, so a project moved whole still verifies while a bucket moved to
+    a different place inside it does not. A bucket outside the stated dataset root is refused.
 
     For the ``operating_point`` document the digest is over the bucket's prediction bytes
     (:func:`~tcip_mcp.prediction_buckets.bucket_content_digest`). For ``resolve_scale`` the digest
@@ -1510,8 +1511,8 @@ def seal_validation(
 
         for d in bucket_dirs:
             resolved = Path(d).resolve()
-            key = bucket_relative_key(resolved, root, document=draft.document)
-            covered[key] = digest_fn(resolved)
+            require_bucket_under(resolved, root, document=draft.document)
+            covered[str(resolved)] = digest_fn(resolved)
     elif bucket_dirs:
         raise ValueError(
             f"a {draft.document} claim covers no prediction bucket's content: it is earned against a "
@@ -1557,7 +1558,7 @@ def seal_validation(
         "selection_disjointness": resolver_selection_disjointness(draft.result, draft.document),
     }
     if draft.producing_experiment_id:
-        run_dir = experiment_dir(draft.producing_experiment_id)
+        run_dir = experiment_dir(draft.producing_experiment_id, project=draft.project)
         try:
             digest = append_validation(run_dir, body)
         except ValueError as exc:
@@ -1568,7 +1569,7 @@ def seal_validation(
             "reference_identity": draft.reference_identity, "trait": draft.trait,
             "derived_from": _CALIBRATION_EXPERIMENT_DERIVATION.get(
                 draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None]),
-        })
+        }, project=draft.project)
         try:
             digest = append_validation(run_dir, body)
         except Exception as exc:
@@ -1602,10 +1603,10 @@ class StampBinding:
 
 
 def _reference_ground_truth_moved(
-    selection_dir: str,
+    selection_dir: str, project: Path,
 ) -> tuple[list[str], list[str], str | None]:
-    """Which of a selection's calibration-side ground truths differ from the draw's own recorded
-    digests.
+    """Which of the calibration-side ground truths of a selection of ``project`` differ from the
+    draw's own recorded digests.
 
     Recomputes over each sample's own ``ground_truth`` path through :func:`ground_truth_digest`.
 
@@ -1622,7 +1623,7 @@ def _reference_ground_truth_moved(
     try:
         from tcip_mcp.pipelines.data.selection import read_selection
 
-        selection = read_selection(selection_dir)
+        selection = read_selection(selection_dir, project=project)
     except Exception as exc:
         return [], [], f"{type(exc).__name__}: {exc}"
 
@@ -1638,10 +1639,12 @@ def _reference_ground_truth_moved(
 
 
 def verify_stamp_binding(
-    sidecar: dict | None, pred_dir: str | Path, *, document: str, trait: str | None = None,
-    digest_memo: dict[str, str] | None = None, images_dir: str | Path | None = None,
+    sidecar: dict | None, pred_dir: str | Path, *, project: Path, document: str,
+    trait: str | None = None, digest_memo: dict[str, str] | None = None,
+    images_dir: str | Path | None = None,
 ) -> StampBinding:
-    """Check that a stamp's validation claim is answered for by a record it cannot itself write.
+    """Check that a stamp's validation claim is answered for by a record it cannot itself write:
+    a validation row of a run of ``project``.
 
     Every check is cheap: a stamp read, a log read, for a
     selection-scoped claim one pass over the calibration side's own label files, and for the count
@@ -1652,8 +1655,8 @@ def verify_stamp_binding(
     experiment and a row; that experiment exists; that row is in it and still hashes to the
     identity the stamp committed to; the row agrees with the stamp on document, reference,
     checkpoint identity (absence equal to absence), trait and the whole claim payload; and for the
-    count and scale documents, every bucket being read is in the covered set at its
-    dataset-relative key with the content (or imagery) identity it was earned over, recomputed now.
+    count and scale documents, every bucket being read is in the covered set under its own path
+    with the content (or imagery) identity it was earned over, recomputed now.
     ``images_dir`` is required to reach that last check for ``resolve_scale`` and unused otherwise.
     When the reference identity carries a ``selection_dir``, the row must also carry a
     ``selection_disjointness`` that is either not-applicable (with a reason) or checked with no
@@ -1696,10 +1699,11 @@ def verify_stamp_binding(
     experiment_id = pointer["experiment_id"]
     record_digest = pointer["record_digest"]
 
-    observation = find_observation(experiment_id)
+    observation = find_observation(experiment_id, project=project)
     if observation is None:
         return floored(
-            f"{document}.json at {bucket!r} names run {experiment_id!r}, which {experiments_dir()} "
+            f"{document}.json at {bucket!r} names run {experiment_id!r}, which "
+            f"{experiments_dir(project)} "
             "does not hold. Earn the claim through the calibration door for this document, which "
             "creates the record it names.",
             experiment_id=experiment_id, record_digest=record_digest,
@@ -1772,7 +1776,7 @@ def verify_stamp_binding(
                 "checked with no leak. Calibrate again under "
                 "the selection's calibration side with a checkpoint whose run is on record.",
                 **known)
-        moved, unstated, unreadable = _reference_ground_truth_moved(row_selection_dir)
+        moved, unstated, unreadable = _reference_ground_truth_moved(row_selection_dir, project)
         if unreadable is not None:
             return floored(
                 f"{document}.json at {bucket!r} claims a validated reference under the selection "
@@ -1796,15 +1800,8 @@ def verify_stamp_binding(
 
     if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()
-        dataset_root = bucket_dataset_root(resolved)
         noun = "count" if document == "operating_point" else "scale"
-        if dataset_root is None:
-            return floored(
-                f"{document}.json at {bucket!r} claims a validated {noun} from a bucket under no "
-                "dataset root, so the covered set cannot be located. Write the predictions into the "
-                "dataset's own predictions layout (resolve_prediction_bucket) to earn a validated "
-                f"{noun}.", **known)
-        key = resolved.relative_to(dataset_root).as_posix()
+        key = str(resolved)
         covered = row.get("covered_buckets") or {}
         if key not in covered:
             return floored(
@@ -1855,7 +1852,8 @@ class AdmissionResolution:
     reason: str
 
 
-def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionResolution:
+def admission_rule_of(stamp: dict | None, pred_dir: str | Path, *,
+                      project: Path) -> AdmissionResolution:
     """The bucket's own validated count operating point, as the rule it admits a prediction score
     under, or the reason none applies.
 
@@ -1874,7 +1872,7 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
             reason=f"no operating_point.json at {str(pred_dir)!r}, so no rule admits any "
                    "prediction here.",
         )
-    binding = verify_stamp_binding(stamp, pred_dir, document="operating_point")
+    binding = verify_stamp_binding(stamp, pred_dir, project=project, document="operating_point")
     if not binding.claimed:
         return AdmissionResolution(
             rule=None,
@@ -1900,7 +1898,7 @@ def admission_rule_of(stamp: dict | None, pred_dir: str | Path) -> AdmissionReso
 
 
 def corroborated_producer(
-    checkpoint_sha256: str | None, experiment_id: str | None
+    checkpoint_sha256: str | None, experiment_id: str | None, *, project: Path,
 ) -> tuple[str | None, str | None]:
     """The producing checkpoint and run a delivery may name, from what a record outside the stamp
     confirms of them.
@@ -1916,7 +1914,7 @@ def corroborated_producer(
         return checkpoint_sha256, None
     from tcip_mcp.experiments import find_observation
 
-    observation = find_observation(experiment_id)
+    observation = find_observation(experiment_id, project=project)
     if observation is None:
         return None, None
     checkpoint = observation.checkpoint
@@ -1961,6 +1959,7 @@ def delivered_provenance(
     bindings: Mapping[str, StampBinding],
     *,
     columns: Sequence[str],
+    project: Path,
 ) -> dict[str, Any]:
     """The provenance cells a delivered CSV carries, for one door's own column list.
 
@@ -1993,7 +1992,7 @@ def delivered_provenance(
         checkpoint = values.get("producer_model_sha256")
         producing_experiment_id = values.get("producing_experiment_id")
     values["producer_model_sha256"], values["producing_experiment_id"] = corroborated_producer(
-        checkpoint, producing_experiment_id)
+        checkpoint, producing_experiment_id, project=project)
     return {c: values.get(c) for c in columns}
 
 
@@ -2012,6 +2011,7 @@ def delivered_tail(
     gate: DeliveryGateResult,
     *,
     columns: Sequence[str],
+    project: Path,
 ) -> dict[str, Any]:
     """One delivered CSV row's full producer-plus-validity tail, for one door's own column list.
 
@@ -2033,7 +2033,7 @@ def delivered_tail(
             "delivered_tail: asserted carries its own produced_at; produced_at is this "
             "composition's own write-time fact, never a caller-supplied one."
         )
-    values = delivered_provenance(asserted, bindings, columns=columns)
+    values = delivered_provenance(asserted, bindings, columns=columns, project=project)
     if "produced_at" in columns:
         values["produced_at"] = datetime.now(timezone.utc).isoformat()
     owned = tuple(dim for dim, col in _DIMENSION_TO_COLUMN.items() if col in columns)
@@ -2072,6 +2072,18 @@ def delivery_event_key(scope: str | Path, event_id: str) -> Key:
     return Key(DELIVERY_EVENTS_STORE, str(scope), (event_id,))
 
 
+_RECONCILED_BUCKETS: PathFields = (
+    ("unvalidated_buckets", "[]"), ("binding_notes", "{}"), ("per_bucket", "{}"))
+
+DELIVERY_EVENT_PATHS: PathFields = (
+    ("output_path",), ("plant_mapping", "dataset_root"),
+    *within(("document_reconciliations", "*"), (
+        *_RECONCILED_BUCKETS, ("missing_sidecars", "[]"), ("bindings", "{}"), ("confs", "{}"))),
+    *within(("dimension_reconciliations", "*"), _RECONCILED_BUCKETS),
+)
+"""The fields of a delivery event record that name a path, stored against its project."""
+
+
 DELIVERY_SUPERSESSIONS_STORE = "delivery_supersessions"
 _DELIVERY_SUPERSESSIONS_LOCATOR = RootedFileLocator(
     prefix=("delivery_supersessions",), suffix=".json")
@@ -2097,11 +2109,11 @@ def delivery_supersession_key(scope: str | Path, event_id: str) -> Key:
     return Key(DELIVERY_SUPERSESSIONS_STORE, str(scope), (event_id,))
 
 
-def load_delivery_supersessions(project_root: str | Path | None = None) -> dict[str, dict]:
+def load_delivery_supersessions(project: str | Path) -> dict[str, dict]:
     """Every delivery-event id under this project that carries a supersession, mapped to its own
     stored record.
     """
-    scope = project_state_dir(project_root)
+    scope = project_state_dir(project)
     out: dict[str, dict] = {}
     for key in tcip_store.keys(DELIVERY_SUPERSESSIONS_STORE, str(scope)):
         record = tcip_store.read(key, default=None)
@@ -2143,35 +2155,35 @@ def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) ->
         ) from exc
 
 
-def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
+def read_delivery_events(project: str | Path) -> list[dict]:
     """Every ``delivery_events`` record stored under this project, each validated against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`.
 
     Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id``, on the first stored
     record that does not validate.
     """
-    scope = project_state_dir(project_root)
+    scope = project_state_dir(project)
     records: list[dict] = []
     for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope)):
         record = tcip_store.read(key, default=None)
         event_id = record.get("event_id") if isinstance(record, dict) else None
         _validated_delivery_event(record, event_id, scope)
-        records.append(record)
+        records.append(runtime_paths(record, DELIVERY_EVENT_PATHS, project))
     return records
 
 
-def read_one_delivery_event(project_root: str | Path | None, event_id: str) -> dict | None:
+def read_one_delivery_event(project: str | Path, event_id: str) -> dict | None:
     """One ``delivery_events`` record by its own id, validated the same way
     :func:`read_delivery_events` validates every record it lists. ``None`` when nothing is stored
     under ``event_id``; raises :class:`DeliveryEventShapeError` when a stored record does not
     validate.
     """
-    scope = project_state_dir(project_root)
+    scope = project_state_dir(project)
     record = tcip_store.read(delivery_event_key(scope, event_id), default=None)
     if record is None:
         return None
     _validated_delivery_event(record, event_id, scope)
-    return record
+    return runtime_paths(record, DELIVERY_EVENT_PATHS, project)
 
 
 def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
@@ -2251,7 +2263,7 @@ def record_delivery_binding_event(
     acknowledgment: Acknowledgment | None,
     revision: TraitRevision,
     delivery_kind: str,
-    project_root: str | Path | None = None,
+    project: str | Path,
     plant_mapping: dict | None = None,
 ) -> None:
     """Record what verification found for each bucket a delivery read: one project-scoped
@@ -2262,7 +2274,7 @@ def record_delivery_binding_event(
     states.
 
     The record is written first, and a write that fails raises. The audit line files against the
-    dataset root the buckets share, or against the platform log when they share none; a dropped
+    dataset root the buckets share, or against the project's log when they share none; a dropped
     append raises ``AuditEntryNotWritten`` with the record already written.
 
     ``document_reconciliations`` and ``dimension_reconciliations`` are the
@@ -2276,8 +2288,7 @@ def record_delivery_binding_event(
     read ``false`` under. The record carries what the door's gate reconciled, never what the
     delivered file's own columns say.
 
-    ``project_root`` names the project this event belongs to; ``None`` gets the process-pinned
-    root.
+    ``project`` names the project this event belongs to.
 
     ``acknowledgment`` is the breeder's own act of shipping this delivery unvalidated, or ``None``
     when nothing needed acknowledging; required. Recorded as the record's own
@@ -2322,9 +2333,10 @@ def record_delivery_binding_event(
         "produced_at": now,
     }
     DeliveryEventRecord.model_validate(record)
-    tcip_store.replace(delivery_event_key(project_state_dir(project_root), event_id), record)
+    tcip_store.replace(delivery_event_key(project_state_dir(project), event_id),
+                       recorded_paths(record, DELIVERY_EVENT_PATHS, project))
     record_event_or_raise("delivery_event", {"event_id": event_id},
-                          scope=distinct_dataset_root(pred_dirs or []))
+                          scope=distinct_dataset_root(pred_dirs or []) or project)
 
 
 def binding_notes_text(notes: Mapping[str, str]) -> str:
@@ -2344,7 +2356,7 @@ def _validity_rank(state: str | None, accepted: tuple[str, ...]) -> int:
 
 
 def _reconcile_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None, document: str,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, asserted: str | None, document: str,
     trait: str | None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor a validity dimension against every bucket's on-disk sidecar: read on-disk, never trust
@@ -2385,7 +2397,8 @@ def _reconcile_validity(
             all_validated = False
             continue
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
-        binding = verify_stamp_binding(sc, d, document=document, digest_memo=memo, trait=trait)
+        binding = verify_stamp_binding(sc, d, project=project, document=document,
+                                       digest_memo=memo, trait=trait)
         bindings[str(d)] = binding
         if not binding.ok:
             binding_notes[str(d)] = binding.note
@@ -2424,8 +2437,8 @@ def _reconcile_validity(
 
 
 def reconcile_operating_point_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
-    digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, trait: str,
+    asserted: str | None = None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the count operating-point validity against every bucket's ``operating_point.json``.
 
@@ -2437,13 +2450,13 @@ def reconcile_operating_point_validity(
     own record via :func:`verify_stamp_binding`.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="operating_point", trait=trait,
+        pred_dirs, project=project, asserted=asserted, document="operating_point", trait=trait,
         digest_memo=digest_memo,
     )
 
 
 def reconcile_classifier_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the classifier validity against every bucket's ``classifier_operating_point.json``
@@ -2451,14 +2464,14 @@ def reconcile_classifier_validity(
     ``false``. Threads no ``trait``; :func:`bind_classifier_validity` compares it.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="classifier_operating_point", trait=None,
-        digest_memo=digest_memo,
+        pred_dirs, project=project, asserted=asserted, document="classifier_operating_point",
+        trait=None, digest_memo=digest_memo,
     )
 
 
 def reconcile_ordinal_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
-    digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, trait: str,
+    asserted: str | None = None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the ordinal compensating-error validity against every bucket's
     ``ordinal_operating_point.json`` (:func:`_reconcile_validity`). A bucket with no persisted
@@ -2467,22 +2480,22 @@ def reconcile_ordinal_validity(
     ``trait`` is required, compared as :func:`reconcile_operating_point_validity` does.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="ordinal_operating_point", trait=trait,
-        digest_memo=digest_memo,
+        pred_dirs, project=project, asserted=asserted, document="ordinal_operating_point",
+        trait=trait, digest_memo=digest_memo,
     )
 
 
 def reconcile_regression_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
-    digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, trait: str,
+    asserted: str | None = None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the regression compensating-error validity against every bucket's
     ``regression_operating_point.json``. Same shape as :func:`reconcile_ordinal_validity`, for the
     regression dimension's own sidecar/param key, including the required ``trait`` binding.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="regression_operating_point", trait=trait,
-        digest_memo=digest_memo,
+        pred_dirs, project=project, asserted=asserted, document="regression_operating_point",
+        trait=trait, digest_memo=digest_memo,
     )
 
 
@@ -2505,7 +2518,8 @@ def tile_size_gate_flag(operating_point: dict | None) -> str | None:
 
 
 def reconcile_tile_size_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the tile-geometry dimension across every prediction bucket's ``operating_point.json``,
     the sidecar-reading counterpart of :func:`tile_size_gate_flag`.
@@ -2531,7 +2545,8 @@ def reconcile_tile_size_validity(
         flag = tile_size_gate_flag((sc or {}).get("operating_point"))
         if flag is None:
             continue
-        binding = verify_stamp_binding(sc, d, document="operating_point", digest_memo=memo)
+        binding = verify_stamp_binding(sc, d, project=project, document="operating_point",
+                                       digest_memo=memo)
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             flag = VALIDATED_FALSE
@@ -2554,7 +2569,8 @@ def reconcile_tile_size_validity(
 
 
 def reconcile_claim_scope_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the claim-scope dimension across every prediction bucket's ``operating_point.json``.
 
@@ -2576,7 +2592,8 @@ def reconcile_claim_scope_validity(
         if recorded is None:
             continue
         flag = recorded if recorded in CLAIM_SCOPE_REFERENCES else VALIDATED_FALSE
-        binding = verify_stamp_binding(sc, d, document="operating_point", digest_memo=memo)
+        binding = verify_stamp_binding(sc, d, project=project, document="operating_point",
+                                       digest_memo=memo)
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             flag = VALIDATED_FALSE
@@ -2594,8 +2611,8 @@ def reconcile_claim_scope_validity(
 
 
 def reconcile_scale_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, unit: str, trait: str, images_dir: str | Path,
-    capture_id: str | None = None, asserted: str | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, project: Path, unit: str, trait: str,
+    images_dir: str | Path, capture_id: str | None = None, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the physical-scale dimension across every prediction bucket's ``resolve_scale.json``.
@@ -2648,8 +2665,8 @@ def reconcile_scale_validity(
                     f"delivered unit {unit!r}; a scale stamped in one linear unit cannot clear a "
                     "delivery in another."
                 )
-        binding = verify_stamp_binding(sc, d, document="resolve_scale", trait=trait,
-                                       digest_memo=memo, images_dir=images_dir)
+        binding = verify_stamp_binding(sc, d, project=project, document="resolve_scale",
+                                       trait=trait, digest_memo=memo, images_dir=images_dir)
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             ref = VALIDATED_FALSE
@@ -2670,6 +2687,7 @@ def bind_classifier_validity(
     classifier_dirs: list[str] | tuple[str, ...] | None,
     producing_dirs: list[str] | tuple[str, ...],
     *,
+    project: Path,
     trait: str,
     digest_memo: dict[str, str] | None = None,
 ) -> tuple[str | None, str]:
@@ -2692,12 +2710,13 @@ def bind_classifier_validity(
     producing_experiment_ids: set[str] = set()
     for d in producing_dirs:
         binding = verify_stamp_binding(
-            read_operating_point_sidecar(d), d, document="operating_point", digest_memo=memo)
+            read_operating_point_sidecar(d), d, project=project, document="operating_point",
+            digest_memo=memo)
         if binding.ok and binding.claimed and binding.producing_experiment_id:
             producing_experiment_ids.add(binding.producing_experiment_id)
     for d in (classifier_dirs or []):
         binding = verify_stamp_binding(
-            read_classifier_operating_point_sidecar(d), d,
+            read_classifier_operating_point_sidecar(d), d, project=project,
             document="classifier_operating_point", trait=trait, digest_memo=memo)
         if not binding.ok:
             return VALIDATED_FALSE, binding.note

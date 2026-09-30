@@ -4,6 +4,8 @@ never survives an untiled run."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
@@ -134,23 +136,24 @@ def _serve(monkeypatch, train_ds):
     from tcip_mcp.pipelines.data import split_construction as sc
 
     monkeypatch.setattr(
-        sc, "auto_train_val", lambda task, data_cfg, transforms, **_: (train_ds, None, None))
+        sc, "auto_train_val", lambda project, task, data_cfg, transforms, **_: (train_ds, None, None))
 
 
-def _base_config(tiling):
+def _base_config(tiling, project: Path):
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
-        "data": {"images_dir": "imgs", "labels_dir": "lbls", "tiling": tiling},
+        "data": {"images_dir": str(project / "imgs"), "labels_dir": str(project / "lbls"),
+                 "tiling": tiling},
         "batch_size": 2, "evaluation": {"selection_metric": "loss"},
     }
 
 
 def _resolved_data(run_dir) -> dict:
     """The data section ``run_dir``'s launch record says its run resolved."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import observe
 
-    return read_record(run_dir / RUN_FILE)["resolved"]["data"]
+    return observe(run_dir).record["resolved"]["data"]
 
 
 def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(monkeypatch, tmp_path):
@@ -159,20 +162,21 @@ def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(monkeypatc
     from tests._verified_checkpoint_fixtures import opened_run
 
     _serve(monkeypatch, _ServedDataset())
-    run_dir = opened_run(tmp_path, _base_config({"enabled": True, "tile_size": 640}))
+    run_dir = opened_run(tmp_path, _base_config({"enabled": True, "tile_size": 640}, tmp_path))
 
     data = _resolved_data(run_dir)
     assert data["tiling"] == {"enabled": False}
-    assert data["images_dir"] == "imgs"
+    assert data["images_dir"] == str(tmp_path.resolve() / "imgs")
 
 
 def _trial(tmp_path, base_config):
     """One HPO trial run through the sweep's own trial body; its run directory."""
+    from tcip_mcp.experiments import sweeps_dir
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
-    trial_dir = tmp_path / "hpo_study" / "trial_0"
-    trial_dir.parent.mkdir()
-    _run_hpo_trial({"lr": 3e-4}, [].append, base_config, trial_dir,
+    trial_dir = sweeps_dir(tmp_path) / "hpo_study" / "trial_0"
+    trial_dir.parent.mkdir(parents=True)
+    _run_hpo_trial({"lr": 3e-4}, [].append, base_config, trial_dir, project=tmp_path,
                    objective={"selection_metric": "loss", "higher_is_better": False},
                    launched_by={"launcher": "process"})
     return trial_dir
@@ -182,7 +186,7 @@ def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, t
     """A trial that trained untiled must not leave the base config's requested tile_size in its
     resolved record, the record a later reader takes for the trial's geometry."""
     _serve(monkeypatch, _ServedDataset())
-    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}))
+    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}, tmp_path))
 
     assert _resolved_data(trial_dir)["tiling"] == {"enabled": False}
 
@@ -190,7 +194,7 @@ def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(monkeypatch, t
 def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
         monkeypatch, tmp_path):
     _serve(monkeypatch, _TiledServedDataset())
-    trial_dir = _trial(tmp_path, _base_config({"enabled": True}))
+    trial_dir = _trial(tmp_path, _base_config({"enabled": True}, tmp_path))
 
     tiling = _resolved_data(trial_dir)["tiling"]
     assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}

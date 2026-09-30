@@ -25,7 +25,7 @@ def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> 
         "test_door", str(out_csv), [], document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=seed_confirmed_count(tmp_path),
         delivery_kind="per_image_count",
-        project_root=tmp_path, plant_mapping=None,
+        project=tmp_path, plant_mapping=None,
     )
 
     scope = project_state_dir(tmp_path)

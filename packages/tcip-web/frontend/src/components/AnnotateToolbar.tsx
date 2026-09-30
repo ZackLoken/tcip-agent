@@ -32,15 +32,7 @@ import { imagePath } from "@/lib/paths";
 import { schemaChangeSweepToast } from "@/lib/registrySweep";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
-
-// Composed once so the schema-stamp-gap sentence stays identical on the optimistic 200 path
-// and the audit-gap 409 path.
-function schemaStampGapToast(imageName: string): string {
-  return (
-    `${imageName}'s status was recorded, but its schema stamp did not land; it still needs ` +
-    "re-confirmation."
-  );
-}
+import { selectProjectRoot } from "@/store/slices/gui";
 
 // Progression order (start state first, terminal states last), matches Review's parallel
 // status filter, which already reads Unreviewed before Reviewed.
@@ -127,6 +119,7 @@ export function AnnotateToolbar({
   replaceRequired?: ReplaceRequired | null;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
+  const projectRoot = useStore(selectProjectRoot);
   const mode = useStore((s) => s.gui.mode);
   const setMode = useStore((s) => s.setMode);
   const activeSubject = useStore((s) => s.gui.active_subject);
@@ -202,15 +195,10 @@ export function AnnotateToolbar({
     const next = { ...registry, [trimmed]: {} };
     setRegistry(next, registryVersion);
     setActiveSubject(trimmed);
-    if (dataset.project_root) {
+    const root = dataset.dataset_root;
+    if (projectRoot && root) {
       try {
-        const saved = await subjectsApi.save(
-          dataset.project_root,
-          next,
-          dataset.dataset_root,
-          dataset.annotations_dir,
-          registryVersion,
-        );
+        const saved = await subjectsApi.save(next, root, registryVersion);
         setRegistry(next, saved.version);
         const toast = schemaChangeSweepToast(saved.schema_change_sweep);
         if (toast) useStore.getState().pushToast(toast, "info");
@@ -235,11 +223,7 @@ export function AnnotateToolbar({
           .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
         setActiveSubject(previousSubject);
         try {
-          const fresh = await subjectsApi.load(
-            dataset.project_root,
-            dataset.dataset_root,
-            dataset.annotations_dir,
-          );
+          const fresh = await subjectsApi.load(root, dataset.annotations_dir);
           setRegistry(fresh.subjects, fresh.version);
         } catch {
           /* the reload itself failing leaves the optimistic registry in place */
@@ -251,42 +235,47 @@ export function AnnotateToolbar({
   // Shared write path for the Complete toggle and the stale re-confirm action, both scoped to
   // dataset.subject so a write here can't read back as a confirmation about a different subject.
   async function writeCompleteStatus(newStatus: ImageStatus) {
-    if (!currentImage || !dataset.project_root || !dataset.subject) return;
-    const wasStale = staleMarks.includes(currentImage);
-    setImageStatus(currentImage, newStatus);
+    const { subject, date, dataset_root: root } = dataset;
+    if (!currentImage || !projectRoot || !subject || !root) return;
+    const image = currentImage;
+    const wasStale = staleMarks.includes(image);
+    setImageStatus(image, newStatus);
     try {
-      const result = await subjectsApi.setImageStatus(
-        dataset.project_root,
-        currentImage,
+      await subjectsApi.setImageStatus(
+        image,
         newStatus,
-        dataset.subject,
-        dataset.date,
-        dataset.dataset_root,
-        dataset.annotations_dir,
+        subject,
+        date,
+        root,
         useStore.getState().user || undefined,
       );
-      // Only a finished status is a human assertion the schema stamp backs; a stamp that did not
-      // land on one leaves it exactly as unverifiable as before the write.
-      if (FINISHED_STATUSES.includes(newStatus) && !result.digest_stamped) {
-        useStore.getState().markStale(currentImage);
-        useStore.getState().pushToast(schemaStampGapToast(currentImage), "info");
-      }
     } catch (e) {
-      const committed = committedOf<{ status: string; digest_stamped: boolean }>(e);
-      if (committed) {
-        if (FINISHED_STATUSES.includes(newStatus) && !committed.digest_stamped) {
-          useStore.getState().markStale(currentImage);
-          useStore.getState().pushToast(schemaStampGapToast(currentImage), "info");
-        }
-        useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+      if (!committedOf<{ status: string; digest_stamped: boolean }>(e)) {
+        // The optimistic write above cleared the mark; the confirmation it stood for never
+        // reached the server, so the disagreement it named still holds.
+        if (wasStale) useStore.getState().markStale(image);
+        useStore
+          .getState()
+          .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
         return;
       }
-      // The optimistic write above cleared the mark; the confirmation it stood for never
-      // reached the server, so the disagreement it named still holds.
-      if (wasStale) useStore.getState().markStale(currentImage);
+      useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+    }
+    if (!FINISHED_STATUSES.includes(newStatus)) return;
+    // The committed status's staleness is the backend's stale_definition, its one evaluation.
+    try {
+      const { stale_definition } = await subjectsApi.loadImageStatus(subject, date, root);
+      if (!stale_definition.includes(image)) return;
+      useStore.getState().markStale(image);
       useStore
         .getState()
-        .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
+        .pushToast(`${image} is stale under ${subject}'s attribute schema; re-confirm it.`, "info");
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(
+          `Could not read back ${image}'s staleness: ${e instanceof Error ? e.message : e}`,
+        );
     }
   }
 

@@ -8,33 +8,24 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp.experiments import TRIAL_DIR_PREFIX
-from tcip_mcp.web_client import current_root
 
 from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
+from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 
-@dataclass(frozen=True)
-class _Launch:
-    """A sweep this process relaunched: the root it launched under and the thread running it."""
-
-    platform_root: str
-    thread: threading.Thread
-
-
-_launches: dict[str, _Launch] = {}
+_launches: dict[tuple[Path, str], threading.Thread] = {}
+"""The thread running each sweep this process relaunched, by its project and sweep name."""
 _lock = threading.Lock()
 
 
@@ -45,35 +36,27 @@ def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
     with _lock:
         pending = list(_launches.items())
     deadline = time.monotonic() + timeout_s
-    for _, launch in pending:
-        launch.thread.join(max(0.0, deadline - time.monotonic()))
-    return tuple(sweep_id for sweep_id, launch in pending if launch.thread.is_alive())
-
-
-def _launch_root(sweep_id: str) -> Optional[str]:
-    """The root a sweep this process relaunched launched under, or ``None`` (the current root)
-    for one it did not launch."""
-    with _lock:
-        launch = _launches.get(sweep_id)
-    return launch.platform_root if launch is not None else None
+    for _, thread in pending:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return tuple(sweep_id for (_, sweep_id), thread in pending if thread.is_alive())
 
 
 def _external(sweep_id: str) -> bool:
-    """Whether ``sweep_id`` is a sweep this process did not launch."""
+    """Whether ``sweep_id`` is a sweep of the open project this process did not launch."""
     with _lock:
-        return sweep_id not in _launches
+        return (store.open_root(), sweep_id) not in _launches
 
 
 def _sweep_or_404(sweep_id: str):
-    """The sweep ``sweep_id`` names, observed under its launch root (:func:`_launch_root`,
-    ``training_tools.sweep_observation``), 404 when no sweep by that name is on disk there and 400
-    for an id that is not a single directory name."""
+    """The sweep ``sweep_id`` names in the open project (``training_tools.sweep_observation``),
+    404 when no sweep by that name is on disk there and 400 for an id that is not a single
+    directory name."""
     from tcip_store import BadKey
 
     from tcip_mcp.tools.training_tools import sweep_observation
 
     try:
-        sweep = sweep_observation(sweep_id, root=_launch_root(sweep_id))
+        sweep = sweep_observation(sweep_id, project=store.open_root())
     except BadKey as exc:
         raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
     if sweep is None:
@@ -121,18 +104,18 @@ def _run(opened) -> None:
 
 @router.post("/sweeps")
 def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
-    """Relaunch a sweep from its own recorded input: no config, param space or path is ever
-    submitted by the browser. The source is read under its launch root (:func:`_launch_root`);
-    the new sweep's input is written (``training_tools.open_sweep``), meeting every refusal the
+    """Relaunch a sweep of the open project from its own recorded input: no config, param space
+    or path is ever submitted by the browser. The new sweep's input is written
+    (``training_tools.open_sweep``), meeting every refusal the
     source's launch passed (422 with the refusal), before its thread starts. Recorded as
     ``launched_by: {"launcher": "gui"}``."""
     from tcip_mcp.tools.training_tools import declare_launcher, open_sweep
 
     source = _sweep_or_404(payload.study_name).record
-    root = current_root()
+    project = store.open_root()
     with declare_launcher("gui"):
         opened = open_sweep(
-            source["base_config"], source["param_space"], n_trials=source["n_trials"],
+            project, source["base_config"], source["param_space"], n_trials=source["n_trials"],
             search_alg=source["search_alg"], scheduler=source["scheduler"],
             grace_period=source["grace_period"], reduction_factor=source["reduction_factor"],
             warm_start=source["warm_start"], baseline_params=source["baseline_params"],
@@ -145,18 +128,18 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
         raise HTTPException(422, detail=opened)
     thread = threading.Thread(target=_run, args=(opened,), daemon=True)
     with _lock:
-        _launches[opened.directory.name] = _Launch(platform_root=root, thread=thread)
+        _launches[(project, opened.directory.name)] = thread
     thread.start()
     return {"status": "launched", "sweep_id": opened.directory.name}
 
 
 @router.post("/sweeps/{sweep_id}/cancel")
 def cancel_sweep_route(sweep_id: str, payload: EmptyBodyPayload) -> dict:
-    """Request cooperative cancellation of a sweep (``cancel_hyperparameter_search``) under its
-    launch root; its refusal answers 404."""
+    """Request cooperative cancellation of a sweep of the open project
+    (``cancel_hyperparameter_search``); its refusal answers 404."""
     from tcip_mcp.tools.training_tools import cancel_hyperparameter_search
 
-    result = cancel_hyperparameter_search(sweep_id, root=_launch_root(sweep_id))
+    result = cancel_hyperparameter_search(store.open_root(), sweep_id)
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -164,11 +147,11 @@ def cancel_sweep_route(sweep_id: str, payload: EmptyBodyPayload) -> dict:
 
 @router.get("/sweeps")
 def list_sweeps() -> dict:
-    """Every sweep directory under the current root holding its input, in directory-name order,
+    """Every sweep directory under the open project holding its input, in directory-name order,
     each by :func:`_sweep_fields`."""
     from tcip_mcp.experiments import SWEEP_FILE, observe, sweeps_dir
 
-    root = sweeps_dir()
+    root = sweeps_dir(store.open_root())
     if not root.is_dir():
         return {"sweeps": []}
     return {"sweeps": [_sweep_fields(observe(d, SWEEP_FILE))
@@ -177,15 +160,15 @@ def list_sweeps() -> dict:
 
 @router.get("/sweeps/{sweep_id}")
 def get_sweep(sweep_id: str) -> dict:
-    """One sweep read whole (``training_tools.read_sweep``) under its launch root
-    (:func:`_launch_root`), with whether this process did not launch it."""
+    """One sweep of the open project read whole (``training_tools.read_sweep``), with whether
+    this process did not launch it."""
     from tcip_mcp.tools.training_tools import read_sweep
 
     return {**read_sweep(_sweep_or_404(sweep_id)), "external": _external(sweep_id)}
 
 
 def _sweep_root(sweep_id: str) -> Path:
-    """The directory a sweep's trials live in under its launch root (:func:`_sweep_or_404`)."""
+    """The directory a sweep's trials live in (:func:`_sweep_or_404`)."""
     return _sweep_or_404(sweep_id).directory
 
 
@@ -217,12 +200,12 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
 
 @router.get("/ray-dashboard")
 def get_ray_dashboard() -> dict:
-    """The live Ray dashboard's URL, or ``null`` when no cluster is up, read off the state file the
-    MCP server process wrote; not scoped to a sweep.
+    """The live Ray dashboard's URL for the open project, or ``null`` when no cluster is up, read
+    off the state file the process that started it wrote; not scoped to a sweep.
     """
     from tcip_mcp.pipelines.training.hpo import read_ray_dashboard
 
-    state = read_ray_dashboard()
+    state = read_ray_dashboard(store.open_root())
     return {"url": state["url"] if state else None}
 
 
@@ -251,20 +234,14 @@ def _link_dir(link: Path, target: Path) -> None:
         raise OSError(f"could not link {link} -> {target}: {result.stderr.strip()}")
 
 
-def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
-    """Where this sweep's clean-named trial links live, apart from the real trial dirs: under
-    ``root`` (the sweep's own launch root) when given, else the current platform root.
+def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, project: Path) -> Path:
+    """A directory under ``project``'s state, apart from the real trial dirs, where every trial
+    with a tensorboard dir today is linked under its bare ``trial_<id>`` name. Only adds links;
+    never removes one.
     """
     from tcip_mcp.project_paths import project_state_dir
 
-    return project_state_dir(root) / "tensorboard_views" / sweep_id
-
-
-def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] = None) -> Path:
-    """A directory where every trial with a tensorboard dir today is linked under its bare
-    ``trial_<id>`` name. Only adds links; never removes one.
-    """
-    view = _trial_view_dir(sweep_id, root=root)
+    view = project_state_dir(project) / "tensorboard_views" / sweep_id
     view.mkdir(parents=True, exist_ok=True)
     for trial_dir in sorted(sweep_root.iterdir()):
         if not trial_dir.is_dir() or not trial_dir.name.startswith(TRIAL_DIR_PREFIX):
@@ -289,7 +266,7 @@ def launch_sweep_tensorboard(sweep_id: str, payload: EmptyBodyPayload) -> dict:
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
 
-    view = _ensure_trial_view(sweep_id, _sweep_root(sweep_id), root=_launch_root(sweep_id))
+    view = _ensure_trial_view(sweep_id, _sweep_root(sweep_id), project=store.open_root())
     return launch_tensorboard(str(view), key=f"sweep_{sweep_id}")
 
 

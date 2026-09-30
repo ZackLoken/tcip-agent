@@ -65,6 +65,7 @@ def write_prediction(pred_dir: str | Path, stem: str, *, count: int = 1) -> Path
 
 
 def file_validation_record(
+    project: Path,
     stamp: dict,
     *,
     document: str = "operating_point",
@@ -78,7 +79,8 @@ def file_validation_record(
     train_disjointness: Any = _UNSTATED,
     selection_disjointness: Any = _UNSTATED_SELECTION,
 ) -> dict:
-    """File the record ``stamp`` claims, and return the stamp with its pointer merged in.
+    """File the record ``stamp`` claims on a run of ``project``, and return the stamp with its
+    pointer merged in.
 
     ``pred_dirs`` are the buckets a claim covers, hashed as they are on disk now, so they must
     already hold what the claim is about: prediction bytes for ``operating_point``, image bytes for
@@ -113,8 +115,7 @@ def file_validation_record(
         assert images_dir is not None
         return bucket_stems_digest(d, images_dir=images_dir)
 
-    covered = {Path(d).resolve().relative_to(root).as_posix(): digest_fn(d)
-               for d in pred_dirs}
+    covered = {str(Path(d).resolve()): digest_fn(d) for d in pred_dirs}
     host = producing_experiment_id if producing_experiment_id is not _HOST else experiment_id
     if train_disjointness is _UNSTATED:
         td = None if document == "resolve_scale" else {"checked": False, "group_check": None}
@@ -128,8 +129,8 @@ def file_validation_record(
     else:
         sd = selection_disjointness
 
-    if find_run(experiment_id) is None:
-        opened_run(None, detection_config(fixture_data_dir(None, experiment_id)),
+    if find_run(experiment_id, project=project) is None:
+        opened_run(project, detection_config(fixture_data_dir(project, experiment_id)),
                    experiment_id=experiment_id)
     body = {
         "document": document,
@@ -145,7 +146,7 @@ def file_validation_record(
         "train_disjointness": td,
         "selection_disjointness": sd,
     }
-    digest = append_validation(experiment_dir(experiment_id), body)
+    digest = append_validation(experiment_dir(experiment_id, project=project), body)
     return {**stamp, "validated_by": {"experiment_id": experiment_id, "record_digest": digest}}
 
 
@@ -158,6 +159,7 @@ def complete_stamp(partial: dict) -> dict:
 
 
 def write_bound_sidecar(
+    project: Path,
     pred_dir: str | Path,
     stamp: dict,
     *,
@@ -167,22 +169,23 @@ def write_bound_sidecar(
     images_dir: str | Path | None = None,
     **record: Any,
 ) -> dict:
-    """File the record and write the bound stamp, the two steps a producer does in that order."""
+    """File the record on a run of ``project`` and write the bound stamp, the two steps a
+    producer does in that order."""
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     covered = pred_dirs if pred_dirs is not None else (
         [pred_dir] if document in ("operating_point", "resolve_scale") else [])
     bound = file_validation_record(
-        stamp, document=document, dataset_root=dataset_root, pred_dirs=covered,
+        project, stamp, document=document, dataset_root=dataset_root, pred_dirs=covered,
         images_dir=images_dir, **record)
-    write_sidecar(pred_dir, bound, document)
+    write_sidecar(pred_dir, bound, document, project=project)
     return bound
 
 
 def validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_point",
                      tag: str = "a") -> str:
     """A prediction bucket under ``<tmp_path>/ds_<tag>`` whose sidecar carries a genuine
-    held-out-validated claim for ``trait``."""
+    held-out-validated claim for ``trait``, filed on a run of the project ``tmp_path``."""
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
     root = tmp_path / f"ds_{tag}"
@@ -197,25 +200,25 @@ def validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_p
     }
     if document == "operating_point":
         stamp["scope"] = {"subject": trait, "attribute": None, "id_map": {trait: 0}}
-    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
+    write_bound_sidecar(tmp_path, bucket, stamp, document=document, dataset_root=root,
                         experiment_id=f"exp-validated-{tag}")
     return str(bucket)
 
 
-def producer_checkpoint_sha256(experiment_id: str) -> str:
-    """The digest of the checkpoint the completed run ``experiment_id`` under the pinned platform
-    root names, so a golden asserting the delivered cell reads its own expectation off the run."""
+def producer_checkpoint_sha256(project: Path, experiment_id: str) -> str:
+    """The digest of the checkpoint the completed run ``experiment_id`` of ``project`` names, so a
+    golden asserting the delivered cell reads its own expectation off the run."""
     from tcip_mcp.experiments import experiment_dir, observe
 
-    checkpoint = observe(experiment_dir(experiment_id)).checkpoint
+    checkpoint = observe(experiment_dir(experiment_id, project=project)).checkpoint
     assert checkpoint is not None, f"{experiment_id} did not complete"
     return checkpoint["sha256"]
 
 
-def record_producing_run(experiment_id: str) -> str:
-    """Complete the run a bucket's stamp names as its producer under the pinned platform root,
-    through the training envelope whose final status registers its checkpoint, and return that
-    checkpoint's hash.
+def record_producing_run(project: Path, experiment_id: str) -> str:
+    """Complete the run of ``project`` a bucket's stamp names as its producer, through the
+    training envelope whose final status registers its checkpoint, and return that checkpoint's
+    hash.
 
     A delivered producer column is emitted only where something outside the prediction bucket
     corroborates the identity the stamp asserts: the run has to have completed naming the digest.
@@ -225,23 +228,23 @@ def record_producing_run(experiment_id: str) -> str:
     from tcip_mcp.experiments import find_run
     from tests._verified_checkpoint_fixtures import finished_run
 
-    if find_run(experiment_id) is None:
-        finished_run(None, experiment_id=experiment_id)
-    return producer_checkpoint_sha256(experiment_id)
+    if find_run(experiment_id, project=project) is None:
+        finished_run(project, experiment_id=experiment_id)
+    return producer_checkpoint_sha256(project, experiment_id)
 
 
 def register_plant_registry_for(
-    csv_paths: list[str | Path], *, name: str = "reg", crop: str = "currant", site: str = "orchard",
+    project: Path, csv_paths: list[str | Path], *, name: str = "reg", crop: str = "currant",
+    site: str = "orchard",
 ) -> str:
-    """Register ``csv_paths`` under ``name`` in whichever project the process is pinned to
-    (``register_plant_registry``'s own resolution, the one ``build_plant_mapping`` and
-    ``deliver_orthomosaic_plant_counts`` share), and return ``name``. Idempotent under the same
-    content: a second call with the same paths under the same name is a no-op.
+    """Register ``csv_paths`` under ``name`` in ``project`` through ``register_plant_registry``,
+    and return ``name``. Idempotent under the same content: a second call with the same paths
+    under the same name is a no-op.
     """
     from tcip_mcp.tools.phenology_tools import register_plant_registry
 
     res = register_plant_registry(
-        name=name, csv_paths=[str(p) for p in csv_paths], crop=crop, site=site)
+        project, name=name, csv_paths=[str(p) for p in csv_paths], crop=crop, site=site)
     assert "error" not in res, res
     return name
 
@@ -292,7 +295,7 @@ def write_plant_mapping(
         # Tolerant of a fixture's partial row (just the fields its own test cares about): the
         # rest take the same honest defaults a real sequence-anchored match would carry.
         return Assignment(
-            image_path=row.get("image_path", f"{row.get('stem', '')}.jpg"),
+            image=row.get("image", f"{row.get('stem', '')}.jpg"),
             stem=row["stem"], date_folder=row.get("date_folder", date),
             plot_name=row.get("plot_name"), accession_name=row.get("accession_name"),
             source=row.get("source", "sequence"), distance_m=row.get("distance_m", 1.0),
@@ -301,12 +304,14 @@ def write_plant_mapping(
     root = Path(dataset_root)
     root.mkdir(parents=True, exist_ok=True)
     crop = sorted(registered_crops())[0]
-    reg = register_dataset(str(root), crop=crop, project_root=str(project_root))
+    from tcip_mcp.registry_paths import stored_path
+
+    reg = register_dataset(Path(project_root), str(root), crop=crop)
     registry = register_plant_registry_record(
         project_root, "unregistered", [], crop=crop, site="fixture",
         registered_by="write_plant_mapping")
     build = MappingBuild(
-        name=name, project_root=str(project_root), dataset_root=str(root), dataset_id=reg["id"],
+        name=name, dataset_root=stored_path(root, project_root), dataset_id=reg["id"],
         built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=sorted(mapping),
         nn_tolerance_m={"value": 10.0, "source": "stated"},
@@ -322,6 +327,7 @@ def write_plant_mapping(
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---
 
 def calibrated_run_fields(
+    project: Path,
     trait: str = "bud_opening",
     *,
     checkpoint_sha256: str,
@@ -337,7 +343,8 @@ def calibrated_run_fields(
     operating point over a dense synthetic reference, collected untiled or, with ``postprocess``
     named, under a tiled regime merging by it (``tiled_regime``), files the record under its own
     identity (``calibration_curve_identity``, the same key a real run's write and a delivery door's
-    read agree on) exactly where a calibrated run files it, and hands back the result fields that
+    read agree on) exactly where a calibrated run of ``project`` files it, and hands back the
+    result fields that
     carry it, its ``slicing`` record included. The producing experiment is ``None``, the ordinary
     bespoke-checkpoint case, so the door earns through a calibration run directory of its own.
     """
@@ -362,7 +369,7 @@ def calibrated_run_fields(
         "tile_size_source": tile_size_source,
         "staged_conf_floor": 0.01,
     }
-    bundle = resolve_operating_point(trait, experiment_id=None, **inputs)
+    bundle = resolve_operating_point(trait, project=project, experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
     # Mirrors _run_inference_verified's own persisted body (inference_tools.py).
@@ -374,7 +381,7 @@ def calibrated_run_fields(
         "calibration_evidence": evidence,
     }
     identity = calibration_curve_identity(body)
-    store.replace(calibration_curve_key(identity), body)
+    store.replace(calibration_curve_key(project, identity), body)
     return {
         "operating_point": bundle.to_provenance()["operating_point"],
         "slicing": bundle.slicing,

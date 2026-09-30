@@ -32,19 +32,19 @@ def _side(partition: dict, side: str) -> list[str]:
     return sorted({s.member for s in partition_samples(partition) if s.side == side})
 
 
-def _resolved(experiment_id: str, task: str, data_cfg: dict):
-    """A run over ``data_cfg`` resolved by the launcher's own producer: what its launch record
-    says it resolved, and the train and val datasets the child's own context producer builds its
-    loaders from out of that record."""
+def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
+    """A run under ``project`` over ``data_cfg`` resolved by the launcher's own producer: what its
+    launch record says it resolved, and the train and val datasets the child's own context
+    producer builds its loaders from out of that record."""
     from tcip_mcp.experiments import observe, run_resolution
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
     from tests._verified_checkpoint_fixtures import opened_run
 
-    run_dir = opened_run(None, {"model_source": {"task": task}, "data": data_cfg},
+    run_dir = opened_run(project, {"model_source": {"task": task}, "data": data_cfg},
                          experiment_id=experiment_id)
     ctx = prepare_run_context(observe(run_dir))
     val = ctx.val_loader.dataset if ctx.val_loader is not None else None
-    return run_resolution(experiment_id), ctx.train_loader.dataset, val
+    return run_resolution(experiment_id, project=project), ctx.train_loader.dataset, val
 
 
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
@@ -77,11 +77,11 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
 
 
 def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
-    result = draw_splits(str(root), output_path=str(out), ground_truth=str(ground_truth),
+    result = draw_splits(out.parent, str(root), output_path=str(out), ground_truth=str(ground_truth),
                          seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
                          group_by="stem")
     assert "error" not in result, result
-    return read_selection(out)
+    return read_selection(out, project=out.parent)
 
 
 # -- a bound run trains over exactly the selection's own samples ---------------
@@ -96,7 +96,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     drawn = _drawn(root, masks_dir, out)
 
     data_cfg = {"split": {"selection_dir": str(out)}}
-    train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
 
     assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
@@ -113,7 +113,7 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     drawn = _drawn(root, csv_path, out)
 
     data_cfg = {"split": {"selection_dir": str(out)}}
-    train_ds, val_ds, partition = auto_train_val("classification", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "classification", data_cfg, None)
 
     assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
@@ -157,7 +157,7 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     drawn = _drawn(root, masks_dir, out)
 
     train_ds, _val_ds, _partition = auto_train_val(
-        "semantic_seg", {"split": {"selection_dir": str(out)}}, None)
+        tmp_path, "semantic_seg", {"split": {"selection_dir": str(out)}}, None)
 
     by_identity = {s.identity: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -178,7 +178,7 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
     drawn = _drawn(root, csv_path, out)
 
     train_ds, _val_ds, _partition = auto_train_val(
-        "classification", {"split": {"selection_dir": str(out)}}, None)
+        tmp_path, "classification", {"split": {"selection_dir": str(out)}}, None)
 
     by_identity = {s.identity: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -200,7 +200,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
-    train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
 
     assert val_ds is not None
     members = {ds: {ds.member_of(key) for key in ds.stems} for ds in (train_ds, val_ds)}
@@ -229,7 +229,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
-    train_ds, val_ds, partition = auto_train_val("regression", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "regression", data_cfg, None)
 
     assert val_ds is not None
     members = {ds: {ds.member_of(key) for key in ds.stems} for ds in (train_ds, val_ds)}
@@ -275,7 +275,7 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                 "split": {"val_ratio": 0.5, "seed": 3, "group_by": "stem"}}
-    resolved, train_ds, val_ds = _resolved("exp-dotted", "classification", data_cfg)
+    resolved, train_ds, val_ds = _resolved(tmp_path, "exp-dotted", "classification", data_cfg)
 
     # The loaders name every row apart, not one collapsed member.
     named = set(record_stems_of(train_ds) or []) | set(record_stems_of(val_ds) or [])
@@ -290,23 +290,24 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     # A calibration over one training row is that row leaking, and the check names it: with the
     # names collapsed, every row would answer for every other one instead.
     leaked = _train_disjointness(
-        "exp-dotted", {trained[0]}, set(), calibration_labels_dir=str(csv_path))
+        "exp-dotted", {trained[0]}, set(), project=tmp_path, calibration_labels_dir=str(csv_path))
     assert leaked["leaked_groups"] == [trained[0]]
     clean = _train_disjointness(
-        "exp-dotted", {validated[0]}, set(), calibration_labels_dir=str(csv_path))
+        "exp-dotted", {validated[0]}, set(), project=tmp_path,
+        calibration_labels_dir=str(csv_path))
     assert clean["leaked_groups"] == [] and clean["leaked_stems"] == []
 
 
 # -- freezing a run whose ground truth is not a label document -----------------
 
 
-def _frozen(experiment_id: str, task: str, data_cfg: dict) -> dict:
-    """Resolve a run through the child's own producer, which records its resolved record, and
-    freeze it."""
+def _frozen(project: Path, experiment_id: str, task: str, data_cfg: dict) -> dict:
+    """Resolve a run under ``project`` through the child's own producer, which records its
+    resolved record, and freeze it."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    _resolved(experiment_id, task, data_cfg)
-    return freeze_selection(experiment_id)
+    _resolved(project, experiment_id, task, data_cfg)
+    return freeze_selection(project, experiment_id)
 
 
 def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
@@ -318,10 +319,10 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
-    result = _frozen("exp-mask-freeze", "semantic_seg", data_cfg)
+    result = _frozen(tmp_path, "exp-mask-freeze", "semantic_seg", data_cfg)
 
     assert "error" not in result, result
-    frozen = read_selection(result["selection_dir"])
+    frozen = read_selection(result["selection_dir"], project=tmp_path)
     assert frozen.scope == ClassScope()
     assert {Path(s.ground_truth).suffix for s in frozen.samples} == {".png"}
     for sample in frozen.samples:
@@ -329,7 +330,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
         assert Path(sample.ground_truth).is_file()
 
     train_ds, val_ds, partition = auto_train_val(
-        "semantic_seg", {"split": {"selection_dir": result["selection_dir"]}}, None)
+        tmp_path, "semantic_seg", {"split": {"selection_dir": result["selection_dir"]}}, None)
     assert sorted(train_ds.stems) == sorted(s.identity for s in frozen.on("train"))
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
@@ -344,15 +345,15 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
                 "split": {"val_ratio": 0.25, "seed": 7}}
 
-    result = _frozen("exp-table-freeze", "classification", data_cfg)
+    result = _frozen(tmp_path, "exp-table-freeze", "classification", data_cfg)
 
     assert "error" not in result, result
-    frozen = read_selection(result["selection_dir"])
+    frozen = read_selection(result["selection_dir"], project=tmp_path)
     assert {s.ground_truth for s in frozen.samples} == {str(csv_path)}
     assert all(s.row_key is not None for s in frozen.samples)
 
     train_ds, val_ds, _partition = auto_train_val(
-        "classification", {"split": {"selection_dir": result["selection_dir"]}}, None)
+        tmp_path, "classification", {"split": {"selection_dir": result["selection_dir"]}}, None)
     assert sorted(train_ds.stems) == sorted(s.identity for s in frozen.on("train"))
     assert val_ds is not None
 
@@ -367,13 +368,13 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
                 "split": {"val_ratio": 0.25, "seed": 7}}
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    _resolved("exp-mask-moved", "semantic_seg", data_cfg)
+    _resolved(tmp_path, "exp-mask-moved", "semantic_seg", data_cfg)
 
     edited = np.zeros((16, 16), dtype=np.uint8)
     edited[:12, :12] = 1
     Image.fromarray(edited, mode="L").save(masks_dir / f"{STEMS[0]}.png")
 
-    result = freeze_selection("exp-mask-moved")
+    result = freeze_selection(tmp_path, "exp-mask-moved")
 
     assert "error" in result and "changed since" in result["error"]
     assert STEMS[0] in result["error"]
@@ -395,13 +396,13 @@ def test_an_unchanged_table_reports_no_member_as_moved(tmp_path: Path):
     drawn = _drawn(root, csv_path, out)
 
     resolved, _train, _val = _resolved(
-        "exp-table-movement", "classification", {"split": {"selection_dir": str(out)}})
+        tmp_path, "exp-table-movement", "classification", {"split": {"selection_dir": str(out)}})
     partition = resolved["partition"]
 
     held_out = {s.member for s in drawn.on("calibration")}
     movement = _resolve_label_movement(
         partition_samples(partition), partition["ground_truth_digests"], held_out,
-        str(csv_path), None, partition["selection"]["selection_sha256"])
+        None, partition["selection"]["selection_sha256"])
 
     assert movement["labels_moved_draw_to_run"] == []
     assert movement["labels_moved_run_to_now"] == []
@@ -419,7 +420,7 @@ def test_an_edited_table_reports_its_members_as_moved(tmp_path: Path):
     drawn = _drawn(root, csv_path, out)
 
     resolved, _train, _val = _resolved(
-        "exp-table-edited", "classification", {"split": {"selection_dir": str(out)}})
+        tmp_path, "exp-table-edited", "classification", {"split": {"selection_dir": str(out)}})
     partition = resolved["partition"]
 
     with open(csv_path, "a", newline="") as handle:
@@ -428,7 +429,7 @@ def test_an_edited_table_reports_its_members_as_moved(tmp_path: Path):
     held_out = sorted(s.member for s in drawn.on("calibration"))
     movement = _resolve_label_movement(
         partition_samples(partition), partition["ground_truth_digests"], set(held_out),
-        str(csv_path), None, partition["selection"]["selection_sha256"])
+        None, partition["selection"]["selection_sha256"])
 
     assert movement["labels_moved_run_to_now"] == held_out
 
@@ -455,7 +456,7 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    run_dir = worker_run(None, {
+    run_dir = worker_run(tmp_path, {
         "model_source": {"builder": "tests.scorer_models:build_linear", "task": "regression"},
         "data": {"split": {"selection_dir": str(out)}},
         "training_source": "tests.bespoke_models:save_built_weights", "device": "cpu",
@@ -475,7 +476,7 @@ def test_a_scalar_calibration_names_the_table_scope_its_run_recorded(tmp_path, m
                         lambda *a, **kw: _RecordedValues())
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", checkpoint_path=checkpoint["path"],
+        tmp_path, trait_name="bud_opening", checkpoint_path=checkpoint["path"],
         images_dir=str(images_dir), csv_path=str(csv_path), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(root), group_by="stem",
     )
@@ -543,11 +544,11 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(tmp_pat
     for stated in (2, 3, 9):
         with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
             auto_train_val(
-                "semantic_seg", {**base, "num_classes": stated, "split": dict(base["split"])},
+                tmp_path, "semantic_seg", {**base, "num_classes": stated, "split": dict(base["split"])},
                 None)
 
     unstated = {**base, "split": dict(base["split"])}
-    _train_ds, val_ds, _partition = auto_train_val("semantic_seg", unstated, None)
+    _train_ds, val_ds, _partition = auto_train_val(tmp_path, "semantic_seg", unstated, None)
     assert val_ds is not None
     assert unstated["num_classes"] == 3 and unstated.get("num_ranks") is None
 
@@ -574,7 +575,7 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Pa
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                 "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
 
-    train_ds, val_ds, partition = auto_train_val("semantic_seg", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
 
     # The one mask reaching class 2 is on the validation side, which is the disagreement a
     # per-loader count would produce here.
@@ -599,7 +600,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     data_cfg: dict = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                       "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
 
-    train_ds, _val_ds, _partition = auto_train_val("semantic_seg", data_cfg, None)
+    train_ds, _val_ds, _partition = auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
     held = {int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
             for stem in STEMS[1:4]}
     assert held == {1}, "the training half reaches only class 1, which is what this measures"
@@ -644,11 +645,11 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_pa
                 "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5}}
 
     with pytest.raises(ValueError, match="carries its own classes"):
-        auto_train_val("semantic_seg", data_cfg(
+        auto_train_val(tmp_path, "semantic_seg", data_cfg(
             {"subject": "leaf", "attribute": "condition", "id_map": {"leaf": 0}}), None)
 
     admitted = data_cfg({})
-    auto_train_val("semantic_seg", admitted, None)
+    auto_train_val(tmp_path, "semantic_seg", admitted, None)
     assert admitted["scope"] == {"subject": None, "attribute": None, "id_map": None}
 
 
@@ -664,7 +665,7 @@ def test_a_mask_selections_held_out_side_redraws_without_a_subject(tmp_path: Pat
     drawn = _drawn(root, masks_dir, tmp_path / "m")
 
     result = redraw_calibration_holdout(
-        dataset_root=str(cal_holdout_scope_root(masks_dir)), labels_dir=str(masks_dir),
+        tmp_path, dataset_root=str(cal_holdout_scope_root(masks_dir)), labels_dir=str(masks_dir),
         images_dir=str(images_dir), selection_dir=str(tmp_path / "m"), reason="test redraw",
     )
 
@@ -693,7 +694,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
     def trained(experiment_id: str, data_cfg: dict) -> dict:
         """Every member the run trains or validates on, with the ground truth, its digest at the
         run and the source the record names for it."""
-        partition = _resolved(experiment_id, "semantic_seg", data_cfg)[0]["partition"]
+        partition = _resolved(tmp_path, experiment_id, "semantic_seg", data_cfg)[0]["partition"]
         at_run = partition["ground_truth_digests"]
         return {s.member: (s.ground_truth, at_run[s.ground_truth], s.source)
                 for s in partition_samples(partition) if s.side in ("train", "val")}
@@ -739,7 +740,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
     def resolved(experiment_id: str, task: str, data_cfg: dict) -> tuple[dict, dict, dict]:
         """The resolved partition, and what the loaders this run actually built say each
         member's own ground truth and source are."""
-        record, train_ds, val_ds = _resolved(experiment_id, task, data_cfg)
+        record, train_ds, val_ds = _resolved(tmp_path, experiment_id, task, data_cfg)
         served_truth = {ds.sample_members[key]: ds.sample_ground_truth[key]
                         for ds in (train_ds, val_ds) for key in ds.sample_ground_truth}
         served_sources = {ds.sample_members[key]: ds.sample_sources[key]

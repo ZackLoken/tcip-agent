@@ -25,17 +25,16 @@ def test_capture_env_records_code_and_libraries():
 
 # ── identity resolved off a verified, registry-matched checkpoint ──────────────
 
-def test_resolve_model_identity_from_the_runs_final_status(tmp_path, monkeypatch):
+def test_resolve_model_identity_from_the_runs_final_status(tmp_path):
     """A completed run's checkpoint resolves its producer through the binding the run's own
     final status recorded, not a caller-asserted tag or a stamp in the payload."""
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    ckpt = registered_checkpoint(None, experiment_id="expR")
+    ckpt = registered_checkpoint(tmp_path, experiment_id="expR")
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     ident = resolve_model_identity(checkpoint)
     assert ident["sha256"] and len(ident["sha256"]) == 64
     assert ident["experiment_id"] == "expR"
@@ -54,7 +53,7 @@ def test_resolve_model_identity_foreign_checkpoint(tmp_path):
     torch.save({"model_state_dict": {}}, ckpt)
     ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {})
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     ident = resolve_model_identity(checkpoint)
     assert ident["sha256"]                 # sha still recorded
     assert ident["experiment_id"] is None  # no run -> honest null, not a failure
@@ -73,7 +72,7 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
     torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
     ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {})
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     ident = resolve_model_identity(checkpoint)
     assert ident["experiment_id"] is None
     assert ident["sha256"]
@@ -100,10 +99,10 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
     )
 
     out = tmp_path / "splits"
-    result = draw_splits(str(data_dir), output_path=str(out), seed=7, subject="bud",
+    result = draw_splits(tmp_path, str(data_dir), output_path=str(out), seed=7, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["seed"] == 7
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     assert drawn.seed == 7
     assert all(sample.ground_truth_digest for sample in drawn.samples)
     assert set(drawn.counts()) == {"train", "val", "calibration"}
@@ -115,7 +114,7 @@ def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
     """A run whose own record answers for the checkpoint a delivery names it by."""
     from tests._binding_fixtures import record_producing_run
 
-    return record_producing_run(experiment_id)
+    return record_producing_run(tmp_path, experiment_id)
 
 
 def test_export_detection_csv_carries_provenance(tmp_path):
@@ -139,11 +138,12 @@ def test_export_detection_csv_carries_provenance(tmp_path):
                                      "validation_kind": "annotations",
                                      "validated_against": VALIDATED_HELD_OUT}},
     }
-    write_bound_sidecar(bucket, stamp, dataset_root=root, producing_experiment_id="expE")
+    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=root, producing_experiment_id="expE")
     out = tmp_path / "counts.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        revision=revision, provenance={"operating_point_conf": 0.42}, pred_dirs=[str(bucket)])
+        revision=revision, provenance={"operating_point_conf": 0.42}, pred_dirs=[str(bucket)],
+        project=tmp_path)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expE"
@@ -172,12 +172,13 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
                                      "validation_kind": "annotations",
                                      "validated_against": VALIDATED_HELD_OUT}},
     }
-    write_bound_sidecar(bucket, stamp, dataset_root=root, producing_experiment_id="expA")
+    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=root, producing_experiment_id="expA")
     out = tmp_path / "agg.csv"
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "image"}],
-        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)])
+        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)],
+        project=tmp_path)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expA"
@@ -206,13 +207,14 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
                                      "validated_against": VALIDATED_HELD_OUT}},
         "produced_at": "2020-01-01T00:00:00+00:00",
     }
-    write_bound_sidecar(bucket, stamp, dataset_root=root, experiment_id="exp-old-stamp")
+    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=root, experiment_id="exp-old-stamp")
     out = tmp_path / "agg.csv"
 
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "image"}],
-        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)])
+        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)],
+        project=tmp_path)
 
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["produced_at"] != "2020-01-01T00:00:00+00:00"
@@ -240,12 +242,13 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
                                      "validation_kind": "annotations",
                                      "validated_against": VALIDATED_HELD_OUT}},
     }
-    write_bound_sidecar(bucket, stamp, dataset_root=root)
+    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=root)
     out = tmp_path / "counts.csv"
 
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        revision=revision, pred_dirs=[str(bucket)])
+        revision=revision, pred_dirs=[str(bucket)],
+        project=tmp_path)
 
     rows = list(__import__("csv").DictReader(out.open()))
     datetime.fromisoformat(rows[0]["produced_at"])
@@ -266,11 +269,11 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
         acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"))
     columns = ("produced_at", "operating_point_validated")
 
-    tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns)
+    tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns, project=tmp_path)
     assert tail["produced_at"]  # the write's own timestamp, not refused
 
     with pytest.raises(ValueError, match="produced_at"):
-        delivered_tail({"produced_at": "2020-01-01T00:00:00+00:00"}, {}, gate, columns=columns)
+        delivered_tail({"produced_at": "2020-01-01T00:00:00+00:00"}, {}, gate, columns=columns, project=tmp_path)
 
 
 # ── phenology CSV schema carries producing-model identity ──────────────────────

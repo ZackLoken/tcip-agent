@@ -34,11 +34,10 @@ def _point_shapefile(tmp_path: Path) -> Path:
 def test_register_plant_registry_refuses_a_shp_naming_the_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     shp = _point_shapefile(tmp_path)
 
     res = register_plant_registry(
-        name="reg", csv_paths=[str(shp)], crop="black locust", site="block")
+        tmp_path, name="reg", csv_paths=[str(shp)], crop="black locust", site="block")
 
     assert "error" in res
     assert "tcip shp-to-plant-csv" in res["error"]
@@ -47,12 +46,11 @@ def test_register_plant_registry_refuses_a_shp_naming_the_command(
 def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     binary_path = tmp_path / "plants.csv"
     binary_path.write_bytes(bytes(range(256)))
 
     res = register_plant_registry(
-        name="reg", csv_paths=[str(binary_path)], crop="black locust", site="block")
+        tmp_path, name="reg", csv_paths=[str(binary_path)], crop="black locust", site="block")
 
     assert "error" in res
     assert "not UTF-8 text" in res["error"]
@@ -65,13 +63,12 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
     first, the resulting CSV registers exactly as a hand-authored one would."""
     from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
     converted = convert_shp_to_plant_csv(shp, csv_path)
 
     res = register_plant_registry(
-        name="reg", csv_paths=[str(csv_path)], crop="black locust", site="block")
+        tmp_path, name="reg", csv_paths=[str(csv_path)], crop="black locust", site="block")
 
     assert "error" not in res, res
     assert res["n_plants"] == converted["n_features"] == 2

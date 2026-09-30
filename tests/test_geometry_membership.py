@@ -115,18 +115,19 @@ def _membership(ds) -> set[str]:
     return {ds.member_of(key) for key in keys}
 
 
-def _recorded(task: str, data_cfg: dict) -> dict:
-    """The partition the launcher's own producer resolves for a ``task`` run over ``data_cfg``,
-    read back from the launch record it writes: the record's members come from the producer,
-    never from a loader's own keys."""
+def _recorded(project: Path, task: str, data_cfg: dict) -> dict:
+    """The partition the launcher's own producer resolves for a ``task`` run of ``project`` over
+    ``data_cfg``, read back from the launch record it writes: the record's members come from the
+    producer, never from a loader's own keys."""
     import copy
 
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import opened_run
 
-    run_dir = opened_run(None, {"model_source": {"task": task}, "data": copy.deepcopy(data_cfg),
-                                "evaluation": {"selection_metric": "loss"}})
-    return run_resolution(run_dir.name)["partition"]
+    run_dir = opened_run(project, {"model_source": {"task": task},
+                                   "data": copy.deepcopy(data_cfg),
+                                   "evaluation": {"selection_metric": "loss"}})
+    return run_resolution(run_dir.name, project=project)["partition"]
 
 
 @pytest.mark.parametrize("task", GEOMETRY_TASKS)
@@ -136,7 +137,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
 
-    train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
 
     assert val_ds is not None
     assert _membership(train_ds).isdisjoint(_membership(val_ds))
@@ -151,9 +152,9 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     images_dir, labels_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "scope": {"subject": SUBJECT}, "auto_val": False}
-    record = _recorded(task, data_cfg)
+    record = _recorded(tmp_path, task, data_cfg)
 
-    train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
 
     assert val_ds is None
     assert _membership(train_ds) == set(stems)
@@ -175,7 +176,7 @@ def test_a_starved_draw_trains_without_validation_and_says_so(tmp_path: Path, ca
                           "group_key_map": {s: "one_group" for s in stems}}}
 
     with caplog.at_level(logging.WARNING, logger=SPLIT_LOGGER):
-        train_ds, val_ds, partition = auto_train_val(task, data_cfg, None)
+        train_ds, val_ds, partition = auto_train_val(tmp_path, task, data_cfg, None)
 
     assert val_ds is None
     assert _membership(train_ds) == set(stems)
@@ -200,7 +201,7 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
 
-    train_ds, val_ds, partition = auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert val_ds is not None
     assert [s.member for s in partition_samples(partition)] == [stem]
@@ -225,11 +226,11 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
 
     whole_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}, "auto_val": False}
-    whole = _recorded("detection", whole_cfg)
+    whole = _recorded(tmp_path, "detection", whole_cfg)
 
     drawn_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}, "auto_val": True, "split": {"val_ratio": 0.5, "seed": 1}}
-    drawn = _recorded("detection", drawn_cfg)
+    drawn = _recorded(tmp_path, "detection", drawn_cfg)
 
     def _held(record: dict) -> list[tuple]:
         return sorted((s.member, s.source, s.ground_truth) for s in partition_samples(record))

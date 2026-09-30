@@ -1,20 +1,17 @@
 """tcip preflight-config: the demoted door's own command-line entry point.
 
-Structural validation always runs, root pinning through require_and_pin_platform_root
-(test_platform_root_pinning.py covers the shared mechanism directly), the same pinning
-tcip calibrate-operating-point uses.
+Structural validation always runs, for the project --project names.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 
-def _fixture_config(tmp_path: Path) -> Path:
+def _fixture_config(root: Path) -> Path:
     """A valid config: a builder the operator's own process imports (never called, since no
     --smoke is passed here) over two labeled frames of the subject its scope names
     (``_verified_checkpoint_fixtures.detection_images``)."""
@@ -23,45 +20,38 @@ def _fixture_config(tmp_path: Path) -> Path:
     config = {
         "model_source": {"builder": "tcip_mcp.pipelines.model_build:build_model",
                          "task": "detection"},
-        "data": {**detection_images(tmp_path / "data", SCOPED_DATA["scope"]), **SCOPED_DATA},
+        "data": {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA},
     }
-    config_path = tmp_path / "config.json"
+    config_path = root / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path
 
 
-def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.CompletedProcess:
-    env = dict(os.environ)
-    if platform_root is None:
-        env.pop("TCIP_STATE_ROOT", None)
-    else:
-        env["TCIP_STATE_ROOT"] = platform_root
+def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "tcip_web.cli", "preflight-config", *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
+        cwd=str(cwd), capture_output=True, text=True, timeout=60,
     )
 
 
-def test_refuses_a_run_with_no_platform_root_pinned(tmp_path):
+def test_refuses_a_run_naming_no_project(tmp_path):
     config_path = _fixture_config(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--config", str(config_path)], cwd=cwd, platform_root=None)
+    result = _run(["--config", str(config_path)], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
-    assert "TCIP_STATE_ROOT" in result.stderr
+    assert "--project" in result.stderr
     assert not (cwd / ".tcip").exists()
 
 
-def test_validates_a_fixture_config_over_a_pinned_platform_root(tmp_path):
-    config_path = _fixture_config(tmp_path)
-    cwd = tmp_path / "operator_cwd"
+def test_validates_a_fixture_config_for_the_named_project(project, tmp_path):
+    config_path = _fixture_config(project)
+    cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
-    platform_root = tmp_path / "platform"
-    platform_root.mkdir()
 
-    result = _run(["--config", str(config_path)], cwd=cwd, platform_root=str(platform_root))
+    result = _run(["--config", str(config_path), "--project", str(project)], cwd=cwd)
 
     assert result.returncode == 0, result.stdout
     body = json.loads(result.stdout)

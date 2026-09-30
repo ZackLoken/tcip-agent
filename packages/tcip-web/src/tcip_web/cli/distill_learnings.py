@@ -4,7 +4,7 @@ Gathers the friction reports (``report_friction``), the retrospectives (``write_
 and the SessionEnd capture backstop.
 
     conda activate tcip-agent
-    tcip distill-learnings [--project <root>]
+    tcip distill-learnings --project <project>
     tcip distill-learnings --workspace
 
 Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
@@ -22,15 +22,6 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-
-
-def _find_repo_root(start: Path) -> Path | None:
-    cur = start
-    while cur != cur.parent:
-        if (cur / ".git").exists():
-            return cur
-        cur = cur.parent
-    return None
 
 # Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
@@ -85,19 +76,15 @@ def _cross_project_themes(
     return [(term, n) for term, n in counts.most_common() if n >= min_projects][:top]
 
 
-def build_workspace_worksheet(workspace_root: Path) -> str:
-    """Cross-project distill worksheet: gathers across every project under the workspace.
+def build_workspace_worksheet(workspace: Path) -> str:
+    """Cross-project distill worksheet: gathers across every project under ``workspace``.
 
     Still pure gather, same as :func:`build_worksheet`: nothing is written, applied, or promoted.
     """
-    lines: list[str] = [f"# Cross-project learning-review worksheet: {workspace_root}", ""]
+    from tcip_mcp.workspace import project_dirs
 
-    from tcip_mcp.workspace import pending_marker_or_none
-
-    projects = sorted(
-        p for p in workspace_root.iterdir()
-        if p.is_dir() and (p / ".tcip").is_dir() and pending_marker_or_none(p) is None
-    )
+    lines: list[str] = [f"# Cross-project learning-review worksheet: {workspace}", ""]
+    projects = project_dirs(workspace)
     if not projects:
         lines.append("\nNo projects with a `.tcip/` directory found under this workspace.")
         return "\n".join(lines) + "\n"
@@ -145,7 +132,7 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _read_reports(project_root: Path) -> list[dict]:
+def _read_reports(project: Path) -> list[dict]:
     """Every friction report of one project, decoded, in the store owner's order; an unreadable one
     is skipped.
     """
@@ -153,19 +140,19 @@ def _read_reports(project_root: Path) -> list[dict]:
 
     return [
         document.value
-        for document in report_documents(str(project_root))
+        for document in report_documents(str(project))
         if not document.value.get("malformed")
     ]
 
 
-def _read_retrospectives(project_root: Path) -> list:
+def _read_retrospectives(project: Path) -> list:
     """Every retrospective of one project, latest stated section first, from the store's owner."""
     from tcip_mcp.tools.meta_tools import retrospective_documents
 
-    return retrospective_documents(str(project_root))
+    return retrospective_documents(str(project))
 
 
-def _read_captures(project_root: Path) -> list[dict]:
+def _read_captures(project: Path) -> list[dict]:
     """Every SessionEnd capture entry for this project's root, through the store the hook
     (``agent_learning_capture.py``) appends through, under whichever backend this process bound.
 
@@ -175,16 +162,16 @@ def _read_captures(project_root: Path) -> list[dict]:
     from tcip_store import read_log
     from tcip_mcp.web_client import learning_capture_key
 
-    page = read_log(learning_capture_key(project_root))
+    page = read_log(learning_capture_key(project))
     return [dict(r) for r in page.records]
 
 
-def build_worksheet(project_root: Path) -> str:
+def build_worksheet(project: Path) -> str:
     """Assemble the Markdown distill worksheet (pure: no writes)."""
-    lines: list[str] = [f"# Learning-review worksheet: {project_root}", ""]
+    lines: list[str] = [f"# Learning-review worksheet: {project}", ""]
 
-    reports = _read_reports(project_root)
-    retros = _read_retrospectives(project_root)
+    reports = _read_reports(project)
+    retros = _read_retrospectives(project)
     report_text = " ".join(str(r.get("detail", "")) for r in reports)
     retro_text = " ".join(document.value for document in retros)
 
@@ -215,7 +202,7 @@ def build_worksheet(project_root: Path) -> str:
             lines.append(f"- {document.name}")
 
     # SessionEnd capture backstop (machine-local; agent_learning_capture.py writes it).
-    captures = _read_captures(project_root)
+    captures = _read_captures(project)
     if captures:
         lines.append(f"\n## Session captures ({len(captures)}): SessionEnd backstop")
         for c in captures[-10:]:
@@ -233,34 +220,26 @@ def build_worksheet(project_root: Path) -> str:
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Gather learning-review material into one worksheet.", prog=prog)
-    ap.add_argument("--project", default=None,
-                    help="project root holding the friction reports and retrospectives "
-                         "(default: this platform checkout's own repo root)")
-    ap.add_argument("--workspace", action="store_true",
-                    help="cross-project mode: gather across every project under the TCIP workspace "
-                         "(TCIP_WORKSPACE, default ~/tcip-projects/) instead of one --project root")
+    scope = ap.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--project", default=None,
+                       help="the project holding the friction reports and retrospectives")
+    scope.add_argument("--workspace", action="store_true",
+                       help="cross-project mode: gather across every project under the TCIP "
+                            "workspace TCIP_WORKSPACE names")
     args = ap.parse_args(argv)
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
-
-    bind_default()
-
     if args.workspace:
-        from tcip_mcp.workspace import workspace_root
+        from tcip_store.binding import bind_default
 
-        print(build_workspace_worksheet(workspace_root()))
+        from tcip_mcp.workspace import workspace_from_environment
+
+        bind_default()
+        print(build_workspace_worksheet(workspace_from_environment()))
         return 0
 
-    project = args.project
-    if project is None:
-        repo_root = _find_repo_root(Path(__file__).resolve())
-        if repo_root is None:
-            print("error: --project not given and no repo root (.git ancestor) found to "
-                  "default to; name a project root explicitly")
-            return 2
-        project = str(repo_root)
-    print(build_worksheet(Path(project)))
+    from tcip_mcp.cli import bound_project
+
+    print(build_worksheet(bound_project(args.project)))
     return 0
 
 

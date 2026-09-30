@@ -46,14 +46,14 @@ def _two_date_dataset(root: Path, stems=_STEMS) -> Path:
     return root
 
 
-def _draw(root: Path, out: Path, *, seed: int = 2):
+def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
+    result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
-    return read_selection(out)
+    return read_selection(out, project=project)
 
 
 def _side_this_date(selection, side: str, date: str = DATES[0]) -> set[str]:
@@ -78,7 +78,7 @@ def test_selection_calibration_universe_holds_only_the_calibration_side(tmp_path
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
 
     stems, group_by, group_key_map, excluded, _counts, _samples = \
         selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
@@ -96,7 +96,7 @@ def test_selection_calibration_universe_reads_only_the_named_labels_directory(tm
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
 
     stems, *_rest = selection_calibration_universe(
         drawn, _labels_dir(root, DATES[1]), drawn.scope, min_foreground_groups={"calibration": 1})
@@ -114,7 +114,7 @@ def test_a_calibration_member_whose_ground_truth_moved_is_named_by_the_re_admiss
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
     calibration_this_date = _calibration_this_date(drawn)
     assert len(calibration_this_date) >= 3, "fixture must leave room to drop one and still have >=2"
 
@@ -134,7 +134,7 @@ def test_selection_calibration_universe_refuses_fewer_than_two_groups(tmp_path: 
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
     held_out = {s.group for s in drawn.on("calibration")
                 if Path(s.ground_truth).parent.name == DATES[0]}
 
@@ -153,7 +153,7 @@ def test_selection_calibration_universe_floor_is_foreground_aware(tmp_path: Path
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
     calibration_this_date = _calibration_this_date(drawn)
     assert len(calibration_this_date) >= 3
 
@@ -183,15 +183,16 @@ def test_selection_calibration_universe_refuses_a_calibration_sample_naming_a_re
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     regioned = tuple(replace(s, rect=(0, 0, IMG // 2, IMG // 2)) if s.side == "calibration" else s
                      for s in drawn.samples)
-    write_selection(out, replace(drawn, samples=regioned))
+    write_selection(out, replace(drawn, samples=regioned), project=tmp_path)
 
     from tcip_mcp.pipelines.data.selection import read_selection
 
     with pytest.raises(ValueError, match="pixel rect"):
-        selection_calibration_universe(read_selection(out), _labels_dir(root), drawn.scope)
+        selection_calibration_universe(read_selection(out, project=tmp_path), _labels_dir(root),
+                                       drawn.scope)
 
 
 def test_a_calibration_door_refuses_a_selections_recorded_rect(tmp_path: Path):
@@ -204,15 +205,15 @@ def test_a_calibration_door_refuses_a_selections_recorded_rect(tmp_path: Path):
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     regioned = tuple(replace(s, rect=(0, 0, IMG // 2, IMG // 2)) if s.side == "calibration" else s
                      for s in drawn.samples)
-    write_selection(out, replace(drawn, samples=regioned))
+    write_selection(out, replace(drawn, samples=regioned), project=tmp_path)
 
     with pytest.raises(ValueError, match="pixel rect"):
         calibration.calibrate_operating_point(
             stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
-            str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
+            str(root / "images" / DATES[0]), selection_dir=str(out), project=tmp_path, **_CAL_KWARGS)
 
 
 def test_the_calibration_universe_refuses_a_directory_the_draw_never_held(
@@ -223,7 +224,7 @@ def test_the_calibration_universe_refuses_a_directory_the_draw_never_held(
     from tcip_mcp.pipelines.data.splits import selection_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
-    drawn = _draw(root, tmp_path / "m")
+    drawn = _draw(tmp_path, root, tmp_path / "m")
     elsewhere = root / "annotations" / "9-9-99"
     elsewhere.mkdir(parents=True)
 
@@ -240,7 +241,7 @@ def test_a_selection_restricted_calibration_reads_its_own_recorded_sources(tmp_p
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     decoy = tmp_path / "decoy" / "images"
     decoy.mkdir(parents=True)
@@ -263,19 +264,7 @@ def test_a_selection_restricted_calibration_reads_its_own_recorded_sources(tmp_p
         assert samples[stem].ground_truth == str(labels_dir / f"{stem}.json")
 
 
-# -- resolve_locked_cal_holdout_split's selection_dir ---------------------------
-
-
-def test_resolve_locked_cal_holdout_split_records_the_selection_dir(tmp_path: Path):
-    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
-
-    locked = resolve_locked_cal_holdout_split(
-        ["a", "b", "c", "d"], identity_hash="ident1", scope_root=tmp_path,
-        selection_dir="some/selection/dir",
-    )
-
-    assert locked["selection_dir"] == "some/selection/dir"
-    assert locked["redraw_history"][0]["policy"]["selection_dir"] == "some/selection/dir"
+# -- a selection's lock is its universe's own identity ---------------------------
 
 
 def test_a_whole_directory_lock_and_a_selection_lock_coexist(tmp_path: Path):
@@ -286,12 +275,10 @@ def test_a_whole_directory_lock_and_a_selection_lock_coexist(tmp_path: Path):
     whole = resolve_locked_cal_holdout_split(
         ["a", "b", "c", "d"], identity_hash="whole_ident", scope_root=tmp_path)
     scoped = resolve_locked_cal_holdout_split(
-        ["a", "b"], identity_hash="selection_ident", scope_root=tmp_path,
-        selection_dir="some/selection/dir")
+        ["a", "b"], identity_hash="selection_ident", scope_root=tmp_path)
 
     assert whole.pop("old_membership") is None and scoped.pop("old_membership") is None
-    assert whole["selection_dir"] is None
-    assert scoped["selection_dir"] == "some/selection/dir"
+    assert "selection_dir" not in whole and "selection_dir" not in scoped
     assert set(whole["calibration"]) | set(whole["holdout"]) == {"a", "b", "c", "d"}
     assert set(scoped["calibration"]) | set(scoped["holdout"]) == {"a", "b"}
 
@@ -299,27 +286,9 @@ def test_a_whole_directory_lock_and_a_selection_lock_coexist(tmp_path: Path):
     again_whole = resolve_locked_cal_holdout_split(
         ["a", "b", "c", "d"], identity_hash="whole_ident", scope_root=tmp_path)
     again_scoped = resolve_locked_cal_holdout_split(
-        ["a", "b"], identity_hash="selection_ident", scope_root=tmp_path,
-        selection_dir="some/selection/dir")
+        ["a", "b"], identity_hash="selection_ident", scope_root=tmp_path)
     assert again_whole == whole
     assert again_scoped == scoped
-
-
-# -- attach_split_policy_provenance --------------------------------------------
-
-
-def test_attach_split_policy_provenance_copies_the_selection_dir():
-    from tcip_mcp.pipelines.operating_point import attach_split_policy_provenance
-    from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
-
-    conf = derived("conf", 0.5, derived_from="test", requires_validation=True,
-                   validation_kind="annotations", validated_against=None, gate_evidence={})
-    bundle = ResolvedBundle(trait="bud_opening", dataset_hash=None, params={"conf": conf})
-
-    attach_split_policy_provenance(bundle, {"group_by": "stem", "seed": 0, "holdout_ratio": 0.5,
-                                            "identity_hash": "abc", "selection_dir": "m/dir"})
-
-    assert bundle.get("conf").gate_evidence["split_policy"]["selection_dir"] == "m/dir"
 
 
 # -- _reference_identity's label_stems group -----------------------------------
@@ -332,9 +301,7 @@ def test_reference_identity_hashes_a_label_stems_group(tmp_path: Path):
     labels_dir = root / "annotations" / DATES[0]
 
     identity = _reference_identity(
-        {"label_stems": {"calibration": {"path": str(labels_dir), "stems": ["a", "b"]}}},
-        dataset_root=root,
-    )
+        {"label_stems": {"calibration": {"path": str(labels_dir), "stems": ["a", "b"]}}})
 
     assert identity["label_stems"]["calibration"]["count"] == 2
     assert identity["label_stems"]["calibration"]["dataset_hash"]
@@ -369,11 +336,11 @@ def test_calibrate_operating_point_binds_to_the_selections_calibration_side(tmp_
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     bundle, dh, _n_excl, evidence = calibration.calibrate_operating_point(
         stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
-        str(root / "images" / DATES[0]), selection_dir=str(out), **_CAL_KWARGS)
+        str(root / "images" / DATES[0]), selection_dir=str(out), project=tmp_path, **_CAL_KWARGS)
 
     calibration_this_date = set(_calibration_this_date(drawn))
     assert set(evidence["calibration_stems"]) == calibration_this_date
@@ -399,13 +366,13 @@ def test_calibrate_operating_point_refuses_a_checkpoint_trained_for_another_clas
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
     with pytest.raises(ValueError, match="0 foreground group"):
         calibration.calibrate_operating_point(
             stub_pass(_CalStub(subject="a_different_subject")), "bud_opening",
             str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
-            selection_dir=str(out), **_CAL_KWARGS)
+            selection_dir=str(out), project=tmp_path, **_CAL_KWARGS)
 
 
 def test_calibrate_operating_point_selection_conflicts_with_group_by(tmp_path: Path):
@@ -413,13 +380,13 @@ def test_calibrate_operating_point_selection_conflicts_with_group_by(tmp_path: P
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
 
     with pytest.raises(ValueError, match="group_by"):
         calibration.calibrate_operating_point(
             stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), selection_dir=str(out), group_by="stem",
-            **_CAL_KWARGS)
+            project=tmp_path, **_CAL_KWARGS)
 
 
 def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_selection(
@@ -430,25 +397,25 @@ def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_sel
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     other_out = tmp_path / "m2"
-    _draw(root, other_out, seed=3)
-    resolved_run(None, {"split": {"selection_dir": str(other_out)}},
+    _draw(tmp_path, root, other_out, seed=3)
+    resolved_run(tmp_path, {"split": {"selection_dir": str(other_out)}},
                  experiment_id="exp-bound-other")
 
     with pytest.raises(ValueError, match="bound to the selection"):
         calibration.calibrate_operating_point(
             stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), selection_dir=str(out),
-            experiment_id="exp-bound-other", **_CAL_KWARGS)
+            experiment_id="exp-bound-other", project=tmp_path, **_CAL_KWARGS)
 
 
 def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selection_respelled(
     tmp_path: Path,
 ):
     """The bound-checkpoint comparison resolves both paths through filesystem identity, not a
-    bare string comparison: a trailing separator, forward slashes or a relative spelling of the
-    same selection directory is still the checkpoint's own selection."""
+    bare string comparison: a trailing separator or forward slashes on the same selection
+    directory is still the checkpoint's own selection."""
     import os
 
     import tcip_mcp.pipelines.calibration as calibration
@@ -456,21 +423,15 @@ def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_selec
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
-    resolved_run(None, {"split": {"selection_dir": str(out)}}, experiment_id="exp-bound-own")
+    _draw(tmp_path, root, out)
+    resolved_run(tmp_path, {"split": {"selection_dir": str(out)}}, experiment_id="exp-bound-own")
 
-    cwd = os.getcwd()
-    os.chdir(tmp_path)
-    try:
-        respellings = [str(out) + os.sep, str(out).replace(os.sep, "/"), os.path.relpath(out)]
-        for spelling in respellings:
-            _bundle, _dh, _n_excl, evidence = calibration.calibrate_operating_point(
-                stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
-                str(root / "images" / DATES[0]), selection_dir=spelling,
-                experiment_id="exp-bound-own", **_CAL_KWARGS)
-            assert evidence["reference_inputs"]["stated_values"]["selection_dir"] == spelling
-    finally:
-        os.chdir(cwd)
+    for spelling in (str(out) + os.sep, str(out).replace(os.sep, "/")):
+        _bundle, _dh, _n_excl, evidence = calibration.calibrate_operating_point(
+            stub_pass(_CalStub()), "bud_opening", str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), selection_dir=spelling,
+            experiment_id="exp-bound-own", project=tmp_path, **_CAL_KWARGS)
+        assert evidence["reference_inputs"]["stated_values"]["selection_dir"] == spelling
 
 
 # -- evaluate_model under a selection ------------------------------------------
@@ -483,7 +444,8 @@ def _evaluate_under(root: Path, out: Path, tmp_path: Path, **kwargs):
 
     ckpt = registered_checkpoint(tmp_path)
     return evaluate_model(
-        ckpt, str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0]), selection_dir=str(out), **kwargs)
+        tmp_path, ckpt, str(root / "images" / DATES[0]), str(root / "annotations" / DATES[0]),
+        selection_dir=str(out), **kwargs)
 
 
 def _corner_dataset(root: Path) -> Path:
@@ -503,17 +465,14 @@ def _corner_dataset(root: Path) -> Path:
 _QUADRANT_TILING = {"tile_size": IMG // 2, "overlap": 0, "skip_empty": True}
 
 
-def test_selected_evaluation_refuses_a_tiling_that_drops_a_held_out_source(
-    tmp_path: Path, monkeypatch,
-):
+def test_selected_evaluation_refuses_a_tiling_that_drops_a_held_out_source(tmp_path: Path):
     """Admission answers for the samples; this answers for the loader built from them. A tiling
     whose keep regions hold no ground truth of a source leaves that source with no tile at all, so
     the measurement would be taken over part of the universe the draw held out and reported as the
     whole of it."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _corner_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     result = _evaluate_under(
         root, out, tmp_path,
@@ -525,15 +484,12 @@ def test_selected_evaluation_refuses_a_tiling_that_drops_a_held_out_source(
         assert stem in result["error"]
 
 
-def test_selected_evaluation_admits_a_tiling_that_keeps_every_held_out_source(
-    tmp_path: Path, monkeypatch,
-):
+def test_selected_evaluation_admits_a_tiling_that_keeps_every_held_out_source(tmp_path: Path):
     """The admitting half of the same rail: a keep region holding every source's ground truth
     retains all of them, and the measurement runs over the universe the draw held out."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _corner_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     result = _evaluate_under(
         root, out, tmp_path,
@@ -543,14 +499,12 @@ def test_selected_evaluation_admits_a_tiling_that_keeps_every_held_out_source(
     assert result["evaluated_stem_count"] == len(_calibration_this_date(drawn))
 
 
-def test_selected_evaluation_measures_the_universe_the_draw_held_out(tmp_path: Path,
-                                                                     monkeypatch):
+def test_selected_evaluation_measures_the_universe_the_draw_held_out(tmp_path: Path):
     """The admitting half: an untouched calibration side is measured whole, and the record says
     how many of its samples the loader indexed."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     result = _evaluate_under(root, out, tmp_path)
 
@@ -560,15 +514,14 @@ def test_selected_evaluation_measures_the_universe_the_draw_held_out(tmp_path: P
 
 
 def test_selected_evaluation_refuses_a_calibration_label_emptied_since_the_draw(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ):
     """A held-out label emptied with nobody confirming that image negative would be scored as an
     image with no objects, turning a real object into a false positive against the operating
     point. The evaluation refuses by name instead, the way a bound run's own loaders do."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     emptied = next(s for s in drawn.on("calibration")
                    if Path(s.ground_truth).parent.name == DATES[0])
     json_io.write_annotations(emptied.ground_truth, [], IMG, IMG, keep_empty=True)
@@ -591,7 +544,7 @@ def test_run_inference_refuses_selection_dir_without_calibration_labels_dir(tmp_
     ckpt.write_bytes(b"stub")
 
     result = run_inference(
-        str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        tmp_path, str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
         selection_dir=str(tmp_path / "m"))
 
     assert "error" in result and "selection_dir" in result["error"]
@@ -605,10 +558,10 @@ def test_force_redraw_binds_to_the_selection_and_records_its_dir(tmp_path: Path)
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        tmp_path, dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), selection_dir=str(out),
         reason="test redraw",
     )
@@ -629,10 +582,10 @@ def test_force_redraw_reads_the_scope_off_the_selection(tmp_path: Path):
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        tmp_path, dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), selection_dir=str(out),
         reason="test redraw",
     )
@@ -665,7 +618,7 @@ def test_force_redraw_refuses_a_document_selection_that_records_no_subject(tmp_p
         seed=0, group_by="stem", scope=ClassScope())))
 
     result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(labels_dir), images_dir=str(images_dir),
+        tmp_path, dataset_root=str(root), labels_dir=str(labels_dir), images_dir=str(images_dir),
         selection_dir=str(out), reason="test redraw",
     )
 
@@ -681,7 +634,7 @@ def test_force_redraw_selection_refuses_the_same_missing_image_the_universe_name
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     missing = _calibration_this_date(drawn)[0]
     (root / "images" / DATES[0] / f"{missing}.jpg").unlink()
 
@@ -689,7 +642,7 @@ def test_force_redraw_selection_refuses_the_same_missing_image_the_universe_name
         selection_calibration_universe(drawn, _labels_dir(root), drawn.scope)
 
     result = redraw_calibration_holdout(
-        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        tmp_path, dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), selection_dir=str(out),
         reason="test redraw",
     )
@@ -750,12 +703,13 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     universe = ["a", "b"]
     dh = dataset_hash(root / "annotations" / DATES[0], stems=universe)
 
     inputs = _dense_inputs(dh)
-    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None,
+                                     **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -768,13 +722,12 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
     monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, dh, 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     ckpt = foreign_checkpoint(tmp_path)
     result = itools.run_inference(
-        str(ckpt), images_dir=str(root / "images" / DATES[0]),
+        tmp_path, str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "baseline" / DATES[0]),
         device="cpu", tile=False, trait="bud_opening",
         calibration_labels_dir=str(root / "annotations" / DATES[0]),
@@ -783,12 +736,12 @@ def test_selection_calibrations_evidence_earns_a_validated_record_through_export
     bucket = result["output_dir"]
 
     stamp = read_operating_point_sidecar(bucket)
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening", project=tmp_path)
     assert binding.ok is True
     assert binding.claimed is True
 
     pointer = stamp["validated_by"]
-    row = find_validation(observe(experiment_dir(pointer["experiment_id"])),
+    row = find_validation(observe(experiment_dir(pointer["experiment_id"], project=tmp_path)),
                           pointer["record_digest"])
     identity = row["reference_identity"]
     assert identity["label_stems"]["calibration"]["count"] == len(universe)
@@ -809,7 +762,7 @@ def test_a_calibration_date_holding_no_training_members_is_checked_not_unresolva
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
     # The same samples, re-sided so date A trains and validates and date B is the whole
     # calibration side: every field but the side is exactly what the draw wrote.
@@ -824,21 +777,21 @@ def test_a_calibration_date_holding_no_training_members_is_checked_not_unresolva
 
     write_selection(out, Selection(
         samples=tuple(_sided(s) for s in drawn.samples), scope=drawn.scope, seed=drawn.seed,
-        group_by=drawn.group_by))
+        group_by=drawn.group_by), project=tmp_path)
 
-    run_id = resolved_run(None, {"split": {"selection_dir": str(out)}}).name
+    run_id = resolved_run(tmp_path, {"split": {"selection_dir": str(out)}}).name
 
     cal_labels = str(_labels_dir(root, DATES[1]))
     cal_ids = {Path(s.ground_truth).stem for s in drawn.samples
                if Path(s.ground_truth).parent.name == DATES[1]}
 
-    trained = _train_disjointness(run_id, cal_ids, set(), calibration_labels_dir=cal_labels)
+    trained = _train_disjointness(run_id, cal_ids, set(), calibration_labels_dir=cal_labels, project=tmp_path)
     assert trained["unresolvable"] is False and trained["checked"] is True
     assert not trained["leaked_stems"]
 
     selected = _selection_disjointness(
         run_id, cal_ids, set(),
-        selection_dir=str(out), calibration_labels_dir=cal_labels)
+        selection_dir=str(out), calibration_labels_dir=cal_labels, project=tmp_path)
     assert selected["applicable"] is True
     assert selected["unresolvable"] is False
     assert not selected["leaked_stems"]
@@ -856,9 +809,9 @@ def test_a_crop_annotated_after_the_draw_is_grouped_by_the_policy_the_selection_
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
-    run_id = resolved_run(None, {"split": {"selection_dir": str(out)}}).name
+    run_id = resolved_run(tmp_path, {"split": {"selection_dir": str(out)}}).name
 
     labels_dir = _labels_dir(root)
     trained_here = sorted(_side_this_date(drawn, "train"))
@@ -871,7 +824,7 @@ def test_a_crop_annotated_after_the_draw_is_grouped_by_the_policy_the_selection_
         [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))], IMG, IMG)
 
     resolved = _train_disjointness(
-        run_id, {late_crop}, set(), calibration_labels_dir=str(labels_dir))
+        run_id, {late_crop}, set(), calibration_labels_dir=str(labels_dir), project=tmp_path)
 
     recorded_key = next(s.group for s in drawn.on("train")
                         if Path(s.ground_truth).stem == parent
@@ -892,9 +845,9 @@ def test_a_sample_backed_loaders_records_name_the_members_the_partition_recorded
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    _draw(tmp_path, root, out)
     train_ds, _val_ds, partition = auto_train_val(
-        "detection", {"split": {"selection_dir": str(out)}}, None)
+        tmp_path, "detection", {"split": {"selection_dir": str(out)}}, None)
 
     class _NoDetections:
         """A detector that finds nothing: the record ids are the point here, not the boxes."""
@@ -948,7 +901,7 @@ def test_a_bespoke_datasets_own_stems_name_its_records(tmp_path: Path):
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
     dataset = build_dataset(
         "detection", samples=drawn.on("train"), sizes={}, transforms=None, scope=drawn.scope,
         dataset_source={"builder": f"{__name__}:build_bespoke_stem_dataset"})
@@ -986,10 +939,9 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    drawn = _draw(root, out)
+    drawn = _draw(tmp_path, root, out)
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    run_dir = worker_run(None, {
+    run_dir = worker_run(tmp_path, {
         "model_source": dict(BUILT_DETECTOR), "training_source": "tests.bespoke_models:save_built_weights",
         "data": {"split": {"selection_dir": str(out)}}})
     experiment_id = run_dir.name
@@ -1002,7 +954,8 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     inputs = _dense_inputs(
         dh, selection_dir=str(out),
         calibration_labels_dir=str(root / "annotations" / DATES[0]))
-    bundle = resolve_operating_point("bud_opening", experiment_id=experiment_id, **inputs)
+    bundle = resolve_operating_point("bud_opening", project=tmp_path,
+                                     experiment_id=experiment_id, **inputs)
     disjointness = bundle.get("conf").gate_evidence["selection_disjointness"]
     assert disjointness["checked"] is True
     assert not disjointness["leaked_groups"] and not disjointness["leaked_stems"]
@@ -1020,7 +973,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
 
     result = itools.run_inference(
-        completed["path"], images_dir=str(root / "images" / DATES[0]),
+        tmp_path, completed["path"], images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "bound" / DATES[0]),
         device="cpu", tile=False, trait="bud_opening",
         calibration_labels_dir=str(root / "annotations" / DATES[0]),
@@ -1029,13 +982,13 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     bucket = result["output_dir"]
 
     stamp = read_operating_point_sidecar(bucket)
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening", project=tmp_path)
     assert binding.ok is True
     assert binding.claimed is True
 
     pointer = stamp["validated_by"]
     assert pointer["experiment_id"] == experiment_id
-    row = find_validation(observe(experiment_dir(pointer["experiment_id"])),
+    row = find_validation(observe(experiment_dir(pointer["experiment_id"], project=tmp_path)),
                           pointer["record_digest"])
     assert row["reference_identity"]["label_stems"]["calibration"]["count"] == len(universe)
     assert row["selection_disjointness"]["applicable"] is True

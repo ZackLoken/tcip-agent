@@ -14,10 +14,10 @@ import tcip_store
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_sidecar
 from tcip_web.app import app
-from tcip_web.state import store
 
 from tests._audit_fixtures import refuse_audit_appends
 from tests._binding_fixtures import producer_checkpoint_sha256
+from tests._web_fixtures import open_new_project
 
 # seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
@@ -41,18 +41,18 @@ _ID_MAP = {"closed": 0, "open": 1}
 
 
 def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
-    client: TestClient, tmp_path: Path
+    client: TestClient, opened_project: Path
 ) -> None:
     """bud_opening is seeded valid by the fixture; a record its schema refuses must still be
     visible by name and reason, never silently absent the way a dropped trait looks like none."""
     from tcip_mcp import traits
 
-    valid = traits.read_trait("bud_opening", tmp_path).model_dump(mode="json")
+    valid = traits.read_trait("bud_opening", opened_project).model_dump(mode="json")
     valid["revisions"][0]["entry"]["localization"] = "unicorn_match"
-    tcip_store.replace(traits.trait_key(tmp_path, "unicorn"), valid,
+    tcip_store.replace(traits.trait_key(opened_project, "unicorn"), valid,
                        expect=tcip_store.Version.ABSENT)
 
-    body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
+    body = client.get("/api/results/traits").json()
 
     assert [record["trait"] for record in body["traits"]] == ["bud_opening"]
     assert [entry["trait"] for entry in body["unreadable"]] == ["unicorn"]
@@ -60,16 +60,15 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
 
 
 def test_plant_mapping_build_requires_a_registered_dataset(
-    client: TestClient, tmp_path: Path,
+    client: TestClient, opened_project: Path,
 ) -> None:
     """A directory that is not a registered dataset's own images/ root refuses, naming that,
     rather than silently building an empty mapping over nothing."""
-    store.open_project(tmp_path.resolve())
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(tmp_path / "nope"),
+            "images_root": str(opened_project / "nope"),
             "plant_registry": "unregistered",
         },
     )
@@ -77,8 +76,9 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     assert "is not a dataset" in resp.json()["detail"]
 
 
-def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:
-    store.open_project(tmp_path.resolve())
+def test_plant_mapping_load_missing_returns_empty(
+    client: TestClient, opened_project: Path,
+) -> None:
     resp = client.post(
         "/api/results/plant_mapping/load",
         json={"name": "missing"},
@@ -103,9 +103,9 @@ def _phenology_fixture(
     delivery repeats a producer identity only where an experiment outside the bucket corroborates
     it, so a fixture that only asserted one would deliver blank producer columns.
 
-    The trait and its confirmed operationalization are registered in the very root this body names,
-    because that is the root the doors resolve both from. A caller passing a subdirectory gets a
-    project that is whole, rather than one whose spec lives somewhere else.
+    ``tmp_path`` gets its trait and confirmed operationalization registered, is made a project
+    and is left open in the web backend, the project the Results doors serve. A caller passing a subdirectory gets a project that is whole, rather than
+    one whose spec lives somewhere else.
 
     ``count_trait`` is the trait the count operating point's own sidecar and validation record are
     earned for, ``"bud_opening"`` by default (matching the delivered trait); a caller wanting a
@@ -127,7 +127,7 @@ def _phenology_fixture(
     seed_confirmed_crossing(tmp_path, BUD_OPENING.name, measured_subject="bud")
 
     # A stamp naming a producing run is only repeated in a delivery when that run really exists.
-    checkpoint_sha256 = (record_producing_run(producing_experiment_id)
+    checkpoint_sha256 = (record_producing_run(tmp_path, producing_experiment_id)
                          if validated and producing_experiment_id else "abc123")
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
@@ -168,7 +168,7 @@ def _phenology_fixture(
                 "experiment_id": producing_experiment_id,
                 "checkpoint_sha256": checkpoint_sha256,
             })
-            write_bound_sidecar(bucket, sidecar, dataset_root=root,
+            write_bound_sidecar(tmp_path, bucket, sidecar, dataset_root=root,
                                 experiment_id=f"exp-op-{date_str}",
                                 producing_experiment_id=producing_experiment_id, trait=count_trait)
             classifier_stamp = {
@@ -176,11 +176,12 @@ def _phenology_fixture(
                 "operating_point": {"classifier": {"value": "open",
                                                    "validated_against": "held_out_annotations"}},
             }
-            write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+            write_bound_sidecar(tmp_path, bucket, classifier_stamp,
+                                document="classifier_operating_point",
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
                                 producing_experiment_id=producing_experiment_id, trait="bud_opening")
         else:
-            write_sidecar(bucket, complete_stamp(sidecar), "operating_point")
+            write_sidecar(bucket, complete_stamp(sidecar), "operating_point", project=tmp_path)
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
@@ -194,8 +195,8 @@ def _phenology_fixture(
     mapping_name = "valley"
     write_plant_mapping(tmp_path, mapping_name, mapping, dataset_root=root)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
-    store.open_project(tmp_path.resolve())
-    return {"project_root": str(tmp_path), "mapping_name": mapping_name,
+    open_new_project(tmp_path)
+    return {"mapping_name": mapping_name,
             "predictions_by_date": preds, "trait": "bud_opening",
             "plants": ["PLANT_A", "PLANT_B"]}
 
@@ -275,7 +276,7 @@ def test_phenology_measurement_ignores_undated_bucket(client: TestClient, tmp_pa
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
     from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
 
-    project_root = Path(body["project_root"])
+    project_root = tmp_path
     build = pm.load_mapping(project_root, body["mapping_name"])
     assert build is not None
     build.assignments["undated"] = build.assignments["2026-02-11"]
@@ -389,9 +390,7 @@ def test_export_ships_an_unvalidated_measurement_once_a_breeder_acknowledges_it(
 
     # The delivery event this export just wrote carries the same act, read back through the
     # listing door rather than the CSV's own columns.
-    events = client.get(
-        "/api/results/delivery-events", params={"project_root": body["project_root"]},
-    ).json()["records"]
+    events = client.get("/api/results/delivery-events").json()["records"]
     event = next(r for r in events if r["door"] == "results.export_csv")
     assert event["acknowledged_by"] == "user:tester"
     assert event["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
@@ -419,7 +418,7 @@ def test_export_refuses_a_whitespace_only_acknowledgment_reason(
 
 
 def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_key(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, opened_project: Path,
 ) -> None:
     """A registry disclosure (deliver_orthomosaic_plant_counts's own PlantRegistryDisclosure,
     which names no walked mapping) carries no plant_mapping_resolved_key at all, beside a walked-
@@ -427,8 +426,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
     from tcip_mcp.traits import read_trait
 
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
-    store.open_project(tmp_path.resolve())
+    tmp_path = opened_project
     revision = read_trait("bud_opening", tmp_path).latest_confirmed
     assert revision is not None
 
@@ -436,10 +434,9 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
         "deliver_orthomosaic_plant_counts", None, [],
         document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=revision,
-        delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
+        delivery_kind="per_plant_count_aggregate", project=tmp_path,
         plant_mapping={
             "plant_registry": {"name": "orchard-block", "digest": "0" * 64},
-            "project_root": str(tmp_path),
             "raster_identity": {"width": 100},
             "nn_tolerance_m": {"value": 1.5, "source": "grid_pitch"},
             "detections_unattributed": 2,
@@ -452,10 +449,10 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
         "results.export_csv", None, [],
         document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=revision,
-        delivery_kind="state_crossing_dates", project_root=tmp_path,
+        delivery_kind="state_crossing_dates", project=tmp_path,
         plant_mapping={
-            "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
-            "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-01T00:00:00+00:00",
+            "name": "valley", "dataset_id": "ds-1",
+            "dataset_root": "ds", "built_at": "2026-02-01T00:00:00+00:00",
             "record_sha256": "1" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
             "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
             "dates_delivered": ["2026-01-01"], "images_unattributed": 0,
@@ -463,7 +460,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
         },
     )
 
-    resp = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
     records = {r["door"]: r for r in resp.json()["records"]}
 
@@ -471,8 +468,9 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     assert "plant_mapping_resolved_key" in records["results.export_csv"]
 
 
-def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
-    """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched.
+def _set_tile_provenance(project: Path, body: dict, tile_size_prov: dict | None) -> dict:
+    """Rewrite each bucket's sidecar tile_size entry under ``project``, leaving every other
+    dimension untouched.
 
     A validated bucket's claim covers the whole ``operating_point`` field, so changing tile_size
     inside it makes the existing validation record answer for a claim it was never earned against;
@@ -493,10 +491,10 @@ def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
         if sidecar.get("validated"):
             root = dataset_root_of(bucket)
             sidecar = file_validation_record(
-                sidecar, dataset_root=root, pred_dirs=[bucket],
+                project, sidecar, dataset_root=root, pred_dirs=[bucket],
                 experiment_id=f"exp-tile-{bucket.name}", producing_experiment_id="exp-1",
                 trait=sidecar.get("trait"))
-        write_sidecar(bucket, sidecar, "operating_point")
+        write_sidecar(bucket, sidecar, "operating_point", project=project)
     return body
 
 
@@ -510,7 +508,7 @@ def test_every_phenology_door_refuses_a_fabricated_tile_size(client: TestClient,
     edge scales. A tiled bucket whose tile_size fell back to the fabricated default refuses at every
     Results door, the same way an uncalibrated conf does, even with the classifier and conf both
     genuinely validated on disk."""
-    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
+    body = _set_tile_provenance(tmp_path, _phenology_fixture(tmp_path, validated=True), _tiled("false"))
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 400, route
@@ -524,7 +522,7 @@ def test_every_phenology_door_delivers_when_the_tile_scale_has_a_real_basis(
 ) -> None:
     """The rail must admit valid work: the identical numbers, produced at a tile edge derived from
     the checkpoint's own persisted training geometry, ship through every door."""
-    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True),
+    body = _set_tile_provenance(tmp_path, _phenology_fixture(tmp_path, validated=True),
                                 _tiled("persisted_training_geometry", 224))
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
@@ -538,7 +536,7 @@ def test_every_phenology_door_delivers_when_the_tile_scale_has_a_real_basis(
 def test_an_untiled_delivery_is_never_gated_on_tile_size(client: TestClient, tmp_path: Path) -> None:
     """Buckets from untiled runs carry a non-gating tile_size entry; the Results doors must not
     acquire a tile-geometry dimension from it and refuse work that was always fine."""
-    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True),
+    body = _set_tile_provenance(tmp_path, _phenology_fixture(tmp_path, validated=True),
                                 {"value": None, "requires_validation": False,
                                  "validation_kind": None, "validated_against": None})
     for route in GATE_DOORS:
@@ -558,7 +556,7 @@ def test_show_unvalidated_shows_a_fabricated_tile_scale_on_screen_but_never_open
     that does exist; ``validated`` must show the same floor the file would, never the operating
     point's own real reference (``validated_raw`` still carries that, for a reader that wants each
     dimension's own outcome)."""
-    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
+    body = _set_tile_provenance(tmp_path, _phenology_fixture(tmp_path, validated=True), _tiled("false"))
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json={**body, "show_unvalidated": True})
         assert resp.status_code == 200, route
@@ -622,7 +620,7 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
         write_sidecar(Path(bucket), {
             "validated": False, "trait": "bud_opening",
             "operating_point": {"classifier": {"value": "open", "validated_against": "false"}},
-        }, "classifier_operating_point")
+        }, "classifier_operating_point", project=tmp_path)
     resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 400
     assert "['classifier']" in resp.json()["detail"]
@@ -640,13 +638,13 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     resp = _export(client, body, "milestones")
     assert resp.status_code == 200
     header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
-    assert header == phenology_csv_columns(latest_confirmed("bud_opening").entry)
+    assert header == phenology_csv_columns(latest_confirmed("bud_opening", tmp_path).entry)
     cells = dict(zip(header, first))
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
     assert cells["operating_point_conf"] == "0.4"
     assert cells["producing_experiment_id"] == "exp-1"
-    assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
+    assert cells["producer_model_sha256"] == producer_checkpoint_sha256(tmp_path, "exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
     # Legitimately blank here: nothing floored and nothing acknowledged on a fully-validated
     # delivery. What the mapping could not verify travels on the delivery event, never per row.
@@ -734,7 +732,7 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
         "/api/results/phenology_measurement", json=body).json()["validated"]
 
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(tmp_path, body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "out.csv"),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -759,7 +757,7 @@ def test_the_two_phenology_doors_classifier_reconciliations_agree_on_a_coinciden
     resolved_dirs = list(web_measurement.predictions_by_date.values())
 
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(tmp_path, body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "mcp.csv"),
         classifier_pred_dirs=resolved_dirs,
     )
@@ -792,7 +790,7 @@ def test_web_and_mcp_export_csv_join_confs_the_same_way(
 
     mcp_out = tmp_path / "mcp.csv"
     mcp_result = deliver_phenology_milestones(
-        trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(body["mapping_name"]),
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=mapped_plants(tmp_path, body["mapping_name"]),
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(mcp_out),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -836,8 +834,9 @@ def test_export_csv_joins_confs_in_dates_delivered_order_not_the_requests_key_or
     assert all(row["dates_delivered"] == "2026-02-11;2026-02-25" for row in web_rows)
 
 
-def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
-    """A genuine classifier record, so a wrong-trait/wrong-experiment refusal comes from the
+def _rewrite_classifier_sidecars(project: Path, body: dict, **overrides) -> None:
+    """A genuine classifier record filed under ``project``, so a wrong-trait/wrong-experiment
+    refusal comes from the
     disagreement a real record surfaces rather than from an absent one. ``experiment_id`` here is
     the producing run the record is checked against (``bind_classifier_validity``'s
     ``producing_experiment_id``), not the log the record itself is filed in.
@@ -854,7 +853,7 @@ def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
         sidecar.update(overrides)
         root = dataset_root_of(bucket_path)
         write_bound_sidecar(
-            bucket_path, sidecar, document="classifier_operating_point", dataset_root=root,
+            project, bucket_path, sidecar, document="classifier_operating_point", dataset_root=root,
             experiment_id=f"exp-cls-record-{bucket_path.name}",
             producing_experiment_id=sidecar.get("experiment_id"), trait=sidecar.get("trait"))
 
@@ -868,7 +867,7 @@ def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delive
     # then wrote it into the delivered CSV as positive_state_classifier_validated. Both doors now
     # call the one shared binding.
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, trait="chestnut_bur")
+    _rewrite_classifier_sidecars(tmp_path, body, trait="chestnut_bur")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
@@ -882,7 +881,7 @@ def test_a_classifier_calibrated_against_another_experiment_does_not_validate_th
     client: TestClient, tmp_path: Path,
 ) -> None:
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, experiment_id="exp-OTHER")
+    _rewrite_classifier_sidecars(tmp_path, body, experiment_id="exp-OTHER")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
@@ -900,7 +899,7 @@ def test_an_acknowledged_delivery_over_a_producing_run_mismatch_records_bound_va
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, read_delivery_events
 
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, trait="bud_opening", experiment_id="exp-OTHER")
+    _rewrite_classifier_sidecars(tmp_path, body, trait="bud_opening", experiment_id="exp-OTHER")
 
     resp = _export(client, body, "milestones",
                    acknowledgment={"reason": "shipping unvalidated for now"}, user="user:tester")
@@ -917,13 +916,13 @@ def test_an_acknowledged_delivery_over_a_producing_run_mismatch_records_bound_va
 def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
     # The refusals above must not be satisfiable by a door that refuses every classifier stamp.
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, trait="bud_opening", experiment_id="exp-1")
+    _rewrite_classifier_sidecars(tmp_path, body, trait="bud_opening", experiment_id="exp-1")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200
     # A foreign checkpoint names no producing run on either document; two absences agree, so nothing refuses.
     foreign = _phenology_fixture(tmp_path / "foreign", validated=True, producing_experiment_id=None)
-    _rewrite_classifier_sidecars(foreign, trait="bud_opening", experiment_id=None)
+    _rewrite_classifier_sidecars(tmp_path / "foreign", foreign, trait="bud_opening", experiment_id=None)
     assert client.post("/api/results/export_csv",
                        json={**foreign, "payload": "milestones", "filename": "x.csv"}
                        ).status_code == 200
@@ -1111,10 +1110,10 @@ def _count_bucket(
             "validated": True,
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         })
-        write_bound_sidecar(bucket, sidecar, dataset_root=root, experiment_id="exp-count-op",
-                            trait=trait)
+        write_bound_sidecar(tmp_path, bucket, sidecar, dataset_root=root,
+                            experiment_id="exp-count-op", trait=trait)
     else:
-        write_sidecar(bucket, complete_stamp(sidecar), "operating_point")
+        write_sidecar(bucket, complete_stamp(sidecar), "operating_point", project=tmp_path)
     return bucket
 
 
@@ -1133,9 +1132,8 @@ def test_export_count_csv_per_image_refuses_unvalidated_with_no_acknowledgment(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=False)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
     })
@@ -1152,9 +1150,8 @@ def test_export_count_csv_per_image_delivers_under_acknowledgment(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=False)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
@@ -1169,9 +1166,7 @@ def test_export_count_csv_per_image_delivers_under_acknowledgment(
     assert cells["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
     assert cells["operating_point_validated"] == "false"
 
-    events = client.get(
-        "/api/results/delivery-events", params={"project_root": str(tmp_path)},
-    ).json()["records"]
+    events = client.get("/api/results/delivery-events").json()["records"]
     event = next(r for r in events if r["door"] == "export_detection_csv")
     assert event["acknowledged_by"] == "user:tester"
 
@@ -1184,12 +1179,11 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     that was written, and the file itself is left in place rather than rolled back."""
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     # Patched only for the export call itself: the fixture setup above records its own
     # validation event through the same emitter and must not be caught by this refusal.
     refuse_audit_appends(monkeypatch)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "unaudited_counts.csv",
     })
@@ -1210,10 +1204,9 @@ def test_export_count_csv_route_line_answers_409_after_the_library_line_lands(
     line is the one refused, so ``committed`` carries the count-export fields alongside it."""
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     refuse_audit_appends(monkeypatch, landing=1)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "route_line_counts.csv",
     })
@@ -1231,9 +1224,8 @@ def test_export_count_csv_per_image_delivers_validated_with_blank_pair(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
     })
@@ -1256,9 +1248,8 @@ def test_export_count_csv_a_validated_bucket_posted_with_acknowledgment_discards
     # check_delivery_gate discards an acknowledgment that cleared nothing: both cells stay blank.
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
@@ -1276,9 +1267,8 @@ def test_export_count_csv_refuses_a_nameless_acknowledgment(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=False)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "acknowledgment": {"reason": "no user given"},
@@ -1292,9 +1282,8 @@ def test_export_count_csv_refuses_a_whitespace_only_reason(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=False)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
         "user": "user:tester",
@@ -1311,9 +1300,8 @@ def test_export_count_csv_refuses_an_unconfirmed_meaning(
     from tests._trait_fixtures import BUD_OPENING
 
     bucket = _count_bucket(tmp_path, validated=True, trait=BUD_OPENING.name)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": BUD_OPENING.name},
         "filename": "counts.csv",
     })
@@ -1336,9 +1324,8 @@ def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_conf
     with tcip_store.transaction(key) as txn:
         current = txn.read(key, default={})
         txn.write(key, {**current, "scope": {**current["scope"], "id_map": {"other": 0}}})
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
     })
@@ -1353,9 +1340,8 @@ def test_export_count_csv_refuses_a_bucket_outside_the_project(
     _seed_count_meaning(tmp_path)
     outside_root = tmp_path_factory.mktemp("outside")
     bucket = _count_bucket(outside_root, validated=False, dataset_root=outside_root / "ds")
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
     })
@@ -1365,9 +1351,8 @@ def test_export_count_csv_refuses_a_bucket_outside_the_project(
 def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = client.post("/api/results/export_count_csv", json={
-        "project_root": str(tmp_path),
         "delivery": {"kind": "not_a_real_kind"},
         "filename": "counts.csv",
     })
@@ -1377,9 +1362,8 @@ def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
 def test_export_count_csv_per_image_refuses_a_blank_predictions_dir_with_422(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": "", "trait": "stem"},
         "filename": "counts.csv",
     })
@@ -1391,9 +1375,8 @@ def test_export_count_csv_per_image_refuses_a_blank_trait_with_422(
 ) -> None:
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": ""},
         "filename": "counts.csv",
     })
@@ -1403,9 +1386,8 @@ def test_export_count_csv_per_image_refuses_a_blank_trait_with_422(
 def test_export_count_csv_orthomosaic_refuses_a_blank_predictions_dir_with_422(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {
             "kind": "orthomosaic_plant_counts", "predictions_dir": "",
             "raster_path": str(tmp_path / "mosaic.tif"), "plant_registry": "reg",
@@ -1419,9 +1401,8 @@ def test_export_count_csv_orthomosaic_refuses_a_blank_predictions_dir_with_422(
 def test_export_count_csv_orthomosaic_refuses_a_blank_raster_path_with_422(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {
             "kind": "orthomosaic_plant_counts", "predictions_dir": str(tmp_path / "preds"),
             "raster_path": "", "plant_registry": "reg", "delivered_phenotype": "stem_count",
@@ -1438,9 +1419,8 @@ def test_export_count_csv_per_image_refuses_an_unknown_trait_with_400_not_500(
     record raises TraitUnknownError, caught and converted to CountDeliveryRefused, never an
     unhandled 500."""
     bucket = _count_bucket(tmp_path, validated=True, trait="stem")
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {
             "kind": "per_image_count", "predictions_dir": str(bucket), "trait": "no-such-trait",
         },
@@ -1450,27 +1430,20 @@ def test_export_count_csv_per_image_refuses_an_unknown_trait_with_400_not_500(
     assert resp.json()["detail"]["kind"] == "count_delivery"
 
 
-def test_export_count_csv_split_root_event_lands_under_the_open_project(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+def test_export_count_csv_event_lands_under_the_open_project(
+    client: TestClient, tmp_path: Path,
 ) -> None:
-    # The open project and the pinned state root differ; the event follows the open project.
-    pinned = tmp_path_factory.mktemp("pinned")
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned))
     project_root = tmp_path / "project"
     project_root.mkdir()
     _seed_count_meaning(project_root)
     bucket = _count_bucket(project_root, validated=True)
-    store.open_project(project_root.resolve())
+    open_new_project(project_root)
     resp = _export_count(client, {
-        "project_root": str(project_root),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
         "filename": "counts.csv",
     })
     assert resp.status_code == 200
-    assert not (pinned / ".tcip" / "state" / "delivery_events").exists()
-    events = client.get(
-        "/api/results/delivery-events", params={"project_root": str(project_root)},
-    ).json()["records"]
+    events = client.get("/api/results/delivery-events").json()["records"]
     assert any(r["door"] == "export_detection_csv" for r in events)
 
 
@@ -1485,18 +1458,11 @@ def _seed_orthomosaic_meaning(project_root: Path) -> None:
 
 
 def _orthomosaic_fixture(
-    project_root: Path, monkeypatch, *, validated: bool, registry_root: Path | None = None,
-    state_root: Path | None = None,
+    project_root: Path, monkeypatch, *, validated: bool,
 ) -> tuple[Path, Path, str]:
     """A real orthomosaic bucket (``run_inference``'s ``raster_path`` regime), raster and
-    registered plant registry, the same producers ``test_orthomosaic_tools.py`` uses. The
-    registry is registered directly under ``registry_root`` (``project_root`` by default),
-    independent of ``state_root`` (``project_root / "state"`` by default), which pins
-    ``TCIP_STATE_ROOT`` for the model registration and inference pass: that scratch location
-    never has to match the project a delivery reads the registry and the meaning record from,
-    but stays fixed through both this build and any later request, since a promoted bucket's
-    ``validated_by`` claim names an experiment the process-pinned experiment store must still
-    hold when the claim is later reconciled. Returns ``(bucket_dir, raster_path, registry_name)``.
+    registered plant registry under ``project_root``, the same producers
+    ``test_orthomosaic_tools.py`` uses. Returns ``(bucket_dir, raster_path, registry_name)``.
     """
     from tests import _trait_fixtures as fx
     from tests.test_orthomosaic_tools import (
@@ -1505,29 +1471,22 @@ def _orthomosaic_fixture(
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import register_plant_registry_record
 
-    root = state_root if state_root is not None else project_root / "state"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
-    (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
-
     raster_path = project_root / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(project_root, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
     if validated:
-        _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+        _promote_bucket_conf(project_root, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(project_root, raster_path, _PLANT_PIXELS)
-    root = registry_root if registry_root is not None else project_root
     register_plant_registry_record(
-        root, "reg", [plant_csv], crop="currant", site="orchard", registered_by="test")
+        project_root, "reg", [plant_csv], crop="currant", site="orchard", registered_by="test")
     return bucket_dir, raster_path, "reg"
 
 
 def _export_orthomosaic(
-    client: TestClient, project_root: Path, bucket_dir: Path, raster_path: Path, registry: str,
-    **extra,
+    client: TestClient, bucket_dir: Path, raster_path: Path, registry: str, **extra,
 ):
     body = {
-        "project_root": str(project_root),
         "delivery": {
             "kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket_dir),
             "raster_path": str(raster_path), "plant_registry": registry,
@@ -1545,8 +1504,8 @@ def test_export_count_csv_orthomosaic_refuses_unvalidated_with_no_acknowledgment
     pytest.importorskip("torchvision")
     _seed_orthomosaic_meaning(tmp_path)
     bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=False)
-    store.open_project(tmp_path.resolve())
-    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    open_new_project(tmp_path)
+    resp = _export_orthomosaic(client, bucket_dir, raster_path, registry)
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert detail["kind"] == "delivery_gate"
@@ -1563,9 +1522,9 @@ def test_export_count_csv_orthomosaic_delivers_under_acknowledgment(
     pytest.importorskip("torchvision")
     _seed_orthomosaic_meaning(tmp_path)
     bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=False)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_orthomosaic(
-        client, tmp_path, bucket_dir, raster_path, registry,
+        client, bucket_dir, raster_path, registry,
         user="user:tester",
         acknowledgment={"reason": "breeder needs a look before calibration finishes"})
     assert resp.status_code == 200
@@ -1579,9 +1538,7 @@ def test_export_count_csv_orthomosaic_delivers_under_acknowledgment(
         assert row["acknowledgment_reason"] == "breeder needs a look before calibration finishes"
         assert row["operating_point_validated"] == "false"
 
-    events = client.get(
-        "/api/results/delivery-events", params={"project_root": str(tmp_path)},
-    ).json()["records"]
+    events = client.get("/api/results/delivery-events").json()["records"]
     event = next(r for r in events if r["door"] == "deliver_orthomosaic_plant_counts")
     assert event["acknowledged_by"] == "user:tester"
 
@@ -1593,8 +1550,8 @@ def test_export_count_csv_orthomosaic_delivers_validated_with_blank_pair(
     pytest.importorskip("torchvision")
     _seed_orthomosaic_meaning(tmp_path)
     bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=True)
-    store.open_project(tmp_path.resolve())
-    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    open_new_project(tmp_path)
+    resp = _export_orthomosaic(client, bucket_dir, raster_path, registry)
     assert resp.status_code == 200
     assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == ""
     assert resp.headers["X-TCIP-Acknowledged-By"] == ""
@@ -1604,29 +1561,6 @@ def test_export_count_csv_orthomosaic_delivers_validated_with_blank_pair(
     for row in rows:
         assert row["acknowledged_by"] == ""
         assert row["acknowledgment_reason"] == ""
-
-
-def test_export_count_csv_orthomosaic_split_root_event_lands_under_the_open_project(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
-) -> None:
-    """The open project and the pinned state root differ; the event, the registry and the meaning
-    record all follow the open project, never the pinned one."""
-    pytest.importorskip("torch")
-    pytest.importorskip("torchvision")
-    pinned = tmp_path_factory.mktemp("pinned")
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    _seed_orthomosaic_meaning(project_root)
-    bucket_dir, raster_path, registry = _orthomosaic_fixture(
-        project_root, monkeypatch, validated=True, state_root=pinned)
-    store.open_project(project_root.resolve())
-    resp = _export_orthomosaic(client, project_root, bucket_dir, raster_path, registry)
-    assert resp.status_code == 200
-    assert not (pinned / ".tcip" / "state" / "delivery_events").exists()
-    events = client.get(
-        "/api/results/delivery-events", params={"project_root": str(project_root)},
-    ).json()["records"]
-    assert any(r["door"] == "deliver_orthomosaic_plant_counts" for r in events)
 
 
 def test_export_count_csv_orthomosaic_refuses_a_registry_csv_outside_the_project(
@@ -1639,7 +1573,7 @@ def test_export_count_csv_orthomosaic_refuses_a_registry_csv_outside_the_project
     outside = tmp_path_factory.mktemp("outside")
     _seed_orthomosaic_meaning(tmp_path)
     bucket_dir, raster_path, registry = _orthomosaic_fixture(
-        tmp_path, monkeypatch, validated=True, registry_root=tmp_path)
+        tmp_path, monkeypatch, validated=True)
 
     # Rewrite the registry's own record to name a CSV outside the project's roots (the file
     # itself is real and byte-valid, only its location is foreign).
@@ -1662,8 +1596,8 @@ def test_export_count_csv_orthomosaic_refuses_a_registry_csv_outside_the_project
         }]
         txn.write(key, record)
 
-    store.open_project(tmp_path.resolve())
-    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    open_new_project(tmp_path)
+    resp = _export_orthomosaic(client, bucket_dir, raster_path, registry)
     assert resp.status_code == 403
 
 
@@ -1674,9 +1608,8 @@ def test_export_count_csv_orthomosaic_filename_with_directory_saves_by_basename(
     pytest.importorskip("torchvision")
     _seed_orthomosaic_meaning(tmp_path)
     bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
     resp = _export_count(client, {
-        "project_root": str(tmp_path),
         "delivery": {
             "kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket_dir),
             "raster_path": str(raster_path), "plant_registry": registry,
@@ -1688,30 +1621,21 @@ def test_export_count_csv_orthomosaic_filename_with_directory_saves_by_basename(
     assert resp.headers["X-TCIP-Saved-To"] == str(tmp_path / "results_export" / "plant_counts.csv")
 
 
-def test_registered_models_confines_project_path_to_allowed_roots(
-    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
-) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path_factory.mktemp("outside")
-    resp = client.get("/api/results/models/registered", params={"project_path": str(outside)})
-    assert resp.status_code == 403
+def test_registered_models_refuses_while_no_project_is_open(client: TestClient) -> None:
+    resp = client.get("/api/results/models/registered")
+    assert resp.status_code == 409
 
 
-def test_registered_models_admits_a_project_path_with_no_extra_roots_set(
-    client: TestClient, tmp_path: Path, monkeypatch
+def test_registered_models_answers_the_open_project_with_none_registered(
+    client: TestClient, opened_project: Path,
 ) -> None:
-    """The rail must admit valid work: a project's own directory answers fine with
-    TCIP_IMAGE_ROOTS unset, since the workspace root alone already admits it."""
-    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
-    resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
+    resp = client.get("/api/results/models/registered")
     assert resp.status_code == 200
     assert resp.json()["models"] == []
 
 
 def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
-    client: TestClient, tmp_path: Path,
+    client: TestClient, opened_project: Path,
 ) -> None:
     """A relative stored checkpoint_path (the registry's own internal spelling) still answers
     absolute over this route, the surface the Inference tab feeds straight back into a launch."""
@@ -1719,24 +1643,24 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import checkpoint_file
 
-    ckpt_dir = tmp_path / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
+    ckpt_dir = opened_project / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt = checkpoint_file(ckpt_dir / "m.pt", "route fixture weights")
-    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {})
+    ModelRegistry(str(opened_project)).register_model("m", str(ckpt), {})
 
-    resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
+    resp = client.get("/api/results/models/registered")
 
     assert resp.status_code == 200
     body = resp.json()
     assert Path(body["models"][0]["checkpoint_path"]) == ckpt.resolve()
 
 
-def test_inference_launch_missing_checkpoint(client: TestClient, tmp_path: Path) -> None:
+def test_inference_launch_missing_checkpoint(client: TestClient, opened_project: Path) -> None:
     resp = client.post(
         "/api/inference/launch",
         json={
-            "checkpoint_path": str(tmp_path / "no.pt"),
-            "dataset_root": str(tmp_path),
+            "checkpoint_path": str(opened_project / "no.pt"),
+            "dataset_root": str(opened_project),
             "model_name": "baseline",
             "date": "2026-02-11",
         },
@@ -1744,19 +1668,21 @@ def test_inference_launch_missing_checkpoint(client: TestClient, tmp_path: Path)
     assert resp.status_code == 404
 
 
-def test_inference_list_jobs_endpoint(client: TestClient) -> None:
+def test_inference_list_jobs_endpoint(client: TestClient, opened_project: Path) -> None:
     resp = client.get("/api/inference/jobs")
     assert resp.status_code == 200
     assert "jobs" in resp.json()
 
 
-def test_inference_list_jobs_carries_each_jobs_warning(client: TestClient) -> None:
+def test_inference_list_jobs_carries_each_jobs_warning(
+    client: TestClient, opened_project: Path,
+) -> None:
     """Each row of the list route is ``_summary``'s, the one producer the stream and the persisted
     registry use, so a job's warning reaches the poll as it reaches the stream."""
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-warn-test", checkpoint_path="", images_dir="", output_dir="",
+        job_id="inf-warn-test", project=str(opened_project), checkpoint_path="", images_dir="", output_dir="",
         conf=0.25, cross_tile_nms=0.5, overlap=0.0,
         warning="3 images carried no readable capture date",
     )
@@ -1788,7 +1714,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
-        job_id="inf-retired-test", checkpoint_path="", images_dir="", output_dir="",
+        job_id="inf-retired-test", project="", checkpoint_path="", images_dir="", output_dir="",
         conf=0.25, cross_tile_nms=0.5, overlap=0.0,
     )
     inference_routes._register(job)
@@ -1807,10 +1733,10 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
     silently checking the project root's own, unrelated registry."""
     bucket = tmp_path / "ds" / "predictions" / "live" / "2026-02-11"
     bucket.mkdir(parents=True)
-    store.open_project(tmp_path.resolve())
+    open_new_project(tmp_path)
 
     resp = client.post("/api/results/phenology_measurement", json={
-        "project_root": str(tmp_path), "mapping_name": "valley",
+        "mapping_name": "valley",
         "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "bud_opening",
         "plants": ["PLANT_A"],
     })

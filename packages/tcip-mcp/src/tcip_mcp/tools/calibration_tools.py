@@ -9,14 +9,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_GROUP_BY, DEFAULT_HOLDOUT_RATIO
 
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@tool()
 def redraw_calibration_holdout(
+    project: Path,
     dataset_root: str,
     labels_dir: str | None = None,
     images_dir: str | None = None,
@@ -34,8 +35,7 @@ def redraw_calibration_holdout(
 
     ``reason`` is required and non-empty. Every redraw is appended to the lock's ``redraw_history``
     with its policy, seed, and the old and new split's content hashes; the old and new split
-    membership is recorded in the dataset's own audit log alongside the reason (and, when given,
-    ``selection_dir``).
+    membership is recorded in the dataset's own audit log alongside the reason.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and its
     stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash; the existing
@@ -61,8 +61,9 @@ def redraw_calibration_holdout(
         holdout_ratio: New calibration/holdout fraction.
         reason: Required, non-empty justification for this redraw, recorded in the dataset's own
             audit log alongside the old and new split membership.
-        selection_dir: Restrict the redraw's universe to a selection's ``calibration`` samples
-            under ``labels_dir`` (``pipelines.data.selection.read_selection``), the restriction
+        selection_dir: Restrict the redraw's universe to a selection of ``project``'s
+            ``calibration`` samples under ``labels_dir``
+            (``pipelines.data.selection.read_selection``), the restriction
             ``run_inference`` applies. Requires ``labels_dir``. The scope is the selection's own.
             The identity is ``dataset_hash(labels_dir, stems=universe)``.
         subject: The object class this redraw's foreground is counted for, for the whole-directory
@@ -104,7 +105,7 @@ def redraw_calibration_holdout(
 
         assert labels_dir is not None, "the selection_dir refusal above requires it"
         try:
-            selection = read_selection(selection_dir)
+            selection = read_selection(selection_dir, project=project)
             (selection_stems, group_by, group_key_map, _excluded, selection_counts,
              _universe_samples) = selection_calibration_universe(
                 selection, labels_dir, selection.scope)
@@ -157,7 +158,7 @@ def redraw_calibration_holdout(
             group_by=group_by, group_key_map=group_key_map,
             holdout_ratio=holdout_ratio, seed=seed,
             force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
-            selection_dir=selection_dir, reason=reason,
+            reason=reason,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -192,8 +193,9 @@ _ORDINAL_REGRESSION_TASKS = {
 }
 
 
-@mcp.tool()
+@tool()
 def calibrate_scalar_operating_point(
+    project: Path,
     trait_name: str,
     checkpoint_path: str,
     images_dir: str,
@@ -234,14 +236,14 @@ def calibrate_scalar_operating_point(
 
     Args:
         trait_name: The registered trait whose rank/value prediction is being calibrated.
-        checkpoint_path: The trained checkpoint to calibrate. Must be registered under this
-            process's platform state root (``register_model``, explicit mode for a foreign or
-            bespoke checkpoint) or this door refuses before loading it.
+        checkpoint_path: The trained checkpoint to calibrate. Must be registered in this
+            project's registry (``register_model``, explicit mode for a foreign or bespoke
+            checkpoint) or this door refuses before loading it.
         images_dir: Directory holding the CSV's images.
         csv_path: The ``(stem, value)`` CSV ``OrdinalDataset``/``RegressionDataset`` reads.
         criterion: Which registered criterion to calibrate against
             (``operating_point.ORDINAL_CRITERIA``/``REGRESSION_CRITERIA``), required.
-        output_dir: Where to write the sidecar.
+        output_dir: Where to write the sidecar; a relative path is under the project.
         dataset_root: The dataset this calibration's claim hangs off: the record's reference
             locations (the CSV, the images directory, the locked split) are written against it, and
             the cal/holdout lock is stored under it. Refuses when the images directory's own layout
@@ -269,14 +271,14 @@ def calibrate_scalar_operating_point(
     from tcip_mcp.traits import TraitUnknownError
 
     try:
-        latest_confirmed(trait_name)
+        latest_confirmed(trait_name, project)
     except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.model_build import recorded_model_dims
 
     try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
+        checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
         task = checkpoint.task
         dims = recorded_model_dims(checkpoint.payload.get("config") or {})
     except ValueError as exc:
@@ -342,13 +344,11 @@ def calibrate_scalar_operating_point(
     if is_ordinal:
         # The producing run's own rank count, the one its head was built at.
         resolver_inputs["num_ranks"] = dims["num_ranks"]
-    result = resolver(trait_name, experiment_id=experiment_id, **resolver_inputs)
-
-    from tcip_mcp.project_paths import resolve_output_path
+    result = resolver(trait_name, project=project, experiment_id=experiment_id, **resolver_inputs)
 
     from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
-    out = resolve_output_path(output_dir)
+    out = Path(project, output_dir)
     document = f"{task}_operating_point"
     stamp = {
         "operating_point": {task: {"validated_against": result["validated_against"],
@@ -363,7 +363,7 @@ def calibrate_scalar_operating_point(
     }
     if result["passed"]:
         draft = open_validation(
-            document=document,
+            project=project, document=document,
             # Named off the function this door reported from, so record and report share one gate.
             evidence={"resolver": resolver.__name__, "inputs": resolver_inputs},
             trait=trait_name, checkpoint_sha256=checkpoint_sha256,
@@ -377,7 +377,7 @@ def calibrate_scalar_operating_point(
         )
         stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
                                    stamp_body=stamp)
-    write_sidecar(out, stamp, document)
+    write_sidecar(out, stamp, document, project=project)
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
@@ -390,8 +390,9 @@ def calibrate_scalar_operating_point(
     }
 
 
-@mcp.tool()
+@tool()
 def calibrate_count_operating_point(
+    project: Path,
     checkpoint_path: str,
     trait: str,
     labels_dir: str,
@@ -430,7 +431,7 @@ def calibrate_count_operating_point(
     ``pred_dir`` must already carry an ``operating_point.json`` stamp naming a checkpoint identity,
     hold at least one prediction document, not name a whole-raster bucket
     (``resolution.stamp_names_raster``), and sit under ``dataset_root``
-    (``resolution.bucket_relative_key``). A bucket outside ``dataset_root``, with no stamp at all,
+    (``resolution.require_bucket_under``). A bucket outside ``dataset_root``, with no stamp at all,
     empty, a whole-raster bucket, whose stamp carries no ``checkpoint_sha256``, whose stamped
     checkpoint disagrees with ``checkpoint_path``, or that already carries a claim
     ``verify_stamp_binding`` answers for, all refuse by name before the calibration pass draws its
@@ -440,8 +441,8 @@ def calibrate_count_operating_point(
     (``resolve_model_identity``); a foreign checkpoint names none and skips train-disjointness.
 
     Args:
-        checkpoint_path: The trained checkpoint to calibrate; must be registered under the platform
-            state root (``register_model``) or this door refuses before loading it.
+        checkpoint_path: The trained checkpoint to calibrate; must be registered in this project's
+            registry (``register_model``) or this door refuses before loading it.
         trait: The registered trait whose count is being calibrated.
         labels_dir: Labeled dir (per-image JSON), this calibration's measurement reference.
         images_dir: Images for ``labels_dir``.
@@ -465,17 +466,16 @@ def calibrate_count_operating_point(
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
     from tcip_mcp.pipelines.resolution import (
-        bucket_relative_key, claim_payload, fold_tile_validation, open_validation,
+        claim_payload, fold_tile_validation, open_validation, require_bucket_under,
         read_operating_point_sidecar, seal_validation, stamp_names_raster, update_sidecar,
         verify_stamp_binding,
     )
-    from tcip_mcp.project_paths import platform_state_root
     from tcip_store.errors import SchemaVersionRefused, StoreBusy
 
     root = Path(dataset_root).resolve()
     bucket = Path(pred_dir).resolve()
     try:
-        bucket_relative_key(bucket, root, document="operating_point")
+        require_bucket_under(bucket, root, document="operating_point")
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -492,7 +492,8 @@ def calibrate_count_operating_point(
         return {"error": f"{bucket} carries a readable operating_point.json stamp but no "
                          "prediction documents: an empty bucket is not this claim's subject "
                          "either."}
-    existing_binding = verify_stamp_binding(existing, bucket, document="operating_point")
+    existing_binding = verify_stamp_binding(existing, bucket, project=project,
+                                            document="operating_point")
     if existing_binding.claimed and existing_binding.ok:
         return {"error": f"{bucket} already carries a validated operating_point.json stamp a "
                          "record answers for (earned at the conf its predictions were produced "
@@ -501,8 +502,7 @@ def calibrate_count_operating_point(
     # Checkpoint identity is derived and refused on before the pass below draws its lock.
     existing_sha = existing.get("checkpoint_sha256")
     try:
-        checkpoint = load_registered_checkpoint(
-            checkpoint_path, project_path=str(platform_state_root()))
+        checkpoint = load_registered_checkpoint(checkpoint_path, project=project)
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
     identity = resolve_model_identity(checkpoint)
@@ -530,7 +530,7 @@ def calibrate_count_operating_point(
         resolved = resolve_count_operating_point(
             checkpoint_path=checkpoint_path, trait=trait, labels_dir=labels_dir,
             images_dir=images_dir, dataset_root=dataset_root,
-            project_root=str(platform_state_root()), group_by=group_by, group_key_map=group_key_map,
+            project=project, group_by=group_by, group_key_map=group_key_map,
             selection_dir=selection_dir, holdout_ratio=holdout_ratio, seed=seed, device=device,
             regime=regime,
         )
@@ -568,7 +568,7 @@ def calibrate_count_operating_point(
     if validated_tentative:
         earned["trait"] = trait
         draft = open_validation(
-            document="operating_point",
+            project=project, document="operating_point",
             evidence={"resolver": "resolve_operating_point", "inputs": resolved.resolver_inputs},
             trait=trait, checkpoint_sha256=resolved.checkpoint_sha256,
             producing_experiment_id=experiment_id,
@@ -586,7 +586,7 @@ def calibrate_count_operating_point(
         stamp's own lock, deciding the answered claim (``verify_stamp_binding``), ``validated``,
         the tile floor and the conf-equality rule against the stamp as stored.
         """
-        binding = verify_stamp_binding(stored, bucket, document="operating_point")
+        binding = verify_stamp_binding(stored, bucket, project=project, document="operating_point")
         if binding.claimed and binding.ok:
             return None
         validated = fold_tile_validation(conf.is_shippable, stored["tile_size_validated"])
@@ -613,7 +613,7 @@ def calibrate_count_operating_point(
         return merged
 
     try:
-        wrote = update_sidecar(bucket, _merge)
+        wrote = update_sidecar(bucket, _merge, project=project)
     except (StoreBusy, ValueError, SchemaVersionRefused) as exc:
         return {"error": str(exc)}
 
@@ -629,7 +629,8 @@ def calibrate_count_operating_point(
                          f"pass was running; recalibrate against the bucket as it is now.{orphan}"}
 
     new_stamp = read_operating_point_sidecar(bucket) or {}
-    new_binding = verify_stamp_binding(new_stamp, bucket, document="operating_point", trait=trait)
+    new_binding = verify_stamp_binding(new_stamp, bucket, project=project,
+                                       document="operating_point", trait=trait)
     validated_now = bool(new_binding.claimed and new_binding.ok)
     return {
         "pred_dir": str(bucket),

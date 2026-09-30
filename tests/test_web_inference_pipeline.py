@@ -6,12 +6,11 @@ from pathlib import Path
 import pytest
 
 
-def _checkpoint(**kwargs) -> Path:
-    """A registered checkpoint under the pinned platform root, completed by a real run
-    (``kwargs`` are its own)."""
+def _checkpoint(project: Path, **kwargs) -> Path:
+    """A checkpoint registered in ``project``, completed by a real run (``kwargs`` are its own)."""
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    return Path(project_checkpoint(**kwargs))
+    return Path(project_checkpoint(project, **kwargs))
 
 
 def test_write_predictions_json_roundtrip_and_negative(tmp_path):
@@ -56,7 +55,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
 
     captured = {}
 
@@ -80,7 +79,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
-        job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nmm",
     )
@@ -116,7 +115,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = _checkpoint(data=classified)
+    ckpt = _checkpoint(tmp_path, data=classified)
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -131,7 +130,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
-        job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
@@ -166,7 +165,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
 
     captured = {}
 
@@ -187,7 +186,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeInstanceSegPredictor)
 
     job = InferenceJob(
-        job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
@@ -218,7 +217,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
     captured = {}
 
     class FakeNativeFramePredictor:
@@ -239,7 +238,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
 
     job = InferenceJob(
-        job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(tmp_path / "out"), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )
@@ -267,7 +266,7 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -298,7 +297,7 @@ def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_def
     out_dir = tmp_path / "out"
 
     job = InferenceJob(
-        job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
+        project=str(tmp_path), job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
         output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7,
         max_dets=DEFAULT_MAX_DETS,
     )
@@ -324,7 +323,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     out_dir = tmp_path / "out"
 
     job = InferenceJob(
-        job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
+        project=str(tmp_path), job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
         output_dir=str(out_dir), tile=False, cross_tile_nms=0.7,
     )
     _worker(job)
@@ -355,7 +354,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
 
     class FakePredictor:
         train_tile_size = 640
@@ -373,7 +372,7 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
-        job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nmm",
     )
@@ -398,10 +397,10 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.jpg")
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.png")
-    ckpt = _checkpoint()
+    ckpt = _checkpoint(tmp_path)
 
     job = InferenceJob(
-        job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        project=str(tmp_path), job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(tmp_path / "out"), tile=False, conf=0.25, cross_tile_nms=0.7,
         overlap=0.2, postprocess="nms",
     )

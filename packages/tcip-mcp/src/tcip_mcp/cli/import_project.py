@@ -10,7 +10,7 @@ database backend, then moves the staged tree onto ``destination``. Wraps
     tcip import-project <bundle_path> <destination>
 
 ``bundle_path`` names either container. This run's audit line is recorded under
-``<destination>/.tcip``, the project being restored, not the process cwd.
+``<destination>/.tcip``, the project being restored.
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-
-from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -31,8 +29,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                                              "or must be an empty directory. Also where this "
                                              "run's audit line is recorded.")
     args = parser.parse_args(argv)
-
-    require_and_pin_platform_root(args.destination)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

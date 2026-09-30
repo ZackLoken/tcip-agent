@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { adoptProjectByName, adoptWorkspaceProject, openProjectByName } from "@/lib/openProject";
+import { openProjectById, openWorkspaceProject } from "@/lib/openProject";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
   api: {
-    projects: { list: vi.fn(), setActive: vi.fn() },
+    projects: { list: vi.fn(), open: vi.fn() },
     dataset: { select: vi.fn() },
   },
 }));
@@ -13,9 +13,14 @@ vi.mock("@/api/client", () => ({
 import { api } from "@/api/client";
 import type { ProjectSummary } from "@/api/client";
 
-function project(overrides: Partial<ProjectSummary> & { name: string }): ProjectSummary {
+function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSummary & {
+  id: string;
+} {
   return {
-    path: `/ws/${overrides.name}`,
+    display_name: `Project ${overrides.id}`,
+    site: "north orchard",
+    record_problem: null,
+    path: `/ws/${overrides.id}`,
     created: 1,
     modified: 1,
     dates: [],
@@ -24,52 +29,50 @@ function project(overrides: Partial<ProjectSummary> & { name: string }): Project
     subjects_by_date: {},
     models_by_date: {},
     image_count: 0,
-    is_active: false,
-    site: "north orchard",
-    site_problem: null,
+    is_open: false,
     label_problem: null,
-    removal_refusal: null,
-    removal_releasable: false,
-    dependency_warnings: [],
-    dependency_problem: null,
     ...overrides,
   };
+}
+
+function listed(projects: ProjectSummary[]) {
+  vi.mocked(api.projects.list).mockResolvedValue({
+    workspace: "/ws",
+    open_id: null,
+    last_opened_problem: null,
+    projects,
+  });
 }
 
 beforeEach(() => {
   vi.mocked(api.dataset.select).mockResolvedValue({
     status: "ok",
-    generation: 1,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    selection: {} as any,
+    selection: { image_list: [], current_image_index: 0 } as any,
   });
-  vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
+  vi.mocked(api.projects.open).mockImplementation(async (id: string) => ({
+    id,
+    display_name: `Project ${id}`,
+    path: `/ws/${id}`,
+  }));
 });
 afterEach(() => vi.clearAllMocks());
 
-describe("openProjectByName", () => {
+describe("openProjectById", () => {
   it("opens on the newest LABELED date, not the newest date (which would be blank)", async () => {
-    const p = project({
-      name: "hz",
-      // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
-      dates: ["2026-02-11", "2026-03-24"],
-      subjects: ["bush", "subject_a"], // flat list would pick "bush"
-      models: ["baseline"],
-      subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
-      models_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
-    });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
+    listed([
+      project({
+        id: "hz",
+        // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
+        dates: ["2026-02-11", "2026-03-24"],
+        subjects: ["bush", "subject_a"], // flat list would pick "bush"
+        models: ["baseline"],
+        subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
+        models_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
+      }),
+    ]);
 
-    await openProjectByName("hz");
+    await openProjectById("hz");
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
     // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
@@ -79,192 +82,56 @@ describe("openProjectByName", () => {
   });
 
   it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
-    const p = project({
-      name: "fresh",
-      dates: ["2026-02-11", "2026-03-24"],
-      subjects: [],
-      models: [],
-      subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
-      models_by_date: { "2026-02-11": [], "2026-03-24": [] },
-    });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
+    listed([
+      project({
+        id: "fresh",
+        dates: ["2026-02-11", "2026-03-24"],
+        subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
+        models_by_date: { "2026-02-11": [], "2026-03-24": [] },
+      }),
+    ]);
 
-    await openProjectByName("fresh");
+    await openProjectById("fresh");
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
     expect(arg.date).toBe("2026-03-24"); // newest overall (nothing labeled to prefer)
     expect(arg.subject).toBeNull();
   });
 
-  it("uses the labeled subject/model when the default date has them", async () => {
-    const p = project({
-      name: "hz2",
-      dates: ["2026-02-11"],
-      subjects: ["subject_a"],
-      models: ["baseline"],
-      subjects_by_date: { "2026-02-11": ["subject_a"] },
-      models_by_date: { "2026-02-11": ["baseline"] },
-    });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
+  it("opens the project by its id and selects inside the directory the open answered", async () => {
+    listed([project({ id: "site-a", dates: ["2026-02-11"] })]);
 
-    await openProjectByName("hz2");
+    await openProjectById("site-a");
 
-    const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.subject).toBe("subject_a");
-    expect(arg.model_name).toBe("baseline");
+    expect(api.projects.open).toHaveBeenCalledWith("site-a");
+    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/ws/site-a");
+    expect(useStore.getState().openProject).toEqual({ id: "site-a", path: "/ws/site-a" });
   });
 
-  it("points both roots at the summary's own path, the same place the picker opens", async () => {
-    const p = project({
-      name: "site-a",
-      dates: ["2026-02-11"],
-      subjects: ["bush"],
-      models: ["baseline"],
-      subjects_by_date: { "2026-02-11": ["bush"] },
-      models_by_date: { "2026-02-11": ["baseline"] },
-    });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
-
-    await openProjectByName("site-a");
-
-    const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.project_root).toBe("/ws/site-a");
-    expect(arg.dataset_root).toBe("/ws/site-a");
-  });
-
-  it("returns null for an unknown project", async () => {
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
-    expect(await openProjectByName("nope")).toBeNull();
+  it("returns null for an id the workspace does not list", async () => {
+    listed([]);
+    expect(await openProjectById("nope")).toBeNull();
+    expect(api.projects.open).not.toHaveBeenCalled();
     expect(api.dataset.select).not.toHaveBeenCalled();
   });
-
-  it("writes no active-project marker", async () => {
-    const p = project({ name: "hz", dates: ["2026-02-11"] });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
-
-    await openProjectByName("hz");
-
-    expect(api.projects.setActive).not.toHaveBeenCalled();
-  });
 });
 
-describe("adoptProjectByName", () => {
-  it("opens the project and writes the active-project marker", async () => {
-    const p = project({ name: "hz", dates: ["2026-02-11"] });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [p],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
-
-    await adoptProjectByName("hz");
-
-    expect(api.dataset.select).toHaveBeenCalledTimes(1);
-    expect(api.projects.setActive).toHaveBeenCalledWith("hz");
-  });
-
-  it("returns null for an unknown project and writes no marker", async () => {
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      active: null,
-      active_path: null,
-      projects: [],
-      pending_removal: [],
-      removal_startup_outcomes: [],
-      pending_rename: [],
-      rename_startup_outcomes: [],
-    });
-
-    expect(await adoptProjectByName("nope")).toBeNull();
-    expect(api.projects.setActive).not.toHaveBeenCalled();
-  });
-});
-
-describe("adoptWorkspaceProject", () => {
-  it("opens the project and adopts it", async () => {
-    const p = project({ name: "hz", dates: ["2026-02-11"] });
-
-    await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
-
-    expect(api.dataset.select).toHaveBeenCalledTimes(1);
-    expect(api.projects.setActive).toHaveBeenCalledWith("hz");
-  });
-
-  it("still returns the selection and pushes a toast when the marker write is rejected", async () => {
-    const p = project({ name: "hz", dates: ["2026-02-11"] });
-    vi.mocked(api.projects.setActive).mockRejectedValue(new Error("locked"));
-    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
-
-    const selection = await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
-    expect(selection).toBeDefined();
-
-    // The marker write is fire-and-forget: await a microtask for its rejection to settle.
-    await Promise.resolve();
-    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("hz"));
-  });
-
+describe("openWorkspaceProject", () => {
   it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
-    const p = project({ name: "hz", dates: ["2026-02-11"] });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      selection: {} as any,
+      selection: { image_list: [], current_image_index: 0 } as any,
       label_problem: "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
-    await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
+    await openWorkspaceProject(
+      project({ id: "hz", dates: ["2026-02-11"] }),
+      "2026-02-11",
+      "subject_a",
+      "baseline",
+    );
 
     expect(pushToast).toHaveBeenCalledWith(
       "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",

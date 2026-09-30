@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from tcip_mcp import traits
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 
 
-@mcp.tool()
+@tool()
 def propose_trait(
-    project_root: str,
+    project: Path,
     entry: traits.TraitEntry,
     rationale: str,
     relayed_note: str = "",
@@ -19,7 +21,6 @@ def propose_trait(
     proposed every time, carrying forward whatever is unchanged.
 
     Args:
-        project_root: The project the trait belongs to.
         entry: The complete entry; its schema states every field and which kinds require what.
         rationale: Why this entry, from the breeder's own words. Prose, read by the breeder.
         relayed_note: What the breeder said away from the GUI, relayed by you; never a confirmation.
@@ -32,7 +33,7 @@ def propose_trait(
     """
     try:
         revision = traits.propose_trait(
-            project_root, entry, rationale=rationale, relayed_note=relayed_note,
+            project, entry, rationale=rationale, relayed_note=relayed_note,
             dataset_root=dataset_root,
         )
     except ValueError as e:

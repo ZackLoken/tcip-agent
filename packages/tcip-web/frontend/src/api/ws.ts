@@ -6,7 +6,7 @@
 import { wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
-import type { GuiState } from "@/store/types";
+import type { GuiState, OpenProject } from "@/store/types";
 import { useStore } from "@/store";
 
 type IncomingMessage =
@@ -14,7 +14,7 @@ type IncomingMessage =
       type: "state_snapshot";
       state: GuiState;
       version?: number;
-      generation?: number | null;
+      project?: OpenProject | null;
       epoch?: string | null;
     }
   | { type: string; [k: string]: unknown };
@@ -50,8 +50,8 @@ export class StateSocket {
   }
 
   /** Force a fresh connect-time replay: the read-only recovery path a canvas push's 409
-   *  triggers, re-delivering the authoritative dataset and binding generation in one update
-   *  rather than assuming a broadcast is still coming. */
+   *  triggers, re-delivering the authoritative dataset and open project in one update rather
+   *  than assuming a broadcast is still coming. */
   resync() {
     this.socket.stop();
     this.socket.start();
@@ -62,12 +62,12 @@ export class StateSocket {
       const m = msg as {
         state: GuiState;
         version?: number;
-        generation?: number | null;
+        project?: OpenProject | null;
         epoch?: string | null;
       };
       useStore
         .getState()
-        .mergeSnapshot(m.state, m.version ?? null, m.generation ?? null, m.epoch ?? null);
+        .mergeSnapshot(m.state, m.version ?? null, m.project ?? null, m.epoch ?? null);
     }
   }
 

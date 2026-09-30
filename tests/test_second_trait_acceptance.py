@@ -2,7 +2,7 @@
 doors and export_csv), asserting its own schema and that an unvalidated row is refused, so the
 delivery path is exercised against more than one registered trait.
 
-``currant_bloom`` is authored here, in this test file's own pinned platform state root, honestly
+``currant_bloom`` is authored here, in each test's own project, honestly
 tentative: no domain expert has confirmed it, and it exists to prove the delivery mechanism
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
 leaves ``majority_milestone``/``majority_label`` empty rather than copied from bud_opening, since
@@ -19,7 +19,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_web.app import app
-from tcip_web.state import store
 
 _ID_MAP = {"closed": 0, "open": 1}
 
@@ -95,7 +94,7 @@ def _currant_bloom_fixture(
                 "experiment_id": "exp-1",
                 "checkpoint_sha256": "abc123",
             })
-            write_bound_sidecar(bucket, sidecar, dataset_root=root,
+            write_bound_sidecar(tmp_path, bucket, sidecar, dataset_root=root,
                                 experiment_id=f"exp-op-{date_str}", producing_experiment_id="exp-1",
                                 trait="currant_bloom")
             classifier_stamp = {
@@ -103,13 +102,13 @@ def _currant_bloom_fixture(
                 "operating_point": {"classifier": {"value": "open",
                                                    "validated_against": "held_out_annotations"}},
             }
-            write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+            write_bound_sidecar(tmp_path, bucket, classifier_stamp, document="classifier_operating_point",
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
                                 producing_experiment_id="exp-1", trait="currant_bloom")
         else:
             from tcip_mcp.pipelines.resolution import write_sidecar
 
-            write_sidecar(bucket, sidecar, "operating_point")
+            write_sidecar(bucket, sidecar, "operating_point", project=tmp_path)
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
@@ -123,8 +122,10 @@ def _currant_bloom_fixture(
     mapping_name = "valley"
     write_plant_mapping(tmp_path, mapping_name, mapping, dataset_root=root)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
-    store.open_project(tmp_path.resolve())
-    return {"project_root": str(tmp_path), "mapping_name": mapping_name,
+    from tests._web_fixtures import open_new_project
+
+    open_new_project(tmp_path)
+    return {"mapping_name": mapping_name,
             "predictions_by_date": preds, "trait": "currant_bloom",
             "plants": sorted({a["plot_name"] for assigns in mapping.values() for a in assigns})}
 
@@ -135,12 +136,11 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
 
 
 def test_currant_bloom_is_registered_and_distinct_from_bud_opening(tmp_path: Path):
-    # $TCIP_STATE_ROOT is already pinned to tmp_path by conftest.py's autouse _pin_platform_root.
     from tcip_mcp.traits import read_trait, trait_names
 
     _seed_currant_bloom_trait(tmp_path)
-    assert "currant_bloom" in trait_names()
-    t = read_trait("currant_bloom").latest.entry
+    assert "currant_bloom" in trait_names(tmp_path)
+    t = read_trait("currant_bloom", tmp_path).latest.entry
     assert t.delivers == ("bloom_05per_date", "bloom_50per_date", "bloom_95per_date")
     assert t.majority_milestone == ""  # no majority alias, unlike bud_opening
 

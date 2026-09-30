@@ -34,16 +34,17 @@ def _dataset(tmp_path: Path, stems=STEMS) -> Path:
 
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tcip_mcp.tools.project_tools import initialize_project
 
     raw = tmp_path / "raw"
     raw.mkdir()
     for index, stem in enumerate(stems):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(raw / f"{stem}.png")
     root = tmp_path / "fruit_count"
-    ingested = ingest_images(source=str(raw), name=root.name, site="the import test's block",
-                             project_path=str(root), date_from=DATE)
+    assert "error" not in initialize_project(str(root), "Fruit count", "the import test's block")
+    ingested = ingest_images(root, source=str(raw), date_from=DATE)
     assert "error" not in ingested, ingested
-    registered = write_subject_registry(str(root), subjects={
+    registered = write_subject_registry(root, str(root), subjects={
         SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
     assert "error" not in registered, registered
     return root
@@ -83,7 +84,7 @@ def _loader(task: str, root: Path):
 
     data_cfg = {"images_dir": str(root / "images" / DATE), "labels_dir": str(_labels(root)),
                 "scope": {"subject": SUBJECT}, "auto_val": False}
-    loader, _, _ = auto_train_val(task, data_cfg, None)
+    loader, _, _ = auto_train_val(root, task, data_cfg, None)
     return loader
 
 
@@ -127,7 +128,7 @@ def test_a_flat_dataset_imports_its_documents_beside_its_flat_images(tmp_path: P
     for index, stem in enumerate(STEMS):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
             root / "images" / f"{stem}.png")
-    registered = write_subject_registry(str(root), subjects={
+    registered = write_subject_registry(root, str(root), subjects={
         SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
     assert "error" not in registered, registered
 
@@ -287,7 +288,7 @@ def test_an_existing_per_image_document_refuses_the_whole_import(tmp_path: Path)
     root = _dataset(tmp_path)
     image = root / "images" / DATE / "tree_02.png"
     assert "error" not in save_annotations(
-        str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        root, root.parent, str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     before = (_labels(root) / "tree_02.json").read_bytes()
 
     result = _import(_document(tmp_path / "external.json"), root)
@@ -305,7 +306,7 @@ def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
     root = _dataset(tmp_path)
     image = root / "images" / DATE / "tree_03.png"
     assert "error" not in save_annotations(
-        str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        root, root.parent, str(image), annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     images = [{"id": index + 1, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
               for index, stem in enumerate(STEMS)]
     images[2]["width"] = IMG * 2
@@ -476,7 +477,7 @@ def test_a_partial_publish_records_the_documents_written_and_the_error(
     monkeypatch.setattr(itools, "write_predictions_json", failing_second_write)
     ckpt = foreign_checkpoint(tmp_path)
     with pytest.raises(OSError):
-        itools.run_inference(ckpt, str(root / "images" / DATE),
+        itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
                              output_dir=str(prediction_dir(root, "detector", DATE)), tile=False)
 
     failed = {row["tool"]: row for row in _rows(root) if row["status"] == "failed"}
@@ -698,7 +699,7 @@ def test_a_missing_image_whose_label_path_exists_reports_both(tmp_path: Path):
 
     root = _dataset(tmp_path)
     assert "error" not in save_annotations(
-        str(root / "images" / DATE / "tree_02.png"),
+        root, root.parent, str(root / "images" / DATE / "tree_02.png"),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
     images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
               {"id": 2, "file_name": "tree_02.jpg", "width": IMG, "height": IMG}]

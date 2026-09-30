@@ -284,7 +284,7 @@ def _register_checkpoint(tmp_path: Path, ckpt_path: str, *, name: str) -> None:
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name=name, checkpoint_path=ckpt_path, config={},
-                            project_path=str(tmp_path))
+                            project=tmp_path)
     assert "error" not in result, result
 
 
@@ -349,11 +349,11 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
     _register_checkpoint(tmp_path, ckpt, name="ortho-detection")
 
-    full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+    full = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
                             device="cpu", score_threshold=0.0)
     full_result = _sliced(full, str(path))
 
-    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
                                 device="cpu", score_threshold=0.0)
     with open_raster(path, arr.shape[-1]) as reader:
         win_result = _sliced(windowed, reader, source_label=str(path))
@@ -400,11 +400,11 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(t
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+    full = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
                             device="cpu", score_threshold=0.0)
     full_result = _sliced(full, str(path))
 
-    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
                                 device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         win_result = _sliced(windowed, reader, source_label=str(path))
@@ -433,7 +433,7 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         result = _sliced(predictor, reader, require_masks=False)
@@ -458,7 +458,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         result = _sliced(predictor, reader, source_label=str(path))

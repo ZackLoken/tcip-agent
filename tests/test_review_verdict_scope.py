@@ -36,7 +36,7 @@ BOX = (12.0, 20.0, 52.0, 44.0)
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
@@ -301,7 +301,7 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
 
     calls: list[dict] = []
 
-    def _fake_queue(**kwargs):
+    def _fake_queue(project, **kwargs):
         calls.append(kwargs)
         return {"queue": [], "total_candidates": 0, "reviewed_skipped": 1}
 

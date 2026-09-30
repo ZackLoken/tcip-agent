@@ -159,7 +159,7 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(t
         hpo.planned_trial_count(space, 3, "random", 1, False, None)
     with pytest.raises(RuntimeError, match="stop before Ray"):
         hpo.tune_search(
-            objective_fn=lambda config, report: report(0.0), param_space=space,
+            project=tmp_path, objective_fn=lambda config, report: report(0.0), param_space=space,
             num_samples=3, search_alg="random", scheduler=None, storage_path=str(tmp_path), seed=0
         )
 

@@ -124,14 +124,14 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
-    res = launch_training(cfg)
+    res = launch_training(tmp_path, cfg)
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
     deadline = time.monotonic() + 120
     status: dict = {}
     while time.monotonic() < deadline:
-        status = monitor_training(res["experiment_id"])
+        status = monitor_training(tmp_path, res["experiment_id"])
         if status.get("status") in ("completed", "failed", "canceled"):
             break
         time.sleep(0.5)
@@ -155,6 +155,6 @@ def test_preflight_imports_a_builder_through_its_source_files(
         "data": {"images_dir": str(images_dir)},
     }
 
-    result = preflight_config(cfg)
+    result = preflight_config(tmp_path, cfg)
 
     assert not any("not importable" in issue for issue in result["issues"]), result["issues"]

@@ -7,6 +7,7 @@ pilot's, so nothing here generalizes from one trait's own vocabulary.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 from datetime import datetime
 from pathlib import Path
@@ -59,16 +60,16 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
 ) -> None:
     """A build over captures none of which carry a position this door reads refuses rather than
     persisting a mapping with ``n_mapped == 0``."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" in res
     assert "plant-tag mechanism" in res["error"]
     assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
@@ -79,16 +80,16 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
 ) -> None:
     """A capture PIL cannot open at all is named as unreadable, not folded into the no-position
     sentence as if it had been opened and found blank."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_corrupt_image(images_root / DATE / "P1_corrupt.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" in res
     assert "P1_corrupt.jpg could not be opened" in res["error"]
     assert "plant-tag mechanism" in res["error"]
@@ -102,14 +103,14 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
     from tcip_web.app import app
     from tcip_web.state import store
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
-    registry = register_plant_registry_for([plant_csv])
-    store.open_project(tmp_path.resolve())
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
@@ -130,12 +131,12 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     from tcip_web.app import app
     from tcip_web.state import store
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
     (images_root / "2099-01-01").mkdir()
-    registry = register_plant_registry_for([plant_csv])
-    store.open_project(tmp_path.resolve())
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
+    asyncio.run(store.open_project(tmp_path.resolve()))
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
@@ -159,6 +160,7 @@ def _persist_synthetic_mapping(
     capture, or every capture beyond the match distance): the delivery-time refusal is what these
     tests pin, not the build-time one, so the record is built directly."""
     from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.registry_paths import stored_path
 
     dataset_id = require_dataset_identity(dataset_root)["id"]
     registry_name, registry_digest = f"{name}-registry", "0" * 64
@@ -172,7 +174,7 @@ def _persist_synthetic_mapping(
         expect=ts.Version.ABSENT,
     )
     build = MappingBuild(
-        name=name, project_root=str(project_root), dataset_root=str(dataset_root),
+        name=name, dataset_root=stored_path(dataset_root, project_root),
         dataset_id=dataset_id, built_by="build_plant_mapping",
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "stated"},
@@ -187,21 +189,15 @@ def _persist_synthetic_mapping(
 
 def _unmapped_row(stem: str, distance_m: float | None) -> Assignment:
     return Assignment(
-        image_path=f"{stem}.jpg", stem=stem, date_folder=DATE, plot_name=None,
+        image=f"{stem}.jpg", stem=stem, date_folder=DATE, plot_name=None,
         accession_name=None, source="unmapped", distance_m=distance_m)
 
 
 def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, str]]:
     """A registered dataset with one real prediction bucket, and the trait this module's
     deliveries run under; returns ``(dataset_root, predictions_by_date)``.
-
-    ``_init`` points ``TCIP_WORKSPACE`` away from ``tmp_path`` so ``initialize_project`` does not hold an
-    arbitrary test directory to the workspace naming scheme; a web-route delivery then guards
-    ``project_root`` against the allowed roots, so ``TCIP_IMAGE_ROOTS`` names ``tmp_path`` as a
-    legitimate root the same way an operator would for a project outside any workspace.
     """
-    _init(tmp_path, monkeypatch)
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _, _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _seed_currant_bloom_trait(tmp_path)
@@ -224,16 +220,16 @@ def _assert_all_doors_refuse(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name=mapping_name, plants=mapped_plants(mapping_name), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
     assert not out_csv.exists()
 
-    store.open_project(tmp_path.resolve())
+    asyncio.run(store.open_project(tmp_path.resolve()))
     client = TestClient(app, base_url="http://127.0.0.1")
     payload = {
-        "project_root": str(tmp_path), "mapping_name": mapping_name,
+        "mapping_name": mapping_name,
         "predictions_by_date": preds_by_date, "trait": "currant_bloom",
         "plants": ["P1"],
     }
@@ -306,15 +302,15 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import assignment_is_attributed
 
-    blank = Assignment(image_path="a.jpg", stem="a", date_folder=DATE, plot_name="",
+    blank = Assignment(image="a.jpg", stem="a", date_folder=DATE, plot_name="",
                        accession_name=None, source="unmapped", distance_m=None)
-    named = Assignment(image_path="b.jpg", stem="b", date_folder=DATE, plot_name="P1",
+    named = Assignment(image="b.jpg", stem="b", date_folder=DATE, plot_name="P1",
                        accession_name="acc-9", source="sequence", distance_m=1.0)
     assert assignment_is_attributed(blank) is False
     assert assignment_is_attributed(named) is True
 
     build = MappingBuild(
-        name="m", project_root="/p", dataset_root="/p/ds", dataset_id="ds-1",
+        name="m", dataset_root="ds", dataset_id="ds-1",
         built_by="test", built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "stated"},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
@@ -329,7 +325,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
 
 
 def _validate_delivery_buckets(
-    preds_by_date: dict[str, str], dataset_root: Path,
+    project: Path, preds_by_date: dict[str, str], dataset_root: Path,
 ) -> list[str]:
     """Bind a genuinely validated operating_point and classifier_operating_point sidecar onto
     every bucket a delivery names, all naming one shared producing run, so a delivery earns its
@@ -350,7 +346,7 @@ def _validate_delivery_buckets(
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "experiment_id": producing, "checkpoint_sha256": "abc123",
         }
-        write_bound_sidecar(bucket, sidecar, dataset_root=dataset_root,
+        write_bound_sidecar(project, bucket, sidecar, dataset_root=dataset_root,
                             experiment_id=f"exp-op-{date}", producing_experiment_id=producing,
                             trait="currant_bloom")
         classifier_stamp = {
@@ -358,7 +354,7 @@ def _validate_delivery_buckets(
             "operating_point": {"classifier": {"value": "open",
                                                "validated_against": "held_out_annotations"}},
         }
-        write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+        write_bound_sidecar(project, bucket, classifier_stamp, document="classifier_operating_point",
                             dataset_root=dataset_root, experiment_id=f"exp-cls-{date}",
                             producing_experiment_id=producing, trait="currant_bloom")
         classifier_dirs.append(bucket)
@@ -379,7 +375,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     from tcip_web.app import app
     from tcip_web.state import store
 
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _write_ungeoreferenced_image(images_root / DATE / "P3_extra.jpg")
@@ -388,14 +384,14 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
         [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                    attributes={"bloom_state": "open"})], 8, 8)
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["per_date"][DATE]["n_unattributed"] == 1
     assert build_res["n_unattributed"] == 1
 
-    store.open_project(tmp_path.resolve())
+    asyncio.run(store.open_project(tmp_path.resolve()))
     client = TestClient(app, base_url="http://127.0.0.1")
     load_resp = client.post("/api/results/plant_mapping/load", json={"name": "valley"})
     assert load_resp.status_code == 200, load_resp.text
@@ -403,10 +399,10 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert loaded_summary["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
-    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
+    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 1
@@ -433,7 +429,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
 ) -> None:
     """A mapping covering two dates, one delivered: the disclosed count is scoped to the
     delivered date alone, never the mapping's full span."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     dates = ["2026-02-11", "2026-02-25"]
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=dates)
@@ -443,18 +439,18 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
         [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                    attributes={"bloom_state": "open"})], 8, 8)
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
     delivered = {dates[0]: preds_by_date[dates[0]]}
-    classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
+    classifier_dirs = _validate_delivery_buckets(tmp_path, delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
@@ -467,7 +463,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     """The no-capture-at-all refusal fires only when nothing across the delivered dates
     attributes: a delivery naming a fully attributed date beside a date recorded with no
     capture at all still ships."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     empty_date = "2026-02-25"
@@ -475,19 +471,19 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     empty_bucket = dataset_root / "predictions" / "live" / empty_date
     empty_bucket.mkdir(parents=True)
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry,
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry,
         dates=[DATE, empty_date])
     assert "error" not in build_res, build_res
     assert build_res["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
     delivered = {**preds_by_date, empty_date: str(empty_bucket)}
-    classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
+    classifier_dirs = _validate_delivery_buckets(tmp_path, delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=delivered,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert sorted(res["dates_delivered"]) == sorted([DATE, empty_date])
@@ -498,16 +494,16 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 0
 
-    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
+    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
@@ -516,21 +512,21 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
 def test_a_raster_beside_positioned_photographs_still_delivers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     (images_root / DATE / "orthomosaic_block.tif").write_bytes(b"")
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
+    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley", plants=mapped_plants("valley"), predictions_by_date=preds_by_date,
+        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert out_csv.exists()
@@ -541,15 +537,15 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
 ) -> None:
     """``(0.0, 0.0)`` is a real GPS position (off the coast of west Africa), never treated as
     the absence of one: the build's own position check is ``is not None``, not truthiness."""
-    _init(tmp_path, monkeypatch)
+    _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_geo_image(images_root / DATE / "P1_a.jpg", 0.0, 0.0, datetime(2026, 2, 11, 9, 30))
     plant_csv = tmp_path / "plants.csv"
     _write_plant_csv(plant_csv, [{"plot": "P1", "accession": "acc-A", "lat": 0.0, "lon": 0.0}])
 
-    registry = register_plant_registry_for([plant_csv])
+    registry = register_plant_registry_for(tmp_path, [plant_csv])
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_registry=registry, nn_tolerance_m=10.0)
+        tmp_path, name="valley", images_root=str(images_root), plant_registry=registry, nn_tolerance_m=10.0)
     assert "error" not in res, res
     assert res["n_mapped"] == 1

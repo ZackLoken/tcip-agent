@@ -1,15 +1,13 @@
 """tcip score-predictions: the demoted door's own command-line entry point.
 
-A plain score (no --trait) needs no platform root at all, since it only reads the image and its
-label/prediction files by path; --trait requires one, since resolving a trait's derived
-localization criterion reads the project's own trait registry, matching the shared
-require_and_pin_platform_root mechanism test_platform_root_pinning.py covers directly.
+A plain score (no --trait) needs no project at all, since it only reads the image and its
+label/prediction files by path; --trait requires --project, since resolving a trait's derived
+localization criterion reads that project's own confirmed revision.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,36 +38,31 @@ def _fixture(tmp_path: Path) -> Path:
     return img
 
 
-def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.CompletedProcess:
-    env = dict(os.environ)
-    if platform_root is None:
-        env.pop("TCIP_STATE_ROOT", None)
-    else:
-        env["TCIP_STATE_ROOT"] = platform_root
+def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "tcip_web.cli", "score-predictions", *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
+        cwd=str(cwd), capture_output=True, text=True, timeout=60,
     )
 
 
-def test_refuses_a_trait_scoped_run_from_an_unpinned_cwd(tmp_path):
+def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
     img = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--path", str(img), "--trait", "bud_count"], cwd=cwd, platform_root=None)
+    result = _run(["--path", str(img), "--trait", "bud_count"], cwd=cwd)
 
     assert result.returncode != 0, result.stdout
-    assert "TCIP_STATE_ROOT" in result.stderr
+    assert "--trait requires --project" in result.stderr
     assert not (cwd / ".tcip").exists()
 
 
-def test_scores_a_single_image_over_a_fixture_root_with_no_project_pinned(tmp_path):
+def test_scores_a_single_image_with_no_project_named(tmp_path):
     img = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--path", str(img)], cwd=cwd, platform_root=None)
+    result = _run(["--path", str(img)], cwd=cwd)
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

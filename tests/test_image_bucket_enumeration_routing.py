@@ -26,8 +26,7 @@ def _ingested_bucket(tmp_path: Path) -> Path:
     source.mkdir()
     Image.new("RGB", (16, 16)).save(source / "shoot_001.jpg")
 
-    result = ingest_images(str(source), "proj", "test-site",
-                           project_path=str(tmp_path / "proj"), date_from="none")
+    result = ingest_images(tmp_path / "proj", str(source), date_from="none")
     assert "error" not in result, result
     return Path(result["image_root"]) / "undated"
 
@@ -51,8 +50,7 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
     for stem in stems:
         Image.new("RGB", (16, 16)).save(source / f"{stem}.jpg")
 
-    result = ingest_images(str(source), "proj", "test-site",
-                           project_path=str(tmp_path / "proj"), date_from="none")
+    result = ingest_images(tmp_path / "proj", str(source), date_from="none")
     assert "error" not in result, result
     return Path(result["image_root"]) / "undated"
 
@@ -91,7 +89,7 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
         "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}},
     }
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
 
@@ -122,7 +120,7 @@ def test_preflight_reports_a_newer_written_bandgroup_manifest(tmp_path):
         "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}},
     }
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("schema_version 2" in i for i in r["issues"]), r["issues"]
 
@@ -207,7 +205,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
         "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT}},
     }
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]
 
 
@@ -227,7 +225,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
                  "scope": {"subject": SUBJECT},
                  "split": {"group_by": "stem"}},
     }
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any(i.startswith("data.split:") for i in r["issues"]), r["issues"]
 
 
@@ -248,7 +246,7 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
                  "tiling": {"enabled": True},
                  "split": {"reserve_calibration_fraction": 0.2}},
     }
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
 
 

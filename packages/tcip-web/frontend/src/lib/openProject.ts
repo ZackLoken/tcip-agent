@@ -1,8 +1,6 @@
 /**
- * Opening a workspace project = pointing the GUI at it (project root = dataset root) via
- * /dataset/select. Shared by the ProjectPicker (human clicks Open) and App's agent→GUI
- * channel (the agent calls activate_project → "app" panel event → open it here), so the
- * two paths can't drift.
+ * Opening a workspace project: making it the backend's open project, then pointing the GUI at a
+ * dataset inside it (the project's own tree) via /dataset/select.
  */
 
 import { api, type ProjectSummary } from "@/api/client";
@@ -20,87 +18,62 @@ export function defaultDate(dates: string[]): string {
   return dates[dates.length - 1] ?? "";
 }
 
+/** Open ``p`` (a listed project whose record reads, so it carries an id) on a date, subject and
+ *  model; the backend points the workspace's last-opened pointer at it. */
 export async function openWorkspaceProject(
-  p: ProjectSummary,
+  p: ProjectSummary & { id: string },
   date: string,
   subject: string | null,
   modelName: string | null,
 ): Promise<DatasetSelection> {
-  // Snapshot the outgoing dataset's UI state before the select's broadcast can move it, then
-  // adopt the new selection with its saved position/filters restored. Every open path (picker,
-  // recent-projects fast-track, agent) funnels through here, so restore is defined once.
+  // Snapshot the outgoing dataset's UI state before the open's broadcast can move it; the
+  // restore for the new selection is defined once, below.
   useStore.getState().saveCurrentDatasetUi();
+  const opened = await api.projects.open(p.id);
   const res = await api.dataset.select({
-    project_root: p.path,
-    dataset_root: p.path,
+    dataset_root: opened.path,
     subject: subject || null,
     date: date || null,
     model_name: modelName || null,
   });
-  recordRecentProject(p.name, p.path);
-  useStore.getState().applyRestoredDataset(res.selection, res.generation);
+  try {
+    recordRecentProject(opened.id);
+  } catch (e) {
+    useStore
+      .getState()
+      .pushToast(
+        `Opened, but the recent projects list was not updated: ${e instanceof Error ? e.message : String(e)}`,
+      );
+  }
+  useStore.getState().applyRestoredDataset(res.selection, { id: opened.id, path: opened.path });
   toastLabelProblem(res.label_problem);
   return res.selection;
 }
 
-/** Open a project like `openWorkspaceProject`, and also write the active-project marker: a
- *  human-initiated open should be what the GUI/ritual find active next time. */
-export async function adoptWorkspaceProject(
-  p: ProjectSummary,
-  date: string,
-  subject: string | null,
-  modelName: string | null,
-): Promise<DatasetSelection> {
-  const selection = await openWorkspaceProject(p, date, subject, modelName);
-  // Fire-and-forget: a rejected write is a toast, never a failed or delayed open.
-  void api.projects.setActive(p.name).catch((e) => {
-    useStore
-      .getState()
-      .pushToast(
-        `Opened ${p.name}, but could not set it as the active project: ` +
-          (e instanceof Error ? e.message : String(e)),
-      );
-  });
-  return selection;
-}
+/** The subjects with labels on date ``d``; empty when nothing is labeled there, so a selector
+ *  never offers a choice that would open a blank canvas. */
+export const subjectsForDate = (p: ProjectSummary, d: string): string[] =>
+  p.subjects_by_date[d] ?? [];
+
+/** The models with predictions on date ``d``; empty when none has predicted there. */
+export const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
 /** The most-recent date that actually has a labeled subject, or null if none do. */
 function newestLabeledDate(p: ProjectSummary): string | null {
-  const labeled = p.dates.filter((d) => (p.subjects_by_date[d] ?? []).length > 0);
+  const labeled = p.dates.filter((d) => subjectsForDate(p, d).length > 0);
   return labeled.length ? defaultDate(labeled) : null;
 }
 
-/** The project (by name) plus the default date/subject/model to open it on; null if the name
- *  is not in the workspace. Prefers the newest date that actually has labels. */
-async function resolveDefaultOpen(name: string): Promise<{
-  p: ProjectSummary;
-  date: string;
-  subject: string | null;
-  model: string | null;
-} | null> {
+/** Open the listed project with ``id`` on sensible defaults, preferring the newest date that
+ *  actually has labels; null when the workspace lists no project with it. */
+export async function openProjectById(id: string): Promise<DatasetSelection | null> {
   const { projects } = await api.projects.list();
-  const p = projects.find((x) => x.name === name);
-  if (!p) return null;
+  const p = projects.find((x) => x.id === id);
+  if (!p || p.id === null) return null;
   // Prefers a labeled date: an agent ingesting a still-unlabeled newer date would
   // otherwise land the human on a blank canvas with no date selector to recover.
   const date = newestLabeledDate(p) ?? defaultDate(p.dates);
-  const subject = (p.subjects_by_date[date] ?? [])[0] ?? null;
-  const model = (p.models_by_date[date] ?? [])[0] ?? null;
-  return { p, date, subject, model };
-}
-
-/** Look a project up by name and open it on sensible defaults; null if it's gone. Writes no
- *  marker (the agent's own `active_project_changed` event uses this). */
-export async function openProjectByName(name: string): Promise<DatasetSelection | null> {
-  const resolved = await resolveDefaultOpen(name);
-  if (!resolved) return null;
-  return openWorkspaceProject(resolved.p, resolved.date, resolved.subject, resolved.model);
-}
-
-/** Same as `openProjectByName`, but adopts (writes the marker): for a human-initiated open,
- *  e.g. the breadcrumb's recent-projects list. */
-export async function adoptProjectByName(name: string): Promise<DatasetSelection | null> {
-  const resolved = await resolveDefaultOpen(name);
-  if (!resolved) return null;
-  return adoptWorkspaceProject(resolved.p, resolved.date, resolved.subject, resolved.model);
+  const subject = subjectsForDate(p, date)[0] ?? null;
+  const model = modelsForDate(p, date)[0] ?? null;
+  return openWorkspaceProject({ ...p, id: p.id }, date, subject, model);
 }

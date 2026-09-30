@@ -14,6 +14,7 @@ import {
 } from "@/api/inference";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
@@ -107,7 +108,7 @@ function statusBadgeClass(status: InferenceStatus): string {
 
 export function InferenceTab() {
   const dataset = useStore((s) => s.gui.dataset);
-  const projectRoot = dataset.project_root;
+  const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = dataset.dataset_root;
 
   const [models, setModels] = useState<RegisteredModel[]>([]);
@@ -150,7 +151,7 @@ export function InferenceTab() {
   const refreshModels = useCallback(() => {
     if (!projectRoot) return;
     void resultsApi
-      .registeredModels(projectRoot)
+      .registeredModels()
       .then((r) => {
         setModels(r.models ?? []);
         setModelsError(null);

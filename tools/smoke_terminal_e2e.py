@@ -44,18 +44,20 @@ def terminal_ws_url(client: Any, session_id: str) -> str:
 
 
 def main(workspace: str | None = None) -> int:
-    """Drive the smoke flow against ``workspace`` (a fresh temp directory when omitted),
-    never the machine's own workspace: the first request this process issues binds the served
-    app's platform-state root from whatever project that workspace's active-project marker
-    names, and every audit line the session writes lands there.
+    """Drive the smoke flow with ``TCIP_WORKSPACE`` set to ``workspace`` (a fresh temp directory
+    when omitted) and the backend started on it, never the machine's own workspace, so nothing
+    the session writes lands in a real project.
     """
     os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(prefix="terminal-smoke-ws-")
 
     from fastapi.testclient import TestClient
 
+    from tcip_mcp.workspace import workspace_from_environment
     from tcip_web.app import app
     from tcip_web.routes import terminal as terminal_routes
+    from tcip_web.state import store
 
+    store.configure(workspace_from_environment(), ())
     client = TestClient(app, base_url="http://127.0.0.1")
 
     status = client.get("/api/terminal/status").json()

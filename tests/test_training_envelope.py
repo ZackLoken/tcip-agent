@@ -42,7 +42,8 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name,
                    config={**record["config"], "data": record["resolved"]["data"]},
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(run_dir))
     return TrainContext(run=run, **{"train_loader": None, **kwargs}), run_dir
 
 
@@ -85,13 +86,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     checkpoint = completed_checkpoint(run_dir)
     assert checkpoint is not None and checkpoint["kind"] == KIND_TCIP_MODULE
     assert checkpoint["path"].endswith("model_best.pt")
-    verified = load_registered_checkpoint(checkpoint["path"], project_path=str(tmp_path))
+    verified = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
     assert verified.sha256 == checkpoint["sha256"]
     assert verified.experiment_id == run_dir.name
 
     from tcip_mcp.pipelines.resolution import corroborated_producer
 
-    assert corroborated_producer(checkpoint["sha256"], run_dir.name) == (
+    assert corroborated_producer(checkpoint["sha256"], run_dir.name, project=tmp_path) == (
         checkpoint["sha256"], run_dir.name)
 
 
@@ -162,6 +163,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.generic_trainer import train
+    from tcip_mcp.registry_paths import stored_path
     from tests.tiny_trainer_fixtures import trainer_run
 
     images_dir = tmp_path / "images"
@@ -191,7 +193,8 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         "seed": 3,
     }
     # Generate the resumable checkpoint directly (not through the envelope).
-    train(trainer_run(dict(cfg), tmp_path / "out", has_val_loader=False, id="resume-source"),
+    train(trainer_run(dict(cfg), tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="resume-source"),
           build_loader())
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
@@ -202,7 +205,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     run_training_envelope(ctx)
 
     assert ctx.run.status == "completed"
-    assert read_record(run_dir / RUN_FILE)["resume_from"] == str(ckpt)
+    assert read_record(run_dir / RUN_FILE)["resume_from"] == stored_path(ckpt, tmp_path)
     assert completed_checkpoint(run_dir) is not None
 
 

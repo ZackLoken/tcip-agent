@@ -36,7 +36,7 @@ def test_a_matching_fingerprint_reports_ok(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
     _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(root))
+    result = register_dataset(root, str(root), "chestnut")
     assert "error" not in result, result
 
     completed = _run_script(str(root))
@@ -49,7 +49,7 @@ def test_a_real_content_change_still_reports_changed(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
     _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(root))
+    result = register_dataset(root, str(root), "chestnut")
     assert "error" not in result, result
 
     (root / "annotations" / "2024-01-01" / "b.json").write_text(
@@ -67,7 +67,7 @@ def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path
     root = tmp_path / "dataset"
     root.mkdir()
     _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(root))
+    result = register_dataset(root, str(root), "chestnut")
     assert "error" not in result, result
 
     identity = require_dataset_identity(root)
@@ -84,7 +84,7 @@ def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path
 def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
-    result = register_dataset(str(root), "chestnut", str(root))
+    result = register_dataset(root, str(root), "chestnut")
     assert "error" not in result, result
     assert result["fingerprint"] is None
 
@@ -101,7 +101,7 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
 def test_a_moved_dataset_is_reported_moved(tmp_path):
     root = tmp_path / "dataset"
     _real_dataset(root)
-    result = register_dataset(str(root), "chestnut", str(tmp_path))
+    result = register_dataset(tmp_path, str(root), "chestnut")
     assert "error" not in result, result
 
     # The registry now names a different, no-longer-existing path for this same id/fingerprint,

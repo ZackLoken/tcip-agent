@@ -336,18 +336,14 @@ export function AnnotateTab() {
   }, [registry, colorTick]);
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
-    if (!imgPath || !dataset.project_root) return null;
+    const project = useStore.getState().openProject;
+    if (!imgPath || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
     if (loadedPathsRef.current?.image !== imgPath) return null;
-    // Binding-presence gate: a dataset without an adopted generation (pre-feature data, a
-    // deleted binding, an export/adopt pass) must stop pushing rather than fabricate one.
-    const generation = useStore.getState().bindingGeneration;
-    useStore.getState().setCanvasBindingMissing(generation == null);
-    if (generation == null) return null;
     const host = measureCanvasHost();
     return {
-      binding_generation: generation,
+      project_id: project.id,
       tab: "annotate",
       image_path: imgPath,
       image: currentImageName ?? "",
@@ -455,7 +451,6 @@ export function AnnotateTab() {
         setIoError("This dataset has no annotations directory set; select one to save.");
       return;
     }
-    const projectRoot = useStore.getState().gui.dataset.project_root;
     const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 
     let result;
@@ -469,7 +464,6 @@ export function AnnotateTab() {
           points: c.points,
           imageAnnotations: c.imageAnnotations,
         }),
-        project_root: projectRoot,
         base_mtime: paths.mtime,
         user: useStore.getState().user,
       });
@@ -512,7 +506,7 @@ export function AnnotateTab() {
     // Heals an unconfirmed status from the saved content; a confirmed name (complete or
     // negative) is a human mark, rewritten only through the toolbar's re-confirm action.
     const name = paths.image.split(/[/\\]/).pop() ?? "";
-    if (projectRoot && name) {
+    if (name) {
       const current = useStore.getState().imageStatus.byImage[name];
       const confirmed = current === "complete" || current === "negative";
       if (!confirmed) {
@@ -528,17 +522,15 @@ export function AnnotateTab() {
         const newStatus: ImageStatus = hasContent ? "partial" : "unannotated";
         if (current !== newStatus) {
           setImageStatus(name, newStatus);
-          if (dataset.subject) {
+          if (dataset.subject && dataset.dataset_root) {
             // Best-effort status write; the labels are already saved.
             void subjectsApi
               .setImageStatus(
-                projectRoot,
                 name,
                 newStatus,
                 dataset.subject,
                 dataset.date,
                 dataset.dataset_root,
-                dataset.annotations_dir,
                 useStore.getState().user || undefined,
               )
               .catch((e: unknown) => {
@@ -684,8 +676,7 @@ export function AnnotateTab() {
   function emitImageSessionEvent(imageName: string) {
     const state = useStore.getState();
     const tracking = state.sessionTracking;
-    const projectRoot = state.gui.dataset.project_root;
-    if (!projectRoot) return;
+    if (!state.openProject) return;
     if (tracking.currentImageName !== imageName || tracking.imageEnterTimeMs === null) return;
 
     const c = state.canvas;
@@ -699,7 +690,6 @@ export function AnnotateTab() {
     clearSessionTracking();
     void sessionsApi
       .imageEvent({
-        project_root: projectRoot,
         image_name: imageName,
         session_seconds_delta: Number(elapsedSeconds.toFixed(2)),
         annotations_added_delta: tracking.annotationsAddedDelta,

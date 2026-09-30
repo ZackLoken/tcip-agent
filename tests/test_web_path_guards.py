@@ -12,10 +12,11 @@ from pathlib import Path
 import pytest
 
 from tcip_web.paths import (
-    allowed_image_roots,
     assert_path_allowed,
+    image_roots_from_environment,
     safe_join,
 )
+from tcip_web.state import store
 from tcip_web.trust_boundary import origin_allowed
 
 # -- Origin trust boundary ------------------------------------------------
@@ -48,7 +49,7 @@ def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
     assert origin_allowed(None, LOCAL_ARRIVAL)
 
 
-# -- TCIP_IMAGE_ROOTS containment -----------------------------------------
+# -- containment under the backend's workspace and image roots ------------
 
 
 def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(tmp_path, monkeypatch) -> None:
@@ -66,7 +67,7 @@ def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(tmp_path, monkey
     secret = sibling / "keys.pem"
     secret.write_bytes(b"x")
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(allowed))
+    store.configure(allowed.resolve(), ())
     assert assert_path_allowed(str(inside)) == inside.resolve()
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(secret))
@@ -96,7 +97,9 @@ def test_every_configured_root_is_honored_not_only_the_first(
     monkeypatch.setenv(
         "TCIP_IMAGE_ROOTS", os.pathsep.join([str(root_a), "  ", str(second)])
     )
-    assert allowed_image_roots() == [root_a.resolve(), second.resolve()]
+    roots = image_roots_from_environment()
+    assert roots == (root_a.resolve(), second.resolve())
+    store.configure(store.workspace, roots)
     assert assert_path_allowed(str(img_a)) == img_a.resolve()
     assert assert_path_allowed(str(img_b)) == img_b.resolve()
     with pytest.raises(ValueError, match="outside the allowed roots"):
@@ -111,7 +114,7 @@ def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch)
     what admits this path is the workspace, not that list.
     """
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
-    assert allowed_image_roots() == []
+    assert image_roots_from_environment() == ()
 
     images = tmp_path / "project" / "images"
     images.mkdir(parents=True)
@@ -126,7 +129,7 @@ def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch)
     assert assert_path_allowed(relative) == target.resolve()
 
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", "   ")
-    assert allowed_image_roots() == []
+    assert image_roots_from_environment() == ()
     assert assert_path_allowed(str(dotted)) == target.resolve()
 
 
@@ -158,15 +161,15 @@ def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
     assert safe_join(base, "images", "IMG_0007.JPG") == real.resolve()
 
 
-# -- the workspace's own exclusions: .removed, and a project pending removal -------------
+# -- the workspace's own exclusion: .removed ---------------------------------------------
 
 
-def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path, monkeypatch) -> None:
+def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path) -> None:
     """``.removed`` sits directly under the workspace, itself an allowed root, so the exclusion
     has to be by name: nothing else keeps a moved-project archive out of a guarded route."""
-    ws = tmp_path / "ws"
+    ws = (tmp_path / "ws").resolve()
     ws.mkdir()
-    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    store.configure(ws, ())
     holding = ws / ".removed" / "sample_plot_alpha-20260304T120000Z"
     holding.mkdir(parents=True)
     (holding / "images").mkdir()
@@ -175,38 +178,6 @@ def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path, monkeypa
 
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(target))
-
-
-def test_a_project_pending_removal_is_excluded_by_identity(tmp_path, monkeypatch) -> None:
-    """A pending project's own root, and a path nested under it, are refused from the moment
-    its marker lands; the same paths were admitted before the marker existed."""
-    import tcip_store as ts
-    from tcip_mcp import workspace
-
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    proj = ws / "sample_plot_alpha"
-    (proj / ".tcip").mkdir(parents=True)
-    (proj / "images").mkdir()
-    nested = proj / "images" / "IMG_0001.JPG"
-    nested.write_bytes(b"x")
-
-    assert assert_path_allowed(str(proj)) == proj.resolve()
-    assert assert_path_allowed(str(nested)) == nested.resolve()
-
-    ts.replace(
-        workspace.pending_removal_key(proj),
-        {"requested_at": "20260304T120000Z", "requested_by": "user:tester",
-         "archive_path": "archive.zip", "holding_dir": "holding",
-         "external_roots": [], "dependent_projects": []},
-        expect=ts.Version.ABSENT,
-    )
-
-    with pytest.raises(ValueError, match="pending removal"):
-        assert_path_allowed(str(proj))
-    with pytest.raises(ValueError, match="pending removal"):
-        assert_path_allowed(str(nested))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="drive-relative parts are a Windows path shape")

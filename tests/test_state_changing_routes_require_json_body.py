@@ -114,10 +114,13 @@ def test_every_state_changing_route_declares_a_json_body_model() -> None:
     assert not undeclared, f"routes with no JSON body model: {undeclared}"
 
 
-def test_a_declared_body_model_admits_an_empty_json_object(client: TestClient) -> None:
+def test_a_declared_body_model_admits_an_empty_json_object(
+    client: TestClient, opened_project
+) -> None:
     """The rail must admit valid work: each route that carries no fields of its own still
     accepts the ``{}`` its real caller sends, and reaches the handler's own outcome rather than
-    a 422 from the body model rejecting the call. An unknown id is a 404 everywhere the handler
+    a 422 from the body model rejecting the call. A project is open, so each handler reaches
+    its own lookup. An unknown id is a 404 everywhere the handler
     resolves an id before acting; the trial-tensorboard stop route acts on a computed process
     key with no id lookup of its own, so an unknown trial is a no-op 200, not a 404.
     """

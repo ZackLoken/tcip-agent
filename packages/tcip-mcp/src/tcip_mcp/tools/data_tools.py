@@ -8,14 +8,14 @@ from pathlib import Path
 
 import tcip_store
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SEED, DEFAULT_VAL_RATIO
 
 
-@mcp.tool()
+@tool()
 @audited
-def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict:
+def freeze_selection(project: Path, experiment_id: str, output_path: str | None = None) -> dict:
     """Freeze a finished run's own drawn train/val partition into a selection, so a later run can
     bind to the identical partition instead of drawing its own.
 
@@ -53,7 +53,7 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     from tcip_mcp.pipelines.resolution import moved_since_run
 
     try:
-        resolved = run_resolution(experiment_id)
+        resolved = run_resolution(experiment_id, project=project)
     except ValueError as exc:
         return {"error": str(exc)}
     partition = resolved["partition"]
@@ -88,7 +88,7 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
     if output_path is None:
         output_path = str(dataset_root / "splits" / f"frozen-{experiment_id}")
     out_dir = Path(output_path)
-    existing, existing_error = read_selection_checked(out_dir)
+    existing, existing_error = read_selection_checked(out_dir, project=project)
     if existing is not None or existing_error is not None:
         return {"error": f"a selection already exists at {output_path!r}: "
                          f"{existing_error or 'freeze_selection never overwrites one.'}"}
@@ -102,7 +102,7 @@ def freeze_selection(experiment_id: str, output_path: str | None = None) -> dict
         write_selection(out_dir, Selection(
             samples=tuple(samples), scope=scope, seed=partition["seed"],
             group_by=partition["group_by"], dataset_fingerprint=fingerprint,
-        ))
+        ), project=project)
     except ValueError as exc:
         return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
     return {
@@ -273,9 +273,10 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
     return entries
 
 
-@mcp.tool()
+@tool()
 @audited
 def draw_splits(
+    project: Path,
     folder_path: str,
     train_ratio: float = 0.8,
     val_ratio: float = DEFAULT_VAL_RATIO,
@@ -594,7 +595,7 @@ def draw_splits(
                           if sample.identity in drew),
             scope=admissions[0].scope,
             seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
-        ), drew))
+        ), drew), project=project)
     except ValueError as exc:
         return {"error": str(exc)}
 

@@ -190,11 +190,12 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
     from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img = str(sam_project / "images" / "occluded.jpg")
-    proposed = propose_annotations(image_path=img, engine_params={"model_type": "hiera_t"})
+    proposed = propose_annotations(sam_project, image_path=img,
+                                   engine_params={"model_type": "hiera_t"})
     assert "error" not in proposed, proposed
     assert proposed["candidate_count"] == 1
 
-    accepted = stage_proposals(image_path=img,
+    accepted = stage_proposals(sam_project, image_path=img,
                                 assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1

@@ -50,8 +50,8 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     exp_id = f"expAdmit_{date}"
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id=exp_id, date=date)
     dataset_root, source = built["dataset_root"], built["bucket"]
-    run_files_before = sorted(p.name for p in experiment_dir(exp_id).iterdir())
-    original_stamp = earn_validated_stamp(source, dataset_root, trait=_EARNED_TRAIT)
+    run_files_before = sorted(p.name for p in experiment_dir(exp_id, project=tmp_path).iterdir())
+    original_stamp = earn_validated_stamp(tmp_path, source, dataset_root, trait=_EARNED_TRAIT)
     original_stems = bucket_stems(source)
     live_reference = str(image_path(dataset_root, date, "img", ".png"))
     assert find_prediction(live_reference) == source / "img.json"
@@ -61,7 +61,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     live_class = _bundle_class(account_for(dataset_root), source / "img.json")
     assert live_class != "not_walked"
 
-    result = clear_prediction_bucket(str(source), "clearing for a fresh run")
+    result = clear_prediction_bucket(tmp_path, str(source), "clearing for a fresh run")
     assert "error" not in result, result
     assert result["resumed"] is False
     assert result["source_republished"] is False
@@ -102,7 +102,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     from tcip_mcp.store_catalog import project_roots
     from tcip_mcp.tools.project_tools import register_dataset
 
-    registered = register_dataset(str(dataset_root), "black_locust")
+    registered = register_dataset(dataset_root, str(dataset_root), "black_locust")
     assert "error" not in registered, registered
     roots = {Path(p).resolve() for p, _layout in project_roots(dataset_root)}
     assert cleared_path.resolve() in roots
@@ -112,7 +112,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
     assert cleared_class == live_class
 
     # The clear is recorded on the destination alone; the producing run's directory is untouched.
-    assert sorted(p.name for p in experiment_dir(exp_id).iterdir()) == run_files_before
+    assert sorted(p.name for p in experiment_dir(exp_id, project=tmp_path).iterdir()) == run_files_before
 
     # The dataset audit log carries the door's own entry, naming the reason.
     from tcip_store import read_log
@@ -129,7 +129,7 @@ def test_admitting_round_trip_clears_and_admits_republication(tmp_path, monkeypa
 
     # A second run in place now publishes, and find_prediction answers the source path again.
     second = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
+        tmp_path, str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
     assert "error" not in second, second
     assert bucket_stems(source) == {"img"}
     assert find_prediction(live_reference) == source / "img.json"

@@ -1,10 +1,11 @@
 """HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the
-declarations of the stores and the tab vocabulary (``ActiveTab``) the web package owns.
+declarations of the stores, the GUI state shape and the tab vocabulary (``ActiveTab``) the web
+package owns.
 
-Port discovery order:
+Port discovery order, under the workspace the caller names:
   1. The port record under the workspace root: the port actually bound, so a substituted port
-     (the requested one was taken) is still the one found.
-  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when no record parses.
+     (the requested one was taken) is still the one found. A record that does not parse raises.
+  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when there is no record.
   3. Default: 8765.
 
 Host discovery:
@@ -20,13 +21,12 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal, Optional, get_args
 
 import tcip_store
+from pydantic import BaseModel, ConfigDict, Field
 from tcip_store import LOG_JSON, RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
-
-from tcip_mcp.project_paths import platform_state_root
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +51,14 @@ register_store(
 )
 
 
-def backend_port_key(root: Path | str | None = None) -> Key:
-    """Where the backend publishes the port it bound, for MCP tools in other processes.
+def backend_port_key(workspace: Path) -> Key:
+    """Where the backend serving ``workspace`` publishes the port it bound, for MCP tools in other
+    processes.
 
     ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
-        first. ``root`` defaults to the workspace root, which every process on this machine
-        resolves identically.
+        first.
     """
-    if root is None:
-        from tcip_mcp import workspace
-
-        root = workspace.workspace_root(create=False)
-    return Key(BACKEND_PORT_STORE, str(Path(root).resolve()), _PORT_PARTS)
+    return Key(BACKEND_PORT_STORE, str(Path(workspace).resolve()), _PORT_PARTS)
 
 
 _SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
@@ -84,13 +80,13 @@ register_store(
 )
 
 
-def gui_snapshot_key(project_root: str | Path) -> Key:
+def gui_snapshot_key(project: str | Path) -> Key:
     """This project's persisted GUI snapshot.
 
     ``last_writer_wins``: the backend holds the live state in memory and writes the whole snapshot
-        from it. ``durable=False``: the snapshot is rewritten on a debounce cycle.
+    from it on each change. ``durable=False``: a lost snapshot costs a re-selection, not history.
     """
-    return Key(GUI_SNAPSHOT_STORE, str(project_root), _SNAPSHOT_PARTS)
+    return Key(GUI_SNAPSHOT_STORE, str(project), _SNAPSHOT_PARTS)
 
 
 _CANVAS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
@@ -118,55 +114,20 @@ for _canvas_store in (CANVAS_META_STORE, CANVAS_GEOMETRY_STORE):
     )
 
 
-def canvas_meta_key(project_root: str) -> Key:
+def canvas_meta_key(project: str) -> Key:
     """The small meta document every push overwrites.
 
     ``last_writer_wins``: each push writes the document whole from the payload it was given and
         reads nothing first. ``durable=False``: the next push repaints a lost one.
     """
-    return Key(CANVAS_META_STORE, project_root, _META_PARTS)
+    return Key(CANVAS_META_STORE, project, _META_PARTS)
 
 
-def canvas_geometry_key(project_root: str) -> Key:
+def canvas_geometry_key(project: str) -> Key:
     """The display-resolved geometry a full push writes, on the same terms as the meta
     document, and written before it so a reader pairing new meta with old geometry sees an
     identity mismatch rather than a false match."""
-    return Key(CANVAS_GEOMETRY_STORE, project_root, _GEOMETRY_PARTS)
-
-
-_BINDING_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The canvas-open binding, one record per workspace."""
-
-CANVAS_OPEN_BINDING_STORE = "canvas_open_binding"
-_BINDING_PARTS = ("canvas_open_binding",)
-register_store(
-    StoreDescriptor(
-        name=CANVAS_OPEN_BINDING_STORE,
-        kind="record",
-        key_fields=("document",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="cas",
-        locator=_BINDING_DOC,
-    )
-)
-
-
-def canvas_open_binding_key(*, create: bool = True) -> Key:
-    """Which root the GUI currently has open: ``{generation, root, project_name, issued_at,
-    released}``.
-
-    Workspace-scoped and written compare-and-set: a select bumps ``generation`` when ``root``
-    changed or the current record was released, before writing a fresh, unreleased record. A
-    release rewrites a record naming the project being released with ``generation + 1`` and
-    ``released: True``, never deleting it. ``released`` is additive and optional, absent from every
-    record a select writes. ``root`` is the server's own resolved open root, never a client string;
-    ``project_name`` is the workspace project name when ``root`` is one, else ``None``. ``create``
-    threads through to the workspace root.
-    """
-    from tcip_mcp import workspace
-
-    return Key(CANVAS_OPEN_BINDING_STORE, str(workspace.workspace_root(create=create)), _BINDING_PARTS)
+    return Key(CANVAS_GEOMETRY_STORE, project, _GEOMETRY_PARTS)
 
 
 _CAPTURE_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
@@ -191,12 +152,6 @@ def learning_capture_key(root: str | Path) -> Key:
     return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
 
 
-def current_root() -> str:
-    """This process's platform-state root, resolved: the value a job's own ``platform_root``
-    field carries."""
-    return str(platform_state_root().resolve())
-
-
 ANNOTATION_STATS_STORE = "annotation_stats"
 _ANNOTATION_STATS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 _ANNOTATION_STATS_PARTS = ("annotation_stats",)
@@ -214,91 +169,9 @@ register_store(
 )
 
 
-def annotation_stats_key(project_root: str) -> Key:
+def annotation_stats_key(project: str) -> Key:
     """The project's per-image annotation timings and session rollups, written compare-and-swap."""
-    return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
-
-
-class GuiBindingUnreadable(RuntimeError):
-    """The canvas-open binding record could not be read, or read as something that does not carry
-    the ``root`` field a comparison needs: a store error, an OS-level failure, or a record shape it
-    cannot trust.
-    """
-
-
-def read_canvas_binding() -> dict[str, Any] | None:
-    """Read the canvas-open binding record as-is, or ``None`` when none exists yet. Raises
-    :class:`GuiBindingUnreadable` when the record cannot be read.
-    """
-    try:
-        return tcip_store.read(canvas_open_binding_key(create=False), default=None)
-    except (tcip_store.StoreError, OSError) as exc:
-        raise GuiBindingUnreadable(f"Could not read the canvas-open binding: {exc}") from exc
-
-
-def binding_released_or_absent(binding: dict[str, Any] | None) -> bool:
-    """Whether ``binding`` means nothing is open: absent, or marked ``released`` by
-    :func:`tcip_mcp.project_removal.release_project_binding`.
-    """
-    return binding is None or bool(binding.get("released"))
-
-
-def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
-    """Whether the GUI's currently open project is ``root``, and the binding compared against.
-
-    Returns ``(False, None)`` when no binding record exists at all; ``(False, binding)`` before
-    ``root`` is even compared when the binding was released (:func:`binding_released_or_absent`).
-    Otherwise ``(matches, binding)``. Raises :class:`GuiBindingUnreadable` when the record cannot
-    be read, or reads as a mapping with no ``root`` field.
-    """
-    binding = read_canvas_binding()
-    if binding is None:
-        return False, None
-    if binding_released_or_absent(binding):
-        return False, binding
-    try:
-        bound_root = binding["root"]
-    except KeyError as exc:
-        raise GuiBindingUnreadable(
-            f"Canvas-open binding record carries no 'root' field: {binding!r}"
-        ) from exc
-    matches = tcip_store.canonical_path(bound_root) == tcip_store.canonical_path(str(root))
-    return matches, binding
-
-
-def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[str, Any]:
-    """Name both sides of a binding disagreement (a foreign project, an unnamed root, or no binding
-    at all) and the step that converges them.
-
-    A binding on a non-workspace root (a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry), or no
-    binding at all, converges only through the GUI's own (re)selection. A released binding reports
-    the same as no binding at all.
-    """
-    from tcip_mcp import workspace
-
-    nothing_open = binding_released_or_absent(binding)
-    bound_root = binding.get("root") if binding is not None and not nothing_open else None
-    bound_name = binding.get("project_name") if binding is not None and not nothing_open else None
-    own_name = workspace.workspace_project_name(Path(own_root))
-    if bound_name:
-        converge = (
-            f"activate_project({bound_name!r}) repins this process to the GUI's open project "
-            "and steers the GUI through the panel-event chain"
-        )
-    elif bound_root:
-        converge = (
-            f"the GUI's open root ({bound_root}) has no workspace name for activate_project "
-            "to adopt; reselect this project in the GUI instead"
-        )
-    else:
-        converge = "nothing is open in the GUI; opening a project there creates a binding"
-    return {
-        "bound_project": bound_name,
-        "bound_root": bound_root,
-        "pinned_project": own_name,
-        "pinned_root": own_root,
-        "converge": converge,
-    }
+    return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
 ActiveTab = Literal[
@@ -309,13 +182,185 @@ validates against."""
 TAB_NAMES = get_args(ActiveTab)
 
 AnnotateMode = Literal["box", "polygon", "point", "map"]
-"""The Annotate canvas's tool modes: the vocabulary ``tcip_web.state.GuiState.mode`` holds. The
-first three draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and
-authors nothing. Declared here, not in ``tcip_web``, for the same reason as ``ActiveTab``: the
-agent's own ``focus_human_attention`` tool validates a caller-supplied mode against this vocabulary and cannot
-import ``tcip_web``, so the vocabulary is the protocol's, and ``tcip_web.state`` imports it."""
+"""The Annotate canvas's tool modes: the vocabulary :attr:`GuiState.mode` holds. The first three
+draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and authors nothing."""
 
 ANNOTATE_MODES = get_args(AnnotateMode)
+
+ReviewFilterType = Literal["all", "tp", "fp", "fn"]
+"""Which review outcomes the Review tab walks."""
+
+_TRANSPORT = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
+"""The GUI state models' config: no field beyond the declared ones, and every field present in
+what they serialize to."""
+
+
+class DatasetSelection(BaseModel):
+    """Which dataset the GUI is looking at inside the open project, with the references the
+    browser reads it through; every path is built by :func:`selection_for`, never by the
+    browser."""
+
+    model_config = _TRANSPORT
+
+    dataset_root: Optional[str] = None
+    subject: Optional[str] = None
+    date: Optional[str] = None
+    model_name: Optional[str] = None
+    image_list: list[str] = Field(default_factory=list)
+    current_image_index: int = 0
+    images_dir: Optional[str] = None
+    annotations_dir: Optional[str] = None
+    predictions_dir: Optional[str] = None
+    # Each listed image's own ground-truth and prediction record, by its name in image_list.
+    label_paths: dict[str, str] = Field(default_factory=dict)
+    prediction_paths: dict[str, str] = Field(default_factory=dict)
+
+
+class ViewState(BaseModel):
+    """Pan/zoom state shared between the Annotate and Review tabs."""
+
+    model_config = _TRANSPORT
+
+    scale: float = 1.0
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+
+
+class ReviewFilters(BaseModel):
+    """The Review tab's thresholds, outcome filter, subject filter and position."""
+
+    model_config = _TRANSPORT
+
+    iou_threshold: float = 0.5
+    conf_threshold: float = 0.25
+    filter_type: ReviewFilterType = "all"
+    # A subject name, or "all".
+    filter_class: str = "all"
+    detection_idx: int = 0
+
+
+class GuiState(BaseModel):
+    """The GUI state the backend holds for its open project and broadcasts to browsers; only
+    ``dataset`` is the backend's own, the rest advisory."""
+
+    model_config = _TRANSPORT
+
+    active_tab: ActiveTab = "annotate"
+    dataset: DatasetSelection = Field(default_factory=DatasetSelection)
+    view: ViewState = Field(default_factory=ViewState)
+    mode: AnnotateMode = "box"
+    active_subject: Optional[str] = None
+    review: ReviewFilters = Field(default_factory=ReviewFilters)
+
+
+class _DatasetChoice(BaseModel):
+    """The chosen part of a selection, the only part ``gui.json`` holds; ``dataset_root`` spelled
+    by :func:`tcip_mcp.registry_paths.stored_path` against the project."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_root: str
+    subject: Optional[str]
+    date: Optional[str]
+    model_name: Optional[str]
+    current_image_index: int
+
+
+class _PersistedGuiState(BaseModel):
+    """``gui.json``'s whole shape: :class:`GuiState` with its dataset held as the choice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    active_tab: ActiveTab
+    dataset: Optional[_DatasetChoice]
+    view: ViewState
+    mode: AnnotateMode
+    active_subject: Optional[str]
+    review: ReviewFilters
+
+
+def require_whole(model: BaseModel, where: str) -> None:
+    """Refuse (``ValueError``, naming it under ``where``) a field of ``model``, or of a model
+    nested in it, that the input it was validated from did not state: a GUI record decodes as its
+    producer's whole shape, never with a default standing in for a missing field."""
+    missing = sorted(set(type(model).model_fields) - model.model_fields_set)
+    if missing:
+        raise ValueError(f"{where} states no {missing}")
+    for name in type(model).model_fields:
+        value = getattr(model, name)
+        if isinstance(value, BaseModel):
+            require_whole(value, f"{where}.{name}")
+
+
+def selection_for(dataset_root: Path, subject: Optional[str], date: Optional[str],
+                  model_name: Optional[str], current_image_index: int) -> DatasetSelection:
+    """The selection a choice names: its image list and every reference the browser reads, all
+    through :mod:`tcip_mcp.dataset_layout`. ``current_image_index`` is clamped to the list.
+    Raises ``AmbiguousImageStem`` for a date directory holding two images of one stem."""
+    from tcip_mcp.dataset_layout import (
+        annotation_dir, annotation_path, image_dir, prediction_dir, prediction_path,
+    )
+    from tcip_mcp.pipelines.image_utils import logical_images_by_name
+
+    named = logical_images_by_name(image_dir(dataset_root, date)) if date else {}
+    image_list = list(named)
+    index = max(0, min(current_image_index, len(image_list) - 1)) if image_list else 0
+    bucket = bool(model_name and date)
+    return DatasetSelection(
+        dataset_root=str(dataset_root),
+        subject=subject,
+        date=date,
+        model_name=model_name,
+        image_list=image_list,
+        current_image_index=index,
+        images_dir=str(image_dir(dataset_root, date)) if date else None,
+        annotations_dir=str(annotation_dir(dataset_root, date)) if date else None,
+        predictions_dir=str(prediction_dir(dataset_root, model_name, date)) if bucket else None,
+        label_paths={name: str(annotation_path(dataset_root, date, stem))
+                     for name, stem in named.items()},
+        prediction_paths={name: str(prediction_path(dataset_root, model_name, date, stem))
+                          for name, stem in named.items()} if bucket else {},
+    )
+
+
+def current_image(selection: DatasetSelection) -> Optional[str]:
+    """The image the selection's index names, under its images directory, or ``None`` when it
+    names none."""
+    if selection.images_dir is None or not selection.image_list:
+        return None
+    return str(Path(selection.images_dir) / selection.image_list[selection.current_image_index])
+
+
+def write_gui_snapshot(project: Path, state: GuiState) -> None:
+    """Persist ``state`` as ``project``'s ``gui.json``, its dataset held as the choice."""
+    from tcip_mcp.registry_paths import stored_path
+
+    dataset = state.dataset
+    choice = None if dataset.dataset_root is None else _DatasetChoice(
+        dataset_root=stored_path(dataset.dataset_root, project), subject=dataset.subject,
+        date=dataset.date, model_name=dataset.model_name,
+        current_image_index=dataset.current_image_index)
+    document = _PersistedGuiState(**{**state.model_dump(exclude={"dataset"}), "dataset": choice})
+    tcip_store.replace(gui_snapshot_key(project), document.model_dump(mode="json"))
+
+
+def read_gui_snapshot(project: Path) -> Optional[GuiState]:
+    """``project``'s persisted GUI state, its selection rebuilt through :func:`selection_for`, or
+    ``None`` when it has none. A snapshot that does not decode as its whole shape raises
+    (``ValidationError``, ``ValueError`` from :func:`require_whole`, or the store's own error), as
+    does a selection that will not build."""
+    from tcip_mcp.registry_paths import resolved_registry_path
+
+    raw = tcip_store.read(gui_snapshot_key(project), default=None)
+    if raw is None:
+        return None
+    persisted = _PersistedGuiState.model_validate(raw)
+    require_whole(persisted, "gui.json")
+    choice = persisted.dataset
+    dataset = DatasetSelection() if choice is None else selection_for(
+        resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,
+        choice.model_name, choice.current_image_index)
+    return GuiState(**{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset})
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
 # The pusher and the receiver both validate against this one set, so neither drifts apart.
@@ -326,14 +371,12 @@ VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 PANEL_EVENT_LABELS_WRITTEN = "labels_written"
 PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus"
 PANEL_EVENT_REVIEW_FOCUS = "review_focus"
-PANEL_EVENT_ACTIVE_PROJECT_CHANGED = "active_project_changed"
 PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request"
 
 PLATFORM_PANEL_EVENTS = (
     PANEL_EVENT_LABELS_WRITTEN,
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
-    PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
     PANEL_EVENT_CANVAS_STATE_REQUEST,
 )
 
@@ -342,52 +385,50 @@ def resolve_web_host() -> str:
     return os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
 
 
-def resolve_web_port() -> int:
-    """Return the port the FastAPI backend is listening on, in the order the module docstring
-    gives: the record under the workspace root, then ``TCIP_WEB_PORT``, then the default. An absent
-    record and an unparseable one both fall through rather than raising.
+def resolve_web_port(workspace: Path) -> int:
+    """Return the port the FastAPI backend serving ``workspace`` is listening on, in the order the
+    module docstring gives: the record under the workspace root, then ``TCIP_WEB_PORT``, then the
+    default. Raises ``ValueError`` naming a recorded port or a ``TCIP_WEB_PORT`` that is not an
+    integer.
     """
-    from tcip_mcp import workspace
-
-    recorded = tcip_store.read(backend_port_key(workspace.workspace_root(create=False)), default=None)
-    if recorded is not None:
-        try:
-            return int(recorded.strip())
-        except ValueError:
-            logger.warning("Cannot parse recorded port %r; using default", recorded)
-
-    env = os.environ.get("TCIP_WEB_PORT")
-    if env:
-        try:
-            return int(env)
-        except ValueError:
-            logger.warning("TCIP_WEB_PORT=%r is not an integer; falling back", env)
-
-    return DEFAULT_PORT
+    recorded = tcip_store.read(backend_port_key(workspace), default=None)
+    try:
+        if recorded is not None:
+            return int(recorded)
+        env = os.environ.get("TCIP_WEB_PORT")
+        return int(env) if env else DEFAULT_PORT
+    except ValueError as exc:
+        raise ValueError(f"the backend's port under {workspace} does not read as a port: "
+                         f"{exc}") from exc
 
 
-def backend_url(path: str) -> str:
-    """Build a full URL to the tcip-web backend for the given path."""
+def backend_url(workspace: Path, path: str) -> str:
+    """Build a full URL to the tcip-web backend serving ``workspace`` for the given path."""
     host = resolve_web_host()
-    port = resolve_web_port()
+    port = resolve_web_port(workspace)
     if not path.startswith("/"):
         path = "/" + path
     return f"http://{host}:{port}{path}"
 
 
 def post_panel_event(
+    project: Path,
+    workspace: Path,
     panel: str,
     event_type: str,
     data: dict[str, Any],
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
-    """POST a panel event to the running tcip-web backend.
+    """POST a panel event for ``project`` to the tcip-web backend serving ``workspace``, which
+    delivers it only when that project is the one it has open.
 
     Every return carries a ``delivered`` bool so callers don't mistake "backend down"
     for success. Returns one of:
       * ``{"status": "ok", "delivered": True, "response": ..., ...}`` on 2xx response, where
         ``response`` is the parsed JSON body (``None`` for a body that does not decode as JSON).
+      * ``{"error": ..., "delivered": False, "open_project_id": ...}`` when the backend has another
+        project open, or none.
       * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down.
       * ``{"error": ..., "delivered": False, ...}`` on any HTTP/serialization failure.
     """
@@ -401,9 +442,12 @@ def post_panel_event(
     if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TCIP_ALLOW_PANEL_EVENTS"):
         return {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
-    url = backend_url(f"/api/events/{panel}")
-    payload = json.dumps({"panel": panel, "event_type": event_type, "data": data}).encode("utf-8")
     from tcip_mcp import agent_identity
+    from tcip_mcp.project_record import read_record
+
+    url = backend_url(workspace, f"/api/events/{panel}")
+    payload = json.dumps({"panel": panel, "event_type": event_type, "data": data,
+                          "project_id": read_record(project)["id"]}).encode("utf-8")
 
     # The pushing harness and session, as headers, so the backend can say who steered the GUI.
     req = urllib.request.Request(
@@ -423,6 +467,15 @@ def post_panel_event(
                     parsed = None
                 return {"status": "ok", "delivered": True, "url": url, "response": parsed}
             return {"error": f"backend returned HTTP {code}", "delivered": False, "url": url}
+    except urllib.error.HTTPError as exc:
+        # The backend's own answer, e.g. the project it has open when that is not this one.
+        try:
+            detail = json.loads(exc.read()).get("detail")
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            detail = None
+        if isinstance(detail, dict):
+            return {**detail, "delivered": False, "url": url}
+        return {"error": f"backend returned HTTP {exc.code}", "delivered": False, "url": url}
     except urllib.error.URLError as exc:
         # ConnectionRefusedError or similar -> backend not running
         reason = getattr(exc, "reason", exc)

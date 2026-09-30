@@ -49,12 +49,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "canvas_open_binding": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "classifier_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
@@ -169,18 +163,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "pending_removal": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "pending_rename": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "plant_mapping": {
       "kind": "record",
       "frozen": true,
@@ -283,11 +265,11 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "workspace_active_project": {
+    "workspace_last_opened": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,
-      "cannot_carry_field": "a single project-name string"
+      "cannot_carry_field": "a single project id string"
     }
   }
 }

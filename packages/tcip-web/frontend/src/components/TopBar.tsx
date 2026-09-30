@@ -25,7 +25,6 @@ export function TopBar() {
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const wsStatus = useStore((s) => s.wsStatus);
-  const canvasBindingMissing = useStore((s) => s.canvasBindingMissing);
   const terminalOpen = useStore((s) => s.terminalOpen);
   const setTerminalOpen = useStore((s) => s.setTerminalOpen);
 
@@ -36,14 +35,9 @@ export function TopBar() {
     const t = setTimeout(() => setGraceOver(true), 2000);
     return () => clearTimeout(t);
   }, []);
-  const wsDegraded =
+  const degraded =
     wsStatus === "error" || wsStatus === "disconnected" || (wsStatus === "connecting" && graceOver);
-  const degraded = wsDegraded || canvasBindingMissing;
-  const label = wsDegraded
-    ? wsStatus === "connecting"
-      ? "reconnecting…"
-      : "disconnected, retrying"
-    : "canvas not synced, reopen the project";
+  const label = wsStatus === "connecting" ? "reconnecting…" : "disconnected, retrying";
 
   const tabRefs = useRef<Partial<Record<TabName, HTMLButtonElement>>>({});
 
@@ -98,13 +92,13 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center justify-self-end">
-        {/* Connection/canvas-binding state: visible only when something is wrong; it
-            self-dismisses once the underlying condition resolves. */}
+        {/* Connection state: visible only when something is wrong; it self-dismisses once the
+            connection recovers. */}
         {degraded && (
           <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
             <span
               className={`w-2 h-2 rounded-full ${
-                wsStatus === "connecting" && wsDegraded ? "bg-tcip-fn" : "bg-tcip-fp"
+                wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"
               }`}
             />
             <span className="text-tcip-muted">{label}</span>

@@ -33,6 +33,7 @@ def prepare_run_context(
     datasets and loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
+    from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.data.split_construction import recorded_datasets
     from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.training.envelope import TrainContext
@@ -44,7 +45,7 @@ def prepare_run_context(
     resolved = run_record["resolved"]
     config = {**run_record["config"], "data": resolved["data"]}
     run_obj = TrainRun(id=run_dir.name, config=config, objective=resolved["objective"],
-                       output_dir=str(run_dir), origin=origin)
+                       project=project_of_run(run_dir), output_dir=str(run_dir), origin=origin)
     if run_record["max_wall_clock_seconds"] is not None:
         run_obj.deadline = time.time() + run_record["max_wall_clock_seconds"]
 
@@ -86,9 +87,11 @@ def run_directory(
         except Exception as exc:
             logger.exception("Pre-training setup failed for run %s: %s", run_dir.name, exc)
             from tcip_mcp.audit import record_event
+            from tcip_mcp.experiments import project_of_run
 
             write_final_status(run_dir, "failed", str(exc), checkpoint=None)
-            record_event("training_run", {"experiment_id": run_dir.name}, status="failed")
+            record_event("training_run", {"experiment_id": run_dir.name}, status="failed",
+                         scope=project_of_run(run_dir))
             raise
         run_training_envelope(ctx)
         return ctx.run

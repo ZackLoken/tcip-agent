@@ -63,13 +63,11 @@ def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
 def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, monkeypatch):
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "dest"
     dest.mkdir()
     (dest / "subjects.json").write_bytes(b"already here")
-    # A scratch platform root for import_project's own audit entry, off tmp_path.
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(dest),
@@ -90,7 +88,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
 def test_import_admits_a_pre_existing_empty_destination(tmp_path):
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -107,7 +105,7 @@ def test_import_admits_a_pre_existing_empty_destination(tmp_path):
 def test_import_refuses_an_unaccounted_member_naming_it(tmp_path):
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
     with zipfile.ZipFile(str(zip_path), "a") as zf:
         zf.writestr(".tcip/state/_write_probe.txt", "probe")
 
@@ -125,10 +123,7 @@ def test_import_refuses_an_unaccounted_member_naming_it(tmp_path):
 def test_import_refuses_an_undecodable_claimed_member_on_both_backends(tmp_path, monkeypatch):
     zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/project.json": b"{not valid json"})
 
-    # import_project's own audit entry lands at the platform root; each stage gets its own so
-    # one backend's write there never collides with the other's.
     dest = tmp_path / "dest_sqlite"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_sqlite"))
     with bound(SqliteBackend()):
         result = import_project(str(zip_path), str(dest))
     assert "error" in result
@@ -136,7 +131,6 @@ def test_import_refuses_an_undecodable_claimed_member_on_both_backends(tmp_path,
     assert not dest.exists()
 
     dest2 = tmp_path / "dest_file"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_file"))
     with bound(FileBackend()):
         result2 = import_project(str(zip_path), str(dest2))
     assert "error" in result2
@@ -272,7 +266,7 @@ def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_
 def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path):
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
     data = zip_path.read_bytes()
     zip_path.write_bytes(data[: len(data) // 2])  # truncated: no longer a readable zip
 
@@ -293,7 +287,7 @@ def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
     negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}}
     with bound(FileBackend()):
         ts.replace(dataset_layout.image_status_key(root), negative, expect=ts.Version.ABSENT)
-        assert "error" not in archive_project(str(root), str(tmp_path / "bundle.zip"))
+        assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
 
     dest = tmp_path / "dest"
     with bound(FileBackend()):
@@ -313,7 +307,7 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(t
 
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "dest"
     imports_root = dest.parent / ".imports"
@@ -337,7 +331,7 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(t
 def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(tmp_path):
     root = _project(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "dest"
     imports_root = dest.parent / ".imports"
@@ -366,11 +360,11 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 
     with bound(FileBackend()):
         root = _project(tmp_path / "source")
-        registered = register_dataset(str(root), crop="currant", project_root=str(root))
+        registered = register_dataset(root, str(root), crop="currant")
         assert "error" not in registered
 
         zip_path = tmp_path / "bundle.zip"
-        assert "error" not in archive_project(str(root), str(zip_path))
+        assert "error" not in archive_project(root, str(zip_path))
         dest = tmp_path / "dest"
         imported = import_project(str(zip_path), str(dest))
 
@@ -386,11 +380,11 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets, register_dataset
 
     root = _project(tmp_path / "source")
-    registered = register_dataset(str(root), crop="currant", project_root=str(root))
+    registered = register_dataset(root, str(root), crop="currant")
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
 
@@ -404,11 +398,11 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
 
     root = _project(tmp_path / "source")
     external = _project(tmp_path / "external_dataset")
-    registered = register_dataset(str(external), crop="currant", project_root=str(root))
+    registered = register_dataset(root, str(external), crop="currant")
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
 
@@ -460,12 +454,12 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     _annotated_dataset(curated, 4)
     ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
 
-    splits_result = draw_splits(str(curated), subject="bud", output_path=str(curated / "splits"),
+    splits_result = draw_splits(project, str(curated), subject="bud", output_path=str(curated / "splits"),
                                  train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
-    archived = archive_project(str(project), str(zip_path))
+    archived = archive_project(project, str(zip_path))
     assert "error" not in archived, archived
 
     dest = tmp_path / "dest"
@@ -495,20 +489,20 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
 
     root = tmp_path / "source"
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     _annotated_dataset(root, 4)
-    assert "error" not in initialize_project(str(root), site="north orchard")
-    assert "error" not in register_dataset(str(root), crop="currant", project_root=str(root))
+    assert "error" not in initialize_project(str(root), "North orchard", site="north orchard")
+    assert "error" not in register_dataset(root, str(root), crop="currant")
     confirmed = seed_confirmed_count(root)
     assert confirmed.confirmed
 
     from tests._verified_checkpoint_fixtures import finished_run
 
-    finished_run(None, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
+    finished_run(root, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
 
-    def fake_trial(point, report, base_config, trial_dir, *, objective, launched_by):
+    def fake_trial(point, report, base_config, trial_dir, *, project, objective, launched_by):
         config = tt._apply_hpo_params(base_config, point)
-        tt.open_run(trial_dir, config, resolve_run(config, objective=objective).record,
+        tt.open_run(trial_dir, config,
+                    resolve_run(config, project=project, objective=objective).record,
                     launched_by=launched_by, trial_params=point)
         report(0.2)
 
@@ -519,7 +513,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     hpo_result = tt.run_hyperparameter_search(
-        base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+        root, base_config={"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                                       "task": "detection"},
                      "data": {"images_dir": str(root / "images" / "2026-03-04"),
                               "labels_dir": str(root / "annotations" / "2026-03-04"),
@@ -528,17 +522,14 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     )
     study = hpo_result["study_name"]
 
-    splits_result = draw_splits(str(root), output_path=str(root / "splits_out"), subject="bud",
+    splits_result = draw_splits(root, str(root), output_path=str(root / "splits_out"), subject="bud",
                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(str(root), str(zip_path))
+    assert "error" not in archive_project(root, str(zip_path))
 
     dest = tmp_path / "restored"
-    # A scratch platform root for import_project's own audit entry, off root (whose own
-    # conform state depends on whichever backend the suite happens to run this file on).
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     with bound(SqliteBackend()):
         imported = import_project(str(zip_path), str(dest))
         assert "error" not in imported
@@ -554,7 +545,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
         assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
-        run_dir = experiments.find_run("exp1", root=dest)
+        run_dir = experiments.find_run("exp1", project=dest)
         assert run_dir is not None
         observation = experiments.observe(run_dir)
         assert observation.record["config"]["model_source"]["task"] == "detection"
@@ -562,7 +553,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         assert rows[0]["loss"] == 0.5
         assert observation.checkpoint is not None
 
-        sweep = tt.read_sweep(tt.sweep_observation(study, root=dest))
+        sweep = tt.read_sweep(tt.sweep_observation(study, project=dest))
         assert sweep["status"] == "completed"
         assert [t["params"] for t in sweep["trials"]] == [{"lr": 0.1}]
 

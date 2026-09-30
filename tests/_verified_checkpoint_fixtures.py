@@ -78,31 +78,29 @@ def detection_config(where: Path, **config: Any) -> dict:
             "data": {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA}, **config}
 
 
-def fixture_data_dir(root: str | Path | None, name: str) -> Path:
-    """Where a fixture run under ``root`` (``None``: the pinned platform root) keeps the images
-    it trains on: a directory beside the project named after it, so the project's own tree holds
-    only what the platform wrote."""
-    from tcip_mcp.project_paths import platform_state_root
-
-    base = Path(root) if root is not None else platform_state_root()
+def fixture_data_dir(root: str | Path, name: str) -> Path:
+    """Where a fixture run under the project ``root`` keeps the images it trains on: a directory
+    beside the project named after it, so the project's own tree holds only what the platform
+    wrote."""
+    base = Path(root)
     return base.parent / f"{base.name}-data" / name
 
 
-def opened_run(root: str | Path | None, config: dict, *, experiment_id: str | None = None,
+def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = None,
                **facts: Any) -> Path:
-    """A run directory under ``root`` (``None``: the pinned platform root) resolved by the
-    launcher's own producer (``split_construction.resolve_run``) and opened by its own writer
-    (``training_tools.open_run``) over a copy of ``config``, launched by ``process``; ``facts``
-    are ``open_run``'s other keywords. Returns the directory."""
+    """A run directory under the project ``root`` resolved by the launcher's own producer
+    (``split_construction.resolve_run``) and opened by its own writer (``training_tools.open_run``)
+    over a copy of ``config``, launched by ``process``; ``facts`` are ``open_run``'s other
+    keywords. Returns the directory."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.tools.training_tools import open_run
 
     run_dir = experiments.experiment_dir(experiment_id or experiments.mint_experiment_id(),
-                                         root=root)
+                                         project=root)
     config = dict(config)
-    open_run(run_dir, config, resolve_run(config).record, launched_by={"launcher": "process"},
-             **facts)
+    open_run(run_dir, config, resolve_run(config, project=Path(root)).record,
+             launched_by={"launcher": "process"}, **facts)
     return run_dir
 
 
@@ -116,18 +114,19 @@ def partition_side(partition: dict, side: str) -> list[str]:
 
 def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
     """Append one epoch row to ``run_dir``'s metrics log through the envelope's own sink."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import RUN_FILE, project_of_run, read_record
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=project_of_run(run_dir),
+                   output_dir=str(run_dir))
     TrainContext(run=run, train_loader=None)._epoch_sink(epoch, metrics)
 
 
 def finished_run(
-    root: str | Path | None,
+    root: str | Path,
     *,
     experiment_id: str | None = None,
     model_source: dict | None = None,
@@ -183,7 +182,7 @@ def finished_run(
     return run_dir
 
 
-def resolved_run(root: str | Path | None, data: dict, *, task: str = "detection",
+def resolved_run(root: str | Path, data: dict, *, task: str = "detection",
                  experiment_id: str | None = None) -> Path:
     """A run under ``root`` opened by :func:`opened_run` over ``data``, whose launch record holds
     the data section, partition and objective the launcher's producer resolved; no body runs.
@@ -192,7 +191,7 @@ def resolved_run(root: str | Path | None, data: dict, *, task: str = "detection"
                       experiment_id=experiment_id)
 
 
-def worker_run(root: str | Path | None, config: dict, *,
+def worker_run(root: str | Path, config: dict, *,
                experiment_id: str | None = None) -> Path:
     """A run under ``root`` opened by :func:`opened_run` over ``config`` and run in-process
     through the child's own entry (``subprocess_worker.run_directory``): its loaders built from
@@ -204,7 +203,7 @@ def worker_run(root: str | Path | None, config: dict, *,
     return run_dir
 
 
-def registered_checkpoint(project_root: str | Path | None, **kwargs: Any) -> str:
+def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
     """The path of the checkpoint a :func:`finished_run` under ``project_root`` registered by
     completing (``kwargs`` are its own)."""
     from tcip_mcp.experiments import observe
@@ -225,8 +224,8 @@ def foreign_checkpoint(project_root: str | Path, *, name: str | None = None,
 
     project_root = Path(project_root)
     path = registered_checkpoint(project_root.parent / f"{project_root.name}-elsewhere", **kwargs)
-    result = register_model(name=name or f"model-{Path(path).parent.name}", checkpoint_path=path,
-                            config={}, project_path=str(project_root))
+    result = register_model(project_root, name=name or f"model-{Path(path).parent.name}",
+                            checkpoint_path=path, config={})
     assert "error" not in result, result
     return path
 
@@ -234,40 +233,37 @@ def foreign_checkpoint(project_root: str | Path, *, name: str | None = None,
 _PROJECT_CHECKPOINTS: dict[str, str] = {}
 
 
-def project_checkpoint(project_root: str | Path | None = None, **kwargs: Any) -> str:
-    """One :func:`foreign_checkpoint` per project root (``None``: the pinned platform root) and
-    ``kwargs``, made on first call and answered again after: for a door whose inference pass a
-    test stubs but whose checkpoint load is real."""
-    from tcip_mcp.project_paths import platform_state_root
-
-    root = Path(project_root) if project_root is not None else platform_state_root()
+def project_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
+    """One :func:`foreign_checkpoint` per project root and ``kwargs``, made on first call and
+    answered again after: for a door whose inference pass a test stubs but whose checkpoint load
+    is real."""
+    root = Path(project_root)
     key = f"{root}|{sorted(kwargs.items())!r}"
     if key not in _PROJECT_CHECKPOINTS:
         _PROJECT_CHECKPOINTS[key] = foreign_checkpoint(root, **kwargs)
     return _PROJECT_CHECKPOINTS[key]
 
 
-def verified_checkpoint(project_root: str | Path | None = None, **kwargs: Any):
+def verified_checkpoint(project_root: str | Path, **kwargs: Any):
     """The registry's own ``VerifiedCheckpoint`` over :func:`project_checkpoint`'s checkpoint."""
     from tcip_mcp.model_registry import load_registered_checkpoint
 
-    return load_registered_checkpoint(
-        project_checkpoint(project_root, **kwargs),
-        project_path=str(project_root) if project_root is not None else None)
+    return load_registered_checkpoint(project_checkpoint(project_root, **kwargs),
+                                      project=Path(project_root))
 
 
-def run_inference_verified(checkpoint_path: str, **overrides: Any):
-    """``_run_inference_verified`` over the registered checkpoint at ``checkpoint_path``, with no
-    bucket persisted: ``overrides`` sets any of its keyword arguments, the rest take
-    ``run_inference``'s unstated defaults, and ``results`` comes back as a list. A checkpoint the
-    registry refuses returns ``{"error": ...}``."""
+def run_inference_verified(project: Path, checkpoint_path: str, **overrides: Any):
+    """``_run_inference_verified`` for ``project`` over the checkpoint registered at
+    ``checkpoint_path``, with no bucket persisted: ``overrides`` sets any of its keyword
+    arguments, the rest take ``run_inference``'s unstated defaults, and ``results`` comes back as
+    a list. A checkpoint the registry refuses returns ``{"error": ...}``."""
     import inspect
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.tools.inference_tools import _run_inference_verified, run_inference
 
     try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
+        checkpoint = load_registered_checkpoint(checkpoint_path, project=Path(project))
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
     # Read off run_inference's own defaults rather than restate them, so this stand-in for its
@@ -285,7 +281,7 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
         "selection_dir": None,
     }
     kwargs.update(overrides)
-    result = _run_inference_verified(checkpoint, **kwargs)
+    result = _run_inference_verified(Path(project), checkpoint, **kwargs)
     if "results" in result:
         result["results"] = list(result["results"])
     return result

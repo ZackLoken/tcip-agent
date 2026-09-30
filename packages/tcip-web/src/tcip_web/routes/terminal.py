@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -64,13 +65,16 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
         queue.put_nowait(None)
 
 
-def _record_start(session_id: str, launched: dict) -> None:
-    """One platform audit line per launch, naming the session id and the program it launched. A
+def _record_start(session_id: str, launched: dict, project: Path | None) -> None:
+    """One audit line in ``project``'s log per launch for it, naming the session id and the
+    program it launched; a launch for no project has no log to land in and records nothing. A
     failed append raises ``AuditEntryNotWritten``.
     """
     from tcip_web.routes.audit_gap import record_committed
 
-    record_committed("agent_terminal_started", {"session_id": session_id, **launched}, scope=None)
+    if project is not None:
+        record_committed("agent_terminal_started", {"session_id": session_id, **launched},
+                         scope=project)
 
 
 class TerminalSession:
@@ -99,7 +103,10 @@ class TerminalSession:
         with self._lock:
             if self._pty is not None and self._pty.isalive():
                 return None
-            argv = pty_host.resolve_terminal_command()
+            from tcip_web.state import store
+
+            project = store.project_root
+            argv = pty_host.resolve_terminal_command(project)
             if argv is None:
                 return pty_host.terminal_status().get("reason")
             launched = pty_host.launched_program(argv)
@@ -123,7 +130,7 @@ class TerminalSession:
         from tcip_mcp.audit import AuditEntryNotWritten
 
         try:
-            _record_start(self.id, launched)
+            _record_start(self.id, launched, project)
         except AuditEntryNotWritten as exc:
             stopped = self.terminate()
             reason = str(exc)

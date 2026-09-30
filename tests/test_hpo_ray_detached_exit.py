@@ -31,6 +31,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
     import sys
     import threading
     import time
+    from pathlib import Path
 
 
     def _capture_daemon_pids(pids_holder, descendants_holder, ready):
@@ -91,7 +92,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
             search_alg="random",
             scheduler=None,
             resources_per_trial={"cpu": 1},
-            storage_path=storage_path, seed=0
+            storage_path=storage_path, seed=0, project=Path(sys.argv[2])
         )
 
         if not ready.wait(timeout=60):
@@ -121,23 +122,20 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
     script_path.write_text(_SUBPROCESS_SCRIPT, encoding="utf-8", newline="\n")
     storage_path = tmp_path / "hpo"
     storage_path.mkdir()
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
     ray_tmp_path = tmp_path / "ray_tmp"
     ray_tmp_path.mkdir()
     output_path = tmp_path / "sweep_output.txt"
 
     env = {
         **os.environ,
-        "TCIP_STATE_ROOT": str(tmp_path),
-        "TCIP_WORKSPACE": str(workspace_path),
+        "TCIP_WORKSPACE": str(tmp_path.parent),
         "RAY_TMPDIR": str(ray_tmp_path),
         "PYTHONUNBUFFERED": "1",
     }
 
     with open(output_path, "w") as output_file:
         proc = subprocess.Popen(
-            [sys.executable, str(script_path), str(storage_path)],
+            [sys.executable, str(script_path), str(storage_path), str(tmp_path)],
             creationflags=DETACHED_PROCESS,
             stdout=output_file,
             stderr=subprocess.STDOUT,

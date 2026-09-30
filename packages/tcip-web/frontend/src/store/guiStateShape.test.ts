@@ -25,15 +25,17 @@ describe("the GUI state the browser opens with", () => {
     expect(OPENING_GUI).toEqual({
       active_tab: "annotate",
       dataset: {
-        project_root: null,
         dataset_root: null,
         subject: null,
         date: null,
+        model_name: null,
         image_list: [],
         current_image_index: 0,
         images_dir: null,
         annotations_dir: null,
         predictions_dir: null,
+        label_paths: {},
+        prediction_paths: {},
       },
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
@@ -59,19 +61,22 @@ describe("the GUI state the browser opens with", () => {
 
 describe("adopting a different dataset selection", () => {
   it("takes every field of the new selection, leaving none of the old one behind", () => {
+    const project = { id: "a1b2c3d4e5f6", path: "/proj/alpha" };
     useStore.setState({
       gui: {
         active_tab: "review",
         dataset: {
-          project_root: "/proj/alpha",
           dataset_root: "/proj/alpha/ds",
           subject: "leaf",
           date: "2026-03-01",
+          model_name: "m1",
           image_list: ["l1.jpg", "l2.jpg"],
           current_image_index: 1,
           images_dir: "/proj/alpha/ds/images/2026-03-01",
           annotations_dir: "/proj/alpha/ds/annotations/2026-03-01",
           predictions_dir: "/proj/alpha/ds/predictions/m1/2026-03-01",
+          label_paths: { "l1.jpg": "/proj/alpha/ds/annotations/2026-03-01/l1.json" },
+          prediction_paths: {},
         },
         view: { scale: 2, offset_x: 30, offset_y: 70 },
         mode: "polygon",
@@ -84,21 +89,24 @@ describe("adopting a different dataset selection", () => {
           detection_idx: 0,
         },
       },
+      openProject: project,
       wsVersion: 4,
     });
 
     const incoming: GuiState = {
       active_tab: "annotate",
       dataset: {
-        project_root: "/proj/beta",
-        dataset_root: "/proj/beta/ds",
+        dataset_root: "/proj/alpha/ds2",
         subject: "bud",
         date: "2026-04-02",
+        model_name: "m2",
         image_list: ["b1.jpg", "b2.jpg", "b3.jpg"],
         current_image_index: 2,
-        images_dir: "/proj/beta/ds/images/2026-04-02",
-        annotations_dir: "/proj/beta/ds/annotations/2026-04-02",
-        predictions_dir: "/proj/beta/ds/predictions/m2/2026-04-02",
+        images_dir: "/proj/alpha/ds2/images/2026-04-02",
+        annotations_dir: "/proj/alpha/ds2/annotations/2026-04-02",
+        predictions_dir: "/proj/alpha/ds2/predictions/m2/2026-04-02",
+        label_paths: { "b1.jpg": "/proj/alpha/ds2/annotations/2026-04-02/b1.json" },
+        prediction_paths: { "b1.jpg": "/proj/alpha/ds2/predictions/m2/2026-04-02/b1.json" },
       },
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
@@ -112,18 +120,8 @@ describe("adopting a different dataset selection", () => {
       },
     };
 
-    s().mergeSnapshot(incoming, 5, null, null);
+    s().mergeSnapshot(incoming, 5, project, null);
 
-    expect(s().gui.dataset).toEqual({
-      project_root: "/proj/beta",
-      dataset_root: "/proj/beta/ds",
-      subject: "bud",
-      date: "2026-04-02",
-      image_list: ["b1.jpg", "b2.jpg", "b3.jpg"],
-      current_image_index: 2,
-      images_dir: "/proj/beta/ds/images/2026-04-02",
-      annotations_dir: "/proj/beta/ds/annotations/2026-04-02",
-      predictions_dir: "/proj/beta/ds/predictions/m2/2026-04-02",
-    });
+    expect(s().gui.dataset).toEqual(incoming.dataset);
   });
 });

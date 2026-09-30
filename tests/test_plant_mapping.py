@@ -46,7 +46,7 @@ def _build(assignments: dict[str, list[Assignment]]) -> MappingBuild:
     own ``persist_mapping``/``load_mapping`` round trip: every other provenance field is a
     placeholder these tests do not exercise."""
     return MappingBuild(
-        name="mapping", project_root="/proj", dataset_root="/proj/ds", dataset_id="ds-1",
+        name="mapping", dataset_root="ds", dataset_id="ds-1",
         built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None, dates=sorted(assignments),
         nn_tolerance_m={"value": 10.0, "source": "stated"},
@@ -224,7 +224,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     build = _build({
         "2-11-26": [
             Assignment(
-                image_path="/data/IMG.JPG",
+                image="IMG.JPG",
                 stem="IMG",
                 date_folder="2-11-26",
                 plot_name="PLOT1",
@@ -252,7 +252,7 @@ def test_load_mapping_refuses_an_older_record_missing_capture_digests(tmp_path: 
     build = _build({
         "2-11-26": [
             Assignment(
-                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                image="IMG.JPG", stem="IMG", date_folder="2-11-26",
                 plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
             )
         ]
@@ -276,7 +276,7 @@ def test_load_mapping_refuses_a_date_capture_identity_names_but_capture_digests_
     build = _build({
         "2-11-26": [
             Assignment(
-                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                image="IMG.JPG", stem="IMG", date_folder="2-11-26",
                 plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
             )
         ]
@@ -306,7 +306,7 @@ def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
         build = _build({
             "2-11-26": [
                 Assignment(
-                    image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                    image="IMG.JPG", stem="IMG", date_folder="2-11-26",
                     plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
                 )
             ]
@@ -330,7 +330,7 @@ def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines
     build = _build({
         "2-11-26": [
             Assignment(
-                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                image="IMG.JPG", stem="IMG", date_folder="2-11-26",
                 plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
             )
         ]
@@ -350,7 +350,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> No
     with pytest.raises(Exception, match="no capture under") as exc:
         build_mapping(
             tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
-            dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
+            dataset_id="ds-1", project=tmp_path, built_by="build_plant_mapping",
             plant_registry={"name": "unregistered", "digest": "0" * 64}, nn_tolerance_m=10.0,
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureRefusal"
@@ -360,7 +360,7 @@ def _one_build() -> MappingBuild:
     return _build({
         "2-11-26": [
             Assignment(
-                image_path="/data/IMG.JPG",
+                image="IMG.JPG",
                 stem="IMG",
                 date_folder="2-11-26",
                 plot_name="PLOT1",

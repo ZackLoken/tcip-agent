@@ -9,6 +9,8 @@ vi.mock("@/api/client", () => ({
 
 import { api } from "@/api/client";
 
+const PROJECT = { id: "a1b2c3d4e5f6", path: "/ws/proj" };
+
 function seedDataset(partial: Record<string, unknown>) {
   useStore.getState().patchGui({
     dataset: {
@@ -16,6 +18,21 @@ function seedDataset(partial: Record<string, unknown>) {
       ...partial,
     },
   });
+  useStore.setState({ openProject: PROJECT });
+}
+
+function selection(over: Record<string, unknown>) {
+  return {
+    dataset_root: "/ws/proj",
+    model_name: null,
+    image_list: [],
+    current_image_index: 0, // backend always resets to 0
+    images_dir: null,
+    predictions_dir: null,
+    label_paths: {},
+    prediction_paths: {},
+    ...over,
+  };
 }
 
 beforeEach(() => {
@@ -29,22 +46,15 @@ describe("applyAnnotateFocus", () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
-      selection: {
-        project_root: "/ws/proj",
-        dataset_root: "/ws/proj",
+      selection: selection({
         subject: "bush",
         date: "2026-03-02",
-        image_list: [],
-        current_image_index: 0, // backend always resets to 0
         annotations_dir: "/ws/proj/annotations/2026-03-02",
-        predictions_dir: null,
-      },
+      }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     await applyAnnotateFocus({
-      project_root: "/ws/proj",
       dataset_root: "/ws/proj",
       subject: "bush",
       date: "2026-03-02",
@@ -68,19 +78,13 @@ describe("applyAnnotateFocus", () => {
 
   it("keeps the focus index even if the /select WS snapshot (index 0) arrives afterward", async () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
-    const newIdentity = {
-      project_root: "/ws/proj",
-      dataset_root: "/ws/proj",
+    const newIdentity = selection({
       subject: "bush",
       date: "2026-03-02",
-      image_list: [],
-      current_image_index: 0,
       annotations_dir: "/ws/proj/annotations/2026-03-02",
-      predictions_dir: null,
-    };
+    });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       selection: newIdentity as any,
     });
@@ -99,7 +103,7 @@ describe("applyAnnotateFocus", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       { dataset: { ...newIdentity, current_image_index: 0 } } as any,
       999,
-      null,
+      PROJECT,
       null,
     );
     expect(useStore.getState().gui.dataset.current_image_index).toBe(47);
@@ -140,17 +144,11 @@ describe("applyAnnotateFocus", () => {
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
-      selection: {
-        project_root: "/ws/proj",
-        dataset_root: "/ws/proj",
+      selection: selection({
         subject: "subject_a",
         date: "2026-02-11",
-        image_list: [],
-        current_image_index: 0,
         annotations_dir: "/ws/proj/annotations/2026-02-11",
-        predictions_dir: null,
-      },
+      }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
@@ -168,17 +166,11 @@ describe("applyAnnotateFocus", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
-      selection: {
-        project_root: "/ws/proj",
-        dataset_root: "/ws/proj",
+      selection: selection({
         subject: "subject_a",
         date: "2026-02-11",
-        image_list: [],
-        current_image_index: 0,
         annotations_dir: "/ws/proj/annotations/2026-02-11",
-        predictions_dir: null,
-      },
+      }),
       label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);

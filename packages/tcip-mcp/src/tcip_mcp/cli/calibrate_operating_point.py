@@ -7,11 +7,11 @@ Usage:
     tcip calibrate-operating-point \
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
-        --dataset-root <dataset_root> --project-root <project_root> \
+        --dataset-root <dataset_root> --project <project> \
         [--holdout-ratio 0.5] [--device cpu] [--selection-dir <dir>]
 
-The checkpoint must be named by a registry entry under --project-root (register it with
-register_model first); this script refuses one it is not, naming the digest and the root. The
+The checkpoint must be named by a registry entry under --project (register it with
+register_model first); this script refuses one it is not, naming the digest and the project. The
 labels are read under the class space the checkpoint records.
 """
 
@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -35,10 +37,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "run_inference's own calibration read one lock for these labels. The "
                              "labels' dataset root, or the labels dir itself when the dataset "
                              "layout places it under none.")
-    parser.add_argument("--project-root", required=True,
-                        help="The registry root the checkpoint must be named under: this script "
-                             "binds only the backend, and platform_state_root() falls back to "
-                             "the working directory, which would search an empty index.")
+    parser.add_argument("--project", required=True,
+                        help="The project whose registry the checkpoint must be named in.")
     parser.add_argument("--holdout-ratio", type=float, default=DEFAULT_HOLDOUT_RATIO,
                         help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
                              "effect on the first calibration call for this labels_dir's GT identity"
@@ -65,10 +65,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "--group-by/--group-key-map.")
     args = parser.parse_args(argv)
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
-
-    bind_default()
+    project = bound_project(args.project)
 
     group_key_map = None
     if args.group_key_map:
@@ -84,7 +81,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         result = resolve_count_operating_point(
             checkpoint_path=args.checkpoint, trait=args.trait, labels_dir=args.labels_dir,
             images_dir=args.images_dir, dataset_root=args.dataset_root,
-            project_root=args.project_root, group_by=args.group_by, group_key_map=group_key_map,
+            project=project, group_by=args.group_by, group_key_map=group_key_map,
             selection_dir=args.selection_dir, holdout_ratio=args.holdout_ratio, seed=args.seed,
             device=args.device,
         )

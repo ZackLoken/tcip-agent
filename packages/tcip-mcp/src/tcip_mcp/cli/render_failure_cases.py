@@ -6,11 +6,11 @@ so an image with the right box count but every box mislocated scores as good. No
 question. Wraps ``tcip_mcp.tools.vision_tools.render_failure_cases`` and prints the grid image's
 path.
 
-    tcip render-failure-cases <predictions_dir> <labels_dir> --project <project_root>
+    tcip render-failure-cases <predictions_dir> <labels_dir> --project <project>
         [--images-dir DIR] [--task detect|segment] [--top-k N] [--class-names NAMES]
 
-``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names where this run's audit line and the
-rendered grid's cache path land; ``predictions_dir``/``labels_dir`` stay what gets read.
+``--project`` names where this run's audit line and the rendered images land;
+``predictions_dir``/``labels_dir`` stay what gets read.
 """
 
 from __future__ import annotations
@@ -19,16 +19,15 @@ import argparse
 import json
 import sys
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("predictions_dir", help="Directory with prediction files.")
     parser.add_argument("labels_dir", help="Directory with ground-truth label files.")
-    parser.add_argument("--project", default="",
-                         help="Project root this run's audit line is recorded under; falls "
-                              "back to $TCIP_STATE_ROOT.")
+    parser.add_argument("--project", required=True,
+                         help="The project this run's audit line and renders land under.")
     parser.add_argument("--images-dir", default="",
                          help="Directory with source images. Auto-detected if omitted.")
     parser.add_argument("--task", default="detect", choices=("detect", "segment"))
@@ -36,16 +35,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--class-names", default="", help="Comma-separated class names.")
     args = parser.parse_args(argv)
 
-    require_and_pin_platform_root(args.project or None)
-
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    project = bound_project(args.project)
 
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
-    bind_default()
-
     result = render_failure_cases(
+        project,
         predictions_dir=args.predictions_dir,
         labels_dir=args.labels_dir,
         images_dir=args.images_dir,

@@ -12,6 +12,7 @@ import pytest
 import tifffile
 
 from tcip_mcp.project_paths import project_state_dir
+from tcip_mcp.registry_paths import stored_path
 from tests import _trait_fixtures as fx
 
 torch = pytest.importorskip("torch")
@@ -29,14 +30,10 @@ TILE = 32
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
-    """Every per-plant delivery below ships under a trait whose meaning is confirmed.
-
-    Seeded into the project these tests pin as well as the one the autouse pin names, so a
-    delivery reads the same registry whichever of the two it resolves against.
-    """
-    for project_root in (tmp_path, tmp_path / "proj"):
-        fx.seed_delivery_traits(project_root)
-        fx.seed_confirmed_aggregate(project_root, "stem_count", value_keys=["count"])
+    """Every per-plant delivery below ships under a trait whose meaning is confirmed in the
+    project these tests act on."""
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
 
 
 def _geokeys() -> tuple[int, ...]:
@@ -64,9 +61,9 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
 
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
-    """Write a bespoke detection checkpoint and register it in explicit mode against the
-    platform state root the caller has already pinned (``TCIP_STATE_ROOT``), so a caller can
-    hand its bare path to a door that resolves the registry itself."""
+    """Write a bespoke detection checkpoint under ``tmp_path`` and register it in that project's
+    model registry, so a caller can hand its bare path to a door that resolves the registry
+    itself."""
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.tools.model_tools import register_model
 
@@ -79,7 +76,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_siz
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
     torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
-    result = register_model(name="test-model", checkpoint_path=str(ckpt), config={})
+    result = register_model(tmp_path, name="test-model", checkpoint_path=str(ckpt), config={})
     assert "error" not in result, result
     return str(ckpt)
 
@@ -90,10 +87,10 @@ def _pixel_to_wgs84(raster_path: Path, px: float, py: float) -> tuple[float, flo
     return OrthomosaicGeoreference.from_file(raster_path).pixel_to_wgs84(px, py)
 
 
-def _plant_registry(plant_csv: Path, *, name: str = "reg") -> str:
+def _plant_registry(project: Path, plant_csv: Path, *, name: str = "reg") -> str:
     from tests._binding_fixtures import register_plant_registry_for
 
-    return register_plant_registry_for([plant_csv], name=name)
+    return register_plant_registry_for(project, [plant_csv], name=name)
 
 
 def _write_plant_csv(path: Path, rows: list[dict]) -> None:
@@ -131,8 +128,6 @@ def test_run_inference_raster_writes_bucket_with_explicit_tile_size(tmp_path, mo
     """An explicit tile_size clears the tile_size gate on its own (no acknowledgment needed);
     the persisted bucket carries one prediction file for the whole raster plus a real
     operating_point.json sidecar in the same shape every other bucket writes."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -142,7 +137,7 @@ def test_run_inference_raster_writes_bucket_with_explicit_tile_size(tmp_path, mo
 
     out_dir = tmp_path / "preds"
     result = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE, overlap=0.2)
 
     assert "error" not in result
@@ -164,7 +159,7 @@ def test_run_inference_raster_writes_bucket_with_explicit_tile_size(tmp_path, mo
     assert sidecar["checkpoint_sha256"]
     # Which raster produced this bucket is a provenance fact, the same as images_dir is for the
     # ordinary regime: a reviewer must be able to reconstruct how a number was produced.
-    assert sidecar["raster_path"] == str(raster_path)
+    assert sidecar["raster_path"] == stored_path(raster_path, tmp_path)
 
     data = json.loads(pred_path.read_text())
     assert data["width"] == 64 and data["height"] == 64
@@ -182,8 +177,6 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
 
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -192,7 +185,7 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "preds"
-    r1 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
+    r1 = run_inference(tmp_path, ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" not in r1, r1
     first_doc = (out / "mosaic.json").read_bytes()
@@ -203,14 +196,14 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
         raise AssertionError("predict_sliced must not run on a refused publish")
 
     monkeypatch.setattr(GenericPredictor, "predict_sliced", _fail_if_reached)
-    r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
+    r2 = run_inference(tmp_path, ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" in r2
     assert r2["document_stem_count"] == 1
     assert (out / "mosaic.json").read_bytes() == first_doc
 
     monkeypatch.setattr(GenericPredictor, "predict_sliced", real_predict_sliced)
-    r3 = run_inference(ckpt, output_dir=str(r2["suggested_bucket"]), raster_path=str(raster_path),
+    r3 = run_inference(tmp_path, ckpt, output_dir=str(r2["suggested_bucket"]), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" not in r3, r3
     assert Path(r3["output_dir"]) == Path(r2["suggested_bucket"])
@@ -221,8 +214,6 @@ def test_run_inference_raster_refuses_missing_checkpoint_cleanly(tmp_path, monke
     refusal in this door uses, never an uncaught FileNotFoundError out of the MCP tool: the
     raster regime builds its own predictor directly rather than going through run_inference's own
     existence check."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -230,7 +221,7 @@ def test_run_inference_raster_refuses_missing_checkpoint_cleanly(tmp_path, monke
     from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    r = run_inference(str(tmp_path / "missing.pt"), output_dir=str(out_dir),
+    r = run_inference(tmp_path, str(tmp_path / "missing.pt"), output_dir=str(out_dir),
                            raster_path=str(raster_path), conf_threshold=0.0)
     assert "error" in r
     assert "Checkpoint not found" in r["error"]
@@ -239,14 +230,12 @@ def test_run_inference_raster_refuses_missing_checkpoint_cleanly(tmp_path, monke
 
 def test_run_inference_raster_refuses_missing_raster_cleanly(tmp_path, monkeypatch):
     """Same shape for a missing raster_path."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
     from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    r = run_inference(ckpt, output_dir=str(out_dir),
+    r = run_inference(tmp_path, ckpt, output_dir=str(out_dir),
                            raster_path=str(tmp_path / "missing.tif"), conf_threshold=0.0)
     assert "error" in r
     assert "raster_path not found" in r["error"]
@@ -259,8 +248,6 @@ def test_run_inference_raster_refuses_when_tile_size_has_no_real_basis(tmp_path,
     run instead, so this refusal is unconditional: allow_unvalidated_staging=True cannot un-stick it
     either, since there is no value to provisionally proceed with, never crashing mid-pass on a
     ``None`` tile_size."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -270,12 +257,12 @@ def test_run_inference_raster_refuses_when_tile_size_has_no_real_basis(tmp_path,
 
     out_dir = tmp_path / "preds"
     refused = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0)
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0)
     assert "error" in refused
     assert not out_dir.exists()  # refused before ever writing the bucket
 
     still_refused = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         allow_unvalidated_staging=True)
     assert "error" in still_refused
     assert not out_dir.exists()
@@ -284,10 +271,6 @@ def test_run_inference_raster_refuses_when_tile_size_has_no_real_basis(tmp_path,
 def test_run_inference_raster_bucket_immutability(tmp_path, monkeypatch):
     """A bucket with a recorded review verdict is never silently overwritten, the same
     immutability the images_dir regime already enforces, shared rather than reimplemented."""
-    platform_root = tmp_path / "platform"
-    (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
-
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
@@ -298,7 +281,7 @@ def test_run_inference_raster_bucket_immutability(tmp_path, monkeypatch):
     dataset_root = tmp_path / "dataset"
     out_dir = dataset_root / "predictions" / "preds"
     first = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in first
 
@@ -315,13 +298,13 @@ def test_run_inference_raster_bucket_immutability(tmp_path, monkeypatch):
     engine.record_detection_action(bucket_key_of(out_dir), det, ctx, action="accepted")
 
     overwrite_attempt = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE, overwrite=True)
     assert "error" in overwrite_attempt and overwrite_attempt["verdict_count"] == 1
     assert Path(overwrite_attempt["suggested_bucket"]).name == "preds@r2"
 
     redirected = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in redirected
     assert redirected["bucket_redirected"] is True
@@ -353,19 +336,20 @@ def _run_bucket(tmp_path, monkeypatch, raster_path: Path) -> tuple[Path, str]:
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     out_dir = tmp_path / "ds" / "predictions" / "preds"
     result = run_inference(
-        ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
     return out_dir, Path(result["files"][0]).stem
 
 
 def _promote_bucket_conf(
-    bucket_dir: Path, dataset_root: Path, *, trait: str, tag: str = "a",
+    project: Path, bucket_dir: Path, dataset_root: Path, *, trait: str, tag: str = "a",
     producing_experiment_id: str | None = None,
 ) -> None:
-    """Promote a raw bucket's conf dimension to a genuine held-out-validated claim, over the
-    bucket's content exactly as it stands now: call after any prediction-file edits, never before,
-    since the record covers the bucket's bytes at filing time.
+    """Promote a raw bucket's conf dimension to a genuine held-out-validated claim filed under
+    ``project``, over the bucket's content exactly as it stands now: call after any
+    prediction-file edits, never before, since the record covers the bucket's bytes at filing
+    time.
 
     ``producing_experiment_id`` names the run that produced the predictions, ``None`` by default
     (the ordinary bespoke-checkpoint case every caller here uses): distinct from the calibration
@@ -379,7 +363,8 @@ def _promote_bucket_conf(
     op = dict(sidecar.get("operating_point") or {})
     op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
     stamp = {**sidecar, "validated": True, "trait": trait, "operating_point": op}
-    write_bound_sidecar(bucket_dir, stamp, dataset_root=dataset_root, experiment_id=f"exp-promoted-{tag}",
+    write_bound_sidecar(project, bucket_dir, stamp, dataset_root=dataset_root,
+                        experiment_id=f"exp-promoted-{tag}",
                         producing_experiment_id=producing_experiment_id)
 
 
@@ -400,8 +385,6 @@ def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once
     """A bare unvalidated count refuses, naming the unvalidated dimension; passing an
     acknowledgment raises TypeError rather than a quieter admission, since this door takes
     none; the same delivery ships once the bucket earns a real reference."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -419,7 +402,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert refused["unvalidated_dimensions"] == "operating_point"
     assert refused["operating_point_validated"] == "false"
@@ -428,15 +411,15 @@ def test_deliver_orthomosaic_plant_counts_refuses_unvalidated_then_delivers_once
 
     with pytest.raises(TypeError):
         deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
-            str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+            str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
             delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert not out_csv.exists()
 
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in delivered
     assert delivered["operating_point_validated"] == VALIDATED_HELD_OUT
@@ -466,21 +449,19 @@ def test_deliver_orthomosaic_plant_counts_csv_carries_detection_level_attributio
 ):
     """Orthomosaic delivery attributes objects to plants at the raw-detection level, never a
     per-image aggregate: the CSV's plant_attribution column names that granularity."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result, result
 
@@ -495,54 +476,47 @@ def test_deliver_orthomosaic_plant_counts_records_exactly_one_delivery_event(tmp
 
     from tcip_mcp.pipelines import resolution
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result, result
 
-    scope = project_state_dir(tmp_path / "proj")
+    scope = project_state_dir(tmp_path)
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))]
     assert len(events) == 1
     assert events[0]["door"] == "deliver_orthomosaic_plant_counts"
 
 
-def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
+def test_deliver_orthomosaic_plant_counts_forwards_its_project_to_the_one_trait_read(
     tmp_path, monkeypatch,
 ):
-    """The MCP tool builds no project_root of its own (always None); the core must forward that
-    None to the one trait read (``confirmed_revision``) through export_aggregated_csv unchanged,
-    never substitute platform_state_root() (or any other resolved path) in its place, even though
-    the registry lookup genuinely needs a resolved root to read the file from disk."""
+    """The core forwards the project the delivery acts on to the one trait read
+    (``confirmed_revision``) through export_aggregated_csv, never a root it resolved itself."""
     import tcip_mcp.operationalization as op
-
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
     real_read = op.confirmed_revision
     seen_roots = []
 
     def _spy_read(*a, **kw):
-        seen_roots.append(kw.get("project_root"))
+        seen_roots.append(kw.get("project"))
         return real_read(*a, **kw)
 
     monkeypatch.setattr(op, "confirmed_revision", _spy_read)
@@ -551,10 +525,10 @@ def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result, result
-    assert seen_roots == [None]
+    assert seen_roots == [tmp_path]
 
 
 def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_path, monkeypatch):
@@ -562,8 +536,6 @@ def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_pa
     (bbox_of has no box for one by design): the door must read the bucket through the same
     real-detections predicate count_by_class already shares, excluding it, rather than crash on
     the first Point it meets."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -579,7 +551,7 @@ def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_pa
         Annotation(subject="0", geometry=Point(60.0, 60.0), score=0.8),
     ]
     json_io.write_annotations(str(pred_path), anns, data["width"], data["height"], keep_empty=True)
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
 
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
@@ -587,7 +559,7 @@ def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_pa
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" not in delivered, delivered
@@ -602,8 +574,6 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 ):
     """A count stamp validated for one trait must not answer for a per-plant delivery under a
     different trait: the refusal names the sidecar and both traits."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -614,7 +584,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
     dataset_root = tmp_path / "ds"
     bucket_dir = dataset_root / "predictions" / "run1"
     result = run_inference(
-        ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
     stem = Path(result["files"][0]).stem
@@ -629,14 +599,14 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
     op = dict(stamped["operating_point"])
     op["conf"] = {**op["conf"], "validated_against": VALIDATED_HELD_OUT}
     validated_stamp = {**stamped, "operating_point": op, "trait": "astringency", "validated": True}
-    write_bound_sidecar(bucket_dir, validated_stamp, dataset_root=dataset_root,
+    write_bound_sidecar(tmp_path, bucket_dir, validated_stamp, dataset_root=dataset_root,
                         experiment_id="exp-mismatched-trait")
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert not out_csv.exists()
     assert str(bucket_dir) in refused["error"]
@@ -648,8 +618,6 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     sibling gated dimension (tile_size here) has no real basis, since this door takes no
     acknowledgment: the refusal names tile_size as the actual floorer, and separately reports the
     operating_point dimension's own cleared reference rather than folding it into the floor."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -660,7 +628,7 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     dataset_root = tmp_path / "ds"
     bucket_dir = dataset_root / "predictions" / "run1"
     result = run_inference(
-        ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tmp_path, ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
     stem = Path(result["files"][0]).stem
@@ -678,14 +646,14 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     # refuses an unfounded tile_size unconditionally, so no real bucket can carry one directly.
     op["tile_size"] = {**op["tile_size"], "validated_against": VALIDATED_FALSE}
     validated_stamp = {**stamped, "operating_point": op, "trait": fx.COUNT_TRAIT, "validated": True}
-    write_bound_sidecar(bucket_dir, validated_stamp, dataset_root=dataset_root,
+    write_bound_sidecar(tmp_path, bucket_dir, validated_stamp, dataset_root=dataset_root,
                         experiment_id="exp-sibling-tile-floor")
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" in refused
     assert not out_csv.exists()
@@ -696,8 +664,6 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
 
 
 def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -707,14 +673,14 @@ def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, mo
         (8.0, 8.0, 12.0, 12.0),      # near plant0
         (3990.0, 3990.0, 4010.0, 4010.0),  # ~2 km away, no plant anywhere near
     ])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result
     assert result["n_detections"] == 2
@@ -729,8 +695,6 @@ def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, mo
 def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_path, monkeypatch):
     """A raster this module can't georeference (here: a ModelTransformationTag, refused by
     OrthomosaicGeoreference itself) surfaces as a clean error, not an uncaught exception."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     rng = np.random.default_rng(0)
@@ -776,7 +740,7 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
 
     write_sidecar(bucket_dir, {"validated": False, "raster_content_identity": identity,
                               "scope": {"subject": "0", "attribute": None, "id_map": None}},
-                 "operating_point")
+                 "operating_point", project=tmp_path)
 
     # Arbitrary geolocation, never derived from the rotated raster itself (which refuses to
     # resolve any pixel -> real-world coordinate at all): the point of this test is that
@@ -790,7 +754,7 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(tmp_path / "counts.csv"),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count")
     assert "error" in result
     assert "ModelTransformationTag" in result["error"]
@@ -800,21 +764,19 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     """A bucket a bespoke checkpoint produced belongs to no experiment, so its checkpoint hash
     stands on its own and travels into the delivered CSV, even though the validated claim itself
     was earned by a separate calibration record rather than by any training run."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -832,18 +794,18 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.resolution import read_delivery_events
 
-    (record,) = [r for r in read_delivery_events()
+    (record,) = [r for r in read_delivery_events(tmp_path)
                  if r["door"] == "deliver_orthomosaic_plant_counts"]
     bindings = record["document_reconciliations"]["operating_point"]["bindings"]
     assert bindings[str(bucket_dir)]["record_digest"]
     # The bucket sits under a real dataset root, so the delivery's one line files in the dataset's
     # own log naming the event, with no call line beside it in either log.
     emitted = ts.read_log(audit_log_key(bucket_dir.parents[1])).records
-    platform = ts.read_log(audit_log_key()).records
-    lines = [e for e in [*emitted, *platform] if e["tool"] == "delivery_event"]
+    project_log = ts.read_log(audit_log_key(tmp_path)).records
+    lines = [e for e in [*emitted, *project_log] if e["tool"] == "delivery_event"]
     assert [e["arguments"] for e in lines] == [{"event_id": record["event_id"]}]
     assert lines[0] in emitted
-    assert not [e for e in [*emitted, *platform]
+    assert not [e for e in [*emitted, *project_log]
                 if e["tool"] == "deliver_orthomosaic_plant_counts"]
 
 
@@ -851,14 +813,12 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
     """The recorded route's own shape: a validated claim naming a producing run the experiment
     store never held reports the producer unknown rather than naming a run that never ran, even
     though the count claim's own validation record (a separate calibration record) still holds."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT,
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT,
                          producing_experiment_id="exp_that_never_ran")
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
@@ -866,7 +826,7 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" not in result
@@ -890,8 +850,6 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     read_delivery_events, which already validates every record against DeliveryEventRecord
     (PlantRegistryDisclosure). A second delivery under an explicit nn_tolerance_m records that
     value under source "stated" rather than the derived "grid_pitch" the first delivery gets."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -900,15 +858,15 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
         (8.0, 8.0, 12.0, 12.0),
         (3990.0, 3990.0, 4010.0, 4010.0),  # far from every plant: contributes to n_unmapped
     ])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
     assert "error" not in result, result
     assert result["n_unmapped"] == 1
@@ -916,7 +874,7 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     from tcip_mcp.pipelines.postprocessing.plant_mapping import grid_pitch_m, read_plant_csvs
     from tcip_mcp.pipelines.resolution import read_delivery_events, read_operating_point_sidecar
 
-    events = read_delivery_events(tmp_path / "proj")
+    events = read_delivery_events(tmp_path)
     assert len(events) == 1
     event = events[0]
 
@@ -935,13 +893,13 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     stated_tolerance = grid_pitch_m(plants) / 12
     out_csv_stated = tmp_path / "counts_stated.csv"
     result_stated = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv_stated),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv_stated),
         delivered_phenotype="stem_count", nn_tolerance_m=stated_tolerance)
     assert "error" not in result_stated, result_stated
 
     existing_ids = {e["event_id"] for e in events}
     new_events = [
-        e for e in read_delivery_events(tmp_path / "proj") if e["event_id"] not in existing_ids]
+        e for e in read_delivery_events(tmp_path) if e["event_id"] not in existing_ids]
     assert len(new_events) == 1
     assert new_events[0]["plant_mapping"]["nn_tolerance_m"] == {
         "value": stated_tolerance, "source": "stated"}
@@ -956,16 +914,14 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after
     verified or the delivery never happens. The refused sentence names the fact
     (verify_registry_csv_bytes' own words) plus this door's own composed remedy, never the
     walked-mapping verifier's different one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     plant_csv.write_text(
         "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
@@ -975,7 +931,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" in refused
@@ -991,16 +947,14 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registered_csv_deleted_after
     """The same registry byte check refuses by name when a registered plant CSV is missing
     entirely, a separate outcome from a rewritten one (verify_registry_csv_bytes' own missing
     list, not its rewritten-file fact)."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     plant_csv.unlink()
 
@@ -1008,7 +962,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registered_csv_deleted_after
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" in refused
@@ -1021,22 +975,20 @@ def test_deliver_orthomosaic_plant_counts_delivers_once_registry_csv_bytes_verif
 ):
     """An unmodified registry CSV still delivers: the byte check above refuses only a rewritten
     file."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" not in delivered, delivered
@@ -1070,8 +1022,6 @@ def test_deliver_orthomosaic_plant_counts_names_an_outside_raster_plant_and_leav
     to any in-frame plant, stays unmapped rather than attributed to it: without the in-frame
     guard, the outside plant would have been the nearest candidate and well inside the stated
     tolerance, mapping the edge detection to a plant this raster never pictures."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)  # 64x64
@@ -1081,13 +1031,13 @@ def test_deliver_orthomosaic_plant_counts_names_an_outside_raster_plant_and_leav
         ("plot_in", 10.0, 10.0), ("plot_out", 70.0, 10.0),  # column 70 >= width 64: outside
     ])
     _replace_boxes(bucket_dir / f"{stem}.json", [(61.0, 8.0, 65.0, 12.0)])  # centroid (63, 10)
-    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv),
         delivered_phenotype="stem_count", nn_tolerance_m=10.0)
 
     assert "error" not in result, result
@@ -1142,7 +1092,7 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_delivers_ties_and_names
         ("plot0", 10.0, 10.0), ("plot1", 10.0, 50.0),
         ("plot2", 50.0, 10.0), ("plot3", 50.0, 50.0),
     ])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
     _write_canopy_document(raster_path, [
         (5.0, 5.0, 15.0, 15.0),    # segment 0: ties to plot0
         (45.0, 5.0, 55.0, 15.0),   # segment 1: ties to plot2
@@ -1154,13 +1104,13 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_delivers_ties_and_names
         (1.0, 56.0, 3.0, 58.0),    # inside segment 2: segment_without_plant
         (30.0, 30.0, 32.0, 32.0),  # inside no segment: outside_segments
     ])
-    _promote_bucket_conf(bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" not in result, result
@@ -1205,7 +1155,7 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_drops_an_ambiguous_over
     plant_csv = _plants_csv_at(tmp_path, raster_path, [
         ("plot0", 10.0, 10.0), ("plot1", 25.0, 10.0), ("plot2", 50.0, 50.0),
     ])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
     _write_canopy_document(raster_path, [
         (0.0, 0.0, 20.0, 20.0),    # segment 0: ties to plot0, overlaps segment 1 on x in [15,20]
         (15.0, 0.0, 35.0, 20.0),   # segment 1: ties to plot1
@@ -1215,13 +1165,13 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_drops_an_ambiguous_over
         (15.0, 8.0, 19.0, 12.0),   # centroid (17, 10): inside both segment 0 and segment 1
         (48.0, 48.0, 52.0, 52.0),  # inside segment 2 alone: attributed to plot2
     ])
-    _promote_bucket_conf(bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
+    _promote_bucket_conf(tmp_path, bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" not in result, result
@@ -1238,13 +1188,13 @@ def test_deliver_orthomosaic_plant_counts_refuses_nn_tolerance_m_beside_canopy_s
 ):
     dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
     _write_canopy_document(raster_path, [(5.0, 5.0, 15.0, 15.0)])
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count", canopy_subject="canopy", nn_tolerance_m=5.0)
 
     assert "error" in result
@@ -1255,19 +1205,17 @@ def test_deliver_orthomosaic_plant_counts_refuses_nn_tolerance_m_beside_canopy_s
 def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_outside_a_registered_dataset(
     tmp_path, monkeypatch,
 ):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" in result
@@ -1283,12 +1231,12 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_under_
     other_dataset_root = tmp_path / "other_ds"
     other_raster_path = write_canonical_dataset_raster(other_dataset_root, width=64, height=64)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(other_raster_path), registry_name, str(tmp_path / "counts.csv"),
+        tmp_path, str(bucket_dir), str(other_raster_path), registry_name, str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" in result
@@ -1300,12 +1248,12 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_missing_docum
 ):
     dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" in result
@@ -1326,18 +1274,18 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_one_le
     raster_path = dataset_root / "images" / "extra" / "2024-06-01" / "mosaic.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
     _write_geo_raster(raster_path)
-    reg = register_dataset(str(dataset_root), crop="chestnut", project_root=str(dataset_root))
+    reg = register_dataset(tmp_path, str(dataset_root), crop="chestnut")
     assert "error" not in reg, reg
 
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" in result
@@ -1355,7 +1303,7 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_when_no_plant_w
     plant_csv = _plants_csv_at(tmp_path, raster_path, [
         ("plot0", 10.0, 10.0), ("plot1", 25.0, 10.0),
     ])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
     _write_canopy_document(raster_path, [
         (0.0, 0.0, 20.0, 20.0),    # segment 0: ties to plot0, overlaps segment 1
         (15.0, 0.0, 35.0, 20.0),   # segment 1: ties to plot1
@@ -1368,7 +1316,7 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_when_no_plant_w
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count", canopy_subject="canopy")
 
     assert "error" in result
@@ -1382,8 +1330,6 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_duplicate_plot_name_in_the_r
     """The nearest-neighbor regime refuses a duplicated plot_name by name too, through the same
     check the canopy regime already runs over its own registry (require_named_plants): two rows
     sharing one identity would otherwise merge two trees' detections into one aggregation row."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -1391,13 +1337,13 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_duplicate_plot_name_in_the_r
     plant_csv = _plants_csv_at(tmp_path, raster_path, [
         ("plotA", 10.0, 10.0), ("plotA", 50.0, 50.0),
     ])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" in result
@@ -1409,20 +1355,18 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_blank_plot_name_in_the_regis
     tmp_path, monkeypatch,
 ):
     """Same guard, a blank identity instead of a duplicated one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
     plant_csv = _plants_csv_at(tmp_path, raster_path, [("", 10.0, 10.0)])
-    registry_name = _plant_registry(plant_csv)
+    registry_name = _plant_registry(tmp_path, plant_csv)
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        tmp_path, str(bucket_dir), str(raster_path), registry_name, str(out_csv),
         delivered_phenotype="stem_count")
 
     assert "error" in result

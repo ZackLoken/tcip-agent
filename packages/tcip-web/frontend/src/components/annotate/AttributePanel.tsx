@@ -11,6 +11,7 @@ import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { schemaChangeSweepToast } from "@/lib/registrySweep";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 
 /** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
  *  authoring new attributes and values onto the active subject: the selected shape's
@@ -31,6 +32,7 @@ export function AttributePanel({
   const registryVersion = useStore((s) => s.registry.version);
   const setRegistry = useStore((s) => s.setRegistry);
   const dataset = useStore((s) => s.gui.dataset);
+  const projectRoot = useStore(selectProjectRoot);
   const boxes = useStore((s) => s.canvas.boxes);
   const polygons = useStore((s) => s.canvas.polygons);
   const points = useStore((s) => s.canvas.points);
@@ -81,15 +83,10 @@ export function AttributePanel({
   // Grows the registry through the same door the toolbar's subject add uses, and the same toast.
   async function saveGrownRegistry(next: Registry) {
     setRegistry(next, registryVersion);
-    if (!dataset.project_root) return;
+    const root = dataset.dataset_root;
+    if (!projectRoot || !root) return;
     try {
-      const saved = await subjectsApi.save(
-        dataset.project_root,
-        next,
-        dataset.dataset_root,
-        dataset.annotations_dir,
-        registryVersion,
-      );
+      const saved = await subjectsApi.save(next, root, registryVersion);
       setRegistry(next, saved.version);
       const toast = schemaChangeSweepToast(saved.schema_change_sweep);
       if (toast) useStore.getState().pushToast(toast, "info");
@@ -113,11 +110,7 @@ export function AttributePanel({
         .getState()
         .pushToast(`Could not update attributes: ${e instanceof Error ? e.message : String(e)}`);
       try {
-        const fresh = await subjectsApi.load(
-          dataset.project_root,
-          dataset.dataset_root,
-          dataset.annotations_dir,
-        );
+        const fresh = await subjectsApi.load(root, dataset.annotations_dir);
         setRegistry(fresh.subjects, fresh.version);
       } catch {
         /* the reload itself failing leaves the optimistic registry in place */

@@ -64,7 +64,7 @@ def _add_if_dir(roots: list[tuple[str, str]], seen: set[tuple[str, str]], path: 
         _add(roots, seen, path, layout)
 
 
-def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
+def project_roots(project: str | Path) -> tuple[tuple[str, str], ...]:
     """The roots a whole project's records live in, each with the layout it is.
 
     Every root here comes from a record the project itself holds, or from walking a directory a
@@ -83,7 +83,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
       own ``predictions/`` tree, live and cleared alike
       (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs` with ``include_cleared=True``).
     """
-    root = Path(project_root).absolute()
+    root = Path(project)
     roots: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -91,18 +91,18 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     _add(roots, seen, project_state_dir(root), STATE)
 
     for run in experiments.run_observations(root):
-        _add(roots, seen, run.directory.absolute(), RUN)
+        _add(roots, seen, run.directory, RUN)
         binding = (run.record["resolved"]["partition"]["selection"]
                    if run.record["config"] is not None else None)
         if binding is not None:
-            _add_if_dir(roots, seen, Path(binding["selection_dir"]).absolute(), SPLITS)
+            _add_if_dir(roots, seen, Path(binding["selection_dir"]), SPLITS)
 
     for dataset_entry in project_tools.read_datasets(root):
-        dataset_root = project_tools.dataset_entry_path(root, dataset_entry).absolute()
+        dataset_root = project_tools.dataset_entry_path(root, dataset_entry)
         _add(roots, seen, dataset_root, ROOT)
         _add(roots, seen, project_state_dir(dataset_root), STATE)
         for bucket in dataset_layout.prediction_bucket_dirs(dataset_root, include_cleared=True):
-            _add(roots, seen, bucket.absolute(), PREDICTION_BUCKET)
+            _add(roots, seen, bucket, PREDICTION_BUCKET)
 
     return tuple(roots)
 

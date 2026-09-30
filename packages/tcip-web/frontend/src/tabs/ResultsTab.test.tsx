@@ -30,10 +30,10 @@ function setupDataset() {
       ...s.gui,
       dataset: {
         ...s.gui.dataset,
-        project_root: "C:/proj",
         dataset_root: "C:/data",
       },
     },
+    openProject: { id: "a1b2c3d4e5f6", path: "C:/proj" },
   }));
 }
 
@@ -784,7 +784,6 @@ describe("ResultsTab delivery events (read-only)", () => {
       event_id: "with-mapping",
       plant_mapping: {
         name: "valley",
-        project_root: "C:/proj",
         dataset_id: "ds-1",
         dataset_root: "C:/data",
         built_at: "2026-02-01T00:00:00+00:00",
@@ -819,7 +818,6 @@ describe("ResultsTab delivery events (read-only)", () => {
       door: "deliver_orthomosaic_plant_counts",
       plant_mapping: {
         plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
-        project_root: "C:/proj",
         raster_identity: { width: 4096, height: 4096 },
         nn_tolerance_m: { value: 1.5, source: "grid_pitch" },
         detections_unattributed: 3,
@@ -849,7 +847,6 @@ describe("ResultsTab delivery events (read-only)", () => {
       door: "deliver_orthomosaic_plant_counts",
       plant_mapping: {
         plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
-        project_root: "C:/proj",
         raster_identity: { width: 4096, height: 4096 },
         canopy_segments: {
           path: "C:/proj/annotations/2024-06-01/mosaic.json",
@@ -895,7 +892,6 @@ describe("ResultsTab delivery events (read-only)", () => {
       event_id: "moved-on",
       plant_mapping: {
         name: "valley",
-        project_root: "C:/proj",
         dataset_id: "ds-1",
         dataset_root: "C:/data",
         built_at: "2026-02-01T00:00:00+00:00",
@@ -1019,8 +1015,8 @@ describe("ResultsTab count export", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
+    expect(downloadCountCsv.mock.calls[0][0]).not.toHaveProperty("project_root");
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
-      project_root: "C:/proj",
       delivery: {
         kind: "per_image_count",
         predictions_dir: "C:/data/predictions/baseline/2026-01-01",
@@ -1061,7 +1057,6 @@ describe("ResultsTab count export", () => {
 
     await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
-      project_root: "C:/proj",
       delivery: {
         kind: "orthomosaic_plant_counts",
         predictions_dir: "C:/data/predictions/baseline/2026-01-01",

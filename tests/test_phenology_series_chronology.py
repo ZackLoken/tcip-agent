@@ -50,8 +50,8 @@ def _states(n_positive: int, n_negative: int) -> list[str]:
     return ["open"] * n_positive + ["closed"] * n_negative
 
 
-def _write_sidecar(dir_path: Path, id_map: dict, *, dataset_root: Path, validated: bool = True,
-                   conf: float = 0.37) -> None:
+def _write_sidecar(project: Path, dir_path: Path, id_map: dict, *, dataset_root: Path,
+                   validated: bool = True, conf: float = 0.37) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     ref = "held_out_annotations" if validated else "false"
     stamp = {
@@ -62,14 +62,15 @@ def _write_sidecar(dir_path: Path, id_map: dict, *, dataset_root: Path, validate
         "scope": {"subject": "bud", "attribute": "opening", "id_map": id_map},
     }
     if validated:
-        write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+        write_bound_sidecar(project, dir_path, stamp, dataset_root=dataset_root,
                             experiment_id=f"exp-record-{dir_path.name}",
                             producing_experiment_id="exp-77")
     else:
         (dir_path / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
-def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, trait: str) -> None:
+def _write_classifier_sidecar(project: Path, dir_path: Path, *, dataset_root: Path,
+                              trait: str) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
         "validated": True,
@@ -78,7 +79,7 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, trait: str)
         "trait": trait,
         "experiment_id": "exp-77",
     }
-    write_bound_sidecar(dir_path, stamp, document="classifier_operating_point",
+    write_bound_sidecar(project, dir_path, stamp, document="classifier_operating_point",
                         dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
                         producing_experiment_id="exp-77", trait=trait)
 
@@ -164,7 +165,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     }
     for d in dates:
         bucket = tmp_path / d
-        _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=tmp_path)
+        _write_sidecar(tmp_path, bucket, SPARSE_ID_MAP, dataset_root=tmp_path)
         for plant, (pos, neg) in counts[d].items():
             _write_preds(bucket, f"{plant}_{d}", _states(pos, neg))
     mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
@@ -227,7 +228,6 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, data={
         "num_channels": 3,
         "scope": {"id_map": dict(SPARSE_ID_MAP), "subject": "bud", "attribute": "state"}})
@@ -252,7 +252,7 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     from tcip_mcp.tools.inference_tools import run_inference
 
     bucket = tmp_path / "preds"
-    res = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
+    res = run_inference(tmp_path, str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
     assert "error" not in res, res
 
     scope = resolution.bucket_scope(bucket)
@@ -279,8 +279,9 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
         bucket = buckets[d]
         # Predictions land before the record is filed, so the covered digest matches what delivery recomputes.
         _write_preds(bucket, f"P1_{d}", _states(pos, neg))
-        _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=root)
-    _write_classifier_sidecar(buckets["2026-03-01"], dataset_root=root, trait="bud_opening")
+        _write_sidecar(tmp_path, bucket, SPARSE_ID_MAP, dataset_root=root)
+    _write_classifier_sidecar(tmp_path, buckets["2026-03-01"], dataset_root=root,
+                              trait="bud_opening")
     from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"
@@ -291,8 +292,8 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={d: str(buckets[d]) for d in counts},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(buckets["2026-03-01"])],

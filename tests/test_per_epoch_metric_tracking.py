@@ -67,7 +67,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
         "early_stopping": {"enabled": False},
     }
     out_dir = tmp_path / "out"
-    run = trainer_run(config, out_dir, has_val_loader=True, id="auto-run-42")
+    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-42")
     run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error
 
@@ -79,7 +79,7 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_pa
 
 def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, sweep_dir
 
     images_dir, labels_dir, val_images, val_labels = _seed_leaf_detection_dataset(tmp_path / "ds")
     base_config = {
@@ -91,11 +91,11 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 2}],
                      "mixed_precision": False, "device": "cpu",
     }
-    trial_dir = tmp_path / "hpo_study" / "trial_x"
-    trial_dir.parent.mkdir()
+    trial_dir = sweep_dir("hpo_study", project=tmp_path) / "trial_x"
+    trial_dir.parent.mkdir(parents=True)
     reported: list[float] = []
-    _run_hpo_trial({}, reported.append, base_config, trial_dir,
-                   objective=resolve_objective(base_config, has_val_loader=True),
+    _run_hpo_trial({}, reported.append, base_config, trial_dir, project=tmp_path,
+                   objective=resolve_objective(base_config, has_val_loader=True, project=tmp_path),
                    launched_by={"launcher": "process"})
 
     # One report per epoch's metrics row, which is the trial's whole result.
@@ -129,7 +129,7 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
         "checkpoint_every_n_epochs": 0,
         "early_stopping": {"enabled": False},
     }
-    run = trainer_run(config, tmp_path / "out", has_val_loader=True, id="auto-run-43")
+    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-43")
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
         run = train(run, train_loader, val_loader=val_loader)
     assert run.status == "completed", run.error

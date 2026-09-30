@@ -56,8 +56,8 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
-    result = register_model(name="band-group-test-model", checkpoint_path=str(ckpt), config={},
-                            project_path=str(tmp_path))
+    result = register_model(tmp_path, name="band-group-test-model", checkpoint_path=str(ckpt),
+                            config={})
     assert "error" not in result, result
     return str(ckpt)
 
@@ -97,7 +97,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
 
     images_dir, labels_dir = _grouped_dataset(tmp_path)
     ckpt = _detection_checkpoint(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     p = _prepare_pass(
         checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=False,
         tile_size=None, overlap=None, cross_tile_nms=None, max_dets=100, postprocess="nms",
@@ -115,7 +115,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
     bundle, dataset_hash, n_excluded, _evidence = calibrate_operating_point(
-        p, "bud_opening", str(labels_dir), str(images_dir),
+        p, "bud_opening", str(labels_dir), str(images_dir), project=tmp_path,
         holdout_ratio=0.0,  # both stems land in calibration -> one predict_batch call sees both
     )
 
@@ -138,13 +138,12 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     pass, no images_dir mixing (see module docstring)."""
     from tests._verified_checkpoint_fixtures import run_inference_verified
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
-    result = run_inference_verified(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
+    result = run_inference_verified(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False)
 
     assert "error" not in result
     assert len(result["results"]) == 1  # one grouped capture, never 2 raw sibling band files
@@ -160,7 +159,7 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
 
     images_dir, labels_dir = _grouped_dataset(tmp_path)
     ckpt = _detection_checkpoint(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
 
     stems, stem_to_image = label_image_stems(str(labels_dir), str(images_dir))

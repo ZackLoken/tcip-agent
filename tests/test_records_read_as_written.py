@@ -36,7 +36,7 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     stated = registered_checkpoint(tmp_path)
-    assert load_registered_checkpoint(stated, project_path=str(tmp_path)).task == "detection"
+    assert load_registered_checkpoint(stated, project=tmp_path).task == "detection"
 
     # Written past the producer, which builds no model for a config naming no task.
     torch = pytest.importorskip("torch")
@@ -48,9 +48,9 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
                 "config": {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection"},
                            "data": dict(SCOPED_DATA)}}, str(unstated))
     assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
-                                         config={}, project_path=str(tmp_path))
+                                         config={}, project=tmp_path)
     with pytest.raises(ValueError, match="model_source.task"):
-        load_registered_checkpoint(str(unstated), project_path=str(tmp_path)).task
+        load_registered_checkpoint(str(unstated), project=tmp_path).task
 
 
 def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(tmp_path: Path) -> None:
@@ -97,18 +97,17 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     def fake_search(**kw):
         return str(Path(kw["storage_path"]) / kw["study_name"])
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
     result = tt.run_hyperparameter_search(
-        base_config=real_hpo_base_config, n_trials=1, search_seed=0)
-    assert tt.monitor_training(sweep_id=result["study_name"])["status"] == "completed"
+        tmp_path, base_config=real_hpo_base_config, n_trials=1, search_seed=0)
+    assert tt.monitor_training(tmp_path, sweep_id=result["study_name"])["status"] == "completed"
 
-    final = tt.sweep_dir(result["study_name"]) / FINAL_STATUS_FILE
+    final = tt.sweep_dir(result["study_name"], project=tmp_path) / FINAL_STATUS_FILE
     damaged = read_record(final)
     del damaged["state"]
     final.write_bytes(RECORD_JSON.encode(damaged))
     with pytest.raises(KeyError, match="state"):
-        tt.monitor_training(sweep_id=result["study_name"])
+        tt.monitor_training(tmp_path, sweep_id=result["study_name"])
 
 
 def test_an_image_status_entry_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:

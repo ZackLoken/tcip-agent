@@ -49,6 +49,7 @@ import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/
 import { detectionAdmitted, detOutcomeGeometry } from "@/lib/reviewGeometry";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 import type { MatchesResponse, ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 
 // Plain-language labels for a breeder audience: the TP/FP/FN tag stays as a short code next
@@ -76,6 +77,7 @@ const IMAGE_STATUS_CLASS: Record<MatchesResponse["image_status"], string> = {
 
 export function ReviewTab() {
   const dataset = useStore((s) => s.gui.dataset);
+  const projectRoot = useStore(selectProjectRoot);
   const patchGui = useStore((s) => s.patchGui);
   // Narrow subscriptions: pan/zoom mutates gui.view (the whole gui object is replaced by
   // setView), so subscribing to the whole gui slice re-rendered this tab (and its overlays)
@@ -147,7 +149,8 @@ export function ReviewTab() {
   const [showPred, setShowPred] = useState(true);
   // GT/Pred visibility is remembered per (project, date, subject/model): restore on dataset change,
   // save on toggle. (Position + filters are persisted centrally in the open path.)
-  const visKey = datasetKey(dataset);
+  const openProject = useStore((s) => s.openProject);
+  const visKey = datasetKey(openProject, dataset);
   useEffect(() => {
     const v = visKey ? loadDatasetVisibility(visKey) : null;
     setShowGT(v ? v.showGT : true);
@@ -170,7 +173,7 @@ export function ReviewTab() {
   const reviewLocked = imageStatus === "completed";
   // Every review route is scoped to the dataset root whose store holds the verdicts.
   const canReview = !!dataset.dataset_root;
-  const needsDatasetSelection = !dataset.dataset_root && !!dataset.project_root;
+  const needsDatasetSelection = !dataset.dataset_root && !!projectRoot;
   // Result of "use this review as a validation reference" (dataset-level, so it clears on selection).
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{
@@ -190,11 +193,11 @@ export function ReviewTab() {
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
   useEffect(() => {
-    if (!dataset.project_root) return;
+    if (!projectRoot) return;
     setTrait("");
     setTraitError(null);
     void resultsApi
-      .traits(dataset.project_root)
+      .traits()
       .then((res) => {
         const names = res.traits.map((t) => t.trait);
         setAvailableTraits(names);
@@ -210,7 +213,7 @@ export function ReviewTab() {
           `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
-  }, [dataset.project_root]);
+  }, [projectRoot]);
   // The bucket's own generation confidence, fetched once per prediction dir (read-only, no
   // gate run) so the "Conf ≥" filter can warn live (see the filter shelf below).
   const [generationConf, setGenerationConf] = useState<number | null>(null);
@@ -276,12 +279,12 @@ export function ReviewTab() {
   useEffect(() => {
     setPqModels([]);
     setPqModelPath("");
-    if (!dataset.project_root) return;
+    if (!projectRoot) return;
     void resultsApi
-      .registeredModels(dataset.project_root)
+      .registeredModels()
       .then((r) => setPqModels(r.models ?? []))
       .catch(() => setPqModels([]));
-  }, [dataset.project_root]);
+  }, [projectRoot]);
 
   // A new dataset/date selection invalidates whatever queue was computed for the previous one.
   useEffect(() => {
@@ -412,18 +415,15 @@ export function ReviewTab() {
   const matchesImageRef = useRef<string | null>(null);
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
-    if (!imgPath || !dataset.project_root || !matches) return null;
+    const project = useStore.getState().openProject;
+    if (!imgPath || !project || !matches) return null;
     // Mid-transition guards: the store must hold this image's matches, and not be mid-reload;
     // otherwise the previous image's shapes would push under the new image_path (a false canvas).
     if (matchesImageRef.current !== imgName) return null;
     if (useStore.getState().review.loading) return null;
-    // Binding-presence gate: a dataset without an adopted generation must stop pushing.
-    const generation = useStore.getState().bindingGeneration;
-    useStore.getState().setCanvasBindingMissing(generation == null);
-    if (generation == null) return null;
     const host = measureCanvasHost();
     return {
-      binding_generation: generation,
+      project_id: project.id,
       tab: "review",
       image_path: imgPath,
       image: imgName ?? "",
@@ -1118,53 +1118,45 @@ export function ReviewTab() {
       if (imgName) setReviewImageStatus(imgName, res.image_status); // keep the nav filter live
       // The annotation status comes from the server (GT files on disk), scoped to the confirmed
       // subject; null when no subject was named, so nothing to sync or mirror.
-      if (res.annotation_status) {
+      if (res.annotation_status && dataset.dataset_root) {
         setStoreImageStatus(imgName, res.annotation_status);
-        // The registry this status is mirrored into is the project's, not the review store's.
-        if (dataset.project_root) {
-          void subjectsApi
-            .setImageStatus(
-              dataset.project_root,
-              imgName,
-              res.annotation_status,
-              dataset.subject,
-              dataset.date,
-              dataset.dataset_root,
-              dataset.annotations_dir,
-              useStore.getState().user || undefined,
-            )
-            .catch((e: unknown) => {
-              if (isAuditEntryNotWritten(e)) {
-                useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
-              }
-            });
-        }
+        // Mirrored into the dataset's own status store, not the review store's.
+        void subjectsApi
+          .setImageStatus(
+            imgName,
+            res.annotation_status,
+            dataset.subject,
+            dataset.date,
+            dataset.dataset_root,
+            useStore.getState().user || undefined,
+          )
+          .catch((e: unknown) => {
+            if (isAuditEntryNotWritten(e)) {
+              useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
+            }
+          });
       }
     } catch (e) {
       const committed = committedOf<Awaited<ReturnType<typeof api.review.markComplete>>>(e);
       if (committed) {
         setImageStatus(committed.image_status);
         if (imgName) setReviewImageStatus(imgName, committed.image_status);
-        if (committed.annotation_status) {
+        if (committed.annotation_status && dataset.dataset_root) {
           setStoreImageStatus(imgName, committed.annotation_status);
-          if (dataset.project_root) {
-            void subjectsApi
-              .setImageStatus(
-                dataset.project_root,
-                imgName,
-                committed.annotation_status,
-                dataset.subject,
-                dataset.date,
-                dataset.dataset_root,
-                dataset.annotations_dir,
-                useStore.getState().user || undefined,
-              )
-              .catch((e2: unknown) => {
-                if (isAuditEntryNotWritten(e2)) {
-                  useStore.getState().pushToast(e2 instanceof Error ? e2.message : String(e2));
-                }
-              });
-          }
+          void subjectsApi
+            .setImageStatus(
+              imgName,
+              committed.annotation_status,
+              dataset.subject,
+              dataset.date,
+              dataset.dataset_root,
+              useStore.getState().user || undefined,
+            )
+            .catch((e2: unknown) => {
+              if (isAuditEntryNotWritten(e2)) {
+                useStore.getState().pushToast(e2 instanceof Error ? e2.message : String(e2));
+              }
+            });
         }
         useStore.getState().pushToast(e instanceof Error ? e.message : String(e));
         return;

@@ -17,7 +17,6 @@ afterEach(() => {
 });
 
 const PARAMS = {
-  projectRoot: "C:/proj",
   subject: "subject_a",
   datasetRoot: "C:/data",
   datasetDate: "2026-01-01",
@@ -66,12 +65,10 @@ describe("useImageStatusHydrate", () => {
     );
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
     expect(bulk).toHaveBeenCalledWith(
-      "C:/proj",
       { "img1.jpg": "partial" },
       "subject_a",
       "2026-01-01",
       "C:/data",
-      "C:/data/annotations/2026-01-01",
       undefined,
     );
   });

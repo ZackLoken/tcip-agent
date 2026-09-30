@@ -10,7 +10,7 @@ one bundle an ``import-project`` run can restore from elsewhere. Wraps
     tcip archive-project <project_path> --output-dir DIR [--include-models]
 
 Exactly one of --output-path/--output-dir is required. This run's audit line is recorded under
-``<project_path>/.tcip``, the project being archived, not the process cwd.
+``<project_path>/.tcip``, the project being archived.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import argparse
 import json
 import sys
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -37,20 +37,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                          help="Include registered model checkpoints (can be large).")
     args = parser.parse_args(argv)
 
-    require_and_pin_platform_root(args.project_path)
-
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
+    project = bound_project(args.project_path)
 
     # archive_project exports every database under the tree before it composes the bundle, so
     # every store must already be registered, not just the ones project_tools.py itself defines.
     import tcip_mcp.store_catalog  # noqa: F401
     from tcip_mcp.tools.project_tools import archive_project
 
-    bind_default()
-
     result = archive_project(
-        args.project_path, output_path=args.output_path, output_dir=args.output_dir,
+        project, output_path=args.output_path, output_dir=args.output_dir,
         include_models=args.include_models,
     )
     if "error" in result:

@@ -70,12 +70,13 @@ def collect_calibration_records(p, cal_stems, hold_stems, source_of, gt_of):
     return records(cal_stems), records(hold_stems)
 
 
-def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
+def calibrate_operating_point(p, trait, labels_dir, images_dir, *, project: Path,
                                group_by=None, group_key_map=None, experiment_id=None,
                                seed=DEFAULT_CAL_SEED, holdout_ratio=DEFAULT_HOLDOUT_RATIO,
                                selection_dir=None):
     """Resolve a per-dataset operating point from a labeled split, over the prepared pass ``p``
-    (``inference_tools._PreparedPass``) a delivery runs.
+    (``inference_tools._PreparedPass``) a delivery runs, for ``trait`` of ``project``, whose run
+    ``experiment_id`` names.
 
     Returns ``(bundle, hash, n_excluded_incomplete_attribute, evidence)``. The third value is the
     count of cal/holdout stems dropped whole because an instance was unlabeled for ``attribute``;
@@ -133,7 +134,7 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
     if selection_dir is not None and experiment_id is not None:
         from tcip_mcp.experiments import run_resolution
 
-        binding = run_resolution(experiment_id)["partition"]["selection"]
+        binding = run_resolution(experiment_id, project=project)["partition"]["selection"]
         if binding is not None and not same_directory(binding["selection_dir"], selection_dir):
             raise ValueError(
                 f"this checkpoint is bound to the selection at {binding['selection_dir']!r}, not "
@@ -149,8 +150,8 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
         from tcip_mcp.pipelines.image_utils import resolve_source_path
         from tcip_mcp.pipelines.resolution import selection_digest
 
-        selection = read_selection(selection_dir)
-        selection_sha256 = selection_digest(selection)
+        selection = read_selection(selection_dir, project=project)
+        selection_sha256 = selection_digest(selection, project)
         stems, group_by, group_key_map, excluded, annotation_counts, universe_samples = \
             selection_calibration_universe(selection, labels_dir, scope)
         # Each stem's own recorded source and ground truth, never a directory listing's: two
@@ -177,7 +178,6 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
         stems, identity_hash=dh, scope_root=cal_holdout_scope_root(labels_dir),
         annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
-        selection_dir=selection_dir,
     )
     if locked.get("unlocked_stems"):
         logger.info(
@@ -209,7 +209,8 @@ def calibrate_operating_point(p, trait, labels_dir, images_dir, *,
         "selection_dir": selection_dir,
         "calibration_labels_dir": str(labels_p), "selection_sha256": selection_sha256,
     }
-    bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
+    bundle = resolve_operating_point(trait, project=project, experiment_id=experiment_id,
+                                     **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": resolver_inputs,

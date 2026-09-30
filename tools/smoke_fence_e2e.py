@@ -29,15 +29,18 @@ os.environ["TCIP_WORKSPACE"] = tempfile.mkdtemp(prefix="fence-ws-")  # keep the 
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tcip_mcp.workspace import workspace_from_environment  # noqa: E402
 from tcip_web import terminal as pty_host  # noqa: E402
 from tcip_web.app import app  # noqa: E402
 from tcip_web.routes import terminal as terminal_routes  # noqa: E402
+from tcip_web.state import store  # noqa: E402
 
 TARGET = REPO / "packages" / "tcip-mcp" / "FENCE_TEST_DELETEME.txt"
 
 
 def main() -> int:
-    argv = pty_host.resolve_terminal_command()
+    store.configure(workspace_from_environment(), ())
+    argv = pty_host.resolve_terminal_command(None)
     print("[1] spawn argv:", argv)
     if argv is None or "--settings" not in argv:
         print("FAIL: real claude not fenced / not available")

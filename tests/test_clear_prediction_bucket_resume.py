@@ -42,11 +42,11 @@ def test_fault_at_first_document_write_after_stamps_moved_is_finished_by_resume(
 
     fault = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash before the first document")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash before the first document")
     assert fault.fired
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after the first-document crash",
+        tmp_path, str(built["bucket"]), "resume after the first-document crash",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -68,11 +68,11 @@ def test_fault_between_destination_creation_and_first_stamp_write_is_finished_by
     fault = inject_store_fault(
         monkeypatch, method_name="replace", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with no destination content")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with no destination content")
     assert fault.fired
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after the no-destination crash",
+        tmp_path, str(built["bucket"]), "resume after the no-destination crash",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -93,14 +93,14 @@ def test_fault_between_op_stamp_copy_and_delete_leaves_it_at_both_finished_by_re
     fault = inject_store_fault(
         monkeypatch, method_name="delete", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with the stamp at both")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with the stamp at both")
     assert fault.fired
     # The clock-free mark: the stamp landed at the destination while the source still holds it.
     assert read_operating_point_sidecar(destination) is not None
     assert read_operating_point_sidecar(built["bucket"]) is not None
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after the stamp-at-both crash",
+        tmp_path, str(built["bucket"]), "resume after the stamp-at-both crash",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -130,7 +130,7 @@ def test_a_merge_landed_on_the_source_in_the_stamp_at_both_state_is_carried_to_t
     fault = inject_store_fault(
         monkeypatch, method_name="delete", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with the stamp at both")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with the stamp at both")
     assert fault.fired
     stale_at_destination = read_operating_point_sidecar(destination)
     assert stale_at_destination is not None
@@ -140,12 +140,12 @@ def test_a_merge_landed_on_the_source_in_the_stamp_at_both_state_is_carried_to_t
         conf["validated_against"] = "held_out_annotations"
         return {**stored, "operating_point": {**stored.get("operating_point", {}), "conf": conf}}
 
-    assert update_sidecar(built["bucket"], merge_a_calibration_shaped_key) is True
+    assert update_sidecar(built["bucket"], merge_a_calibration_shaped_key, project=tmp_path) is True
     merged_at_source = read_operating_point_sidecar(built["bucket"])
     assert merged_at_source != stale_at_destination
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after a count calibration merged into the still-published source",
+        tmp_path, str(built["bucket"]), "resume after a count calibration merged into the still-published source",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert bucket_stems(built["bucket"]) == set()
@@ -166,13 +166,13 @@ def test_fault_between_document_write_and_source_delete_finished_by_resume(tmp_p
     fault = inject_store_fault(
         monkeypatch, method_name="delete", predicate=key_in_store(ANNOTATION_RECORDS_STORE))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with the document at both")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with the document at both")
     assert fault.fired
     assert bucket_stems(built["bucket"]) == {"img"}
     assert bucket_stems(destination) == {"img"}
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after the document-at-both crash",
+        tmp_path, str(built["bucket"]), "resume after the document-at-both crash",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -197,20 +197,20 @@ def test_fault_after_last_source_delete_reports_republication_on_resume(tmp_path
     # second crashes after every write has landed, before the body returns.
     raise_on_nth_call(monkeypatch, prediction_buckets_mod, "review_state_count", 2)
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash after the last write")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash after the last write")
     assert bucket_stems(built["bucket"]) == set()
     assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
     # A fresh publish lands into the now-empty source.
     republish = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(built["bucket"]),
+        tmp_path, str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(built["bucket"]),
         tile=False)
     assert "error" not in republish, republish
     assert bucket_stems(built["bucket"]) == {"img"}
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after the last-step crash and a republication",
+        tmp_path, str(built["bucket"]), "resume after the last-step crash and a republication",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -242,7 +242,7 @@ def test_a_version_conflict_during_reconcile_refuses_naming_the_key_and_what_mov
         monkeypatch, method_name="put_blob",
         predicate=key_in_store(ANNOTATION_RECORDS_STORE), exc=conflict)
 
-    result = clear_prediction_bucket(str(built["bucket"]), "should refuse: version conflict")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "should refuse: version conflict")
     assert "error" in result
     assert fault.fired
     assert "img" in result["error"]
@@ -263,20 +263,20 @@ def test_an_undecodable_stamp_at_the_destination_refuses_by_name_on_resume(tmp_p
     from tests._record_damage_fixtures import damage_record
 
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id="expDestUndecodable")
-    write_sidecar(built["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    write_sidecar(built["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale", project=tmp_path)
     _fix_stamp(monkeypatch)
     destination = _expected_destination(built)
 
     fault = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash after the stamps moved")
     assert fault.fired
 
     key = sidecar_key(destination, "resolve_scale")
     damage_record(key, b"{not json")
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume over a corrupted destination stamp",
+        tmp_path, str(built["bucket"]), "resume over a corrupted destination stamp",
         cleared_bucket=str(destination))
     assert "error" in result
     assert "resolve_scale.json will not decode" in result["error"]
@@ -295,10 +295,10 @@ def test_unfinished_clear_no_destination_content_refuses_a_keyword_less_call(tmp
     fault = inject_store_fault(
         monkeypatch, method_name="replace", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash before any stamp write")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash before any stamp write")
     assert fault.fired
 
-    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "keyword-less call over the wreckage")
     assert "error" in result
     assert "is on record and unfinished" in result["error"]
     assert repr(str(destination)) in result["error"]
@@ -314,10 +314,10 @@ def test_unfinished_clear_stamp_at_both_refuses_a_keyword_less_call(tmp_path, mo
     fault = inject_store_fault(
         monkeypatch, method_name="delete", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with the stamp at both")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with the stamp at both")
     assert fault.fired
 
-    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "keyword-less call over the wreckage")
     assert "error" in result
     assert "is on record and unfinished" in result["error"]
     assert repr(str(destination)) in result["error"]
@@ -337,11 +337,11 @@ def test_a_keyword_less_call_in_the_stamps_moved_state_refuses_naming_the_newest
 
     fault = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash after the stamps moved")
     assert fault.fired
     assert bucket_stems(built["bucket"]) == {"img"}
 
-    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the wreckage")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "keyword-less call over the wreckage")
     assert "error" in result
     assert "carries no operating_point.json" in result["error"]
     assert f"cleared_bucket={str(destination)!r}" in result["error"]
@@ -363,12 +363,12 @@ def test_a_keyword_less_call_in_the_emptied_state_refuses_naming_the_newest_arch
 
     raise_on_nth_call(monkeypatch, prediction_buckets_mod, "review_state_count", 2)
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash after the last write")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash after the last write")
     assert bucket_stems(built["bucket"]) == set()
     assert_source_stamps_absent(built["bucket"])
     assert bucket_stems(destination) == {"img"}
 
-    result = clear_prediction_bucket(str(built["bucket"]), "keyword-less call over the empty source")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "keyword-less call over the empty source")
     assert "error" in result
     assert "carries no operating_point.json" in result["error"]
     assert f"cleared_bucket={str(destination)!r}" in result["error"]
@@ -401,7 +401,7 @@ def test_a_document_arrived_during_the_move_refuses_naming_the_stem(tmp_path, mo
 
     monkeypatch.setattr(inference_tools_mod, "_reconcile_document", stage_arriving_document)
 
-    result = clear_prediction_bucket(str(built["bucket"]), "a document arrives mid-move")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "a document arrives mid-move")
     assert "error" in result
     assert "newcomer" in result["error"]
 
@@ -421,18 +421,18 @@ def test_a_secondary_stamp_present_at_the_source_alone_moves_or_refuses_by_the_o
 
     built_a = build_published_bucket(
         tmp_path, monkeypatch, experiment_id="expSecondaryOpNotMoved", dataset_root=tmp_path / "ds_a")
-    write_sidecar(built_a["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    write_sidecar(built_a["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale", project=tmp_path)
     _fix_stamp(monkeypatch)
     destination_a = _expected_destination(built_a)
 
     fault_a = inject_store_fault(
         monkeypatch, method_name="replace", predicate=key_in_store("operating_point_sidecar"))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built_a["bucket"]), "should crash before any stamp write")
+        clear_prediction_bucket(tmp_path, str(built_a["bucket"]), "should crash before any stamp write")
     assert fault_a.fired
 
     result_a = clear_prediction_bucket(
-        str(built_a["bucket"]), "resume after the no-stamp-write crash",
+        tmp_path, str(built_a["bucket"]), "resume after the no-stamp-write crash",
         cleared_bucket=str(destination_a))
     assert "error" not in result_a, result_a
     assert read_operating_point_sidecar(destination_a) is not None
@@ -447,31 +447,31 @@ def test_a_secondary_stamp_present_at_the_source_alone_moves_or_refuses_by_the_o
 
     fault_b = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built_b["bucket"]), "should crash after the stamps moved")
+        clear_prediction_bucket(tmp_path, str(built_b["bucket"]), "should crash after the stamps moved")
     assert fault_b.fired
 
-    write_sidecar(built_b["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale")
+    write_sidecar(built_b["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale", project=tmp_path)
 
     result_b = clear_prediction_bucket(
-        str(built_b["bucket"]), "resume after a fresh secondary stamp landed",
+        tmp_path, str(built_b["bucket"]), "resume after a fresh secondary stamp landed",
         cleared_bucket=str(destination_b))
     assert "error" in result_b
     assert "resolve_scale.json is present at" in result_b["error"]
 
     built_c = build_published_bucket(
         tmp_path, monkeypatch, experiment_id="expSecondaryOpMovedDiffers", dataset_root=tmp_path / "ds_c")
-    write_sidecar(built_c["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale")
+    write_sidecar(built_c["bucket"], {"conf": {"value": 0.1}}, document="resolve_scale", project=tmp_path)
     destination_c = _expected_destination(built_c)
 
     fault_c = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built_c["bucket"]), "should crash after the stamps moved")
+        clear_prediction_bucket(tmp_path, str(built_c["bucket"]), "should crash after the stamps moved")
     assert fault_c.fired
 
-    write_sidecar(built_c["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale")
+    write_sidecar(built_c["bucket"], {"conf": {"value": 0.4}}, document="resolve_scale", project=tmp_path)
 
     result_c = clear_prediction_bucket(
-        str(built_c["bucket"]), "resume after a differing secondary stamp landed",
+        tmp_path, str(built_c["bucket"]), "resume after a differing secondary stamp landed",
         cleared_bucket=str(destination_c))
     assert "error" in result_c
     assert "resolve_scale.json differs" in result_c["error"]
@@ -491,7 +491,7 @@ def test_a_same_stem_document_staged_over_a_copied_one_refuses_on_resume(tmp_pat
     fault = inject_store_fault(
         monkeypatch, method_name="delete", predicate=key_in_store(ANNOTATION_RECORDS_STORE))
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash with the document at both")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash with the document at both")
     assert fault.fired
 
     write_annotations(
@@ -500,7 +500,7 @@ def test_a_same_stem_document_staged_over_a_copied_one_refuses_on_resume(tmp_pat
     )
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after a same-stem document was staged over",
+        tmp_path, str(built["bucket"]), "resume after a same-stem document was staged over",
         cleared_bucket=str(destination))
     assert "error" in result
     assert "img.json differs" in result["error"]
@@ -528,7 +528,7 @@ def test_review_state_landed_during_clear_is_reported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inference_tools_mod, "_reconcile_document", land_review_mid_move)
 
-    result = clear_prediction_bucket(str(built["bucket"]), "review lands mid-move")
+    result = clear_prediction_bucket(tmp_path, str(built["bucket"]), "review lands mid-move")
     assert "error" not in result, result
     assert result["review_state_landed_during_clear"] == 1
 
@@ -549,13 +549,13 @@ def test_a_verdict_recorded_between_a_crash_and_the_resume_still_finishes_report
 
     fault = inject_store_fault(monkeypatch, method_name="put_blob")
     with pytest.raises(RuntimeError):
-        clear_prediction_bucket(str(built["bucket"]), "should crash after the stamps moved")
+        clear_prediction_bucket(tmp_path, str(built["bucket"]), "should crash after the stamps moved")
     assert fault.fired
 
     record_review_verdict(built["bucket"], review_state_dir, "img.png")
 
     result = clear_prediction_bucket(
-        str(built["bucket"]), "resume after a verdict landed on the wreckage",
+        tmp_path, str(built["bucket"]), "resume after a verdict landed on the wreckage",
         cleared_bucket=str(destination))
     assert "error" not in result, result
     assert result["resumed"] is True
@@ -582,18 +582,18 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     built = build_published_bucket(tmp_path, monkeypatch, experiment_id=exp_id)
     source = built["bucket"]
 
-    first = clear_prediction_bucket(str(source), "first clear")
+    first = clear_prediction_bucket(tmp_path, str(source), "first clear")
     assert "error" not in first, first
     first_destination = first["cleared_bucket"]
     assert bucket_stems(source) == set()
     assert_source_stamps_absent(source)
 
     republish = run_inference(
-        str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
+        tmp_path, str(built["checkpoint"]), str(built["images_dir"]), output_dir=str(source), tile=False)
     assert "error" not in republish, republish
     assert bucket_stems(source) == {"img"}
 
-    second = clear_prediction_bucket(str(source), "second clear over the re-published source")
+    second = clear_prediction_bucket(tmp_path, str(source), "second clear over the re-published source")
     assert "error" not in second, second
     second_destination = second["cleared_bucket"]
     assert second_destination != first_destination
@@ -601,7 +601,7 @@ def test_a_resume_naming_an_older_finished_archive_of_a_source_cleared_twice_ref
     assert_source_stamps_absent(source)
 
     resume_on_older = clear_prediction_bucket(
-        str(source), "resume naming the older archive", cleared_bucket=first_destination)
+        tmp_path, str(source), "resume naming the older archive", cleared_bucket=first_destination)
     assert "error" in resume_on_older
     assert "is not the newest cleared bucket on record" in resume_on_older["error"]
     assert f"cleared_bucket={second_destination!r}" in resume_on_older["error"]

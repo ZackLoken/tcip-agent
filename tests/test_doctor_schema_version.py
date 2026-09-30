@@ -30,11 +30,11 @@ def _run(root: Path):
 def _project(root: Path) -> None:
     """The project record every creating door writes, written through its producer under the file
     backend the doctor subprocess reads."""
-    from tcip_mcp.project_record import record_site
+    from tests._web_fixtures import new_project
 
     ts.bind(FileBackend())
     root.mkdir(parents=True, exist_ok=True)
-    record_site(str(root), "north orchard")
+    new_project(root)
 
 
 def _plant(key: ts.Key, doc: dict) -> None:

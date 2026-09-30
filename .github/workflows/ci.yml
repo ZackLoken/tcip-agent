@@ -176,8 +176,8 @@ jobs:
             exit 1
           }
 
-  # The denied-rename branch runs only where an open database denies a directory rename; this
-  # job is its only CI coverage, the shape of ray-exit-windows above.
+  # An open database denies a directory rename only on Windows, so a removal's move and the seam's
+  # release of one root are proven only here, the shape of ray-exit-windows above.
   project-removal-windows:
     runs-on: windows-latest
     defaults:
@@ -192,20 +192,20 @@ jobs:
           activate-environment: tcip-agent
           auto-activate-base: false
 
-      - name: The denied-rename branches, on the database backend
+      - name: The removal's move of a project whose database was open, on the database backend
         run: |
           set -o pipefail
-          pytest tests/test_project_removal.py::test_denied_completion_reports_blocked_by_and_admits_once_released \
-                 "tests/test_store_contract.py::test_close_connections_releases_a_handle_so_the_root_can_be_renamed[sqlite]" \
+          pytest tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line \
+                 "tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other[sqlite]" \
                  -v --timeout=300 | tee project-removal-windows-output.txt
 
       - name: Prove both selected tests passed by node id, not a bare count
         run: |
-          grep -qE "^tests/test_project_removal\.py::test_denied_completion_reports_blocked_by_and_admits_once_released PASSED" project-removal-windows-output.txt || {
-            echo "the denied-completion test did not pass (skipped or none selected)"
+          grep -qE "^tests/test_project_removal\.py::test_removal_archives_moves_and_records_one_line PASSED" project-removal-windows-output.txt || {
+            echo "the removal test did not pass (skipped or none selected)"
             exit 1
           }
-          grep -qE "^tests/test_store_contract\.py::test_close_connections_releases_a_handle_so_the_root_can_be_renamed\[sqlite\] PASSED" project-removal-windows-output.txt || {
+          grep -qE "^tests/test_store_contract\.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other\[sqlite\] PASSED" project-removal-windows-output.txt || {
             echo "the seam contract test's sqlite case did not pass (skipped or none selected)"
             exit 1
           }

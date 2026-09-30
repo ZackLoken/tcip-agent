@@ -1,11 +1,12 @@
-"""``tools/smoke_terminal_e2e.py`` must never bind against the machine's own workspace: it
-sets ``TCIP_WORKSPACE`` to a workspace it is given before the served app's first request
-resolves anything, so a run against a developer's real projects never audits into one.
+"""``tools/smoke_terminal_e2e.py`` must never run against the machine's own workspace: it sets
+``TCIP_WORKSPACE`` to a workspace it is given before the served app resolves anything, so a run
+beside a developer's real projects never opens or audits into one.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,43 +23,38 @@ def _load():
     return mod
 
 
-def test_binds_under_the_given_workspace_not_the_machines_live_marker(tmp_path, monkeypatch):
-    """A live marker naming an adoptable project must not decide this process's root: the
-    script's first request has to see the workspace it was given, not the one the machine
-    already had active."""
-    from tcip_mcp import audit, project_paths
-    from tcip_mcp import workspace as ws_mod
+def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
+        tmp_path, monkeypatch):
+    """A live workspace whose last-opened pointer names a real project must not decide what this
+    run touches: the run sees the workspace it was given, opens nothing, and leaves the live
+    project's log as it was."""
+    import tcip_store
 
-    live_ws = tmp_path / "live-workspace"
-    live_proj = live_ws / "elderberry_cyme_bloom"
-    (live_proj / ".tcip").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_WORKSPACE", str(live_ws))
-    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    ws_mod.activate_project("elderberry_cyme_bloom")
-    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    project_paths.restore_binding(None)
+    from tcip_mcp import workspace
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.project_record import read_record
+    from tcip_web.state import store
+    from tests._web_fixtures import new_project
+
+    live_project = new_project(tmp_path)
+    workspace.write_last_opened(tmp_path.parent, read_record(live_project)["id"])
+    live_lines = len(tcip_store.read_log(audit_log_key(live_project)).records)
     monkeypatch.setenv("TCIP_TERMINAL_CLI", "tcip-smoke-test-nonexistent-cli")
 
-    scratch_ws = tmp_path / "scratch-workspace"
+    scratch_ws = tmp_path.parent.parent / "scratch-workspace"
     mod = _load()
     result = mod.main(workspace=str(scratch_ws))
 
     assert result == 1
-    binding = project_paths.root_binding()
-    assert binding is not None
-    assert binding.source != "marker"
-    assert binding.root.resolve() != live_proj.resolve()
-    assert audit.platform_audit_scope().resolve() != live_proj.resolve()
+    assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
+    assert store.workspace == scratch_ws.resolve()
+    assert store.project_id is None
+    assert len(tcip_store.read_log(audit_log_key(live_project)).records) == live_lines
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, monkeypatch):
     """Coverage: asserts the URL terminal_ws_url builds for a TestClient is absolute and names
     the same host the client's own base_url does. Never runs the live smoke."""
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(workspace / "scratch_project"))
-
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app

@@ -7,6 +7,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TabHeading } from "@/components/TabHeading";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 
 // Sized to this panel's own typography rather than the markdown renderer's defaults, and links
 // open in a new tab so a retrospective can never navigate the app away from unsaved GUI state.
@@ -55,7 +56,7 @@ function fmtDuration(seconds: number): string {
  * retrospectives (from `write_retrospective`). Read-only.
  */
 export function MetaTab() {
-  const projectRoot = useStore((s) => s.gui.dataset.project_root);
+  const projectRoot = useStore(selectProjectRoot);
 
   const [reports, setReports] = useState<FrictionReport[]>([]);
   const [retros, setRetros] = useState<Retrospective[]>([]);
@@ -70,9 +71,9 @@ export function MetaTab() {
     setError(null);
     try {
       const [r, rt, sess] = await Promise.all([
-        metaApi.reports(projectRoot),
-        metaApi.retrospectives(projectRoot),
-        sessionsApi.load(projectRoot),
+        metaApi.reports(),
+        metaApi.retrospectives(),
+        sessionsApi.load(),
       ]);
       setReports(r.reports);
       setRetros(rt.retrospectives);

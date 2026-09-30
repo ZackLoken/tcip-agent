@@ -47,9 +47,10 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
 )
 from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
+from tests import _trait_fixtures as fx  # noqa: E402
 from tests._trait_fixtures import confirm_bare  # noqa: E402
 
-# A test naming trait="bud_opening" proposes it in its pinned root (conftest.seed_bud_trait_spec).
+# A test naming trait="bud_opening" proposes it in its project (conftest.seed_bud_trait_spec).
 _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -272,49 +273,49 @@ def test_resolve_match_criterion_derives_an_unstated_kind_and_leaves_the_entry_a
     it again rather than reading back a value nobody proposed."""
     from tcip_mcp.traits import read_trait
 
-    confirm_bare("leaf")
+    trait = confirm_bare(tmp_path, "leaf").entry
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]  # char size 20 -> center_match
-    result = resolve_match_criterion("leaf", gt_only(small_boxes))
+    result = resolve_match_criterion(trait, gt_only(small_boxes))
     assert result["kind"] == "center_match"
     assert result["kind_source"] == "data_derived_at_runtime"
     assert result["kind_diverged"] is False
 
-    record = read_trait("leaf")
+    record = read_trait("leaf", tmp_path)
     assert len(record.revisions) == 1 and record.latest.entry.localization == ""
     assert resolve_match_criterion(
-        "leaf", gt_only(small_boxes))["kind_source"] == "data_derived_at_runtime"
+        record.latest.entry, gt_only(small_boxes))["kind_source"] == "data_derived_at_runtime"
 
 
 def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_path: Path):
-    confirm_bare("leaf", localization="iou_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
     # Small boxes would derive center_match fresh, but a recorded kind must be used as-is.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", gt_only(small_boxes))
+    result = resolve_match_criterion(trait, gt_only(small_boxes))
     assert result["kind"] == "iou_match"
     assert result["kind_source"] == "recorded"
 
 
 def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
-    confirm_bare("leaf", localization="iou_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
     # Small boxes: derive_localization_kind would say center_match, diverging from the recorded
     # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", gt_only(small_boxes))
+    result = resolve_match_criterion(trait, gt_only(small_boxes))
     assert result["kind_diverged"] is True
     assert result["kind"] == "iou_match"  # unchanged despite the divergence
 
 
 def test_resolve_match_criterion_no_divergence_when_kinds_agree(tmp_path: Path):
-    confirm_bare("leaf", localization="center_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="center_match").entry
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion("leaf", gt_only(small_boxes))
+    result = resolve_match_criterion(trait, gt_only(small_boxes))
     assert result["kind_diverged"] is False
 
 
 def test_resolve_match_criterion_refuses_when_unrecorded_and_underivable(tmp_path: Path):
-    confirm_bare("leaf")
+    trait = confirm_bare(tmp_path, "leaf").entry
     with pytest.raises(ValueError, match="states no localization kind"):
-        resolve_match_criterion("leaf", [])  # no GT at all -> nothing to derive from
+        resolve_match_criterion(trait, [])  # no GT at all -> nothing to derive from
 
 
 def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
@@ -326,18 +327,18 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
 def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
     """iou_match's threshold must be genuinely derived from the GT in hand
     (derive_iou_match_threshold), not pinned to 0.5."""
-    confirm_bare("leaf", localization="iou_match")
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
-    result = resolve_match_criterion("leaf", gt_only(large_boxes))
+    result = resolve_match_criterion(trait, gt_only(large_boxes))
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] > 0.5
     assert "achievable IoU" in result["derived_from"]
 
 
 def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(tmp_path: Path):
-    confirm_bare("leaf", localization="iou_match")
-    result = resolve_match_criterion("leaf", [], iou_threshold=0.42)
+    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
+    result = resolve_match_criterion(trait, [], iou_threshold=0.42)
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] == pytest.approx(0.42)  # caller/default, not a fabricated derivation
     assert "underivable" in result["derived_from"]
@@ -520,17 +521,19 @@ def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
 
 
 @_with_bud_trait
-def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
+def test_resolve_selection_metric_rejects_incoherent_explicit_choice(tmp_path):
+    trait = fx.latest("bud_opening", tmp_path)
     with pytest.raises(ValueError, match="comparability-only"):
-        resolve_selection_metric("detection", "bud_opening", "map50")
+        resolve_selection_metric("detection", trait, "map50")
 
 
 @_with_bud_trait
-def test_resolve_selection_metric_allows_coherent_explicit_choice():
+def test_resolve_selection_metric_allows_coherent_explicit_choice(tmp_path):
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
-    assert resolve_selection_metric("detection", "bud_opening", "f1") == "f1"
-    assert resolve_selection_metric("detection", "bud_opening", "recall") == "recall"
+    trait = fx.latest("bud_opening", tmp_path)
+    assert resolve_selection_metric("detection", trait, "f1") == "f1"
+    assert resolve_selection_metric("detection", trait, "recall") == "recall"
     assert resolve_selection_metric("detection", None, "map50") == "map50"  # no trait -> no gate
 
 
@@ -555,7 +558,7 @@ def _detection_batch(num_images: int = 2, img_size: int = 64):
 
 
 @_with_bud_trait
-def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
+def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_path):
     """The declaration is exactly the numeric keys these two producers return: nothing declared
     that neither ever produces, nothing either produces that the declaration leaves unaccounted
     for (declared, or named in the not-a-ranking list below, or a ``_state`` companion)."""
@@ -608,7 +611,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
             loader = [(imgs, {"masks": torch.stack([m0, m1])})]
 
         # "bud_opening" (seeded center_match) exercises evaluate()'s center-match branch for detection.
-        trait = "bud_opening" if task == "detection" else None
+        trait = fx.latest("bud_opening", tmp_path) if task == "detection" else None
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
         result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait)
         returned.update(result)
@@ -707,7 +710,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     ckpt_path = registered_checkpoint(tmp_path)
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
-    checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
     test_result = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu",
                                       selection_dir=str(tmp_path / "manifest"),
                                       evaluated_stem_count=3)
@@ -796,7 +799,7 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", has_val_loader=True,
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-23")
     run = train(run, loader, val_loader=loader)  # no AttributeError on model.heads
 
@@ -836,7 +839,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
                     "task": "detection"}
     cfg = _cfg(model_source, data)
     cfg["evaluation"] = {"trait": "bud_opening"}
-    run = trainer_run(cfg, tmp_path / "out", has_val_loader=True, id="auto-run-24")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=True, id="auto-run-24")
     run = train(run, loader, val_loader=loader)
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -863,7 +866,7 @@ def test_validate_classification_metrics(tmp_path):
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
                     "task": "classification"}
-    run = trainer_run(_cfg(model_source, data), tmp_path / "out", has_val_loader=True,
+    run = trainer_run(_cfg(model_source, data), tmp_path / "out", project=tmp_path, has_val_loader=True,
                       id="auto-run-25")
     run = train(run, loader, val_loader=loader)
 

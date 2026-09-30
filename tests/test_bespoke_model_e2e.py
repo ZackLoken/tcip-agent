@@ -113,7 +113,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert expected_ratios != (0.5, 1.0, 2.0)              # not torchvision's default ratios
     assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
 
-    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
     predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
     assert predictor.kind == KIND_TCIP_MODULE
     anchor_gen = predictor.model.detector.rpn.anchor_generator
@@ -157,7 +157,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert overfit["passed"], overfit["issue"]
 
     records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")
-    bundle = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="test",
+    bundle = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
+                                     dataset_hash="test",
                                      calibration_records=records, holdout_records=records)
     assert "conf" in bundle.params                          # operating point resolved over bespoke outputs
 

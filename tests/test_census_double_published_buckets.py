@@ -41,14 +41,13 @@ def _project(tmp_path: Path, monkeypatch) -> Path:
     images.mkdir(parents=True)
     Image.new("RGB", (10, 10), (1, 2, 3)).save(images / "a.png")
     Image.new("RGB", (10, 10), (3, 2, 1)).save(images / "b.png")
-    initialize_project(str(project), site="north orchard")
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-    result = register_dataset(str(project), "chestnut", str(project))
+    initialize_project(str(project), "Census project", "north orchard")
+    result = register_dataset(project, str(project), "chestnut")
     assert "error" not in result, result
     return project
 
 
-def _stamp(bucket: Path, named: list[str]) -> None:
+def _stamp(project: Path, bucket: Path, named: list[str]) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[], scope=ClassScope(subject="bud"),
@@ -57,7 +56,7 @@ def _stamp(bucket: Path, named: list[str]) -> None:
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
         image_filenames={stem: f"{stem}.png" for stem in named},
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=project)
 
 
 def _bucket(project: Path, model: str, stems: list[str]) -> Path:
@@ -70,9 +69,9 @@ def _bucket(project: Path, model: str, stems: list[str]) -> Path:
 def test_a_stamp_naming_fewer_stems_than_the_bucket_holds_is_a_double_publish(tmp_path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
     mixed = _bucket(project, "baseline", ["a", "b"])
-    _stamp(mixed, ["b"])
+    _stamp(project, mixed, ["b"])
     clean = _bucket(project, "baseline@r2", ["a", "b"])
-    _stamp(clean, ["a", "b"])
+    _stamp(project, clean, ["a", "b"])
 
     census = _load().census_project(project)
 
@@ -97,7 +96,7 @@ def test_a_cleared_bucket_in_the_tree_is_not_reported(tmp_path, monkeypatch):
     cleared = cleared_prediction_dir(project, "baseline", DATE, "20260402T000000Z")
     for stem in ("a", "b"):
         write_annotations(str(cleared / f"{stem}.json"), [], img_w=10, img_h=10, keep_empty=True)
-    _stamp(cleared, ["b"])  # shaped like a double-publish, were it a live bucket
+    _stamp(project, cleared, ["b"])  # shaped like a double-publish, were it a live bucket
 
     census = _load().census_project(project)
 
@@ -118,7 +117,7 @@ def test_a_validation_row_sealed_over_a_mixed_bucket_is_reported_with_its_digest
 
     project = _project(tmp_path, monkeypatch)
     mixed = _bucket(project, "baseline", ["a", "b"])
-    _stamp(mixed, ["b"])
+    _stamp(project, mixed, ["b"])
     run_dir = opened_run(project, detection_config(tmp_path / "run-data"),
                          experiment_id="exp-census")
     sealed = bucket_content_digest(mixed)
@@ -130,7 +129,7 @@ def test_a_validation_row_sealed_over_a_mixed_bucket_is_reported_with_its_digest
         "checkpoint_sha256": "sha-detector",
         "producing_experiment_id": None,
         "reference_identity": {},
-        "covered_buckets": {mixed.resolve().relative_to(project.resolve()).as_posix(): sealed},
+        "covered_buckets": {str(mixed.resolve()): sealed},
         "dataset_root": str(project.resolve()),
         "recorded_at": "2026-04-02T00:00:00+00:00",
         "train_disjointness": None,
@@ -160,18 +159,17 @@ def test_a_project_registering_an_external_dataset_still_notes_its_own_unwalked_
     walked), not that the project registers no dataset at all."""
     project = tmp_path / "project"
     project.mkdir()
-    initialize_project(str(project), site="north orchard")
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+    initialize_project(str(project), "Census project", "north orchard")
 
     external = tmp_path / "external"
     images = external / "images" / DATE
     images.mkdir(parents=True)
     Image.new("RGB", (10, 10), (1, 2, 3)).save(images / "a.png")
-    result = register_dataset(str(external), "chestnut", str(project))
+    result = register_dataset(project, str(external), "chestnut")
     assert "error" not in result, result
 
     own_bucket = _bucket(project, "baseline", ["a"])
-    _stamp(own_bucket, ["a"])
+    _stamp(project, own_bucket, ["a"])
 
     census = _load().census_project(project)
 
@@ -186,7 +184,7 @@ def test_a_project_registering_an_external_dataset_still_notes_its_own_unwalked_
 def test_a_bucket_whose_stamp_names_every_document_is_not_a_finding(tmp_path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
     clean = _bucket(project, "baseline", ["a", "b"])
-    _stamp(clean, ["a", "b"])
+    _stamp(project, clean, ["a", "b"])
 
     census = _load().census_project(project)
 
@@ -199,7 +197,7 @@ def test_a_bucket_whose_stamp_names_every_document_is_not_a_finding(tmp_path, mo
 def test_main_exits_one_on_a_finding_and_two_on_a_non_project(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path, monkeypatch)
     mixed = _bucket(project, "baseline", ["a", "b"])
-    _stamp(mixed, ["b"])
+    _stamp(project, mixed, ["b"])
     mod = _load()
 
     assert mod.main([str(project)]) == 1
@@ -223,7 +221,7 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_is_unjudgeable(tmp_
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=project)
 
     census = _load().census_project(project)
 
@@ -252,7 +250,7 @@ def test_a_bucket_whose_stamp_records_no_image_filenames_map_and_holds_no_docume
         checkpoint_sha256="sha-detector", experiment_id=None, images_dir=None,
         raster_path=None, produced_at="2026-04-02T00:00:00+00:00",
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=project)
 
     census = _load().census_project(project)
 
@@ -274,12 +272,12 @@ def test_a_stamp_that_will_not_decode_is_read_refused_and_the_census_continues_o
 
     damaged = _project(tmp_path / "damaged", monkeypatch)
     bucket = _bucket(damaged, "baseline", ["a"])
-    _stamp(bucket, ["a"])
+    _stamp(damaged, bucket, ["a"])
     damage_record(sidecar_key(bucket, "operating_point"), b"{not json")
 
     clean = _project(tmp_path / "clean", monkeypatch)
     clean_bucket = _bucket(clean, "baseline", ["a"])
-    _stamp(clean_bucket, ["a"])
+    _stamp(clean, clean_bucket, ["a"])
 
     exit_code = _load().main([str(damaged), str(clean)])
 

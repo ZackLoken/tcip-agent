@@ -23,7 +23,8 @@ from mcp.shared.memory import create_client_server_memory_streams
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tcip_mcp import traits
-from tcip_mcp.server import mcp as tcip_server
+from tcip_mcp.server import build_server
+from tcip_mcp.workspace import workspace_from_environment
 from tests import _trait_fixtures as fx
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
@@ -41,16 +42,30 @@ def _body(result: Any) -> dict:
 
 
 def call_through_handshake(
-    calls: list[tuple[str, dict]], declared: mcp_types.Implementation = DECLARED
+    calls: list[tuple[str, dict]], declared: mcp_types.Implementation = DECLARED, *,
+    project: Path | None,
 ) -> list[dict]:
-    """Run the real server in memory, complete a handshake as ``declared``, make ``calls`` in order,
-    and hand back each tool's return value."""
+    """Run the real server in memory for ``project``, complete a handshake as ``declared``, make
+    ``calls`` in order, and hand back each tool's return value."""
+    return [_body(result)
+            for result in results_through_handshake(calls, declared, project=project)]
 
-    async def run() -> list[dict]:
-        bodies: list[dict] = []
+
+def results_through_handshake(
+    calls: list[tuple[str, dict]], declared: mcp_types.Implementation = DECLARED, *,
+    project: Path | None,
+) -> list[Any]:
+    """Run the real server in memory, built for ``project`` as ``--project`` builds it, complete a
+    handshake as ``declared``, make ``calls`` in order, and hand back each call's result as the
+    server sent it, a refused call's error included."""
+
+    async def run() -> list[Any]:
+        bodies: list[Any] = []
         async with create_client_server_memory_streams() as (client_streams, server_streams):
             async with anyio.create_task_group() as tg:
-                server = tcip_server._lowlevel_server  # the run loop; MCPServer.run is stdio-only
+                # The run loop; MCPServer.run is stdio-only.
+                binding = None if project is None else (project, workspace_from_environment())
+                server = build_server(binding)._lowlevel_server
 
                 async def serve() -> None:
                     await server.run(
@@ -64,32 +79,31 @@ def call_through_handshake(
                 ) as session:
                     await session.initialize()
                     for name, arguments in calls:
-                        bodies.append(_body(await session.call_tool(name, arguments)))
+                        bodies.append(await session.call_tool(name, arguments))
                 tg.cancel_scope.cancel()
         return bodies
 
     return anyio.run(run)
 
 
-def _platform_rows(tool: str) -> list[dict]:
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+def _project_rows(project: Path, tool: str) -> list[dict]:
+    key = audit_module.audit_log_key(project)
     return [row for row in ts.read_log(key).records if row["tool"] == tool]
 
 
-def _report_call(tmp_path: Path, detail: str) -> tuple[str, dict]:
-    return ("report_friction", {"project_path": str(tmp_path), "category": "unexpected_behavior",
-                               "detail": detail})
+def _report_call(detail: str) -> tuple[str, dict]:
+    return ("report_friction", {"category": "unexpected_behavior", "detail": detail})
 
 
 # ── the audit line ───────────────────────────────────────────────────────────
 
 
 def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_session(
-    tmp_path: Path,
+    project: Path,
 ) -> None:
-    call_through_handshake([_report_call(tmp_path, "first"), _report_call(tmp_path, "second")])
+    call_through_handshake([_report_call("first"), _report_call("second")], project=project)
 
-    rows = _platform_rows("report_friction")
+    rows = _project_rows(project, "report_friction")
     assert [row["arguments"]["detail"] for row in rows] == ["first", "second"]
     for row in rows:
         assert row["agent_client_name"] == "reviewing-harness"
@@ -100,36 +114,36 @@ def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_
 
 
 def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TCIP_TERMINAL_SESSION", "term_abc123")
-    call_through_handshake([_report_call(tmp_path, "under a terminal")])
+    call_through_handshake([_report_call("under a terminal")], project=project)
 
-    (row,) = _platform_rows("report_friction")
+    (row,) = _project_rows(project, "report_friction")
     assert row["terminal_session"] == "term_abc123"
 
 
-def test_two_handshakes_in_two_runs_mint_two_sessions(tmp_path: Path) -> None:
-    call_through_handshake([_report_call(tmp_path, "run one")])
-    call_through_handshake([_report_call(tmp_path, "run two")])
+def test_two_handshakes_in_two_runs_mint_two_sessions(project: Path) -> None:
+    call_through_handshake([_report_call("run one")], project=project)
+    call_through_handshake([_report_call("run two")], project=project)
 
-    first, second = _platform_rows("report_friction")
+    first, second = _project_rows(project, "report_friction")
     assert first["agent_session"] != second["agent_session"]
 
 
-def test_a_call_with_no_handshake_records_no_identity(tmp_path: Path) -> None:
+def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
     """The control: the web backend, a script and this test process import the tools without a
     handshake, and their lines keep the shape they always had."""
     from tcip_mcp.tools.meta_tools import report_friction
 
-    report_friction(str(tmp_path), "unexpected_behavior", "no handshake")
+    report_friction(project, "unexpected_behavior", "no handshake")
 
-    (row,) = _platform_rows("report_friction")
+    (row,) = _project_rows(project, "report_friction")
     assert not set(IDENTITY_FIELDS) & set(row)
 
 
 def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_else_s(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Claude Code hands its MCP servers its own session id and effort; a harness that declares
     another name gets none of them even with the variables in its environment."""
@@ -137,10 +151,10 @@ def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_el
     monkeypatch.setenv("CLAUDE_EFFORT", "high")
     claude = mcp_types.Implementation(name="claude-code", version="2.1.238")
 
-    call_through_handshake([_report_call(tmp_path, "from claude code")], declared=claude)
-    call_through_handshake([_report_call(tmp_path, "from another harness")])
+    call_through_handshake([_report_call("from claude code")], declared=claude, project=project)
+    call_through_handshake([_report_call("from another harness")], project=project)
 
-    claude_row, other_row = _platform_rows("report_friction")
+    claude_row, other_row = _project_rows(project, "report_friction")
     assert claude_row["harness_session"] == "0b56e764-5533-408a-bb5d-d5dd17b4e6b9"
     assert claude_row["harness_effort_at_connect"] == "high"
     assert "harness_session" not in other_row and "harness_effort_at_connect" not in other_row
@@ -149,22 +163,22 @@ def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_el
 # ── the trait revision ───────────────────────────────────────────────────────
 
 
-def test_a_trait_proposed_through_a_handshake_names_the_harness(tmp_path: Path) -> None:
+def test_a_trait_proposed_through_a_handshake_names_the_harness(project: Path) -> None:
     """The entry travels as the tool's declared input schema, JSON over the real server."""
     entry = fx.with_operationalization(
         fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT)
 
     (revision,) = call_through_handshake([("propose_trait", {
-        "project_root": str(tmp_path), "entry": entry.model_dump(mode="json"),
+        "entry": entry.model_dump(mode="json"),
         "rationale": "the breeder described the count in their own field-scoring terms",
-    })])
+    })], project=project)
 
     agent = revision["proposing_agent"]
     assert agent["agent_client_name"] == "reviewing-harness"
     assert agent["agent_client_version"] == "1.2.3"
     assert agent["agent_session"].startswith("mcp_")
     assert agent["terminal_session"] is None
-    stored = traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest
+    stored = traits.read_trait(fx.COUNT_TRAIT, project).latest
     assert stored.proposing_agent == agent
     assert stored.entry == entry and stored.entry_sha256 == traits.entry_sha256(entry)
 
@@ -188,6 +202,9 @@ class _CapturingResponse:
     def __exit__(self, *exc: object) -> None:
         return None
 
+    def read(self) -> bytes:
+        return b"{}"
+
 
 @pytest.fixture
 def captured_requests(monkeypatch: pytest.MonkeyPatch) -> list:
@@ -206,20 +223,11 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch) -> list:
 
 
 def test_the_push_through_a_handshake_sends_the_identity_as_headers(
-    captured_requests: list, tmp_path: Path,
+    captured_requests: list, project: Path,
 ) -> None:
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-    from tests.test_canvas_liveview import _select
-
-    _select(TestClient(app, base_url="http://127.0.0.1"), tmp_path)
-
     call_through_handshake([("push_panel_event", {
         "panel": "meta", "event_type": "identity_probe", "data": {"n": 1},
-        "project_root": str(tmp_path),
-    })])
+    })], project=project)
 
     (req,) = captured_requests
     assert req.get_header("X-tcip-agent-client-name") == "reviewing-harness"
@@ -228,10 +236,12 @@ def test_the_push_through_a_handshake_sends_the_identity_as_headers(
     assert req.get_header("X-tcip-terminal-session") is None
 
 
-def test_the_push_with_no_handshake_sends_only_the_content_type(captured_requests: list) -> None:
+def test_the_push_with_no_handshake_sends_only_the_content_type(
+    captured_requests: list, project: Path,
+) -> None:
     from tcip_mcp.web_client import post_panel_event
 
-    post_panel_event("meta", "identity_probe", {"n": 1})
+    post_panel_event(project, project.parent, "meta", "identity_probe", {"n": 1})
 
     (req,) = captured_requests
     assert {name.lower() for name in req.headers} == {"content-type"}

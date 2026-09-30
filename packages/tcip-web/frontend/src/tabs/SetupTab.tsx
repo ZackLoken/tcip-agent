@@ -212,14 +212,14 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
 /** What a project is set up with before anything is measured: each trait's revisions for the
  *  breeder to confirm, and the plant mapping a phenology delivery reads. */
 export function SetupTab() {
-  const projectRoot = useStore((s) => s.gui.dataset.project_root);
+  const projectId = useStore((s) => s.openProject?.id ?? null);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
-  if (!projectRoot) return null;
+  if (!projectId) return null;
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="setup" />
-      <TraitRevisionPanel projectRoot={projectRoot} />
-      <PlantMappingPanel key={projectRoot} datasetRoot={datasetRoot} />
+      <TraitRevisionPanel key={projectId} />
+      <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
     </div>
   );
 }

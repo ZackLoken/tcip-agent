@@ -20,8 +20,6 @@ from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
-# dataset_entry_path is imported inside each test that needs it, not at module scope, so this
-# module still collects at the pre-row baseline (where it does not exist yet).
 
 def _make_dataset(root: Path) -> None:
     """A minimal nested-schema dataset (image + label + registry), so its fingerprint is real
@@ -52,7 +50,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(tmp_p
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    registered = register_dataset(str(src), crop="currant", project_root=str(src))
+    registered = register_dataset(src, str(src), crop="currant")
 
     assert "error" not in registered
     regs = read_datasets(src)
@@ -67,7 +65,7 @@ def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(t
 
     src = tmp_path / "proj"
     _make_dataset(src)
-    register_dataset(str(src), crop="currant", project_root=str(src))
+    register_dataset(src, str(src), crop="currant")
 
     entry = read_datasets(src)[0]
 
@@ -94,7 +92,7 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(tm
     nested = project / "datasets" / "main"
     _make_dataset(nested)
 
-    registered = register_dataset(str(nested), crop="currant", project_root=str(project))
+    registered = register_dataset(project, str(nested), crop="currant")
 
     assert "error" not in registered
     entries = read_datasets(project)
@@ -103,11 +101,11 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(tm
     assert dataset_entry_path(project, entries[0]).resolve() == nested.resolve()
 
 
-def test_registry_path_for_returns_the_resolved_absolute_path_when_not_contained(tmp_path: Path):
+def test_stored_path_returns_the_resolved_absolute_path_when_not_contained(tmp_path: Path):
     """A dataset genuinely outside the project is stored absolute; the fall-through must return
-    the resolved form rather than echoing whatever spelling the caller passed, since the
-    docstring promises "absolute ... and a '..' form is never produced"."""
-    from tcip_mcp.tools.project_tools import registry_path_for
+    the resolved form rather than echoing whatever spelling the caller passed, and a '..' form is
+    never produced."""
+    from tcip_mcp.registry_paths import stored_path
 
     project = tmp_path / "proj"
     project.mkdir()
@@ -115,19 +113,19 @@ def test_registry_path_for_returns_the_resolved_absolute_path_when_not_contained
     external.mkdir()
     messy = external / ".." / "external"
 
-    result = registry_path_for(messy, project)
+    result = stored_path(messy, project)
 
     assert ".." not in result
     assert Path(result) == external.resolve()
 
 
-def test_registry_path_for_recognizes_containment_through_a_symlinked_project_root(tmp_path: Path):
+def test_stored_path_recognizes_containment_through_a_symlinked_project_root(tmp_path: Path):
     """Coverage: containment is decided by filesystem identity, so an alias of the project root
     (a symlink standing in for a junction) still recognizes a dataset under the real directory
     it points at."""
     import pytest
 
-    from tcip_mcp.tools.project_tools import registry_path_for
+    from tcip_mcp.registry_paths import stored_path
 
     real_project = tmp_path / "real_proj"
     dataset = real_project / "datasets" / "main"
@@ -138,7 +136,7 @@ def test_registry_path_for_recognizes_containment_through_a_symlinked_project_ro
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks not available on this machine: {exc}")
 
-    assert registry_path_for(dataset, alias) == "datasets/main"
+    assert stored_path(dataset, alias) == "datasets/main"
 
 
 # ── project_roots (tcip_mcp.store_catalog): reaches a relatively-registered dataset ───
@@ -154,7 +152,7 @@ def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: 
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="currant", project_root=str(project))
+    register_dataset(project, str(dataset), crop="currant")
 
     roots = project_roots(project)
 
@@ -169,7 +167,7 @@ def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: 
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_path: Path):
     src = tmp_path / "proj"
     _make_dataset(src)
-    register_dataset(str(src), crop="currant", project_root=str(src))
+    register_dataset(src, str(src), crop="currant")
 
     result = _run_check(str(src), "--project", str(src))
 
@@ -182,7 +180,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
 
     orig = tmp_path / "orig"
     _make_dataset(orig)
-    register_dataset(str(orig), crop="currant", project_root=str(orig))
+    register_dataset(orig, str(orig), crop="currant")
 
     moved = tmp_path / "moved"
     shutil.copytree(orig, moved)
@@ -209,8 +207,8 @@ def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(t
     second = project / "datasets" / "second"
     _make_dataset(first)
     _make_dataset(second)
-    register_dataset(str(first), crop="currant", project_root=str(project))
-    register_dataset(str(second), crop="currant", project_root=str(project))
+    register_dataset(project, str(first), crop="currant")
+    register_dataset(project, str(second), crop="currant")
 
     try:
         resolve_statement_registry(str(project), "")
@@ -236,7 +234,7 @@ def test_evidence_roots_resolves_a_relatively_registered_dataset(tmp_path: Path)
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="currant", project_root=str(project))
+    register_dataset(project, str(dataset), crop="currant")
 
     roots = _evidence_roots(project)
 

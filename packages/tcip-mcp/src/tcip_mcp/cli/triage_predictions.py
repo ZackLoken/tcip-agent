@@ -8,12 +8,12 @@ model's validated confidence distribution and a breeder spot-check.
 
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
-        --project <platform_root> [--dataset-root <dir>] [--no-skip-reviewed] \
+        --project <project> [--dataset-root <dir>] [--no-skip-reviewed] \
         [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--bucket <name>] \
         [--review-state-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project (register it with register_model
-first); this command refuses one it is not, naming the digest and the root.
+first); this command refuses one it is not, naming the digest and the project.
 """
 
 from __future__ import annotations
@@ -21,16 +21,15 @@ from __future__ import annotations
 import argparse
 import json
 
-from tcip_mcp.project_paths import require_and_pin_platform_root
+from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("--checkpoint", required=True, help="Trained model checkpoint.")
     parser.add_argument("--images-dir", required=True, help="Directory of candidate images.")
-    parser.add_argument("--project", default=None,
-                        help="Platform state root the checkpoint's registry entry is looked up "
-                             "under. Required (or set $TCIP_STATE_ROOT).")
+    parser.add_argument("--project", required=True,
+                        help="The project the checkpoint's registry entry is looked up under.")
     parser.add_argument("--dataset-root", default="",
                         help="Root of the dataset whose review is in progress; scopes the "
                              "verdict store --skip-reviewed reads. Omitted with "
@@ -53,19 +52,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                         help="A verdict store to read instead of the dataset's own.")
     args = parser.parse_args(argv)
 
-    root = require_and_pin_platform_root(args.project)
-
-    from tcip_store.binding import bind_default
-
-    bind_default()
+    project = bound_project(args.project)
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     result = triage_predictions(
-        args.checkpoint, args.images_dir, dataset_root=args.dataset_root,
+        project, args.checkpoint, args.images_dir, dataset_root=args.dataset_root,
         skip_reviewed=not args.no_skip_reviewed, low=args.low, high=args.high,
         auto_threshold=args.auto_threshold, bucket=args.bucket,
-        review_state_dir=args.review_state_dir, project_path=str(root),
+        review_state_dir=args.review_state_dir,
     )
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0

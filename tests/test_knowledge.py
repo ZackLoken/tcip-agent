@@ -146,9 +146,9 @@ def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge():
 
 
 def test_the_registered_tool_description_names_every_document():
-    from tcip_mcp.server import mcp
+    from tcip_mcp.server import build_server
 
-    tools = {t.name: t for t in mcp._tool_manager.list_tools()}
+    tools = {t.name: t for t in build_server(None)._tool_manager.list_tools()}
     tool = tools["serve_domain_knowledge"]
     assert (
         "Without a name it returns the index of names and descriptions below; with a name "

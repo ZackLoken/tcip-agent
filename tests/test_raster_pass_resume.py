@@ -50,22 +50,21 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg.pt"
     torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
-    result = register_model(name="instance-seg-test-model", checkpoint_path=str(ckpt), config={})
+    result = register_model(tmp_path, name="instance-seg-test-model", checkpoint_path=str(ckpt), config={})
     assert "error" not in result, result
     return str(ckpt)
 
 
 def _setup(tmp_path: Path, monkeypatch) -> tuple[str, Path]:
     """A registered bespoke detection checkpoint and a real, readable 64x64 geo raster (four
-    32px tiles at overlap 0.0), under a pinned platform state root."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    32px tiles at overlap 0.0), in the project ``tmp_path``."""
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path, height=64, width=64)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     return ckpt, raster_path
 
 
-def _run(ckpt: str, raster_path: Path, out: Path, **kwargs) -> dict:
+def _run(project: Path, ckpt: str, raster_path: Path, out: Path, **kwargs) -> dict:
     from tcip_mcp.tools.inference_tools import run_inference
 
     call_kwargs = {
@@ -73,7 +72,7 @@ def _run(ckpt: str, raster_path: Path, out: Path, **kwargs) -> dict:
         "tile_size": TILE, "overlap": 0.0, "tile_batch_size": 1, "device": "cpu",
     }
     call_kwargs.update(kwargs)
-    return run_inference(ckpt, **call_kwargs)
+    return run_inference(project, ckpt, **call_kwargs)
 
 
 def _progress_keys(out: Path):
@@ -111,7 +110,7 @@ def test_resume_refuses_with_images_dir(tmp_path):
     images_dir.mkdir()
 
     result = run_inference(
-        str(ckpt), images_dir=str(images_dir), output_dir=str(tmp_path / "out"), resume=True)
+        tmp_path, str(ckpt), images_dir=str(images_dir), output_dir=str(tmp_path / "out"), resume=True)
 
     assert "error" in result and "resume=True" in result["error"]
 
@@ -120,7 +119,7 @@ def test_resume_refuses_with_no_recorded_progress(tmp_path, monkeypatch):
     ckpt, raster_path = _setup(tmp_path, monkeypatch)
     out = tmp_path / "preds"
 
-    result = _run(ckpt, raster_path, out, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, out, resume=True)
 
     assert "error" in result
     assert "no raster-pass identity record" in result["error"]
@@ -134,18 +133,17 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
     so the resumed pass merges the seeded masks exactly as the uninterrupted pass does."""
     import json
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path, height=64, width=64)
     ckpt = _instance_seg_checkpoint(tmp_path)
     interrupted_out, uninterrupted_out = tmp_path / "interrupted", tmp_path / "uninterrupted"
 
-    baseline = _run(ckpt, raster_path, uninterrupted_out, require_masks=True)
+    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted_out, require_masks=True)
     assert "error" not in baseline, baseline
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, interrupted_out, require_masks=True)
-    resumed = _run(ckpt, raster_path, interrupted_out, resume=True, require_masks=True)
+        _run(tmp_path, ckpt, raster_path, interrupted_out, require_masks=True)
+    resumed = _run(tmp_path, ckpt, raster_path, interrupted_out, resume=True, require_masks=True)
     assert "error" not in resumed, resumed
 
     def _as_produced(out: Path) -> list[dict]:
@@ -163,7 +161,7 @@ def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record(tmp_path, 
     _interrupt_after_one_batch(monkeypatch)
 
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
     keys = _progress_keys(out)
     assert sorted(k.parts[0] for k in keys) == ["batch-000000", "identity"]
@@ -180,7 +178,7 @@ def test_a_bucket_holding_progress_enumerates_only_its_prediction_documents(tmp_
     _interrupt_after_one_batch(monkeypatch)
 
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
     assert _progress_keys(out)  # the progress really is there to be missed
     assert list(prediction_documents(out)) == []
@@ -193,9 +191,9 @@ def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clear
     interrupted_out = tmp_path / "interrupted"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, interrupted_out)
+        _run(tmp_path, ckpt, raster_path, interrupted_out)
 
-    resumed = _run(ckpt, raster_path, interrupted_out, resume=True)
+    resumed = _run(tmp_path, ckpt, raster_path, interrupted_out, resume=True)
     assert "error" not in resumed, resumed
     assert resumed["tiles"] == 4
     assert _progress_keys(interrupted_out) == []
@@ -203,7 +201,7 @@ def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clear
     # An uninterrupted pass over the identical inputs, into its own bucket, is the ground truth
     # the resumed one must match: same tile count, same detections.
     uninterrupted_out = tmp_path / "uninterrupted"
-    baseline = _run(ckpt, raster_path, uninterrupted_out)
+    baseline = _run(tmp_path, ckpt, raster_path, uninterrupted_out)
     assert "error" not in baseline, baseline
     assert baseline["tiles"] == resumed["tiles"]
 
@@ -225,9 +223,9 @@ def test_no_resume_refuses_over_recorded_progress_naming_both_ways_out(tmp_path,
     out = tmp_path / "preds"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
-    result = _run(ckpt, raster_path, out)
+    result = _run(tmp_path, ckpt, raster_path, out)
 
     assert "error" in result
     assert "resume=True" in result["error"] and "overwrite=True" in result["error"]
@@ -239,10 +237,10 @@ def test_overwrite_discards_recorded_progress_and_starts_over(tmp_path, monkeypa
     out = tmp_path / "preds"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
     assert _progress_keys(out)
 
-    result = _run(ckpt, raster_path, out, overwrite=True)
+    result = _run(tmp_path, ckpt, raster_path, out, overwrite=True)
 
     assert "error" not in result, result
     assert result["tiles"] == 4
@@ -266,13 +264,13 @@ def test_a_document_and_progress_record_left_coexisting_refuses_on_the_document(
 
     monkeypatch.setattr(itools, "_clear_raster_pass_progress", _raise_after_write)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
     assert (out / "mosaic.json").is_file()
     assert _progress_keys(out)
 
     for kwargs in ({}, {"resume": True}, {"overwrite": True}):
-        result = _run(ckpt, raster_path, out, **kwargs)
+        result = _run(tmp_path, ckpt, raster_path, out, **kwargs)
         assert "error" in result, (kwargs, result)
         assert result["document_stem_count"] == 1
     assert _progress_keys(out)  # untouched by any of the three refusals above
@@ -283,9 +281,9 @@ def test_resume_refuses_a_call_that_differs_from_the_recorded_pass(tmp_path, mon
     out = tmp_path / "preds"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
-    result = _run(ckpt, raster_path, out, resume=True, conf_threshold=0.9)
+    result = _run(tmp_path, ckpt, raster_path, out, resume=True, conf_threshold=0.9)
 
     assert "error" in result
     assert "differs" in result["error"] and "operating_point.conf" in result["error"]
@@ -300,7 +298,7 @@ def test_resume_refuses_an_identity_schema_version_the_reader_does_not_know(tmp_
     out = tmp_path / "preds"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
     identity_key = Key(RASTER_PASS_PROGRESS_STORE, str(out), ("identity",))
     body = dict(store.read(identity_key))
@@ -308,7 +306,7 @@ def test_resume_refuses_an_identity_schema_version_the_reader_does_not_know(tmp_
     with store.transaction(identity_key) as txn:
         txn.write(identity_key, body)
 
-    result = _run(ckpt, raster_path, out, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, out, resume=True)
 
     assert "error" in result and "schema_version" in result["error"]
 
@@ -338,13 +336,13 @@ def test_a_redirected_interrupted_pass_resumes_in_its_own_bucket(tmp_path, monke
 
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, requested)
+        _run(tmp_path, ckpt, raster_path, requested)
 
     redirected = requested.parent / "preds@r2"
     assert _progress_keys(redirected)
     assert not _progress_keys(requested)
 
-    result = _run(ckpt, raster_path, requested, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, requested, resume=True)
 
     assert "error" not in result, result
     assert Path(result["output_dir"]) == redirected
@@ -363,7 +361,7 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
     out = tmp_path / "preds"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _run(ckpt, raster_path, out)
+        _run(tmp_path, ckpt, raster_path, out)
 
     identity_key = Key(RASTER_PASS_PROGRESS_STORE, str(out), ("identity",))
     body = dict(store.read(identity_key))
@@ -371,7 +369,7 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
     with store.transaction(identity_key) as txn:
         txn.write(identity_key, body)
 
-    result = _run(ckpt, raster_path, out, resume=True)
+    result = _run(tmp_path, ckpt, raster_path, out, resume=True)
 
     assert "error" in result and "future_field" in result["error"]
 
@@ -398,7 +396,7 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
 
     monkeypatch.setattr(raster_source_module, "open_raster", _flaky_open_raster)
 
-    result = _run(ckpt, raster_path, out)
+    result = _run(tmp_path, ckpt, raster_path, out)
 
     assert "error" in result
     assert str(raster_path) in result["error"]
@@ -441,17 +439,18 @@ def test_resume_completes_an_interrupted_block_calibrated_pass_running_the_calib
     interrupted_out = tmp_path / "interrupted"
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        run_inference(exp["checkpoint_path"], output_dir=str(interrupted_out), **call_kwargs)
+        run_inference(tmp_path, exp["checkpoint_path"], output_dir=str(interrupted_out),
+                      **call_kwargs)
     assert calls["n"] == 1
 
     resumed = run_inference(
-        exp["checkpoint_path"], output_dir=str(interrupted_out), resume=True, **call_kwargs)
+        tmp_path, exp["checkpoint_path"], output_dir=str(interrupted_out), resume=True, **call_kwargs)
     assert "error" not in resumed, resumed
     assert calls["n"] == 1  # the resume applied the recorded operating point, never re-derived one
 
     uninterrupted_out = tmp_path / "uninterrupted"
     baseline = run_inference(
-        exp["checkpoint_path"], output_dir=str(uninterrupted_out), **call_kwargs)
+        tmp_path, exp["checkpoint_path"], output_dir=str(uninterrupted_out), **call_kwargs)
     assert "error" not in baseline, baseline
     assert calls["n"] == 2
 

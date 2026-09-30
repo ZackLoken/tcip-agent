@@ -6,7 +6,7 @@ from tests._producer_fixtures import run_over  # noqa: E402
 torch = pytest.importorskip("torch")
 
 
-def test_cancel_training_reaches_the_runs_own_poll(tmp_path, monkeypatch):
+def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
     """A cancel requested by id is the one record the run's own poll reads; an id naming no run
     refuses."""
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -14,17 +14,17 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import cancel_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    run_dir = opened_run(None, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(run_dir))
     assert not run.should_cancel()
 
-    res = cancel_training(run.id)
+    res = cancel_training(tmp_path, run.id)
     assert res["cancel_requested"] is True and res["experiment_id"] == run.id
     assert run.should_cancel()
-    assert "error" in cancel_training("missing-run")
+    assert "error" in cancel_training(tmp_path, "missing-run")
 
 
 def test_cancel_before_training_yields_canceled(tmp_path):
@@ -54,7 +54,8 @@ def test_cancel_before_training_yields_canceled(tmp_path):
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
         "mixed_precision": False, "early_stopping": {"enabled": False},
     }
-    run = trainer_run(cfg, tmp_path / "out", has_val_loader=False, id="cancel-run-2")
+    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
+                      id="cancel-run-2")
     (tmp_path / "out").mkdir()
     request_cancel(tmp_path / "out")  # request cancellation before any epoch runs
     run = train(run, loader)

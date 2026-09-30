@@ -15,8 +15,6 @@ call ``derive_operating_point_curve`` (the thing under test) directly. None cons
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 import pytest
 
@@ -47,15 +45,9 @@ N_MATCHED = 12
 N_SWAPPED = 3
 FRAME = 1024  # a frame holding every GT-door box the fixtures below lay out
 
-# no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, which every
+# resolve_operating_point("bud_opening", ...) below names.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
-
-
-@pytest.fixture(autouse=True)
-def _hermetic_platform_root(tmp_path):
-    """The cal/holdout split locks under ``$TCIP_STATE_ROOT/.tcip``: keep it out of the repo."""
-    os.environ["TCIP_STATE_ROOT"] = str(tmp_path)  # conftest restores the prior value
 
 
 def _entry(action, cid, gt, pred, conf):
@@ -121,7 +113,8 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
 def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_calls_unbiased(tmp_path):
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "bud_opening",
                                             **tiled_regime(), staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path,
+                                            project=tmp_path)
     conf = b.params["conf"]
     sweep = conf.gate_evidence
     hb = sweep["holdout_bias"]
@@ -142,7 +135,8 @@ def test_review_door_class_failure_has_its_own_breeder_message(tmp_path):
     # on a name it can't translate), so a new gate name without a message is a loud error here.
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "bud_opening",
                                             **tiled_regime(), staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path,
+                                            project=tmp_path)
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
     assert out["validated"] is False
     assert "kind" in out["reason"].lower()
@@ -154,7 +148,8 @@ def test_review_door_class_failure_has_its_own_breeder_message(tmp_path):
 def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_class(tmp_path):
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=False), "bud_opening",
                                             **tiled_regime(), staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path,
+                                            project=tmp_path)
     conf = b.params["conf"]
     assert conf.gate_evidence["failures"] == []
     assert conf.gate_evidence["per_class_count_bias_failures"] == []
@@ -164,9 +159,9 @@ def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_
 
 # ── the GT door (run_inference -> calibrate_operating_point) ─────────────────────────────────
 
-def test_gt_door_refuses_a_class_compensating_reference():
+def test_gt_door_refuses_a_class_compensating_reference(tmp_path):
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     sweep = b.params["conf"].gate_evidence
@@ -175,22 +170,22 @@ def test_gt_door_refuses_a_class_compensating_reference():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_gt_door_validates_the_same_geometry_called_correctly():
+def test_gt_door_validates_the_same_geometry_called_correctly(tmp_path):
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=False),
         holdout_records=_gt_records("hold", 4, swap_classes=False, offset=5000.0))
     assert b.params["conf"].gate_evidence["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
-def test_single_class_reference_is_unaffected_by_the_conditioning():
+def test_single_class_reference_is_unaffected_by_the_conditioning(tmp_path):
     # Bud's shipped shape today: one detection class ({subject: 0} -> category_id 1), the
     # opening call made by a separate classifier. Conditioning on class must be a no-op here:
     # a rail that fail-closed the only trait the platform ships would be worse than the hole.
     cal = _gt_records("cal", 4, swap_classes=False, classes=(1, 1))
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
@@ -208,13 +203,13 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
         assert hb["per_class"]["1"][key] == pytest.approx(explicit[key])
 
 
-def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence():
+def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence(tmp_path):
     # This gate has a hole reachable through the split: the model confuses classes 1 and 2 in
     # calibration, the holdout draw happens to hold only class 1, every per-class entry the gate
     # can see reads bias 0.0, and the reference was stamped validated on no class-2 evidence.
     cal = _gt_records("cal", 4, swap_classes=True)
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     assert sweep["per_class_count_bias_failures"] == []   # the holdout has nothing to fail on
@@ -255,7 +250,7 @@ def _sparse_class_calibration(prefix, n, *, offset):
     return recs
 
 
-def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
+def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass(tmp_path):
     # Class 2 is present on 2 of 20 holdout images and missed outright both times, wrong every
     # time there is anything to be wrong about. Pooled over all 20 images the mean reads -0.4,
     # comfortably inside bud's tolerance of 1.0; only weighting the equivalence test's standard
@@ -263,7 +258,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     # it) surfaces that this reference has almost no real evidence backing that mean.
     cal = _sparse_class_calibration("cal", 4, offset=0.0)
     hold = _sparse_class_records("hold", 20, offset=5000.0)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     c2 = sweep["holdout_bias"]["per_class"]["2"]
@@ -275,25 +270,25 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class():
+def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class(tmp_path):
     # The companion obligation: the coverage rule must not refuse a holdout that does carry every
     # class, including one whose objects the model correctly finds on only some images.
     cal = _gt_records("cal", 4, swap_classes=False)
     hold = _gt_records("hold", 4, swap_classes=False, offset=5000.0)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     assert b.params["conf"].gate_evidence["holdout_missing_classes"] == []
     assert b.params["conf"].gate_evidence["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
-def test_missing_class_failure_has_its_own_breeder_message():
+def test_missing_class_failure_has_its_own_breeder_message(tmp_path):
     # describe_review_validation raises on a gate failure it cannot translate, so this is what
     # proves the new name is in the breeder-facing vocabulary at all. Driven off a real refusal
     # rather than a hand-built bundle; the review door reaches the same message through the same
     # lookup, but which images its locked split holds back is not the fixture's to choose.
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0))
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
@@ -301,15 +296,15 @@ def test_missing_class_failure_has_its_own_breeder_message():
     assert "held back" in out["reason"] and "no independent evidence" in out["reason"]
 
 
-def test_per_class_keys_survive_the_sweep_artifact_round_trip():
+def test_per_class_keys_survive_the_sweep_artifact_round_trip(tmp_path):
     # run_inference persists the whole curve to .tcip/artifacts/operating_point_sweep_<hash>.json,
     # so the gate's per-class breakdown is only reconstructable later if its keys are JSON-stable:
     # int keys would come back as strings and silently stop matching an in-memory read.
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
-    path = Path(os.environ["TCIP_STATE_ROOT"]) / "sweep.json"
+    path = tmp_path / "sweep.json"
     path.write_text(json.dumps({"gate_evidence": b.params["conf"].gate_evidence}), encoding="utf-8")
     reloaded = json.loads(path.read_text(encoding="utf-8"))["gate_evidence"]
     assert reloaded["holdout_bias"]["per_class"] == b.params["conf"].gate_evidence["holdout_bias"]["per_class"]
@@ -318,7 +313,7 @@ def test_per_class_keys_survive_the_sweep_artifact_round_trip():
 
 # ── the conf pick, which has to optimize what the gate judges ─────────────────────────────────
 
-def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
+def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap(tmp_path):
     """For a model that calls every class-1 object class 2, the refusal is not an artifact of which
     conf was picked: every conf on the curve leaves a class over tolerance.
 
@@ -344,7 +339,7 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
         assert max(abs(s["count_bias_mean"]) for s in entry["per_class"].values()) > 1.0
 
 
-def test_pick_serves_the_worst_class_not_the_pooled_total():
+def test_pick_serves_the_worst_class_not_the_pooled_total(tmp_path):
     """With three classes the pooled-unbiased conf can be the one the gate must refuse: at conf 0.9
     the pooled bias is 0 while class 3 sits at -2.0; at conf 0.4, every class's bias magnitude is
     smaller. A pooled pick refuses a model that has a valid operating point.
@@ -399,7 +394,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     # this same picked conf (each bias magnitude was exactly 1.0, clearing a tolerance of 1.0 via
     # ``<=``); the relative tolerance does not, because none of them was ever a trustworthy
     # 1%-relative claim at this reference's actual density.
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"]._raw == pytest.approx(0.4)  # still the worst-class-aware pick
     assert "count_bias_exceeds_tolerance" in b.params["conf"].gate_evidence["failures"]        # pooled
@@ -408,7 +403,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_enough():
+def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_enough(tmp_path):
     """Same picker mechanism and the same qualitative shape as the test above (a pooled-unbiased
     conf that traps a naive pick, a worst-class-aware pick that avoids it), but every class also
     carries 200 always-correctly-detected background objects: real GT, always matched at every conf
@@ -463,7 +458,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
     assert max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values()) == pytest.approx(1.0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.4)
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"].value == pytest.approx(0.4)
     assert b.params["conf"].gate_evidence["failures"] == []
@@ -477,7 +472,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
 # provenance a caller actually reads, not just an indirect pass/fail outcome that a small-n
 # equivalence test's own SE term can obscure.
 
-def test_effective_count_bias_tolerance_floor_governs_a_near_zero_fraction():
+def test_effective_count_bias_tolerance_floor_governs_a_near_zero_fraction(tmp_path):
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # A rare class (typical_count=1) at the platform default fraction (0.01) alone would demand a
@@ -488,7 +483,7 @@ def test_effective_count_bias_tolerance_floor_governs_a_near_zero_fraction():
     assert tol > 0.01 * 1.0
 
 
-def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows():
+def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows(tmp_path):
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     tol_n5 = _effective_count_bias_tolerance(0.0, typical_count=0.0, n=5)
@@ -498,7 +493,7 @@ def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows():
     assert tol_n50 < tol_n5  # more evidence behind the mean -> a tighter floor, never looser
 
 
-def test_effective_count_bias_tolerance_floor_never_loosens_past_the_1_0_default_at_n_ge_2():
+def test_effective_count_bias_tolerance_floor_never_loosens_past_the_1_0_default_at_n_ge_2(tmp_path):
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # The absolute default is 1.0: at every n the reference-sufficiency gates actually let
@@ -508,7 +503,7 @@ def test_effective_count_bias_tolerance_floor_never_loosens_past_the_1_0_default
         assert _effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
 
 
-def test_effective_count_bias_tolerance_fraction_term_dominates_a_dense_reference():
+def test_effective_count_bias_tolerance_fraction_term_dominates_a_dense_reference(tmp_path):
     from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
 
     # At the density this platform's own test suite's dense fixtures use (~100 objects/image, not
@@ -538,14 +533,14 @@ def _floor_matters_records(prefix, offset):
     return recs
 
 
-def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_term():
+def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_term(tmp_path):
     """End-to-end: the sparse class's stamped tolerance (what the gate actually compared its bias
     against) must be the floor (1/n_present == 0.2), not the fraction term alone (0.01 * 2 == 0.02):
     a direct pin on ``_effective_count_bias_tolerance`` being live inside ``resolve_operating_point``,
     not inferred indirectly from a pass/fail outcome an unrelated SE term could also explain.
     """
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_floor_matters_records("c", 0.0),
         holdout_records=_floor_matters_records("h", 5000.0))
     sweep = b.params["conf"].gate_evidence
@@ -556,7 +551,7 @@ def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_te
     assert sweep["per_class_count_bias_tolerance"]["2"] > 0.01 * sweep["per_class_typical_count"]["2"]
 
 
-def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_alone():
+def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_alone(tmp_path):
     """Without a per-class minimum-presence gate, a class present on exactly one holdout image gets
     a relative tolerance derived from that one image's own density (reachable with no adversarial
     construction: an ordinary rare class that happens to show up once, in a denser-than-typical
@@ -586,7 +581,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
             recs.append(build_coco_image_record(FRAME, FRAME, gt, dt, image_id=f"{prefix}{i}"))
         return recs
 
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=build("c", 0.0), holdout_records=build("h", 5000.0))
     sweep = b.params["conf"].gate_evidence
     assert sweep["holdout_bias"]["per_class"]["2"]["n_present"] == 1
@@ -602,7 +597,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
     assert "single image" in out["reason"]
 
 
-def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_image_one():
+def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_image_one(tmp_path):
     """``n_present == 0`` (a class evidenced in calibration but with no holdout presence at all, not
     even one image) must keep getting ``holdout_missing_class``'s message, not
     ``insufficient_holdout_images_per_class``'s "held back in exactly one image", which would be
@@ -611,7 +606,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     """
     cal = _gt_records("cal", 4, swap_classes=True)  # classes 1 and 2 both evidenced in calibration
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)  # holdout: only 1
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
     assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all: no n_present==0 key
@@ -622,7 +617,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     assert "single image" not in out["reason"]
 
 
-def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count():
+def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count(tmp_path):
     """Coverage: `gate_evidence_summary`'s per-class provenance fields (the agent-facing compact
     view) have no assertion that they reach its output. Drives a real refusal through the real
     door end to end, then checks the compact view a caller (e.g. run_inference's response)
@@ -631,7 +626,7 @@ def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count():
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
 
     b = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     sweep = b.params["conf"].gate_evidence

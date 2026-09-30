@@ -10,27 +10,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { adoptProjectByName, openWorkspaceProject } from "@/lib/openProject";
-import { loadRecentProjects } from "@/lib/recentProjects";
+import {
+  modelsForDate,
+  openProjectById,
+  openWorkspaceProject,
+  subjectsForDate,
+} from "@/lib/openProject";
+import { loadRecentProjectIds } from "@/lib/recentProjects";
 import { useStore } from "@/store";
-import { selectProjectOpen } from "@/store/slices/gui";
 import type { TabName } from "@/store/types";
 
 const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "review", "results"]);
 
-const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
-const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
-
-/** The model bucket the current predictions dir points at (predictions/<model>/<date>/…), or null. */
-function currentModel(predDir: string | null): string | null {
-  if (!predDir) return null;
-  const after = predDir.split(/[/\\]predictions[/\\]/)[1];
-  return after ? (after.split(/[/\\]/)[0] ?? null) : null;
-}
-
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
-  const projectOpen = useStore(selectProjectOpen);
+  const openProject = useStore((s) => s.openProject);
   const user = useStore((s) => s.user);
   const clearDataset = useStore((s) => s.clearDataset);
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -42,10 +36,10 @@ export function ProjectBreadcrumb() {
   const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Load the project list when a menu first opens: powers the date switcher and resolves recent
-  // project names. On-demand so the status bar never polls.
+  // Load the project list once per open project: names it, and powers the date switcher. Never
+  // polled; a rename lands here at the next open.
   useEffect(() => {
-    if (!menu || projects) return;
+    if (!openProject) return;
     let canceled = false;
     api.projects
       .list()
@@ -58,7 +52,7 @@ export function ProjectBreadcrumb() {
     return () => {
       canceled = true;
     };
-  }, [menu, projects, pushToast]);
+  }, [openProject, pushToast]);
 
   // Close the menu on an outside click.
   useEffect(() => {
@@ -77,13 +71,13 @@ export function ProjectBreadcrumb() {
     if (!DATASET_TABS.has(activeTab)) setActiveTab("annotate");
   }
 
-  async function openRecent(name: string) {
+  async function openRecent(id: string) {
     setMenu(null);
     setBusy(true);
     try {
-      // adoptProjectByName saves the outgoing UI state, restores this project's saved
-      // position/filters, and writes the active-project marker; no patchGui here.
-      const sel = await adoptProjectByName(name);
+      // openProjectById saves the outgoing UI state and restores this project's saved
+      // position/filters; no patchGui here.
+      const sel = await openProjectById(id);
       if (!sel) pushToast("That project is no longer in the workspace.");
     } catch (e) {
       pushToast(`Could not open project: ${e instanceof Error ? e.message : String(e)}`);
@@ -92,7 +86,7 @@ export function ProjectBreadcrumb() {
     }
   }
 
-  async function switchDate(newDate: string, current: ProjectSummary) {
+  async function switchDate(newDate: string, current: ProjectSummary & { id: string }) {
     setMenu(null);
     if (newDate === dataset.date) return;
     setBusy(true);
@@ -104,7 +98,7 @@ export function ProjectBreadcrumb() {
         dataset.subject && subjects.includes(dataset.subject)
           ? dataset.subject
           : (subjects[0] ?? null);
-      const curModel = currentModel(dataset.predictions_dir);
+      const curModel = dataset.model_name;
       const model = curModel && models.includes(curModel) ? curModel : (models[0] ?? null);
       // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
       await openWorkspaceProject(current, newDate, subject, model);
@@ -115,19 +109,26 @@ export function ProjectBreadcrumb() {
     }
   }
 
-  // dataset.dataset_root is re-checked alongside projectOpen only so TypeScript narrows it to a
-  // string below; both read the same field, so they can never disagree.
-  if (!projectOpen || !dataset.dataset_root) {
+  if (!openProject) {
     return <span>no project open</span>;
   }
 
-  const projectName = dataset.dataset_root.split(/[/\\]/).slice(-1)[0];
-  const current = projects?.find((p) => p.path === dataset.project_root) ?? null;
-  // Every recent project lists, the open one marked as current and inert (hiding it would
-  // read as broken in a one-project workspace); name-or-path matching catches a moved project.
-  const isCurrent = (r: { name: string; path: string }) =>
-    r.path === dataset.project_root || r.name === projectName;
-  const recent = loadRecentProjects();
+  const listed = projects?.find((p) => p.id === openProject.id) ?? null;
+  const current = listed && listed.id !== null ? { ...listed, id: listed.id } : null;
+  const projectName = current?.display_name ?? "";
+  // Every recent project still in the listing, named by it, the open one marked as current and
+  // inert (hiding it would read as broken in a one-project workspace).
+  const isCurrent = (r: { id: string }) => r.id === openProject.id;
+  let recent: { id: string; display_name: string }[] = [];
+  let recentProblem: string | null = null;
+  try {
+    recent = loadRecentProjectIds().flatMap((id) => {
+      const project = projects?.find((p) => p.id === id);
+      return project?.display_name ? [{ id, display_name: project.display_name }] : [];
+    });
+  } catch (e) {
+    recentProblem = e instanceof Error ? e.message : String(e);
+  }
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -184,15 +185,16 @@ export function ProjectBreadcrumb() {
 
       {menu === "project" && (
         <Dropdown title="Recent projects">
-          {recent.length === 0 ? (
+          {recentProblem ? (
+            <EmptyRow text={recentProblem} />
+          ) : recent.length === 0 ? (
             <EmptyRow text="No recent projects" />
           ) : (
             recent.map((r) => (
               <MenuButton
-                key={r.name}
-                onClick={() => (isCurrent(r) ? setMenu(null) : void openRecent(r.name))}
-                label={r.name}
-                sub={r.path}
+                key={r.id}
+                onClick={() => (isCurrent(r) ? setMenu(null) : void openRecent(r.id))}
+                label={r.display_name}
                 active={isCurrent(r)}
               />
             ))

@@ -63,24 +63,21 @@ def test_build_plant_mapping_wraps_build_and_persists(
 
     from tests._binding_fixtures import write_geo_image
 
-    # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
-    # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
     images_root = tmp_path / "images"
     write_geo_image(
         images_root / "2026-02-11" / "img1.jpg", 43.19670, -90.058000,
         datetime(2026, 2, 11, 9, 30))
-    register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
+    register_dataset(tmp_path, str(tmp_path), crop=sorted(registered_crops())[0])
     csv_path = tmp_path / "plants.csv"
     _plant_csv(csv_path)
     name = "valley"
 
     from tests._binding_fixtures import register_plant_registry_for
 
-    registry = register_plant_registry_for([csv_path])
+    registry = register_plant_registry_for(tmp_path, [csv_path])
     res = build_plant_mapping(
-        name=name,
+        tmp_path, name=name,
         images_root=str(images_root),
         plant_registry=registry,
         nn_tolerance_m=10.0,
@@ -88,7 +85,6 @@ def test_build_plant_mapping_wraps_build_and_persists(
 
     assert "error" not in res, res
     assert res["name"] == name
-    assert res["project_root"] == str(tmp_path)
     assert res["dataset_root"] == str(tmp_path)
     assert res["n_dates"] == 1
     assert res["n_images"] == 1
@@ -107,10 +103,9 @@ def test_build_plant_mapping_missing_images_root(
 ) -> None:
     from tcip_mcp.tools.project_tools import initialize_project
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
     res = build_plant_mapping(
-        images_root=str(tmp_path / "nope"),
+        tmp_path, images_root=str(tmp_path / "nope"),
         plant_registry="unregistered",
         name="m",
     )
@@ -124,13 +119,12 @@ def test_build_plant_mapping_missing_registry(
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
 
-    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
-    register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
+    register_dataset(tmp_path, str(tmp_path), crop=sorted(registered_crops())[0])
     res = build_plant_mapping(
-        images_root=str(images_root),
+        tmp_path, images_root=str(images_root),
         plant_registry="does-not-exist",
         name="m",
     )
@@ -224,7 +218,8 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
     ``experiment_id`` doubles as the record's producing_experiment_id when ``validated``: the run
     that produced these predictions is the run a genuinely-bound claim names. ``subject`` and
     ``attribute`` default to the classified scope :data:`ID_MAP` decodes; a caller writing a bare
-    detector map states ``attribute=None``.
+    detector map states ``attribute=None``. The record is filed under the project
+    ``dataset_root`` sits in.
     """
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -240,7 +235,7 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
         "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
     }
     if validated:
-        write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+        write_bound_sidecar(dataset_root.parent, dir_path, stamp, dataset_root=dataset_root,
                             experiment_id=f"exp-record-{dir_path.name}",
                             producing_experiment_id=experiment_id)
     else:
@@ -254,7 +249,8 @@ def _tiled(ref: str, value: int = 640) -> dict:
 
 def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool,
                               trait: str | None = None, experiment_id: str | None = None) -> None:
-    """The classifier_operating_point.json calibrate_classifier_operating_point writes."""
+    """The classifier_operating_point.json calibrate_classifier_operating_point writes, filed
+    under the project ``dataset_root`` sits in."""
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
@@ -264,7 +260,8 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: 
         "experiment_id": experiment_id,
     }
     if validated and trait:
-        write_bound_sidecar(dir_path, stamp, document="classifier_operating_point",
+        write_bound_sidecar(dataset_root.parent, dir_path, stamp,
+                            document="classifier_operating_point",
                             dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
                             producing_experiment_id=experiment_id, trait=trait)
     else:
@@ -290,8 +287,8 @@ def test_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Pat
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -331,7 +328,7 @@ def test_deliver_phenology_milestones_derives_one_conf_from_two_stamps_with_no_c
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -360,7 +357,7 @@ def test_deliver_phenology_milestones_joins_confs_from_dates_calibrated_apart(tm
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -392,7 +389,7 @@ def test_deliver_phenology_milestones_joins_confs_in_dates_delivered_order_not_t
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-03-09": str(d2), "2026-02-11": str(d1)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -424,7 +421,7 @@ def test_deliver_phenology_milestones_blanks_a_bucket_with_no_numeric_conf_in_th
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -455,8 +452,8 @@ def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(t
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -484,8 +481,8 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -518,8 +515,8 @@ def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_a
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -554,8 +551,8 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(other_trait_dir)],
@@ -589,8 +586,8 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -616,8 +613,8 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
     })
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -627,7 +624,7 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
 
 
 def _deliver_via_writer(
-    *, trait: str, mapping_name: str, predictions_by_date: dict[str, str],
+    project: Path, *, trait: str, mapping_name: str, predictions_by_date: dict[str, str],
     output_csv_path: Path, classifier_pred_dirs: list[str] | None = None,
     acknowledgment,
 ) -> dict:
@@ -646,22 +643,20 @@ def _deliver_via_writer(
         bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
-    from tcip_mcp.project_paths import platform_state_root
-
-    platform_root = platform_state_root()
     mapping_build, verified = plant_mapping.resolve_delivery_mapping(
-        platform_root, mapping_name, predictions_by_date)
+        project, mapping_name, predictions_by_date)
     disclosure = mapping_build.delivery_disclosure(verified, list(predictions_by_date))
 
     pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait=trait)
-    classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
+    recon = reconcile_operating_point_validity(pred_dirs, trait=trait, project=project)
+    classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [], project=project)
     classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], classifier_pred_dirs, pred_dirs, trait=trait)
-    tile_recon = reconcile_tile_size_validity(pred_dirs)
+        classifier_recon["validated"], classifier_pred_dirs, pred_dirs, trait=trait,
+        project=project)
+    tile_recon = reconcile_tile_size_validity(pred_dirs, project=project)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
-    revision = confirmed_revision("state_crossing_dates", project_root=None, trait=trait)
+    revision = confirmed_revision("state_crossing_dates", project=project, trait=trait)
     spec = revision.entry
     result = phenology.per_plant_phenology(
         mapping_build.rows(), predictions_by_date,
@@ -678,7 +673,7 @@ def _deliver_via_writer(
         },
         producer={}, dimension_reconciliations={"tile_size": tile_recon},
         predictions_by_date=predictions_by_date,
-        project_root=platform_root, plant_mapping=disclosure)
+        project=project, plant_mapping=disclosure)
 
 
 def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_path: Path) -> None:
@@ -697,7 +692,7 @@ def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_pat
     })
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="bud_opening",
+        tmp_path, trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -724,8 +719,8 @@ def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Pa
     })
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -751,7 +746,7 @@ def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) 
     })
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="bud_opening",
+        tmp_path, trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -791,7 +786,7 @@ def test_deliver_phenology_milestones_refuses_a_fabricated_tile_size(tmp_path: P
     geometry and no explicit caller override, must refuse here even though the classifier and the
     conf beside it are both genuinely validated."""
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = deliver_phenology_milestones(**args, plants=["P1"])
+    res = deliver_phenology_milestones(tmp_path, **args, plants=["P1"])
     assert "error" in res
     assert res["tile_size_validated"] == "false"
     assert res["operating_point_validated"] == "held_out_annotations"  # conf is not what refused
@@ -802,7 +797,7 @@ def test_deliver_phenology_milestones_delivers_when_the_tile_scale_has_a_real_ba
     """The rail must admit valid work: a tile edge derived from the checkpoint's own persisted
     training geometry delivers cleanly."""
     args = _tile_gate_fixture(tmp_path, _tiled("persisted_training_geometry", 224))
-    res = deliver_phenology_milestones(**args, plants=["P1"])
+    res = deliver_phenology_milestones(tmp_path, **args, plants=["P1"])
     assert "error" not in res, res
     assert res["tile_size_validated"] == "persisted_training_geometry"
     assert Path(args["output_csv_path"]).exists()
@@ -813,7 +808,7 @@ def test_deliver_phenology_milestones_never_gates_an_untiled_delivery_on_tile_si
     refusal over a dimension that was never operative."""
     args = _tile_gate_fixture(tmp_path, {"value": None, "requires_validation": False,
                                          "validation_kind": None, "validated_against": None})
-    res = deliver_phenology_milestones(**args, plants=["P1"])
+    res = deliver_phenology_milestones(tmp_path, **args, plants=["P1"])
     assert "error" not in res, res
     assert res["tile_size_validated"] is None
     assert Path(args["output_csv_path"]).exists()
@@ -831,7 +826,7 @@ def test_writer_acknowledged_tile_size_floors_the_csv_operating_point_stamp(
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
     cells = _deliver_via_writer(
-        **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
+        tmp_path, **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
                                                 reason="test acknowledgment"))
     assert cells["operating_point_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
@@ -850,7 +845,7 @@ def test_writer_acknowledged_tile_size_floors_the_csv_classifier_stamp(
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
     cells = _deliver_via_writer(
-        **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
+        tmp_path, **args, acknowledgment=Acknowledgment(acknowledged_by="user:tester",
                                                 reason="test acknowledgment"))
     assert cells["positive_state_classifier_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
@@ -871,8 +866,8 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening",
+        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -883,8 +878,8 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
 
 def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
     res = deliver_phenology_milestones(
-        trait="bud_opening",
-        mapping_name="nope", plants=mapped_plants("nope"),
+        tmp_path, trait="bud_opening",
+        mapping_name="nope", plants=mapped_plants(tmp_path, "nope"),
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -894,8 +889,8 @@ def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
 
 def test_deliver_phenology_milestones_unknown_trait_refuses(tmp_path: Path) -> None:
     res = deliver_phenology_milestones(
-        trait="not-a-real-trait",
-        mapping_name="nope", plants=mapped_plants("nope"),
+        tmp_path, trait="not-a-real-trait",
+        mapping_name="nope", plants=mapped_plants(tmp_path, "nope"),
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -969,7 +964,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(root),
@@ -989,7 +984,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     # reader over the real output, not by re-asserting a key name in two places.
 
     assert sidecar["operating_point"]["classifier"]["validated_against"] == VALIDATED_HELD_OUT
-    assert reconcile_classifier_validity([str(tmp_path / "out")])["validated"] == VALIDATED_HELD_OUT
+    assert reconcile_classifier_validity([str(tmp_path / "out")], project=tmp_path)["validated"] == VALIDATED_HELD_OUT
 
 
 def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
@@ -1030,7 +1025,7 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
             conn.close()
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path),
@@ -1067,7 +1062,7 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(out), dataset_root=str(root),
@@ -1077,14 +1072,14 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     stamp = read_classifier_operating_point_sidecar(out)
     assert stamp["checkpoint_sha256"] is None  # no bucket in the inputs carried one to copy
     binding = verify_stamp_binding(stamp, out, document="classifier_operating_point",
-                                   trait="bud_opening")
+                                   trait="bud_opening", project=tmp_path)
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert binding.producing_experiment_id is None  # the calibration hangs off its own experiment
 
     from tcip_mcp.experiments import find_observation, find_validation
 
-    row = find_validation(find_observation(res["validated_by"]["experiment_id"]),
+    row = find_validation(find_observation(res["validated_by"]["experiment_id"], project=tmp_path),
                           res["validated_by"]["record_digest"])
     # Sealed-disjointness liveness through the real classifier resolver: gate_evidence is read
     # correctly end to end, not silently lost to a stale key lookup that would leave these null.
@@ -1094,10 +1089,11 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     later = _bucket(tmp_path, "2026-04-06")
     _write_preds(later, "P1_a", ["open"])
     _write_op_sidecar(later, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id=None)
-    state = reconcile_classifier_validity([str(out)])["validated"]
+    state = reconcile_classifier_validity([str(out)], project=tmp_path)["validated"]
 
     assert state == VALIDATED_HELD_OUT
-    assert bind_classifier_validity(state, [str(out)], [str(later)], trait="bud_opening") == (
+    assert bind_classifier_validity(state, [str(out)], [str(later)], trait="bud_opening",
+                                    project=tmp_path) == (
         VALIDATED_HELD_OUT, "")
 
 
@@ -1114,7 +1110,7 @@ def test_calibrate_classifier_operating_point_refuses_a_dataset_root_its_gt_dirs
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(stated),
@@ -1143,7 +1139,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_h
     _write_split(hold_gt, hold_pred, prefix="dup", n_images=20, per_image_calls=calls)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(root),
@@ -1175,7 +1171,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=50, per_image_calls=flipped, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(root),
@@ -1193,7 +1189,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     assert gate_evidence["kappa_floor_source"] == "default"  # bud_opening sets none
 
 
-def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> None:
+def test_resolve_classifier_operating_point_refuses_single_image_holdout(tmp_path: Path) -> None:
     """A single-image holdout has no images to vary the count-bias
     across, so its std is trivially 0: the SE penalty the equivalence test relies on vanishes.
     Must refuse (insufficient_holdout_images), the same minimum the detection path requires,
@@ -1212,13 +1208,16 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
         for i in range(20)
     ]
     res = resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None,
+        project=tmp_path)
 
     assert res["passed"] is False
     assert "insufficient_holdout_images" in res["failures"], res["failures"]
 
 
-def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -> None:
+def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images(
+    tmp_path: Path,
+) -> None:
     """count_bias/count_bias_std must be measured over the same population typical_positive_count
     is already scoped to (images carrying a true or predicted positive), matching the pooled
     detector gate's own present-scoping, mirroring _count_stats_at_conf's own `if gt or dt`.
@@ -1251,7 +1250,8 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
                     "bbox": [-100.0 - i, 0.0, -90.0 - i, 10.0]})
 
     res = resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None,
+        project=tmp_path)
 
     assert res["gate_evidence"]["typical_positive_count"] == pytest.approx(100.0)
     assert res["gate_evidence"]["count_bias_n_images"] == 10  # scoped to the 10 informative images only
@@ -1281,7 +1281,9 @@ def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=(), ima
     return items
 
 
-def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_class_the_dense_admits():
+def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_class_the_dense_admits(
+    tmp_path,
+):
     """The classifier path's count-bias tolerance is relative too (same field, same
     `_bias_equivalence_ok`); the one passing classifier fixture in this file has bias exactly 0.0,
     true at any tolerance, so this pins both directions with the identical absolute miscall (one extra
@@ -1293,7 +1295,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
     sparse = resolve_classifier_operating_point(
         "bud_opening", calibration_items=_classifier_items("c", 20, 1),
         holdout_items=_classifier_items("h", 20, 1, miscall_images=[0], image_offset=20),
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
     assert sparse["gate_evidence"]["typical_positive_count"] == pytest.approx(1.0)
     assert sparse["passed"] is False
     assert "count_bias_exceeds_tolerance" in sparse["failures"]
@@ -1301,7 +1303,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
     dense = resolve_classifier_operating_point(
         "bud_opening", calibration_items=_classifier_items("c", 20, 150),
         holdout_items=_classifier_items("h", 20, 150, miscall_images=[0], image_offset=20),
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
     assert dense["gate_evidence"]["typical_positive_count"] == pytest.approx(150.0)
     # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical): only
     # the derived tolerance differs, proving density is what changed the outcome.
@@ -1317,16 +1319,17 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     """TraitEntry.classifier_agreement_floor, when a trait authors one,
     must be the floor actually applied, not the platform's interim default."""
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import BUD_OPENING, confirm_entry, with_fields
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
 
-    confirm_entry(with_fields(BUD_OPENING, classifier_agreement_floor=0.9))
+    propose_and_confirm(tmp_path, with_fields(BUD_OPENING, classifier_agreement_floor=0.9))
 
     # A holdout with kappa=0.8: clears the platform's interim default (0.41) but not the
     # trait's own stricter authored floor (0.9).
     cal = _flipped_items(20, flips=set())
     hold = _flipped_items(100, flips=set(range(10)))  # 10% symmetric flip -> kappa=0.8
     res = op_mod.resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None,
+        project=tmp_path)
 
     assert 0.75 < res["gate_evidence"]["kappa"] < 0.85, res["gate_evidence"]
     assert res["gate_evidence"]["kappa_floor"] == 0.9
@@ -1335,25 +1338,29 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     assert "compensating_error_floor_failed" in res["failures"]
 
 
-def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(monkeypatch) -> None:
+def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(
+    tmp_path: Path,
+) -> None:
     """TraitEntry.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
     stamp: unauthored (BUD_OPENING's own state) resolves to the platform's interim default fraction and
     stamps that; a trait that authors its own value stamps ``"trait"`` instead."""
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import BUD_OPENING, confirm_entry, with_fields
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm, with_fields
 
     cal = _flipped_items(20, flips=set())
     hold = _flipped_items(100, flips=set())  # clean, zero bias, so this stamp is reachable regardless
 
-    confirm_entry(BUD_OPENING)
+    propose_and_confirm(tmp_path, BUD_OPENING)
     res_default = op_mod.resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None,
+        project=tmp_path)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac_source"] == "default"
 
-    confirm_entry(with_fields(BUD_OPENING, count_bias_tolerance_frac=0.2))
+    propose_and_confirm(tmp_path, with_fields(BUD_OPENING, count_bias_tolerance_frac=0.2))
     res_trait = op_mod.resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None,
+        project=tmp_path)
     assert res_trait["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
     assert res_trait["gate_evidence"]["count_bias_tolerance_frac_source"] == "trait"
 
@@ -1373,7 +1380,7 @@ def _regression_items(prefix, true_values, pred_values, offset=0):
            for i, (t, p) in enumerate(zip(true_values, pred_values))]
 
 
-def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> None:
+def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
     ranks = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1] * 2  # 20 items, every rank represented repeatedly
@@ -1382,7 +1389,7 @@ def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> Non
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        num_ranks=3, experiment_id=None)
+        num_ranks=3, experiment_id=None, project=tmp_path)
 
     assert res["passed"] is True, res
     assert res["failures"] == []
@@ -1391,7 +1398,7 @@ def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> Non
     assert res["gate_evidence"]["floor_source"] == "default"
 
 
-def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() -> None:
+def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
     ranks = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1] * 2
@@ -1400,14 +1407,14 @@ def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() ->
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        num_ranks=3, experiment_id=None)
+        num_ranks=3, experiment_id=None, project=tmp_path)
 
     assert res["passed"] is False
     assert "not_disjoint" in res["failures"]
     assert res["validated_against"] == "false"
 
 
-def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() -> None:
+def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor(tmp_path: Path) -> None:
     """A holdout with mostly-adjacent-rank disagreement scores well below the interim default
     kappa floor (0.41) and must refuse, not merely score low."""
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
@@ -1419,7 +1426,7 @@ def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() ->
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
-        num_ranks=3, experiment_id=None)
+        num_ranks=3, experiment_id=None, project=tmp_path)
 
     assert res["gate_evidence"]["score"] is not None
     assert res["gate_evidence"]["score"] <= res["gate_evidence"]["floor"]
@@ -1427,19 +1434,19 @@ def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() ->
     assert "compensating_error_floor_failed" in res["failures"]
 
 
-def test_resolve_ordinal_operating_point_fails_closed_on_missing_items() -> None:
+def test_resolve_ordinal_operating_point_fails_closed_on_missing_items(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
     res = resolve_ordinal_operating_point(
         "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=None, holdout_items=None,
-        num_ranks=3, experiment_id=None)
+        num_ranks=3, experiment_id=None, project=tmp_path)
 
     assert res["passed"] is False
     assert res["failures"] == ["no_calibration_or_holdout"]
     assert res["validated_against"] == "false"
 
 
-def test_resolve_ordinal_operating_point_unknown_criterion_raises() -> None:
+def test_resolve_ordinal_operating_point_unknown_criterion_raises(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
     with pytest.raises(ValueError, match="not a registered ordinal criterion"):
@@ -1447,10 +1454,10 @@ def test_resolve_ordinal_operating_point_unknown_criterion_raises() -> None:
             "bud_opening", criterion="not_a_real_criterion",
             calibration_items=[{"image_id": "c0", "true_rank": 0, "predicted_rank": 0}],
             holdout_items=[{"image_id": "h0", "true_rank": 0, "predicted_rank": 0}],
-            num_ranks=3, experiment_id=None)
+            num_ranks=3, experiment_id=None, project=tmp_path)
 
 
-def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> None:
+def test_resolve_regression_operating_point_passes_on_clean_disjoint_split(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     values = [float(i) for i in range(20)]
@@ -1459,7 +1466,7 @@ def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> 
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     assert res["passed"] is True, res
     assert res["failures"] == []
@@ -1468,7 +1475,7 @@ def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> 
     assert res["gate_evidence"]["floor_source"] == "default"
 
 
-def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split() -> None:
+def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     values = [float(i) for i in range(20)]
@@ -1477,14 +1484,14 @@ def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split()
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     assert res["passed"] is False
     assert "not_disjoint" in res["failures"]
     assert res["validated_against"] == "false"
 
 
-def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor() -> None:
+def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor(tmp_path: Path) -> None:
     """A holdout whose predictions carry no real relationship to the true values scores well below
     the interim default skill floor (0.5) and must refuse."""
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
@@ -1495,7 +1502,7 @@ def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor()
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     assert res["gate_evidence"]["score"] is not None
     assert res["gate_evidence"]["score"] <= res["gate_evidence"]["floor"]
@@ -1503,19 +1510,19 @@ def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor()
     assert "compensating_error_floor_failed" in res["failures"]
 
 
-def test_resolve_regression_operating_point_fails_closed_on_missing_items() -> None:
+def test_resolve_regression_operating_point_fails_closed_on_missing_items(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="r_squared", calibration_items=[], holdout_items=[],
-        experiment_id=None)
+        experiment_id=None, project=tmp_path)
 
     assert res["passed"] is False
     assert res["failures"] == ["no_calibration_or_holdout"]
     assert res["validated_against"] == "false"
 
 
-def test_resolve_regression_operating_point_unknown_criterion_raises() -> None:
+def test_resolve_regression_operating_point_unknown_criterion_raises(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     with pytest.raises(ValueError, match="not a registered regression criterion"):
@@ -1523,10 +1530,10 @@ def test_resolve_regression_operating_point_unknown_criterion_raises() -> None:
             "bud_opening", criterion="not_a_real_criterion",
             calibration_items=[{"image_id": "c0", "true_value": 1.0, "predicted_value": 1.0}],
             holdout_items=[{"image_id": "h0", "true_value": 1.0, "predicted_value": 1.0}],
-            experiment_id=None)
+            experiment_id=None, project=tmp_path)
 
 
-def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> None:
+def test_resolve_regression_operating_point_ccc_criterion_is_selectable(tmp_path: Path) -> None:
     """The criterion toolkit is genuinely dispatched, not hardcoded to r_squared: a caller who
     states concordance_correlation_coefficient gets that statistic recorded, not silently ignored."""
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
@@ -1537,7 +1544,7 @@ def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> Non
 
     res = resolve_regression_operating_point(
         "bud_opening", criterion="concordance_correlation_coefficient", calibration_items=cal,
-        holdout_items=hold, experiment_id=None)
+        holdout_items=hold, experiment_id=None, project=tmp_path)
 
     assert res["gate_evidence"]["criterion"] == "concordance_correlation_coefficient"
     assert res["gate_evidence"]["score"] == pytest.approx(1.0)
@@ -1559,7 +1566,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(root),
@@ -1594,7 +1601,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
                 per_image_calls=perfect_plus_unassessed, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="bud_opening", subject="bud", attribute="opening",
+        tmp_path, trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(root),
@@ -1632,7 +1639,7 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     # so this assertion is what actually fails fast, with a clear message, if the BUD_OPENING fixture's
     # localization value ever changes and silently stops exercising the center-match code path
     # this test exists to cover.
-    spec = latest_confirmed("bud_opening").entry
+    spec = latest_confirmed("bud_opening", tmp_path).entry
     assert spec.localization == CENTER_MATCH and spec.localization_tolerance_frac == 0.5
 
     # "big": a 200x200 GT box -> char_size=200 -> per-image tolerance would be 100px; offset 40px
@@ -1659,7 +1666,7 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
     # Split-wide avg char_size = (200 + 20) / 2 = 110 -> tolerance = 0.5 * 110 = 55px, comfortably
     # above both the small image's 15px offset and the big image's 40px offset.
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    items = _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                   **BUD_OPENING, positive_value="open")
 
     by_image = {it["image_id"]: it for it in items}
@@ -1695,7 +1702,7 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
                    attributes={"opening": "open"}),
     ], 400, 400)
 
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    items = _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                   **BUD_OPENING, positive_value="open")
 
     assert len(items) == 1
@@ -1723,7 +1730,7 @@ def test_classification_items_never_pair_a_crowd_region(tmp_path: Path) -> None:
                    attributes={"opening": "closed"}),
     ], 400, 400)
 
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    items = _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                   **BUD_OPENING, positive_value="open")
 
     assert [it["bbox"] for it in items] == [[10.0, 10.0, 40.0, 40.0]]
@@ -1744,7 +1751,7 @@ def test_a_crowd_prediction_pairs_no_ground_truth_object(tmp_path: Path) -> None
         Annotation(subject="bud", geometry=box, score=0.9, attributes={"opening": "open"},
                    iscrowd=True)], 400, 400)
 
-    assert _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    assert _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                  **BUD_OPENING, positive_value="open") == []
 
 
@@ -1772,7 +1779,7 @@ def test_classification_items_refuses_a_bare_split_with_no_registry(tmp_path: Pa
     _write_pair(gt_dir, pred_dir, gt_value="open")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+        _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                               **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
@@ -1796,14 +1803,14 @@ def test_classification_items_refuses_a_stated_scope_beside_a_stamped_bucket(
         trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,
         experiment_id=None, images_dir=None, raster_path=None, produced_at=None,
     )
-    write_sidecar(pred_dir, stamp)
+    write_sidecar(pred_dir, stamp, project=tmp_path)
 
     for stated in (BUD_OPENING, {"subject": "", "attribute": None}):
         with pytest.raises(ValueError, match="would be a second one"):
-            _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+            _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                   **stated, positive_value="open")
     # Admits valid work: the same stamped bucket with nothing stated beside it pairs its item.
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+    items = _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                                   subject=None, attribute=None, positive_value="open")
     assert [it["is_true_positive"] for it in items] == [True]
 
@@ -1829,7 +1836,7 @@ def test_classification_items_refuses_a_registry_not_declaring_the_positive_valu
     _write_pair(gt_dir, pred_dir, gt_value="closed", pred_value="closed")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+        _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                               **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
@@ -1855,10 +1862,10 @@ def test_classification_items_refuses_an_id_map_not_declaring_the_positive_value
         dataset_hash=None, checkpoint=None, checkpoint_sha256=None, experiment_id=None,
         images_dir=None, raster_path=None, produced_at=None,
     )
-    write_sidecar(pred_dir, stamp)
+    write_sidecar(pred_dir, stamp, project=tmp_path)
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+        _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                               subject=None, attribute=None, positive_value="open")
 
     message = str(exc.value)
@@ -1880,7 +1887,7 @@ def test_classification_items_refuses_a_ground_truth_value_outside_the_registry(
     gt_file = _write_pair(gt_dir, pred_dir, gt_value="budding")
 
     with pytest.raises(ValueError) as exc:
-        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening",
+        _classification_items(str(gt_dir), str(pred_dir), trait=latest_confirmed("bud_opening", tmp_path).entry,
                               **BUD_OPENING, positive_value="open")
 
     message = str(exc.value)
@@ -1907,7 +1914,6 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
     from tests.tiny_trainer_fixtures import trainer_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1921,19 +1927,18 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     model_source = _model_source("build_bespoke_ordinal")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
     run = trainer_run({**_train_config(model_source, data), "seed": 0}, tmp_path / "out",
-                      has_val_loader=False, id="auto-run-44")
+                      has_val_loader=False, id="auto-run-44", project=tmp_path)
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
     from tcip_mcp.tools.model_tools import register_model
 
     ckpt_path = str(tmp_path / "out" / "model_best.pt")
-    reg = register_model(name="ordinal-e2e", checkpoint_path=ckpt_path, config={},
-                         project_path=str(tmp_path))
+    reg = register_model(tmp_path, name="ordinal-e2e", checkpoint_path=ckpt_path, config={})
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening",
+        tmp_path, trait_name="bud_opening",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
@@ -1972,7 +1977,6 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
     from tests.tiny_trainer_fixtures import trainer_run
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1986,18 +1990,18 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     model_source = _model_source("build_bespoke_regressor")
     # Seeded through the trainer's own config key so this run's init and shuffling repeat.
     run = trainer_run({**_train_config(model_source, data), "seed": 0}, tmp_path / "out",
-                      has_val_loader=False, id="auto-run-45")
+                      has_val_loader=False, id="auto-run-45", project=tmp_path)
     run = train(run, loader, val_loader=None)
     assert run.status == "completed", getattr(run, "error", run.status)
 
     from tcip_mcp.tools.model_tools import register_model
 
-    reg = register_model(name="regression-e2e", checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
-                         config={}, project_path=str(tmp_path))
+    reg = register_model(tmp_path, name="regression-e2e",
+                         checkpoint_path=str(tmp_path / "out" / "model_best.pt"), config={})
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening",
+        tmp_path, trait_name="bud_opening",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="r_squared", output_dir=str(tmp_path / "calib"),
@@ -2028,17 +2032,16 @@ def test_calibrate_scalar_operating_point_refuses_a_checkpoint_of_another_task(
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     checkpoint = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": {}, "kind": "tcip_module",
                 "config": {"model_source": {"task": "classification"},
                            "data": {"num_channels": 3, "num_classes": 2, "scope": {}}}},
                checkpoint)
-    assert "error" not in register_model(name="classifier", checkpoint_path=str(checkpoint),
-                                         config={}, project_path=str(tmp_path))
+    assert "error" not in register_model(tmp_path, name="classifier",
+                                         checkpoint_path=str(checkpoint), config={})
 
     result = calibrate_scalar_operating_point(
-        trait_name="bud_opening", checkpoint_path=str(checkpoint),
+        tmp_path, trait_name="bud_opening", checkpoint_path=str(checkpoint),
         images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(tmp_path),
     )
@@ -2088,9 +2091,7 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
 
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    reg = register_model(name="loose-dir", checkpoint_path=str(checkpoint), config={},
-                         project_path=str(tmp_path))
+    reg = register_model(tmp_path, name="loose-dir", checkpoint_path=str(checkpoint), config={})
     assert "error" not in reg, reg
 
     class _RecordedRanks:
@@ -2101,7 +2102,7 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
                         lambda *a, **kw: _RecordedRanks())
 
     res = calibrate_scalar_operating_point(
-        trait_name="bud_opening", checkpoint_path=str(checkpoint),
+        tmp_path, trait_name="bud_opening", checkpoint_path=str(checkpoint),
         images_dir=str(frames), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path), group_by="stem",
@@ -2109,18 +2110,19 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
 
     assert res["passed"] is True, res
     stamp = read_ordinal_operating_point_sidecar(out)
-    binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="bud_opening")
+    binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="bud_opening",
+                                project=tmp_path)
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert reconcile_ordinal_validity(
-        [str(out)], trait="bud_opening")["validated"] == VALIDATED_HELD_OUT
+        [str(out)], trait="bud_opening", project=tmp_path)["validated"] == VALIDATED_HELD_OUT
 
     # The door ran this checkpoint, so stamp and record both name it and the equality check holds.
     import hashlib
 
     sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     assert stamp["checkpoint_sha256"] == sha
-    row = find_validation(find_observation(res["validated_by"]["experiment_id"]),
+    row = find_validation(find_observation(res["validated_by"]["experiment_id"], project=tmp_path),
                           res["validated_by"]["record_digest"])
     assert row["checkpoint_sha256"] == sha
     assert binding.checkpoint_sha256 == sha
@@ -2143,7 +2145,7 @@ def test_calibrate_scalar_operating_point_refuses_a_dataset_root_its_images_cont
     _rank_csv(csv_path, {f"img{i}": i % 3 for i in range(4)})
 
     res = calibrate_scalar_operating_point(
-        trait_name="bud_opening", checkpoint_path=str(tmp_path / "model_best.pt"),
+        tmp_path, trait_name="bud_opening", checkpoint_path=str(tmp_path / "model_best.pt"),
         images_dir=str(ds / "images"), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
         dataset_root=str(stated),
@@ -2200,13 +2202,13 @@ def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_buck
     run those records were earned under, rather than leaving a reader to trust the stamps."""
     from tests._binding_fixtures import record_producing_run
 
-    sha = record_producing_run("exp-producer")
+    sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -2240,11 +2242,11 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
         return stamp
 
     for d in (d1, d2):
-        update_sidecar(d, _forge, "operating_point")
+        update_sidecar(d, _forge, "operating_point", project=tmp_path)
 
     out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="bud_opening",
+        tmp_path, trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -2268,13 +2270,13 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     record that says which buckets stood behind the numbers, with no call line beside it."""
     from tests._binding_fixtures import record_producing_run
 
-    sha = record_producing_run("exp-producer")
+    sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -2291,7 +2293,7 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     bindings = record["document_reconciliations"]["operating_point"]["bindings"]
     assert set(bindings) == {str(d1), str(d2)}
     assert all(doc["ok"] and doc["record_digest"] for doc in bindings.values())
-    platform = ts.read_log(audit_log_key()).records
-    lines = [e for e in [*page.records, *platform] if e["tool"] == "delivery_event"]
+    project_log = ts.read_log(audit_log_key(tmp_path)).records
+    lines = [e for e in [*page.records, *project_log] if e["tool"] == "delivery_event"]
     assert [e["arguments"] for e in lines] == [{"event_id": record["event_id"]}]
     assert lines[0] in page.records

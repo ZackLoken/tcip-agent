@@ -42,9 +42,9 @@ def _checkpoint(tmp_path: Path, *, in_chans: int = 3, with_masks: bool = False,
     model = build_model(config, recorded_model_dims(config))
     torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
     result = register_model(name="blob", checkpoint_path=str(ckpt), config={},
-                            project_path=str(tmp_path))
+                            project=tmp_path)
     assert "error" not in result, result
-    return str(ckpt), load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    return str(ckpt), load_registered_checkpoint(str(ckpt), project=tmp_path)
 
 
 def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
@@ -349,8 +349,9 @@ def _dry_and_real(tmp_path, **stated):
     images.mkdir()
     _png(images, _frame())
     out = tmp_path / "bucket"
-    dry = run_inference(ckpt, images_dir=str(images), output_dir=str(out), dry_run=True, **stated)
-    real = run_inference(ckpt, images_dir=str(images), output_dir=str(out), **stated)
+    dry = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out), dry_run=True,
+                        **stated)
+    real = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out), **stated)
     assert "error" not in dry and "error" not in real, (dry, real)
     return dry, read_operating_point_sidecar(out)
 
@@ -422,10 +423,10 @@ def test_a_calibrated_pass_collects_exports_previews_and_seals_one_regime(
                 calibration_labels_dir=str(labels), group_by="stem",
                 allow_unvalidated_staging=True)
 
-    dry = run_inference(ckpt, dry_run=True, **call)
+    dry = run_inference(tmp_path, ckpt, dry_run=True, **call)
     assert "error" not in dry, dry
     assert not out.exists()
-    real = run_inference(ckpt, **call)
+    real = run_inference(tmp_path, ckpt, **call)
     assert "error" not in real, real
 
     stamp = read_operating_point_sidecar(out)
@@ -434,7 +435,8 @@ def test_a_calibrated_pass_collects_exports_previews_and_seals_one_regime(
     assert len(merged_at) > N_CALIBRATION_IMAGES and set(merged_at) == {merge["value"]}
     assert (dry["operating_point"], dry["slicing"]) == (stamp["operating_point"], stamp["slicing"])
     assert stamp["validated"] is True
-    assert verify_stamp_binding(stamp, out, document="operating_point", trait="bud_opening").ok
+    assert verify_stamp_binding(stamp, out, document="operating_point", trait="bud_opening",
+                                project=tmp_path).ok
 
 
 def _earned_result(tmp_path, *, slicing_postprocess: str):
@@ -443,7 +445,7 @@ def _earned_result(tmp_path, *, slicing_postprocess: str):
     from tcip_mcp.pipelines.slicing import slicing_record
     from tests._binding_fixtures import calibrated_run_fields, run_result
 
-    fields = calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256="deadbeef",
+    fields = calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
                                    postprocess="nms", tile_size=TILE, tile_size_source="derived")
     fields["slicing"] = slicing_record(fields["slicing"]["overlap"], None, slicing_postprocess)
     return run_result(
@@ -458,7 +460,8 @@ def _calibrated_bucket_under(tmp_path, postprocess: str):
     from tcip_mcp.tools.inference_tools import publish_bucket
 
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    pub = publish_bucket(_earned_result(tmp_path, slicing_postprocess=postprocess), out=out,
+    pub = publish_bucket(tmp_path, _earned_result(tmp_path, slicing_postprocess=postprocess),
+                         out=out,
                          trait="bud_opening", dataset_root=bucket_dataset_root(out),
                          allow_unvalidated_staging=False)
     assert pub["refusal"] is None and pub["op_stamp"]["validated"], pub
@@ -477,14 +480,14 @@ def test_a_claim_stating_no_slicing_record_refuses_by_name(tmp_path, seed_bud_tr
     from tcip_mcp.tools.inference_tools import _calibration_evidence
     from tests._binding_fixtures import calibrated_run_fields, write_prediction
 
-    fields = calibrated_run_fields(labels_dir=tmp_path, checkpoint_sha256="deadbeef",
+    fields = calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
                                    postprocess="nms", tile_size=TILE, tile_size_source="derived")
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     write_prediction(out, "a")
     root = bucket_dataset_root(out)
-    evidence = _calibration_evidence(fields)
+    evidence = _calibration_evidence(tmp_path, fields)
     draft = open_validation(
-        document="operating_point",
+        project=tmp_path, document="operating_point",
         evidence={"resolver": evidence["resolver"], "inputs": evidence["inputs"]},
         trait="bud_opening", checkpoint_sha256="deadbeef", producing_experiment_id=None,
         reference_inputs={**evidence["reference_inputs"], "dataset_root": str(root)})
@@ -494,19 +497,19 @@ def test_a_claim_stating_no_slicing_record_refuses_by_name(tmp_path, seed_bud_tr
         seal_validation(draft, dataset_root=root, bucket_dirs=[out], stamp_body=stamp)
 
 
-def _delivery(out: Path):
+def _delivery(project: Path, out: Path):
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate, reconcile_operating_point_validity,
     )
 
-    recon = reconcile_operating_point_validity([str(out)], trait="bud_opening")
+    recon = reconcile_operating_point_validity([str(out)], trait="bud_opening", project=project)
     return recon, check_delivery_gate({"operating_point": recon["validated"]})
 
 
 def test_a_bucket_stamped_under_its_calibrations_slicing_delivers(tmp_path, seed_bud_trait_spec):
     out = _calibrated_bucket_under(tmp_path, "nms")
 
-    _recon, gate = _delivery(out)
+    _recon, gate = _delivery(tmp_path, out)
 
     assert gate.ok, gate.reason
 
@@ -517,9 +520,10 @@ def test_a_bucket_restamped_under_another_merge_than_its_calibration_refuses_by_
     from tcip_mcp.pipelines.slicing import slicing_record
 
     out = _calibrated_bucket_under(tmp_path, "nms")
-    assert update_sidecar(out, lambda s: {**s, "slicing": slicing_record(OVERLAP, None, "nmm")})
+    assert update_sidecar(out, lambda s: {**s, "slicing": slicing_record(OVERLAP, None, "nmm")},
+                          project=tmp_path)
 
-    recon, gate = _delivery(out)
+    recon, gate = _delivery(tmp_path, out)
 
     assert not gate.ok
     assert "slicing disagree" in recon["binding_notes"][str(out)]
@@ -538,7 +542,7 @@ def test_the_stamp_records_the_slice_geometry_the_operating_point_derived(tmp_pa
     _png(images, _frame())
 
     out = tmp_path / "bucket"
-    response = run_inference(ckpt, images_dir=str(images), output_dir=str(out),
+    response = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
                              conf_threshold=0.0, postprocess="nmm", allow_unvalidated_staging=True)
     assert "error" not in response, response
     stamp = read_operating_point_sidecar(out)

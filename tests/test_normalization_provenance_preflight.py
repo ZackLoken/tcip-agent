@@ -47,7 +47,7 @@ def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
     lbls.mkdir()
     cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]})
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("image_stats_sampling" in i for i in r["issues"])
 
@@ -72,7 +72,7 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
                                     "pixel_fraction": 1.0, "window_size": None,
                                     "max_windows_per_image": None})
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("outside" in i for i in r["issues"])
     assert r["image_stats_containment"] == "checked"
@@ -97,7 +97,7 @@ def test_preflight_admits_a_sampling_record_naming_images_inside_images_dir(tmp_
                                     "pixel_fraction": 1.0, "window_size": None,
                                     "max_windows_per_image": None})
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
     assert r.get("image_stats_containment") == "checked", r
 
@@ -121,7 +121,7 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
         "data": {"dataset_source": {"builder": "tests.bespoke_models:build_bespoke_classifier"}},
     }
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["image_stats_containment"] == "not_checked"
     assert not any("outside" in i for i in r["issues"])
 
@@ -149,7 +149,7 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": mean, "image_std": std},
               image_stats_sampling=image_stats_provenance(result))
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
     assert r["image_stats_containment"] == "checked"
 
@@ -180,7 +180,7 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
               image_stats_sampling=image_stats_provenance(
                   result, window_size=8, max_windows_per_image=4))
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
     assert r["image_stats_containment"] == "checked"
 
@@ -214,7 +214,7 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": mean, "image_std": std},
               image_stats_sampling=image_stats_provenance(result))
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any("outside" in i for i in r["issues"]), r["issues"]
     assert r["image_stats_containment"] == "checked"
 
@@ -235,9 +235,9 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     from tcip_mcp.tools.data_tools import draw_splits
 
     assert "error" not in draw_splits(
-        str(root), output_path=str(out), subject=SUBJECT, seed=7,
+        tmp_path, str(root), output_path=str(out), subject=SUBJECT, seed=7,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25), "the draw is the fixture"
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]
     assert len({s.member for s in bound}) < len(bound), (
         "the fixture must hold one member name on two dates for this to bite")
@@ -251,7 +251,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
                         "windows": [[str(s.source), None] for s in bound], "seed": None,
                         "pixel_fraction": 1.0, "window_size": None,
                         "max_windows_per_image": None}}
-    r = preflight_config({"model_source": model_source,
+    r = preflight_config(tmp_path, {"model_source": model_source,
                           "data": {"split": {"selection_dir": str(out)}}})
 
     assert r["image_stats_containment"] == "checked"
@@ -271,7 +271,7 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
     cfg = _cfg(imgs, lbls, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
               image_stats_sampling={"note": "derived by hand, not through either derivation"})
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("'windows'" in i and "'pixel_fraction'" in i for i in r["issues"]), r["issues"]
 
@@ -294,7 +294,7 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
     tifffile.imwrite(str(imgs / "b.tif"), np.zeros((16, 16, 5), dtype=np.uint8))
     _label(lbls, "a", "b")
 
-    r = preflight_config(_cfg(imgs, lbls, builder_kwargs={}))
+    r = preflight_config(tmp_path, _cfg(imgs, lbls, builder_kwargs={}))
 
     assert r["valid"] is False
     assert any("different band counts" in i for i in r["issues"]), r["issues"]
@@ -309,6 +309,6 @@ def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):
     lbls.mkdir()
     cfg = _cfg(imgs, lbls, builder_kwargs={})
 
-    r = preflight_config(cfg)
+    r = preflight_config(tmp_path, cfg)
     assert not any("image_stats_sampling" in i for i in r["issues"])
     assert "image_stats_containment" not in r

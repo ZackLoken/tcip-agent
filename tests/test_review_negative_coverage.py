@@ -173,7 +173,7 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
         experiment_id="exp-17", images_dir=None, raster_path=None,
         produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
     )
-    write_sidecar(d, stamp)
+    write_sidecar(d, stamp, project=tmp_path)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
@@ -209,7 +209,7 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
         raster_path=None, produced_at="2026-01-01T00:00:00Z",
         scope=ClassScope(subject="leaf", id_map={"leaf": 0}),
     )
-    write_sidecar(d, stamp)
+    write_sidecar(d, stamp, project=tmp_path)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
@@ -244,7 +244,7 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
         experiment_id="exp-17", images_dir=None, raster_path=None,
         produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
     )
-    write_sidecar(d, stamp)
+    write_sidecar(d, stamp, project=tmp_path)
     dataset_root = _dataset_root(tmp_path)
 
     first = client.post("/api/review/mark_complete", json={
@@ -309,7 +309,7 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
         raster_path=None, produced_at="2026-01-01T00:00:00Z",
         scope=ClassScope(subject="bud", id_map={"bud": 0}),
     )
-    write_sidecar(d, stamp)
+    write_sidecar(d, stamp, project=tmp_path)
 
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud") is False

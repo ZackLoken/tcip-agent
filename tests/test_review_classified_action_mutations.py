@@ -55,7 +55,7 @@ def _stage(dataset_root: Path, *, value: str) -> dict:
     )
 
 
-def _stamp_bucket(bucket: Path) -> None:
+def _stamp_bucket(project: Path, bucket: Path) -> None:
     stamp = operating_point_stamp(
         {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
         tile_size_validated=None, shippable_issues=[],
@@ -64,7 +64,7 @@ def _stamp_bucket(bucket: Path) -> None:
         checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
         images_dir=None, raster_path=None, produced_at="2026-04-01T00:00:00+00:00",
     )
-    write_sidecar(bucket, stamp)
+    write_sidecar(bucket, stamp, project=project)
 
 
 def _write_gt(dataset_root: Path, *, value: str) -> Path:
@@ -85,7 +85,7 @@ def _setup(tmp_path: Path, *, pred_value: str, gt_value: str) -> dict:
     img = _image(dataset_root)
     staged = _stage(dataset_root, value=pred_value)
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_bucket(bucket)
+    _stamp_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value=gt_value)
     return {"dataset_root": dataset_root, "img": img, "staged": staged, "bucket": bucket, "gt": gt}
 

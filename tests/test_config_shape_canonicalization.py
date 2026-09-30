@@ -59,7 +59,8 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tests.tiny_trainer_fixtures import trainer_run
 
-    run = trainer_run(dict(FLAT_CONFIG), tmp_path, has_val_loader=True, id="auto-run-5")
+    run = trainer_run(dict(FLAT_CONFIG), tmp_path, project=tmp_path, has_val_loader=True,
+                      id="auto-run-5")
     assert run.config["stages"] == FLAT_CONFIG["stages"]
     assert len(run.config["stages"]) == 2
     assert "training" not in run.config

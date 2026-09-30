@@ -12,7 +12,7 @@ import hashlib
 import logging
 from pathlib import Path
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.pipelines.data.splits import DEFAULT_CAL_SEED, DEFAULT_HOLDOUT_RATIO
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,9 @@ def _read_reference_csv(csv_path: str) -> dict[str, dict[str, float | str]]:
     return out
 
 
-@mcp.tool()
+@tool()
 def calibrate_physical_scale(
+    project: Path,
     trait: str,
     pred_dir: str,
     dataset_root: str,
@@ -114,8 +115,7 @@ def calibrate_physical_scale(
             different trait's scale floors (``reconcile_scale_validity``).
         pred_dir: The prediction bucket to stamp; the scale claim binds to this bucket's own
             imagery.
-        dataset_root: The dataset this calibration's claim hangs off; the reference locations and
-            the locked split are recorded and stored against it.
+        dataset_root: The dataset this calibration's claim hangs off.
         images_dir: Directory holding the bucket's own images, one per predicted stem; hashed (not
             the stems alone) to bind the claim to the imagery it was earned on.
         unit: The physical unit every reference (and the stamped scale) is in; a reference CSV row
@@ -137,7 +137,7 @@ def calibrate_physical_scale(
     from tcip_mcp.traits import TraitUnknownError
 
     try:
-        spec = latest_confirmed(trait).entry
+        spec = latest_confirmed(trait, project).entry
     except (TraitUnknownError, OperationalizationRefused) as e:
         return {"error": str(e)}
 
@@ -239,12 +239,11 @@ def calibrate_physical_scale(
         "validated": result["passed"], "validated_by": None,
         "failures": result["failures"], "gate_evidence": result["gate_evidence"],
         "trait": trait, "reference_subject": reference_subject,
-        "reference_csv": _relative_to_root(reference_csv, dataset_root),
         "produced_at": _now_iso(),
     }
     if result["passed"]:
         draft = open_validation(
-            document="resolve_scale",
+            project=project, document="resolve_scale",
             evidence={"resolver": "resolve_physical_scale",
                       "inputs": {"unit": unit, "references": references,
                                  "tolerance_frac": spec.scale_tolerance_frac,
@@ -262,7 +261,7 @@ def calibrate_physical_scale(
         )
         stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[pred_dir],
                                    stamp_body=stamp, images_dir=images_dir)
-    write_sidecar(pred_dir, stamp, "resolve_scale")
+    write_sidecar(pred_dir, stamp, "resolve_scale", project=project)
     return {
         "pred_dir": pred_dir,
         "validated_against": result["validated_against"],
@@ -273,17 +272,6 @@ def calibrate_physical_scale(
         "unit": unit,
         "n_references": len(references),
     }
-
-
-def _relative_to_root(path: str, dataset_root: str) -> str:
-    """``path`` relative to ``dataset_root``, or the resolved absolute path when it does not sit
-    under it.
-    """
-    resolved = Path(path).resolve()
-    try:
-        return resolved.relative_to(Path(dataset_root).resolve()).as_posix()
-    except ValueError:
-        return resolved.as_posix()
 
 
 def _now_iso() -> str:

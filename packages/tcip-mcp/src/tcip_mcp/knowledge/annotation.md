@@ -95,7 +95,7 @@ bearing (denormalizing, cropping, drawing); go through `load_image`.
 | `save_annotations` | Write an image's per-image label document |
 | `import_coco` | Convert an external dataset-level COCO into per-image label documents |
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
-| `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for a named `project_root`, not restricted to images/annotations; refuses when the GUI's open project does not agree |
+| `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for this server's project, not restricted to images/annotations; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives), its manifest naming the verdicts it read; under a classified bucket's own recorded scope a rejected value call is never a hard negative (the model named the wrong state, not the object's absence), so it lands in `unconfirmed_negatives` instead |
 
@@ -229,14 +229,13 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
   far more common way an image is finished, freezes its bucket the same way, so a session that
   interleaves staging with completing images sends each later stage into its own fresh variant
   unless every image of a run is staged before any is reviewed.
-- `focus_human_attention(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
+- `focus_human_attention(tab='review', dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
   missed catkin) without hunting. The Review analog of `focus_human_attention(tab='annotate')`.
-  Refuses before resolving anything when the GUI's open project (its `canvas_open_binding` record)
-  does not name `project_root`: a mismatch, or no binding at all, refuses every time, naming what
-  the GUI has open and how to converge on it. Once the binding agrees, a backend that is not
-  running still answers `delivered: false` rather than raising.
+  The event names this server's project by its id, and the backend delivers it only while the GUI
+  has that project open: otherwise the answer is `delivered: false` with the id of the project the
+  GUI does have open, and a backend that is not running answers `delivered: false` too.
 
 Flow: run inference (or `stage_proposals`) → `focus_human_attention(tab='review')` the human to the weakest/flagged
 frames → they accept on the canvas → only then does it become GT. See

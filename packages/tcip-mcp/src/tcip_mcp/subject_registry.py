@@ -177,7 +177,7 @@ def _registry_key(path: str | Path) -> "Key":
     """The stored registry a ``subjects.json`` path names, addressed by the dataset root holding it."""
     from tcip_mcp.dataset_layout import subject_registry_key
 
-    return subject_registry_key(Path(path).absolute().parent)
+    return subject_registry_key(Path(path).parent)
 
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
@@ -416,7 +416,7 @@ def replace_registry(
         key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)), expect=expect
     )
 
-    sweep = _sweep_schema_change(Path(path).absolute().parent, outgoing, registry)
+    sweep = _sweep_schema_change(Path(path).parent, outgoing, registry)
     if decode_warning and sweep["warning"] is None:
         sweep = {**sweep, "warning": decode_warning}
     return {"version": new_version, "schema_change_sweep": sweep}

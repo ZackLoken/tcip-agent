@@ -24,7 +24,7 @@ from tests._producer_fixtures import admission_of
 from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
 
-def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
+def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path, project):
     """Behavioral parity, not source-text matching: substring-matching the script's source
     (``'max_dets=DEFAULT_MAX_DETS' in script_src``) would stay green on a cosmetic rename of an
     unrelated variable that happened to share the substring, and would not catch two entry doors
@@ -84,13 +84,12 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
     assert rc == 0
 
     # ---- MCP path ----
@@ -100,14 +99,14 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     img = tmp_path / "a.png"
     Image.new("RGB", (100, 100)).save(img)
-    run_inference(ckpt, images_dir=str(Path(str(img)).parent), device="cpu", tile=False)
+    run_inference(tmp_path, ckpt, images_dir=str(Path(str(img)).parent), device="cpu", tile=False)
 
     assert len(max_dets_calls) == 2
     script_cap, mcp_cap = max_dets_calls
     assert script_cap == mcp_cap == DEFAULT_MAX_DETS  # the same effective cap, not two literals
 
 
-def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
+def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path, project):
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
 
     calls: dict = {}
@@ -150,13 +149,12 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
     assert rc == 0
     # The script's build_predictor call carries the shared cap constant, not the framework
     # default (100/300) that would otherwise truncate the 0.01-floored calibration pass.
@@ -169,7 +167,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     assert calls["resolve_operating_point_kwargs"]["slicing"] is None
 
 
-def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypatch, tmp_path):
+def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypatch, tmp_path, project):
     """The cap that actually governs the collection pass is
     set_detector_operating_point's detections_per_img call, which executes after build_predictor's
     construction-time DEFAULT_MAX_DETS and overrides it. This split's labels are sparse (2 objects
@@ -213,19 +211,18 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
     assert rc == 0
     applied_cap = _Model.detector.roi_heads.detections_per_img
     assert applied_cap == 100  # derive_max_dets_from_counts([2, 2]) floor
     assert applied_cap != DEFAULT_MAX_DETS
 
-def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path, capsys):
+def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path, project, capsys):
     """The script inspects a sweep; minting or replacing a validated claim belongs to the audited
     doors, so a run leaves the experiment directory exactly as it found it."""
 
@@ -263,19 +260,18 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
     assert rc == 0
     assert not (tmp_path / ".tcip" / "experiments").exists()
     out = capsys.readouterr().out
     assert '"conf"' in out
 
-def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monkeypatch, tmp_path):
+def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monkeypatch, tmp_path, project):
     """The labels dir is this script's measurement reference, so the admissibility rail fires
     before any model or dataset work begins."""
     import json as _json
@@ -297,11 +293,11 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
     with pytest.raises(ValueError) as refused:
         main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(labels), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
     assert "created_by" in str(refused.value) or "claude" in str(refused.value)
 
 
-def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkeypatch, tmp_path, capsys):
+def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkeypatch, tmp_path, project, capsys):
     """A labeled split too small to divide into cal/holdout is a usage refusal, not a traceback:
     the library's CalibrationUsageError becomes a printed message and rc=2."""
     ckpt = foreign_checkpoint(tmp_path, name="script-model")
@@ -322,37 +318,36 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset",
                         lambda *a, samples=None, **kw: SimpleNamespace(
                             stems=list(samples) if samples is not None else ["only_one"]))
-    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", ckpt, "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project", str(project)])
 
     assert rc == 2
     assert "Need >=2 labeled stems" in capsys.readouterr().err
 
 
-def test_script_selection_dir_conflicts_with_group_by(tmp_path):
+def test_script_selection_dir_conflicts_with_group_by(tmp_path, project):
     """A drawn split's own parameter beside a recorded partition is a conflict, not a silent
     choice between the two."""
     from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+              "--dataset-root", str(tmp_path), "--project", str(project),
               "--selection-dir", str(tmp_path / "m"),
               "--group-by", "stem"])
 
     assert rc == 2
 
 
-def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
-    tmp_path, seed_bud_trait_spec,
+def test_script_runs_end_to_end_with_a_checkpoint_registered_under_the_project(
+    tmp_path, project, seed_bud_trait_spec,
 ):
     """The admitting half of the registry rail: no stub anywhere on the checkpoint's own path,
-    a real load_registered_checkpoint against --project-root, and the script completes."""
+    a real load_registered_checkpoint against --project, and the script completes."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -374,6 +369,6 @@ def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
     rc = main([
         "--checkpoint", ckpt, "--trait", "bud_opening",
         "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
-        "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+        "--dataset-root", str(tmp_path), "--project", str(project),
     ])
     assert rc == 0

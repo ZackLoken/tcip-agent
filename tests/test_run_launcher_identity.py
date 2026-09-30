@@ -62,14 +62,14 @@ def _seed_one_image(images_dir, labels_dir) -> None:
                                   [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
 
-def _launch_record(experiment_id: str) -> dict:
+def _launch_record(project, experiment_id: str) -> dict:
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
-    return read_record(experiment_dir(experiment_id) / RUN_FILE)
+    return read_record(experiment_dir(experiment_id, project=project) / RUN_FILE)
 
 
-def _launched_by(experiment_id: str) -> dict:
-    return _launch_record(experiment_id)["launched_by"]
+def _launched_by(project, experiment_id: str) -> dict:
+    return _launch_record(project, experiment_id)["launched_by"]
 
 
 def test_a_bare_launch_writes_launcher_process(tmp_path, monkeypatch):
@@ -82,9 +82,9 @@ def test_a_bare_launch_writes_launcher_process(tmp_path, monkeypatch):
     _fake_popen(monkeypatch, [])
 
     result = training_tools.launch_training(
-        _detection_cfg(images_dir, labels_dir, "exp-bare-launch"))
+        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-bare-launch"))
     assert "error" not in result, result
-    assert _launched_by(result["experiment_id"]) == {"launcher": "process"}
+    assert _launched_by(tmp_path, result["experiment_id"]) == {"launcher": "process"}
 
 
 def test_a_launch_inside_an_mcp_handshake_writes_launcher_agent_with_identity_fields(
@@ -104,9 +104,9 @@ def test_a_launch_inside_an_mcp_handshake_writes_launcher_agent_with_identity_fi
 
     identity = agent_identity.begin("claude-code", "2.1.238")
     result = training_tools.launch_training(
-        _detection_cfg(images_dir, labels_dir, "exp-agent-launch"))
+        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-agent-launch"))
     assert "error" not in result, result
-    assert _launched_by(result["experiment_id"]) == {
+    assert _launched_by(tmp_path, result["experiment_id"]) == {
         "launcher": "agent", "agent_client_name": "claude-code", "agent_client_version": "2.1.238",
         "agent_session": identity.session,
     }
@@ -127,11 +127,11 @@ def test_declare_launcher_stamps_the_declared_name(tmp_path, monkeypatch):
     try:
         with training_tools.declare_launcher("gui"):
             result = training_tools.launch_training(
-                _detection_cfg(images_dir, labels_dir, "exp-gui-launch"))
+                tmp_path, _detection_cfg(images_dir, labels_dir, "exp-gui-launch"))
     finally:
         agent_identity.end()
     assert "error" not in result, result
-    assert _launched_by(result["experiment_id"]) == {"launcher": "gui"}
+    assert _launched_by(tmp_path, result["experiment_id"]) == {"launcher": "gui"}
 
 
 def test_all_training_runs_reads_launched_by_from_the_runs_own_record(tmp_path, monkeypatch):
@@ -145,10 +145,10 @@ def test_all_training_runs_reads_launched_by_from_the_runs_own_record(tmp_path, 
 
     with training_tools.declare_launcher("gui"):
         result = training_tools.launch_training(
-            _detection_cfg(images_dir, labels_dir, "exp-row-launcher"))
+            tmp_path, _detection_cfg(images_dir, labels_dir, "exp-row-launcher"))
     assert "error" not in result, result
 
-    row = next(r for r in training_tools._all_training_runs()
+    row = next(r for r in training_tools._all_training_runs(tmp_path)
                if r["experiment_id"] == "exp-row-launcher")
     assert row["launched_by"] == {"launcher": "gui"}
 
@@ -175,12 +175,12 @@ def test_launch_refuses_a_dataset_identity_above_the_readers_ceiling(tmp_path, m
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
     result = training_tools.launch_training(
-        _detection_cfg(images_dir, labels_dir, "exp-identity-refused"))
+        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-identity-refused"))
 
     assert result["error"].startswith("launch_training:")
     assert "schema_version" in result["error"]
     assert captured == []
-    assert find_run("exp-identity-refused") is None
+    assert find_run("exp-identity-refused", project=tmp_path) is None
 
 
 def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_path, monkeypatch):
@@ -194,12 +194,13 @@ def test_launch_refuses_an_experiment_id_that_is_not_a_legal_directory_name(tmp_
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
-    result = training_tools.launch_training(_detection_cfg(images_dir, labels_dir, "not/legal"))
+    result = training_tools.launch_training(
+        tmp_path, _detection_cfg(images_dir, labels_dir, "not/legal"))
 
     assert result["error"].startswith("launch_training:")
     assert "not/legal" in result["error"]
     assert captured == []
-    assert run_dirs() == []
+    assert run_dirs(tmp_path) == []
 
 
 def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monkeypatch):
@@ -222,11 +223,11 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     monkeypatch.setattr(experiments_mod, "write_once", _raise)
 
     result = training_tools.launch_training(
-        _detection_cfg(images_dir, labels_dir, "exp-write-raises"))
+        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-write-raises"))
 
     assert result["error"] == "launch_training: disk full"
     assert not any("tcip_mcp.pipelines.training.subprocess_worker" in argv for argv in captured)
-    assert find_run("exp-write-raises") is None
+    assert find_run("exp-write-raises", project=tmp_path) is None
 
 
 def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
@@ -239,10 +240,10 @@ def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     _fake_popen(monkeypatch, [])
 
     cfg = _detection_cfg(images_dir, labels_dir, "exp-fresh-seed")
-    result = training_tools.launch_training(cfg)
+    result = training_tools.launch_training(tmp_path, cfg)
     assert "error" not in result, result
     assert "seed" not in cfg
-    assert isinstance(_launch_record("exp-fresh-seed")["config"]["seed"], int)
+    assert isinstance(_launch_record(tmp_path, "exp-fresh-seed")["config"]["seed"], int)
 
 
 def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, monkeypatch):
@@ -264,12 +265,13 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
     monkeypatch.setattr(subprocess, "Popen", _raise_popen)
 
     with pytest.raises(OSError):
-        training_tools.launch_training(_detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
+        training_tools.launch_training(
+            tmp_path, _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
 
     monkeypatch.setattr(experiments_mod, "HEARTBEAT_STALE_SECONDS", -1.0)
-    assert observe(experiment_dir("exp-spawn-fails")).state == "interrupted"
+    assert observe(experiment_dir("exp-spawn-fails", project=tmp_path)).state == "interrupted"
 
     _fake_popen(monkeypatch, [])
     relaunch = training_tools.launch_training(
-        _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
+        tmp_path, _detection_cfg(images_dir, labels_dir, "exp-spawn-fails"))
     assert "already exists" in relaunch["error"]

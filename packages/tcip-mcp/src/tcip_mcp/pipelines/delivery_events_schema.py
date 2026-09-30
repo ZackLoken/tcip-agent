@@ -50,7 +50,6 @@ class PlantMappingDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    project_root: str
     dataset_id: str
     dataset_root: str
     built_at: str
@@ -76,7 +75,6 @@ class PlantRegistryDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plant_registry: PlantRegistryReference
-    project_root: str
     raster_identity: dict
     nn_tolerance_m: MatchTolerance
     detections_unattributed: int
@@ -143,7 +141,6 @@ class CanopySegmentDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plant_registry: PlantRegistryReference
-    project_root: str
     raster_identity: dict
     canopy_segments: CanopySegmentsDocument
     segment_ties: list[SegmentTieDisclosure]

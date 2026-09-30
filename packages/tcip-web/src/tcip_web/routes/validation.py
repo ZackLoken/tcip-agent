@@ -17,9 +17,9 @@ from pydantic import BaseModel
 from tcip_mcp.audit import AuditEntryNotWritten
 from tcip_web.routes.audit_gap import audit_gap_409
 
-from tcip_web.routes.review import (
-    _bucket_of_dir, _get_engine, _guard_path, _prediction_digest,
-)
+from tcip_web.paths import allowed_optional
+from tcip_web.routes.review import _bucket_of_dir, _get_engine, _prediction_digest
+from tcip_web.state import store
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
@@ -27,15 +27,15 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 def _recorded_prediction_digests(image_state: dict) -> set[Optional[str]]:
     """Every prediction-document identity recorded against one reviewed image at review time.
 
-    The image-level producer fact a confirmed negative carries, plus the one on each verdict entry.
-    A recorded identity carrying no digest reads as None, the same value an image with no
-    prediction document records.
+    The image-level producer fact a confirmed negative carries, plus the one on each verdict entry;
+    an image with no prediction document recorded ``None`` as its digest. A recorded identity with
+    no ``prediction_digest`` field raises ``KeyError``.
     """
     from tcip_annotation.verdicts import decode_verdict
 
     identities = [image_state.get("producer_identity")]
     identities += [decode_verdict(d).producer_identity for d in image_state.get("detections") or []]
-    return {i.get("prediction_digest") for i in identities if isinstance(i, dict)}
+    return {i["prediction_digest"] for i in identities if isinstance(i, dict)}
 
 
 # ── Promote a completed review into a validation reference ─────────────────
@@ -81,6 +81,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     a review whose prediction documents changed since the verdicts earns nothing. A lost audit line
     after a record or stamp landed answers 409 with the buckets stamped so far.
     """
+    project = store.open_root()
     if not req.dataset_root:
         raise HTTPException(
             400,
@@ -93,7 +94,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             "validate_reference requires the subject this reference validates; name one rather "
             "than leaving it unstated.",
         )
-    pred_dir = _guard_path(req.pred_dir)
+    pred_dir = allowed_optional(req.pred_dir)
     if not pred_dir:
         return ValidateReferenceResponse(
             validated=False, reference=None, reviewed_image_count=0, conf=None,
@@ -138,7 +139,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     except (DecodeError, SchemaVersionRefused) as exc:
         raise HTTPException(400, str(exc)) from None
     digest_memo: dict[str, str] = {}
-    binding = verify_stamp_binding(sidecar, pred_dir, document="operating_point",
+    binding = verify_stamp_binding(sidecar, pred_dir, document="operating_point", project=project,
                                    digest_memo=digest_memo)
     stamped_op = sidecar.get("operating_point") or {}
     if binding.claimed and binding.ok:
@@ -248,7 +249,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     }
     try:
         bundle = resolve_operating_point_from_review(
-            trait_name=req.trait, experiment_id=review_experiment_id, **resolver_inputs)
+            project=project, trait_name=req.trait, experiment_id=review_experiment_id, **resolver_inputs)
     except TraitUnknownError:
         raise HTTPException(
             400,
@@ -279,7 +280,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     if result["validated"]:
         try:
             draft = open_validation(
-                document="operating_point",
+                project=project, document="operating_point",
                 evidence={"resolver": "resolve_operating_point_from_review",
                           "inputs": resolver_inputs},
                 trait=req.trait,
@@ -320,7 +321,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             now answers for is left as it is, and the pointer is merged only while the stamp
             still makes the claim ``earned`` was sealed over."""
             now = verify_stamp_binding(stored, pred_dir, document="operating_point",
-                                       digest_memo=digest_memo)
+                                       project=project, digest_memo=digest_memo)
             if now.claimed and now.ok:
                 return None
             merged = _stamp_body(stored)
@@ -333,7 +334,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             return merged
 
         try:
-            if update_sidecar(pred_dir, _promote):
+            if update_sidecar(pred_dir, _promote, project=project):
                 stamped.append(pred_dir)
         except AuditEntryNotWritten:
             stamped.append(pred_dir)  # the stamp landed; only its line was lost

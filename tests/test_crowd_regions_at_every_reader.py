@@ -154,8 +154,8 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
     collate = task_collate("detection")
     RecordingDetector.handed.clear()
-    run = trainer_run(_train_config(tmp_path), tmp_path / "run", has_val_loader=True,
-                      id="crowd-run")
+    run = trainer_run(_train_config(tmp_path), tmp_path / "run", project=tmp_path,
+                      has_val_loader=True, id="crowd-run")
     completed = train(run, DataLoader(loader_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(loader_ds, batch_size=2, collate_fn=collate))
 
@@ -222,12 +222,12 @@ def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
 
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size, resolve_match_criterion
 
-    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
+    trait = fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC).entry
     with_crowd, without = _records(tmp_path, crowd=True, n_crowd=3), _records(tmp_path, crowd=False)
 
     assert gt_class_avg_size(with_crowd) == gt_class_avg_size(without) == 10.0
-    assert (resolve_match_criterion(fx.COUNT_TRAIT, with_crowd)["tolerance"]
-            == resolve_match_criterion(fx.COUNT_TRAIT, without)["tolerance"])
+    assert (resolve_match_criterion(trait, with_crowd)["tolerance"]
+            == resolve_match_criterion(trait, without)["tolerance"])
 
 
 def _read_back(path: Path, anns: list) -> list:
@@ -380,7 +380,8 @@ def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: 
                                                width=IMG, height=IMG)[1])
         return out
 
-    resolved = [resolve_operating_point(fx.COUNT_TRAIT, dataset_hash="h", **tiled_regime(),
+    resolved = [resolve_operating_point(fx.COUNT_TRAIT, project=tmp_path, dataset_hash="h",
+                                        **tiled_regime(),
                                         calibration_records=records(crowd))
                 for crowd in (True, False)]
     with_crowd, without = (bundle.get("localization_tolerance_frac") for bundle in resolved)

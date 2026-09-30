@@ -354,7 +354,7 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
 
     with pytest.raises(_StoppedAfterSpace):
         hpo.tune_search(
-            objective_fn=lambda config, report: None,
+            project=tmp_path, objective_fn=lambda config, report: None,
             param_space={"bs": {"type": "categorical", "choices": [2, 4]}},
             search_alg="Grid",
             storage_path=str(tmp_path), seed=0
@@ -480,7 +480,7 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
         metric="objective", mode="min", num_samples=6,
         search_alg="random", scheduler="none",
         warm_start=True, baseline_params={"x": 2.0},
-        storage_path=str(tmp_path / "hpo"), seed=0
+        storage_path=str(tmp_path / "hpo"), seed=0, project=tmp_path,
     )
     points = [json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()]
     assert len(points) == 6

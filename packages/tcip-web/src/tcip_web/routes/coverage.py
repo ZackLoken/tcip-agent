@@ -38,10 +38,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 import tcip_store
 
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import allowed_path
 from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
 from tcip_web.routes.audit_gap import AUDIT_ENTRY_NOT_WRITTEN
-from tcip_web.routes.subjects import _guard_dataset_root
 from tcip_web.routes.images import _checked
 
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
@@ -86,14 +85,14 @@ def _resolve_root(image_path: str, dataset_root: Optional[str]) -> str:
     """The dataset root the record belongs to: the explicit one, else derived from the
     image's canonical path. Either way confined to the allowed image roots."""
     if dataset_root:
-        return _guard_dataset_root(dataset_root)
+        return str(allowed_path(dataset_root))
     from tcip_mcp.dataset_layout import parse_image_path
 
     try:
         root, _date, _stem = parse_image_path(image_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return _guard_dataset_root(str(root))
+    return str(allowed_path(root))
 
 
 def _require_subject(subject: Optional[str]) -> str:
@@ -361,7 +360,7 @@ def post_grid_zoom(payload: GridZoomPayload) -> dict:
     if not payload.dataset_root:
         raise HTTPException(400, "the coverage grid zoom is scoped to a dataset; pass "
                                  "dataset_root")
-    root = _guard_dataset_root(payload.dataset_root)
+    root = str(allowed_path(payload.dataset_root))
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
     key = coverage_grid_zoom_key(root)
@@ -612,10 +611,7 @@ def get_completeness(
         annotation_counts_by_cell, record_annotations, stale_cells,
     )
 
-    try:
-        src = assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    src = allowed_path(path)
 
     root = _resolve_root(path, dataset_root)
     stem = Path(path).stem
@@ -733,10 +729,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
 
     complete = payload.complete
     if complete:
-        try:
-            assert_path_allowed(payload.image_path)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
+        allowed_path(payload.image_path)
 
     bucket = status_bucket(subject, stem)
     completeness_key = region_completeness_key(root)

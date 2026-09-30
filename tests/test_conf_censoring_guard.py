@@ -27,8 +27,8 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+# No built-in traits: seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's
+# tmp_path project, the project every resolve_operating_point call below names.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -62,13 +62,13 @@ def test_floor_mismatch_predicate():
 # the low-score FP is filtered out), comfortably above a real 0.01 calibration floor, exercising the
 # "genuinely floored reference must still validate" direction.
 
-def test_reference_floored_at_the_real_calibration_floor_still_validates():
+def test_reference_floored_at_the_real_calibration_floor_still_validates(tmp_path):
     # A genuinely floored, honestly-asserted reference must still be able to validate: a naive fix
     # could otherwise make validation permanently unreachable.
     cal, hold = good_cal_holdout(fp_score=0.05)
     # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)
@@ -80,11 +80,11 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
     assert sweep["failures"] == []
 
 
-def test_no_staged_conf_floor_asserted_fails_closed():
+def test_no_staged_conf_floor_asserted_fails_closed(tmp_path):
     # No floor asserted must fail closed (the honest default), named conf_floor_unstated,
     # distinct from conf_censored (a stated floor the pick does not clear).
     cal, hold = good_cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -94,11 +94,11 @@ def test_no_staged_conf_floor_asserted_fails_closed():
     assert "conf_censored" not in conf.gate_evidence["failures"]
 
 
-def test_reference_truncated_above_the_picked_conf_is_refused():
+def test_reference_truncated_above_the_picked_conf_is_refused(tmp_path):
     # Same geometry as the passing case, but the asserted floor sits at the picked conf, so the
     # sweep could not have seen anything below it, and it must refuse even though the holdout bias is 0.
     cal, hold = good_cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.95)
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -109,7 +109,7 @@ def test_reference_truncated_above_the_picked_conf_is_refused():
     assert "conf_censored" in sweep["failures"]
 
 
-def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
+def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates(tmp_path):
     # The caller asserts the real 0.01 calibration floor, but the reference's own detections never
     # actually go below 0.5, a material gap between the assertion and the data. This check is
     # non-gating provenance only: it is still computed and stamped on the sweep for a human/agent to
@@ -119,7 +119,7 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     cal, hold = good_cal_holdout(fp_score=0.5)
     # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, slicing=None, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"

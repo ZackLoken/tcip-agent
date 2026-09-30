@@ -15,16 +15,18 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 def _ctx(tmp_path) -> tuple[TrainContext, dict]:
     """A context over a run the launcher's own writer opened under ``tmp_path``, and the config
-    its launch record states."""
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    its launch record stores."""
+    from tcip_mcp.experiments import RUN_FILE, observe, read_record
     from tcip_mcp.pipelines.training.run_registry import TrainRun
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
-    record = read_record(run_dir / RUN_FILE)
+    record = observe(run_dir).record
     run = TrainRun(id=run_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
-    return TrainContext(run=run, train_loader=None, val_loader=None), record["config"]
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(run_dir))
+    stored = read_record(run_dir / RUN_FILE)["config"]
+    return TrainContext(run=run, train_loader=None, val_loader=None), stored
 
 
 def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(tmp_path) -> None:
@@ -36,10 +38,16 @@ def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(tmp_path) -
 
 
 def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(tmp_path) -> None:
+    """The checkpoint carries the run's own config, every field but the data locations only the
+    run's record keeps."""
     ctx, launched = _ctx(tmp_path)
 
     path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}})
 
     payload = torch.load(path, weights_only=False)
-    assert payload["config"] == ctx.config
-    assert payload["config"]["data"] == launched["data"]
+    locations = {"images_dir", "labels_dir"}
+    assert {k: v for k, v in payload["config"].items() if k != "data"} == {
+        k: v for k, v in launched.items() if k != "data"}
+    assert payload["config"]["data"] == {
+        k: v for k, v in launched["data"].items() if k not in locations}
+    assert launched["data"].keys() >= locations

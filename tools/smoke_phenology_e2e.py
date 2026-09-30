@@ -21,10 +21,9 @@ Exits non-zero on the first failed assertion.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
-import os
-import shutil
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -131,27 +130,21 @@ def main() -> int:
     print("Phenology e2e smoke: build_plant_mapping -> deliver_phenology_milestones -> "
           "acknowledged web export\n")
     with tempfile.TemporaryDirectory() as td:
-        # A workspace/project split, its name fitting crop_subject_phenotype
-        # (initialize_project holds a workspace project to that scheme).
         workspace_root = Path(td)
-        root = workspace_root / "currant_bud_phenology"
+        root = (workspace_root / "bud-phenology").resolve()
         root.mkdir(parents=True)
         dataset_root = root / "dataset"        # a registered dataset the mapping is built over
         images_root = dataset_root / "images"
         preds_root = dataset_root / "predictions" / "live"  # class-carrying predictions (valid)
         mapping_name = "smoke-valley"
 
-        # Both pinned explicitly for this run and restored after: state resolution otherwise
-        # follows the process cwd, and the web app refuses a TestClient request with no workspace.
-        _saved_platform_root = os.environ.get("TCIP_STATE_ROOT")
-        _saved_workspace = os.environ.get("TCIP_WORKSPACE")
-        os.environ["TCIP_STATE_ROOT"] = str(root)
-        os.environ["TCIP_WORKSPACE"] = str(workspace_root)
+        # The web backend is started here with this run's scratch workspace.
+        store.configure(workspace_root.resolve(), ())
         try:
             from tcip_mcp.traits import registered_crops
             from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 
-            init = initialize_project(str(root), site="smoke test orchard")
+            init = initialize_project(str(root), "Bud phenology", "smoke test orchard")
             check("project initialized", "error" not in init, init.get("error", ""))
             _author_bud_opening_trait_spec(root)
 
@@ -182,7 +175,7 @@ def main() -> int:
                     experiment_id=None, images_dir=str(images_root / date), raster_path=None,
                     produced_at=datetime.now(timezone.utc).isoformat(),
                 )
-                write_sidecar(preds_root / date, stamp, "operating_point")
+                write_sidecar(preds_root / date, stamp, "operating_point", project=root)
 
             plant_csv = root / "plants.csv"
             with plant_csv.open("w", newline="", encoding="utf-8") as f:
@@ -192,7 +185,7 @@ def main() -> int:
                     w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
 
             crop = sorted(registered_crops())[0]
-            register_dataset(str(dataset_root), crop=crop, project_root=str(root))
+            register_dataset(root, str(dataset_root), crop=crop)
             # The web export route resolves the subject registry from the delivered dataset's own
             # root, never the project's; the MCP tool never checks one (it reads the bucket's id_map).
             from tcip_mcp.subject_registry import copy_registry
@@ -204,14 +197,14 @@ def main() -> int:
 
             registry_name = "smoke-valley-plants"
             reg = register_plant_registry(
-                name=registry_name, csv_paths=[str(plant_csv)], crop=crop,
+                root, name=registry_name, csv_paths=[str(plant_csv)], crop=crop,
                 site="smoke test orchard")
             check("no error", "error" not in reg, reg.get("error", ""))
 
             # 2. build_plant_mapping: real EXIF GPS → plant assignments.
             print("Step 1: build_plant_mapping")
             m = build_plant_mapping(
-                name=mapping_name,
+                root, name=mapping_name,
                 images_root=str(images_root),
                 plant_registry=registry_name,
             )
@@ -230,7 +223,7 @@ def main() -> int:
             plants = sorted({row["plot_name"] for rows in _plant_mapping.load_mapping_rows(
                 root, mapping_name).values() for row in rows if row.get("plot_name")})
             r = deliver_phenology_milestones(
-                trait="bud_opening",
+                root, trait="bud_opening",
                 mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,
                 output_csv_path=str(csv_out),
@@ -246,11 +239,11 @@ def main() -> int:
             # 3. The breeder's own route: look at the unvalidated numbers, then acknowledge and
             # export them, exercising the writer, the gate, the tail and the delivery event.
             print("\nStep 3: the web export route delivers an acknowledged, unvalidated CSV")
-            store.open_project(root.resolve())
+            asyncio.run(store.open_project(root))
             client = TestClient(app, base_url="http://127.0.0.1")
             body = {
-                "project_root": str(root), "mapping_name": mapping_name,
-                "predictions_by_date": preds_by_date, "trait": "bud_opening", "plants": plants,
+                "mapping_name": mapping_name, "predictions_by_date": preds_by_date,
+                "trait": "bud_opening", "plants": plants,
             }
 
             screen = client.post(
@@ -303,8 +296,7 @@ def main() -> int:
                     check("operating_point_validated stamps false (never silently upgraded)",
                           cell.get("operating_point_validated") == "false", str(cell))
 
-            events = client.get(
-                "/api/results/delivery-events", params={"project_root": str(root)}).json()
+            events = client.get("/api/results/delivery-events").json()
             record = next(
                 (e for e in events.get("records", []) if e.get("door") == "results.export_csv"),
                 None)
@@ -316,14 +308,6 @@ def main() -> int:
                       record.get("acknowledgment_reason") == "smoke run over an uncalibrated scene",
                       str(record))
         finally:
-            if _saved_platform_root is None:
-                os.environ.pop("TCIP_STATE_ROOT", None)
-            else:
-                os.environ["TCIP_STATE_ROOT"] = _saved_platform_root
-            if _saved_workspace is None:
-                os.environ.pop("TCIP_WORKSPACE", None)
-            else:
-                os.environ["TCIP_WORKSPACE"] = _saved_workspace
             # Windows can't remove the tempdir the bound backend still holds a database handle
             # into; close it before the enclosing TemporaryDirectory context tears the tree down.
             backend.close()
@@ -337,14 +321,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Run from an isolated cwd so the tools' @audited log doesn't touch the repo's .tcip/.
-    # chdir back before removing it (Windows can't delete the dir a process is cwd'd into).
-    _origin = os.getcwd()
-    _audit_cwd = tempfile.mkdtemp()
-    os.chdir(_audit_cwd)
-    try:
-        _rc = main()
-    finally:
-        os.chdir(_origin)
-        shutil.rmtree(_audit_cwd, ignore_errors=True)
-    sys.exit(_rc)
+    sys.exit(main())

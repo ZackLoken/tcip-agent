@@ -61,7 +61,7 @@ def test_bundle_propagates_the_refusal_rather_than_reading_a_malformed_registry_
 
     from tcip_mcp.tools.project_tools import initialize_project
 
-    initialize_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), "Test project", "north orchard")
     _plant_malformed_registry(tmp_path)
 
     with pytest.raises(RegistryVersionRefused):
@@ -71,10 +71,10 @@ def test_bundle_propagates_the_refusal_rather_than_reading_a_malformed_registry_
 def test_archive_project_refuses_loudly_on_a_malformed_registry(tmp_path: Path):
     from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
-    initialize_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), "Test project", "north orchard")
     _plant_malformed_registry(tmp_path)
 
-    result = archive_project(str(tmp_path), str(tmp_path.parent / "out.zip"))
+    result = archive_project(tmp_path, str(tmp_path.parent / "out.zip"))
 
     assert "error" in result
     assert "not a recognized entries-mapping document" in result["error"]
@@ -84,7 +84,7 @@ def test_archive_project_accounts_for_a_registered_checkpoint_outside_models(tmp
     from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
     project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
+    initialize_project(str(project), "Test project", "north orchard")
     weights_dir = project / "weights"
     weights_dir.mkdir()
     ckpt = weights_dir / "m.pt"
@@ -92,7 +92,7 @@ def test_archive_project_accounts_for_a_registered_checkpoint_outside_models(tmp
     ModelRegistry(str(project)).register_model("m", str(ckpt), {})
     out = tmp_path / "out.zip"
 
-    result = archive_project(str(project), str(out), include_models=True)
+    result = archive_project(project, str(out), include_models=True)
 
     assert "error" not in result, result
     assert result["left_behind"]["unaccounted"] == 0
@@ -104,7 +104,7 @@ def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
     from tcip_mcp.cli import doctor
     from tcip_mcp.tools.project_tools import initialize_project
 
-    initialize_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), "Test project", "north orchard")
     _plant_malformed_registry(tmp_path)
 
     findings: list[tuple[str, str]] = []
@@ -148,7 +148,7 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Pa
     """One containment core: a checkpoint and a dataset both sitting under the same project
     root spell relative, and both sitting on a genuinely separate tree spell absolute, agreeing
     with each other rather than each registry re-deriving its own notion of containment."""
-    from tcip_mcp.tools.project_tools import entry_is_external, registry_path_for
+    from tcip_mcp.registry_paths import stored_path
 
     project = tmp_path / "proj"
     nested_dataset = project / "datasets" / "main"
@@ -161,10 +161,10 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Pa
     reg = ModelRegistry(str(project))
     entry = reg.register_model("m", str(ckpt), {})
     stored_ckpt = read_registry_index(project)[0]["checkpoint_path"]
-    dataset_path = registry_path_for(nested_dataset, project)
+    dataset_path = stored_path(nested_dataset, project)
 
     assert not is_external_form(stored_ckpt)
-    assert not entry_is_external({"path": dataset_path})
+    assert not is_external_form(dataset_path)
     assert Path(entry["checkpoint_path"]).is_absolute()
 
     outside = tmp_path / "elsewhere"
@@ -173,10 +173,10 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(tmp_path: Pa
     _checkpoint(outside_ckpt, "other weights")
     reg.register_model("m2", str(outside_ckpt), {})
     stored_outside = read_registry_index(project)[1]["checkpoint_path"]
-    outside_dataset_path = registry_path_for(outside, project)
+    outside_dataset_path = stored_path(outside, project)
 
     assert is_external_form(stored_outside)
-    assert entry_is_external({"path": outside_dataset_path})
+    assert is_external_form(outside_dataset_path)
 
 
 # ── response surfaces: resolved absolute, including a relative-root process case ───────────
@@ -207,7 +207,7 @@ def test_rank_registered_models_listing_view_answers_resolved_absolute(tmp_path:
     project = tmp_path / "proj"
     _, ckpt = _register_internal_checkpoint(project)
 
-    result = rank_registered_models(str(project))
+    result = rank_registered_models(project)
 
     assert Path(result["models"][0]["checkpoint_path"]) == Path(ckpt).resolve()
 
@@ -222,7 +222,7 @@ def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
     _checkpoint(ckpt, "best-model fixture weights")
     ModelRegistry(str(project)).register_model("m", str(ckpt), {}, metrics={"val_map50": 0.9})
 
-    result = rank_registered_models(str(project), metric="val_map50", higher_is_better=True,
+    result = rank_registered_models(project, metric="val_map50", higher_is_better=True,
                                     include_unverified=True)
 
     assert "error" not in result, result
@@ -242,7 +242,7 @@ def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
 
 
 def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolute(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ):
     """A run's final status names its checkpoint relative to its own directory; the registry's
     listing of that run answers the path resolved absolute."""
@@ -251,15 +251,14 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
     from tests._verified_checkpoint_fixtures import finished_run
 
     project = tmp_path / "proj"
-    initialize_project(str(project), site="north orchard")
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
-    finished_run(None, experiment_id="exp1")
+    initialize_project(str(project), "Test project", "north orchard")
+    finished_run(project, experiment_id="exp1")
 
     (entry,) = [m for m in ModelRegistry(str(project)).list_models() if m["name"] == "exp1"]
 
     assert Path(entry["checkpoint_path"]).is_absolute()
     assert Path(entry["checkpoint_path"]).resolve() == (
-        experiment_dir("exp1") / "model_final.pt").resolve()
+        experiment_dir("exp1", project=project) / "model_final.pt").resolve()
 
 
 # ── one shared at-or-under predicate, not a second copy per module ─────────────────────────

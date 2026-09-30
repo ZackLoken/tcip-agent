@@ -31,14 +31,16 @@ def _drain(ws) -> list[dict]:
     return frames
 
 
-def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_values(tmp_path):
+def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_values(
+    tmp_path, opened_project,
+):
     run_id = "exp-021-currant-bud-det"
     finished_run(tmp_path, experiment_id=run_id, rows=[
         {"epoch": 3, "loss": 0.94, "val_map50": 0.28},
         {"epoch": 7, "loss": 0.31, "val_map50": 0.66}])
 
     with _client().websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",
+        f"ws://127.0.0.1/api/training/runs/{run_id}/stream",
     ) as ws:
         frames = _drain(ws)
 
@@ -51,7 +53,7 @@ def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_value
     assert frames[-1]["status"]["status"] == "completed"
 
 
-def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(tmp_path):
+def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(tmp_path, opened_project):
     """A relaunch's id is minted fresh and is the one id its directory is addressed by
     everywhere, the stream included: no separate run id to resolve it through."""
     from tcip_mcp.experiments import mint_experiment_id
@@ -62,7 +64,7 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(tmp_path):
     assert relaunched_id != parent.name
 
     with _client().websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/{relaunched_id}/stream?project_root={tmp_path}",
+        f"ws://127.0.0.1/api/training/runs/{relaunched_id}/stream",
     ) as ws:
         frames = _drain(ws)
 
@@ -71,7 +73,7 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(tmp_path):
 
 
 def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
-    tmp_path, monkeypatch,
+    tmp_path, opened_project, monkeypatch,
 ):
     """A row the run appends as it ends, after the stream's last log read, still reaches the
     browser ahead of the status frame that ends the stream: the run ends between the stream's
@@ -94,14 +96,15 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
         if calls["n"] == 2:
             record = real_observe(directory).record
             run = TrainRun(id=run_id, config=record["config"],
-                           objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                           objective=record["resolved"]["objective"], project=tmp_path,
+                           output_dir=str(run_dir))
             run_training_envelope(TrainContext(run=run, train_loader=None))
         return real_observe(directory, *args)
 
     monkeypatch.setattr(experiments, "observe", finish_then_observe)
 
     with _client().websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",
+        f"ws://127.0.0.1/api/training/runs/{run_id}/stream",
     ) as ws:
         frames = _drain(ws)
 
@@ -111,11 +114,11 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     assert frames[-1]["status"]["status"] == "completed"
 
 
-def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(tmp_path):
+def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(opened_project):
     """An id no run directory answers for replays nothing and sends only the terminal status
     frame naming the unresolved run."""
     with _client().websocket_connect(
-        f"ws://127.0.0.1/api/training/runs/never-launched/stream?project_root={tmp_path}",
+        "ws://127.0.0.1/api/training/runs/never-launched/stream",
     ) as ws:
         frames = _drain(ws)
 

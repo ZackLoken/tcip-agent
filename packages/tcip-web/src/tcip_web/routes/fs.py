@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from tcip_mcp.dataset_layout import image_root
-from tcip_web.paths import allowed_roots, assert_path_allowed, exposed_arrival
+from tcip_web.paths import allowed_path, allowed_roots, assert_path_allowed, exposed_arrival
 
 router = APIRouter(prefix="/api/fs", tags=["fs"])
 
@@ -55,7 +55,7 @@ def _windows_drives() -> list[dict]:
 def _roots_listing(confined: bool) -> dict:
     """Top-level view (no path given): the allowed roots when confined, else drives (Windows) / '/'."""
     if confined:
-        roots, _excluded = allowed_roots()
+        roots = allowed_roots()
         return {
             "path": "",
             "parent": None,
@@ -117,10 +117,7 @@ def list_dir(
     if not path:
         return _roots_listing(confined)
     if confined:
-        try:
-            resolved = assert_path_allowed(path)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
+        resolved = allowed_path(path)
     else:
         try:
             resolved = Path(path).resolve()

@@ -30,7 +30,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 
 
@@ -209,22 +209,18 @@ def retrospective_documents(project_path: str) -> list[MemoryDocument]:
     return _newest_first(documents)
 
 
-@mcp.tool()
+@tool()
 @audited
 def report_friction(
-    project_path: str,
+    project: Path,
     category: str,
     detail: str,
     context: dict | None = None,
     user_disagreement: bool = False,
 ) -> dict:
-    """Log structured friction when you get stuck, confused, or surprised.
-
-    Call this whenever you hit a problem you'd otherwise push through silently, while the context
-    is fresh.
+    """Record one friction report in the project: a category, what happened, and its context.
 
     Args:
-        project_path: Root directory of the project.
         category: One of: missing_tool, ambiguous_data, cant_find_file, confused_about_domain,
             failed_repeatedly, needs_human_judgment, unexpected_behavior.
         detail: Free-text description of what went wrong. Be specific: what you tried, what you
@@ -254,25 +250,25 @@ def report_friction(
     }
 
     tcip_store.replace(
-        friction_report_key(project_path, report_id), entry, expect=Version.ABSENT,
+        friction_report_key(str(project), report_id), entry, expect=Version.ABSENT,
     )
     from tcip_mcp.project_status import record_report
 
-    record_report(project_path)
+    record_report(str(project))
 
     return {
         "report_id": report_id,
-        "report_path": _path_if_written(_report_path(project_path, report_id)),
+        "report_path": _path_if_written(_report_path(str(project), report_id)),
         "category": category,
         "timestamp": entry["timestamp"],
         "user_disagreement": user_disagreement,
     }
 
 
-@mcp.tool()
+@tool()
 def load_project_memory(
+    project: Path,
     kind: str,
-    project_path: str = "",
     limit: int = 5,
     category: str = "",
     filter_substring: str = "",
@@ -285,21 +281,16 @@ def load_project_memory(
 
     Args:
         kind: Which corpus to read: 'reports' or 'retrospectives'.
-        project_path: Root directory of the project. Empty defaults to the active project.
         limit: Maximum number of entries to return (default 5).
         category: Reports only, optional exact category filter (e.g. 'missing_tool'), one of the
             ``report_friction`` categories; empty means all. Ignored for retrospectives.
         filter_substring: Optional case-insensitive substring matched against each entry's filename
             or its text.
     """
-    from tcip_mcp import workspace
-
-    project_path = workspace.resolve_project_path(project_path)
-
     if kind == "reports":
-        return _load_reports(project_path, limit, category, filter_substring)
+        return _load_reports(str(project), limit, category, filter_substring)
     if kind == "retrospectives":
-        return _load_retrospectives(project_path, limit, filter_substring)
+        return _load_retrospectives(str(project), limit, filter_substring)
     return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
 
 
@@ -337,8 +328,9 @@ def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> d
     return parsed
 
 
-@mcp.tool()
+@tool()
 def read_audit_log(
+    project: Path,
     scope: str | None = None,
     *,
     tool: str | None = None,
@@ -353,8 +345,8 @@ def read_audit_log(
     ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``: a path under a dataset's
     canonical segment (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its
     dataset root, and a bare directory counts as a root only when it carries its own ``.tcip``
-    directory or a ``subjects.json``, which a project root does too. ``scope=None`` is the platform
-    default. A ``scope`` that resolves to none of these refuses by name. The whole log is read
+    directory or a ``subjects.json``, which a project root does too. ``scope=None`` reads the
+    project's own log. A ``scope`` that resolves to none of these refuses by name. The whole log is read
     through ``tcip_store.read_log``, filtered in memory on each entry's own ``tool`` name,
     ``status``, and ``timestamp``, then returned newest first by each entry's own stated timestamp.
     ``skipped`` states how many entries this call is not returning, whether filtered out or
@@ -371,7 +363,8 @@ def read_audit_log(
     this call's own result.
 
     Args:
-        scope: Dataset root, project root, a path under either, or ``None`` for the platform log.
+        scope: Dataset root, project root, a path under either, or ``None`` for the project's own
+            log.
         tool: Exact tool-name filter, e.g. 'save_annotations'.
         since: Only entries whose own timestamp is at or after this ISO-8601 string.
         until: Only entries whose own timestamp is at or before this ISO-8601 string; a date-only
@@ -382,14 +375,14 @@ def read_audit_log(
     from tcip_mcp.audit import audit_log_key, dataset_scope_of
 
     if scope is None:
-        key = audit_log_key(None)
+        key = audit_log_key(project)
     else:
         resolved_scope = dataset_scope_of(scope)
         if resolved_scope is None:
             return {
                 "error": (
                     f"scope '{scope}' names no dataset root, project root, or path under "
-                    "either: pass the platform default (omit scope), a dataset root, a "
+                    "either: omit scope for the project's own log, or pass a dataset root, a "
                     "project root, or a path under one; a project root must carry its own "
                     ".tcip directory or subjects.json for this to resolve it"
                 ),
@@ -499,10 +492,10 @@ def _load_reports(
     }
 
 
-@mcp.tool()
+@tool()
 @audited
 def write_retrospective(
-    project_path: str,
+    project: Path,
     project_id: str,
     task: str,
     worked: str,
@@ -512,19 +505,12 @@ def write_retrospective(
     missing_or_hard_tools: str = "",
     would_do_differently: str = "",
 ) -> dict:
-    """Write an end-of-project retrospective to markdown.
-
-    Call this when you finish a substantial piece of work, even if incomplete.
-    The retrospective is how future sessions learn from this one. Be honest
-    about what did not work: that is the most valuable part.
-
-    Writes to .tcip/retrospectives/<project_id>.md. If the file exists, a new
-    dated section is appended rather than overwriting.
+    """Write a retrospective to ``.tcip/retrospectives/<project_id>.md``; when one exists under
+    that name, a new dated section is appended rather than overwriting it.
 
     Args:
-        project_path: Root directory of the project.
-        project_id: Short identifier for the project (e.g. '<crop>-<trait>-trial').
-            Becomes the filename.
+        project_id: Short identifier for this retrospective (e.g. '<crop>-<trait>-trial'), not
+            the project record's own id. Becomes the filename.
         task: What you were trying to accomplish.
         worked: What went well. Approaches, tools, decisions that paid off.
         did_not_work: What went badly. Dead ends, failures, confusion.
@@ -537,6 +523,7 @@ def write_retrospective(
             your approach?
     """
     now = datetime.now(timezone.utc)
+    project_path = str(project)
     retro_path = _retrospective_path(project_path, project_id)
 
     section_header = f"## Retrospective: {now.isoformat()}"
@@ -602,22 +589,19 @@ def write_retrospective(
     }
 
 
-@mcp.tool()
+@tool()
 @audited
-def record_distillation_pass(project_path: str) -> dict:
+def record_distillation_pass(project: Path) -> dict:
     """Record that you reviewed this project's friction/retrospectives (e.g. via ``tcip
     distill-learnings``); resets its distillation-backlog counters.
 
     Call this after reading a distillation worksheet. It records only that a review happened; it
     never applies, promotes, or writes anything from the worksheet itself.
-
-    Args:
-        project_path: Root directory of the project (or workspace project) reviewed.
     """
     from tcip_mcp.project_status import record_distillation
 
-    record_distillation(project_path)
-    return {"project_path": project_path, "status": "recorded"}
+    record_distillation(str(project))
+    return {"status": "recorded"}
 
 
 def _load_retrospectives(

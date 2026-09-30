@@ -17,7 +17,7 @@ import random
 import time
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -51,6 +51,9 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     snapshot_optimizer_state,
 )
 from tcip_mcp.pipelines.training.run_registry import TrainRun
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +323,7 @@ def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
     dims: Mapping[str, int], conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    trait: str | None = None,
+    trait: TraitEntry | None = None,
 ) -> dict:
     """Task-aware validation, delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
 
@@ -331,8 +334,9 @@ def _validate(
     ``evaluation.selection_metric``) drives ``model_best.pt``/early stopping, every other
     task, including semantic_seg, selects by ``val_loss`` (see ``resolve_selection_metric``).
 
-    ``trait``: when set, a count trait's derived localization criterion governs the reported
-    detection count/F1 instead of the IoU@0.5 comparability convention (see ``evaluate``).
+    ``trait``: the trait's confirmed entry; when set, a count trait's derived localization
+    criterion governs the reported detection count/F1 instead of the IoU@0.5 comparability
+    convention (see ``evaluate``).
     """
     metrics = evaluate(
         model, val_loader, device, task, dims=dims,
@@ -343,19 +347,29 @@ def _validate(
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
 
+def config_trait(config: dict, project: Path) -> TraitEntry | None:
+    """The confirmed entry of the trait a run's ``evaluation`` block names, read from
+    ``project`` (refusing as ``operationalization.latest_confirmed`` does), or ``None`` when the
+    block names none."""
+    name = (config.get("evaluation") or {}).get("trait")
+    if not name:
+        return None
+    from tcip_mcp.operationalization import latest_confirmed
+
+    return latest_confirmed(name, project).entry
+
+
 def resolve_selection_metric(
-    task: str, trait: str | None, requested: str | None, *, has_val_loader: bool = True,
+    task: str, trait: TraitEntry | None, requested: str | None, *, has_val_loader: bool = True,
 ) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
     both ``model_best.pt`` and early stopping.
 
     Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit ``requested``
-        is honored, except it is rejected when ``trait`` is a center-match trait and ``requested``
-        names a metric that trait's own localization criterion demotes to comparability-only
-        (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``).
-
-    Reads the localization kind of the trait's latest confirmed revision, refusing as
-    ``operationalization.latest_confirmed`` does; an unstated kind rejects nothing here.
+        is honored, except it is rejected when ``trait``, the trait's confirmed entry, is a
+        center-match trait and ``requested`` names a metric that trait's own localization
+        criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``);
+        an unstated kind rejects nothing here.
 
     A resolved metric (default or explicit) with no declared ranking direction
     (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected.
@@ -380,28 +394,27 @@ def resolve_selection_metric(
             "and this run has none. Only 'loss' (the training loss) can be selected on without "
             "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
-    if trait:
-        from tcip_mcp.operationalization import latest_confirmed
+    if trait is not None:
         from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
         from tcip_mcp.traits import CENTER_MATCH
 
-        spec = latest_confirmed(trait).entry
-        if spec.localization == CENTER_MATCH and resolved in CENTER_MATCH_COMPARABILITY_KEYS:
+        if trait.localization == CENTER_MATCH and resolved in CENTER_MATCH_COMPARABILITY_KEYS:
             raise ValueError(
                 f"evaluation.selection_metric={resolved!r} is a comparability-only metric for "
-                f"trait {trait!r} (localization=center_match), it does not govern this trait's "
-                "phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or 'loss', "
-                "which resolve through the trait's own center-match criterion."
+                f"trait {trait.name!r} (localization=center_match), it does not govern this "
+                "trait's phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or "
+                "'loss', which resolve through the trait's own center-match criterion."
             )
     return resolved
 
 
-def resolve_objective(config: dict, *, has_val_loader: bool) -> dict:
+def resolve_objective(config: dict, *, project: Path, has_val_loader: bool) -> dict:
     """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its task
-    (:func:`~tcip_mcp.pipelines.model_build.run_task`) and its ``evaluation`` block's ``trait``
-    and ``selection_metric``, and ``higher_is_better``, that metric's declared direction."""
+    (:func:`~tcip_mcp.pipelines.model_build.run_task`), its ``evaluation`` block's trait
+    (:func:`config_trait` in ``project``) and ``selection_metric``, and ``higher_is_better``, that
+    metric's declared direction."""
     eval_cfg = config.get("evaluation") or {}
-    metric = resolve_selection_metric(run_task(config), eval_cfg.get("trait"),
+    metric = resolve_selection_metric(run_task(config), config_trait(config, project),
                                       eval_cfg.get("selection_metric"),
                                       has_val_loader=has_val_loader)
     return {"selection_metric": metric, "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric]}
@@ -604,7 +617,7 @@ def train(
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
         eval_cfg = config.get("evaluation") or {}
-        trait = eval_cfg.get("trait")
+        trait = config_trait(config, run.project)
         selection_metric = run.objective["selection_metric"]
         higher_is_better = run.objective["higher_is_better"]
         # The losing-side sentinel for this run's own direction: any real value beats it.
@@ -834,7 +847,7 @@ def train(
                     "trainable_params": trainable,
                     "selection": round(sel, 6),
                     "selection_metric": selection_metric,
-                    "selection_trait": trait,
+                    "selection_trait": trait.name if trait is not None else None,
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)

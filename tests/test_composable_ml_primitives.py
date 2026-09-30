@@ -128,7 +128,7 @@ class TestOptimizerFactory:
 def test_load_registered_checkpoint_raises_filenotfounderror_on_a_missing_file(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     with pytest.raises(FileNotFoundError):
-        load_registered_checkpoint(str(tmp_path / "nonexistent.pt"), project_path=str(tmp_path))
+        load_registered_checkpoint(str(tmp_path / "nonexistent.pt"), project=tmp_path)
 
 
 # ====================================================================

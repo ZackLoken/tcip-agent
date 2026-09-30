@@ -1,27 +1,6 @@
-/** The paths the browser handles: pasted filesystem paths, and the dataset's own records. */
+/** The paths the browser reads off the dataset selection. */
 
-import { LABEL_SUFFIX } from "@/api/types.generated";
 import type { DatasetSelection } from "@/store/types";
-
-/**
- * Trim whitespace and strip surrounding quotes. Windows "Copy as path" wraps the path in
- * double quotes, and pasting from an address bar often adds stray spaces; either makes
- * the backend reject an otherwise-correct path, so clean it before use.
- */
-export function cleanPath(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^["']+|["']+$/g, "")
-    .trim();
-}
-
-function stemOf(imageName: string): string {
-  return imageName.replace(/\.[^.]+$/, "");
-}
-
-function inDir(dir: string | null, fileName: string): string | null {
-  return dir ? `${dir}/${fileName}` : null;
-}
 
 /** Where one image's bytes live under an already-resolved image directory. */
 export function inImagesDir(imagesDir: string, imageName: string): string {
@@ -40,14 +19,16 @@ export function pathInDir(path: string | null, dir: string | null): boolean {
   return !!path && !!dir && path.startsWith(`${dir}/`);
 }
 
-/** One image's ground-truth record on the selected date, or null when there is no label dir. */
+/** One image's ground-truth record on the selected date, as the selection names it; null for no
+ *  image or one the selection does not list. */
 export function labelPath(dataset: DatasetSelection, imageName: string | null): string | null {
-  return imageName ? inDir(dataset.annotations_dir, stemOf(imageName) + LABEL_SUFFIX) : null;
+  return imageName ? (dataset.label_paths[imageName] ?? null) : null;
 }
 
-/** One image's prediction record in the selected model bucket, or null when none is selected. */
+/** One image's prediction record in the selected model bucket, as the selection names it; null
+ *  when no model is selected. */
 export function predictionPath(dataset: DatasetSelection, imageName: string | null): string | null {
-  return imageName ? inDir(dataset.predictions_dir, stemOf(imageName) + LABEL_SUFFIX) : null;
+  return imageName ? (dataset.prediction_paths[imageName] ?? null) : null;
 }
 
 /** The image the selection currently points at: its name and where its bytes live. */

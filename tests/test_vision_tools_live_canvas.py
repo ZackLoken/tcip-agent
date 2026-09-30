@@ -42,33 +42,23 @@ def _canvas_image(tmp_path: Path) -> str:
     return str(path)
 
 
-def _mint_binding(tmp_path: Path) -> None:
-    """Bind ``tmp_path`` as the GUI's open root: the reader refuses to render with none."""
-    import tcip_store
-    from tcip_mcp.web_client import canvas_open_binding_key
-
-    key = canvas_open_binding_key()
-    stored = tcip_store.read_versioned(key, default=None)
-    tcip_store.replace(key, {
-        "generation": 1, "root": str(tmp_path), "project_name": None,
-        "issued_at": "2026-01-01T00:00:00+00:00",
-    }, expect=stored.version)
-
-
 def _push_state(tmp_path: Path, image: str, *, received_at: float,
                 shapes: list[dict] | None = None) -> None:
-    """Write the two documents the GUI pushes: the meta heartbeat and the geometry blob."""
+    """Write the two documents the GUI pushes for the project ``tmp_path``: the meta heartbeat
+    and the geometry blob, the image named relative to the project as the push route stores it."""
     import tcip_store
+    from tcip_mcp.registry_paths import stored_path
     from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
 
     root = str(tmp_path)
+    image_path = stored_path(image, tmp_path)
     tcip_store.replace(canvas_geometry_key(root), {
-        "image_path": image, "tab": "annotate", "received_at": received_at,
+        "image_path": image_path, "tab": "annotate", "received_at": received_at,
         "shapes": SHAPES if shapes is None else shapes,
     })
     tcip_store.replace(canvas_meta_key(root), {
-        "received_at": received_at, "project_root": root, "tab": "annotate",
-        "image": Path(image).name, "image_path": image,
+        "received_at": received_at, "tab": "annotate",
+        "image": Path(image).name, "image_path": image_path,
         "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
         "user": "breeder", "mode": "polygon",
         "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
@@ -83,7 +73,7 @@ def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
 
 
 def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A frame read down to ``max_edge`` carries its shapes down with it.
 
@@ -91,14 +81,12 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     without that same reduction shows the agent every polygon, box and point enlarged and
     displaced while the tool reports it as the human's live canvas.
     """
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time())
-    _mint_binding(tmp_path)
 
-    result = capture_live_canvas(refresh=False, crop_to_viewport=False,
+    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=False, crop_to_viewport=False,
                                  max_edge=SERVED_MAX_EDGE)
     assert "error" not in result, result
     assert result["shapes_missing"] is False
@@ -121,23 +109,22 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     what the human is looking at right now. Reading an unchanged heartbeat as a fresh answer
     presents a stale canvas, and its stale shape counts, as the live one.
     """
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time() - 600)
-    _mint_binding(tmp_path)
 
     pings: list[tuple[str, str]] = []
 
-    def silent_hub(panel: str, event_type: str, data: dict, **kwargs: object) -> dict:
+    def silent_hub(project: Path, workspace: Path, panel: str, event_type: str, data: dict,
+                   **kwargs: object) -> dict:
         pings.append((panel, event_type))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", silent_hub)
 
-    result = capture_live_canvas(refresh=True, crop_to_viewport=False)
+    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
     assert pings == [("app", "canvas_state_request")]
     assert result["refresh_ping_delivered"] is True
@@ -151,21 +138,20 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 ) -> None:
     """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
     round trip has to admit the answered case, not only flag the unanswered one."""
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time() - 600)
-    _mint_binding(tmp_path)
 
-    def answering_hub(panel: str, event_type: str, data: dict, **kwargs: object) -> dict:
+    def answering_hub(project: Path, workspace: Path, panel: str, event_type: str, data: dict,
+                      **kwargs: object) -> dict:
         _push_state(tmp_path, image, received_at=time.time())
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
 
-    result = capture_live_canvas(refresh=True, crop_to_viewport=False)
+    result = capture_live_canvas(tmp_path, tmp_path.parent, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
     assert result["refreshed"] is True
     assert "last known" not in result["summary"]

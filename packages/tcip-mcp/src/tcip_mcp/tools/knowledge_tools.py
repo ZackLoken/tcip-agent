@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from tcip_mcp.knowledge import list_documents, read_document
 from tcip_mcp.project_paths import repo_root_from_here
-from tcip_mcp.server import mcp
+from tcip_mcp.server import tool
 
 
 def _repo_relative_path(document) -> str:
@@ -30,7 +30,7 @@ def _description() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool(description=_description())
+@tool(description=_description())
 def serve_domain_knowledge(name: str | None = None) -> dict:
     """Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop
     biology.

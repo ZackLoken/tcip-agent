@@ -30,17 +30,14 @@ from pydantic import BaseModel
 
 from tcip_mcp.pipelines.data.splits import same_directory
 from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS
-from tcip_mcp.web_client import current_root
 from tcip_web import jobstore
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import allowed_path
 from tcip_web.routes._body_common import EmptyBodyPayload
+from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
-
-def _current_root() -> str:
-    return current_root()
 
 
 # ── Job registry ────────────────────────────────────────────────────────
@@ -49,6 +46,8 @@ def _current_root() -> str:
 @dataclass
 class InferenceJob:
     job_id: str
+    # The project open when the job launched, which it runs for.
+    project: str
     checkpoint_path: str
     images_dir: str
     output_dir: str
@@ -73,8 +72,6 @@ class InferenceJob:
     dropped_boxes: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    # The platform root this job launched under, resolved on the thread that constructs it.
-    platform_root: str = field(default_factory=_current_root)
     # The dataset root the launch resolved its bucket under, which the publication is recorded
     # under.
     dataset_root: Optional[Path] = None
@@ -96,17 +93,17 @@ _registry = jobstore.JobRegistry()
 
 
 def _register(job: InferenceJob) -> None:
-    _registry.register(job.job_id, job, job_root=job.platform_root)
+    _registry.register(job.job_id, job)
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
-    """A job by id, from any root this process holds: a repin to another project must not
-    make an in-flight job unreachable for canceling or streaming it."""
+    """A job by id, whichever project it runs for: opening another project must not make an
+    in-flight job unreachable for canceling or streaming it."""
     return _registry.get(job_id)
 
 
 def _list_jobs() -> list[InferenceJob]:
-    return _registry.list(current_root())
+    return _registry.list(str(store.open_root()))
 
 
 # ── Worker ─────────────────────────────────────────────────────────────
@@ -125,8 +122,7 @@ def _worker(job: InferenceJob) -> None:
         from tcip_mcp.tools.inference_tools import _prepare_pass, publish_bucket
 
         try:
-            checkpoint = load_registered_checkpoint(
-                job.checkpoint_path, project_path=job.platform_root)
+            checkpoint = load_registered_checkpoint(job.checkpoint_path, project=Path(job.project))
         except UnregisteredCheckpoint as exc:
             terminal_status = "failed"
             job.error = str(exc)
@@ -157,7 +153,7 @@ def _worker(job: InferenceJob) -> None:
         run["results"] = predictions()
         try:
             pub = publish_bucket(
-                run, out=Path(job.output_dir), trait=None,
+                Path(job.project), run, out=Path(job.output_dir), trait=None,
                 dataset_root=job.dataset_root, allow_unvalidated_staging=False)
         except AuditEntryNotWritten as exc:
             # The publisher committed an act whose line it could not write; a failed pass's own
@@ -208,13 +204,10 @@ class LaunchInferencePayload(BaseModel):
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
-    # Confine client-supplied paths to the allowed roots (TCIP_IMAGE_ROOTS): a caller must not
-    # name a file outside them, registered checkpoint or not. No-op when unset.
-    try:
-        for p in (payload.checkpoint_path, payload.dataset_root):
-            assert_path_allowed(p)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    project = store.open_root()
+    # A caller must not name a file outside the allowed roots, registered checkpoint or not.
+    for p in (payload.checkpoint_path, payload.dataset_root):
+        allowed_path(p)
 
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
     from tcip_mcp.workspace import is_valid_name
@@ -268,7 +261,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     requested_output_dir = str(
         prediction_dir(payload.dataset_root, payload.model_name, payload.date))
     bucket_dir, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
-        requested_output_dir, overwrite=payload.overwrite)
+        project, requested_output_dir, overwrite=payload.overwrite)
     if refusal is not None:
         if "verdict_count" in refusal:
             raise HTTPException(409, refusal["error"])
@@ -287,6 +280,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     # Every tuning value travels as stated, None where omitted; the worker's pass resolves each.
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
+        project=str(project),
         checkpoint_path=payload.checkpoint_path,
         images_dir=str(images_dir),
         output_dir=resolved_output_dir,

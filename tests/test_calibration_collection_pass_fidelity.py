@@ -138,7 +138,7 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
 
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=3, holdout_ratio=0.5,
+        project=tmp_path, group_by="stem", seed=3, holdout_ratio=0.5,
     )
 
     assert n_excluded == 0
@@ -251,7 +251,7 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
 
     calibration.calibrate_operating_point(
         stub_pass(_TwoClassStub()), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=5, holdout_ratio=0.5,
+        project=tmp_path, group_by="stem", seed=5, holdout_ratio=0.5,
     )
 
     cal_records = captured["calibration_records"]
@@ -309,7 +309,7 @@ def test_calibration_records_carry_each_ground_truth_records_crowd_flag(tmp_path
 
     calibration.calibrate_operating_point(
         stub_pass(stub), "bud_opening", str(labels_dir), str(images_dir),
-        group_by="stem", seed=5, holdout_ratio=0.5,
+        project=tmp_path, group_by="stem", seed=5, holdout_ratio=0.5,
     )
 
     assert captured["records"], "no records reached the sweep"

@@ -3,7 +3,6 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { subjectsApi } from "@/api/subjects";
 import { ROUTES } from "@/api/routes";
 import {
-  PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
   PANEL_EVENT_ANNOTATE_FOCUS,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   PANEL_EVENT_REVIEW_FOCUS,
@@ -26,8 +25,8 @@ import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { anyTrackerDirty, coverageOutbox, flushAllTrackers } from "@/lib/coverageTracker";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
-import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 import type { TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { MetaTab } from "@/tabs/MetaTab";
@@ -72,10 +71,10 @@ function TabFallback() {
 
 function App() {
   const activeTab = useStore((s) => s.gui.active_tab);
-  // Distinct from selectProjectOpen: the canvas tabs this gates need an image directory, so an
+  // A dataset with a date is selected: the canvas tabs this gates need an image directory, so an
   // open project with no dated images still shows the picker here.
   const datasetReady = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
-  const projectRoot = useStore((s) => s.gui.dataset.project_root);
+  const projectRoot = useStore(selectProjectRoot);
   const datasetKey = useStore(
     (s) =>
       `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.subject ?? ""}::${s.gui.dataset.date ?? ""}`,
@@ -125,34 +124,12 @@ function App() {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  // Agent → GUI "look here": when the agent sets the active project (e.g. after
-  // ingesting a breeder's images), open it here so the GUI lands on what it built.
+  // Agent → GUI steering on the "app" panel: banners, focus, and canvas refresh requests.
   useEffect(() => {
     const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
       if (ev.event_type === "banner") {
         const text = ev.data.text;
         if (typeof text === "string") useStore.getState().pushBanner(ev.panel, ev.event_id, text);
-        return;
-      }
-
-      if (ev.event_type === PANEL_EVENT_ACTIVE_PROJECT_CHANGED) {
-        const name = (ev.data as { name?: string }).name;
-        if (!name) return;
-        void openProjectByName(name)
-          .then((selection) => {
-            if (!selection) return;
-            if (!selection.date) {
-              // No dated capture to land on: say so instead of appearing to do nothing.
-              useStore
-                .getState()
-                .pushToast(`Opened ${name}, but it has no dated images yet.`, "info");
-            }
-          })
-          .catch(() => {
-            useStore
-              .getState()
-              .pushToast(`Agent opened a project but it couldn't be loaded: ${name}`);
-          });
         return;
       }
 
@@ -195,14 +172,14 @@ function App() {
     if (!projectRoot) return;
     const user = useStore.getState().user || "web";
     // Best-effort telemetry: never surface a failure to the user.
-    void sessionsApi.start(projectRoot, user).catch(() => {});
+    void sessionsApi.start(user).catch(() => {});
     endedSessionForRoot.current = null;
 
     function endSession() {
       if (endedSessionForRoot.current === projectRoot) return;
       endedSessionForRoot.current = projectRoot;
 
-      const payload = JSON.stringify({ project_root: projectRoot });
+      const payload = JSON.stringify({});
       try {
         if (navigator.sendBeacon) {
           const blob = new Blob([payload], { type: "application/json" });
@@ -256,10 +233,10 @@ function App() {
 
   // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
-    if (!projectRoot || imageList.length === 0) return;
+    if (!projectRoot || !datasetRoot || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await subjectsApi.load(projectRoot, datasetRoot, annotationsDir);
+        const reg = await subjectsApi.load(datasetRoot, annotationsDir);
         setRegistry(reg.subjects, reg.version);
         if (reg.unreadable.length) {
           useStore
@@ -287,7 +264,6 @@ function App() {
   // A fresh project with no subject yet has nothing to scope image status to: the hook itself
   // skips its load/reconcile/write sequence with no subject set.
   useImageStatusHydrate({
-    projectRoot,
     subject,
     datasetRoot,
     datasetDate,

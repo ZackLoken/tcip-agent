@@ -208,6 +208,14 @@ def logical_image_name(source: "Path | BandGroupRef") -> str:
     return source.manifest_path.name if isinstance(source, BandGroupRef) else source.name
 
 
+def logical_images_by_name(images_dir: str | Path) -> dict[str, str]:
+    """Every logical image in ``images_dir`` (:func:`list_logical_images`), its
+    :func:`logical_image_name` to its exact stem, in name order. Raises what
+    :func:`list_logical_images` raises."""
+    named = {logical_image_name(src): stem for stem, src in list_logical_images(images_dir).items()}
+    return {name: named[name] for name in sorted(named)}
+
+
 FLAT_IMAGE_STORE = "flat_image"
 _FLAT_IMAGE_LOCATOR = RootedFileLocator()
 register_store(
@@ -226,7 +234,7 @@ def flat_image_key(images_dir: str | Path, filename: str) -> Key:
     """One placed image's bytes, addressed by the flat directory it was materialized into: a
     curated dataset's ``images/`` tree, distinct from ``image_key``'s dated ingest layout.
     """
-    return Key(FLAT_IMAGE_STORE, str(Path(images_dir).absolute()), (filename,))
+    return Key(FLAT_IMAGE_STORE, str(Path(images_dir)), (filename,))
 
 
 def place_logical_image(
@@ -240,7 +248,7 @@ def place_logical_image(
     :func:`logical_image_name` gives it there.
 
     A :class:`BandGroupRef` places every sibling band it names plus its own ``.bandgroup``
-    manifest; a plain path places just that one file. ``dest_dir`` is absolutized at entry.
+    manifest; a plain path places just that one file. ``dest_dir`` is absolute.
 
     ``copy_files=True`` routes each band and plain image through the store under
     ``dest_key(filename)`` and the destination manifest under ``band_group_manifest_key(dest_dir,
@@ -249,7 +257,7 @@ def place_logical_image(
     ``os.path.lexists`` reports present and tolerating a concurrent placement's
     ``FileExistsError``.
     """
-    dest_dir = Path(dest_dir).absolute()
+    dest_dir = Path(dest_dir)
 
     def _place_copy(src_path: Path, key: Key, dst: Path) -> None:
         if dst.exists():

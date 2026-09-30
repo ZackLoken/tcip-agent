@@ -37,7 +37,7 @@ def _seed_capture(project_root: Path, session_id: str) -> None:
     stdin = io.StringIO(json.dumps({"session_id": session_id, "cwd": str(project_root)}))
     old_stdin, sys.stdin = sys.stdin, stdin
     try:
-        agent_learning_capture.main()
+        agent_learning_capture.main(["--project", str(project_root)])
     finally:
         sys.stdin = old_stdin
 
@@ -120,12 +120,13 @@ def test_cross_project_themes_surface_when_shared_across_projects():
 
 def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
     distill = _load_distill()
+    workspace = tmp_path.parent
     for name, detail in [("proj_a", "shared friction theme theme"),
                           ("proj_b", "shared friction theme theme")]:
-        (tmp_path / name).mkdir()
-        _seed_report(tmp_path / name, "r", {"category": "unexpected_behavior", "detail": detail})
+        (workspace / name).mkdir()
+        _seed_report(workspace / name, "r", {"category": "unexpected_behavior", "detail": detail})
 
-    ws = distill.build_workspace_worksheet(tmp_path)
+    ws = distill.build_workspace_worksheet(workspace)
     assert "Cross-project recurring themes" in ws
     assert "proj_a" in ws and "proj_b" in ws
     assert "Nothing here is applied" in ws  # same governance framing as the single-project worksheet
@@ -135,41 +136,9 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
 
 def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
     distill = _load_distill()
-    (tmp_path / "not_a_project").mkdir()  # no .tcip/, must not be treated as a project
-    ws = distill.build_workspace_worksheet(tmp_path)
+    (tmp_path.parent / "not_a_project").mkdir()  # no .tcip/, must not be treated as a project
+    ws = distill.build_workspace_worksheet(tmp_path.parent)
     assert "No projects with a `.tcip/` directory" in ws
-
-
-def test_build_workspace_worksheet_skips_a_pending_project(tmp_path):
-    """A project the request door has marked pending removal is skipped by the walker even
-    though its own directory and log are still on disk (phase one moves nothing); the marker
-    is written through the door itself, the way test_project_removal.py's own tests do."""
-    from tcip_mcp import project_removal, workspace
-    from tcip_mcp.tools.project_tools import initialize_project
-
-    distill = _load_distill()
-    ws = tmp_path.parent
-
-    open_result = initialize_project(str(ws / "sample_plot_open"), site="a site")
-    assert "error" not in open_result, open_result
-    _seed_report(ws / "sample_plot_open", "r", {"category": "unexpected_behavior", "detail": "x"})
-    workspace.activate_project("sample_plot_open")
-
-    pending_result = initialize_project(str(ws / "sample_plot_pending"), site="a site")
-    assert "error" not in pending_result, pending_result
-    _seed_report(
-        ws / "sample_plot_pending", "r", {"category": "unexpected_behavior", "detail": "y"},
-    )
-
-    removal = project_removal.request_project_removal(
-        "sample_plot_pending", "sample_plot_pending",
-        requested_by="user:tester", job_conflict=lambda p: None,
-    )
-    assert "error" not in removal, removal
-
-    worksheet = distill.build_workspace_worksheet(ws)
-    assert "sample_plot_open" in worksheet
-    assert "sample_plot_pending" not in worksheet
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
@@ -183,18 +152,13 @@ def test_workspace_mode_never_writes_anything(tmp_path):
 
     ts.bind(FileBackend())
     distill = _load_distill()
-    (tmp_path / "proj_a").mkdir()
-    _seed_report(tmp_path / "proj_a", "r", {"category": "missing_tool", "detail": "x"})
+    proj_a = tmp_path.parent / "proj_a"
+    proj_a.mkdir()
+    _seed_report(proj_a, "r", {"category": "missing_tool", "detail": "x"})
 
-    before = {
-        p: p.read_bytes()
-        for p in (tmp_path / "proj_a" / ".tcip").rglob("*") if p.is_file()
-    }
-    distill.build_workspace_worksheet(tmp_path)
-    after = {
-        p: p.read_bytes()
-        for p in (tmp_path / "proj_a" / ".tcip").rglob("*") if p.is_file()
-    }
+    before = {p: p.read_bytes() for p in (proj_a / ".tcip").rglob("*") if p.is_file()}
+    distill.build_workspace_worksheet(tmp_path.parent)
+    after = {p: p.read_bytes() for p in (proj_a / ".tcip").rglob("*") if p.is_file()}
     assert before == after
 
 
@@ -205,7 +169,7 @@ def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s1", "cwd": str(tmp_path), "reason": "clear"})))
-    agent_learning_capture.main()
+    agent_learning_capture.main(["--project", str(tmp_path)])
 
     key = learning_capture_key(tmp_path)
     records = ts.read_log(key).records
@@ -214,41 +178,27 @@ def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
 
     # Malformed / empty stdin must not raise: a capture backstop cannot break the session.
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json at all"))
-    agent_learning_capture.main()
+    agent_learning_capture.main(["--project", str(tmp_path)])
 
 
-def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch):
-    """Entries pool in one platform-level file, so each stamps which workspace project was
-    adopted at session end; no marker stamps None rather than guessing."""
+def test_capture_hook_records_nothing_for_a_session_with_no_project(tmp_path, monkeypatch):
+    """A session started for no project has no project log to write to, so the hook records
+    nothing rather than choosing one."""
     import tcip_store as ts
     from tcip_mcp.web_client import learning_capture_key
-    from tcip_mcp.workspace import active_project_key
     from tcip_web import agent_learning_capture
 
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
-    ts.replace(active_project_key(), "currant_buds_valley-farm", expect=ts.Version.ABSENT)
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s2", "cwd": str(tmp_path)})))
-    agent_learning_capture.main()
+    agent_learning_capture.main([])
 
-    key = learning_capture_key(tmp_path)
-    entry = ts.read_log(key).records[0]
-    assert entry["active_project"] == "currant_buds_valley-farm"
-
-    ts.delete(active_project_key())
-    monkeypatch.setattr(sys, "stdin",
-                        io.StringIO(json.dumps({"session_id": "s3", "cwd": str(tmp_path)})))
-    agent_learning_capture.main()
-    entries = ts.read_log(key).records
-    assert entries[-1]["active_project"] is None
+    assert ts.read_log(learning_capture_key(tmp_path)).records == []
 
 
-def test_materialize_absolutizes_sessionend_capture_hook():
+def test_materialize_absolutizes_sessionend_capture_hook(tmp_path):
     from tcip_web.terminal import _materialize_fence_settings
 
-    dest = _materialize_fence_settings()
+    dest = _materialize_fence_settings(tmp_path)
     assert dest is not None
     cfg = json.loads(dest.read_text(encoding="utf-8"))
     cmd = cfg["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
@@ -256,12 +206,12 @@ def test_materialize_absolutizes_sessionend_capture_hook():
     assert cmd.startswith('"')  # absolutized + quoted, like the guards (no cwd dependency)
 
 
-def test_materialize_absolutizes_every_agent_hook():
+def test_materialize_absolutizes_every_agent_hook(tmp_path):
     # The materialization loop is event-agnostic: every agent_*.py hook command, across all event
     # groups, must be absolutized (the guards, the SessionEnd capture, the SessionStart ritual).
     from tcip_web.terminal import _FENCE_SETTINGS, _materialize_fence_settings
 
-    dest = _materialize_fence_settings()
+    dest = _materialize_fence_settings(tmp_path)
     assert dest is not None
     cfg = json.loads(dest.read_text(encoding="utf-8"))
     guard_dir = _FENCE_SETTINGS.parent.as_posix()

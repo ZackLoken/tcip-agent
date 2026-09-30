@@ -6,7 +6,6 @@ import { reconcileImageStatuses } from "@/lib/imageStatus";
 import { useStore } from "@/store";
 
 export interface ImageStatusHydrateParams {
-  projectRoot: string | null;
   subject: string | null;
   datasetRoot: string | null;
   datasetDate: string | null;
@@ -26,12 +25,12 @@ export interface ImageStatusHydrateParams {
  * or a vocabulary changed in this same open session, is not checked again until the next
  * selection of this dataset; the schema-change sweep's own toast is the signal until then.
  *
- * Skips entirely with no subject selected: nothing to scope image status to yet. Either way,
+ * Skips entirely with no subject or no dataset selected: nothing to scope image status to yet.
+ * Either way,
  * `staleMarks` is cleared first, so a mark left over from a previously selected dataset can never
  * be read against a same-named image in this one.
  */
 export function useImageStatusHydrate({
-  projectRoot,
   subject,
   datasetRoot,
   datasetDate,
@@ -40,28 +39,21 @@ export function useImageStatusHydrate({
 }: ImageStatusHydrateParams): void {
   useEffect(() => {
     useStore.getState().clearStaleMarks();
-    if (!projectRoot || !subject || imageList.length === 0) return;
+    if (!subject || !datasetRoot || imageList.length === 0) return;
     let canceled = false;
     void (async () => {
       try {
-        const saved = await subjectsApi.loadImageStatus(
-          projectRoot,
-          subject,
-          datasetDate,
-          datasetRoot,
-          annotationsDir,
-        );
-        const stored = saved.statuses ?? {};
+        const saved = await subjectsApi.loadImageStatus(subject, datasetDate, datasetRoot);
+        const stored = saved.statuses;
         const confirmed = imageList.filter((name) => FINISHED_STATUSES.includes(stored[name]));
-        const digestStale = new Set(saved.stale_definition ?? []);
+        const digestStale = new Set(saved.stale_definition);
         const derivedRes = await subjectsApi.deriveImageStatus({
-          project_root: projectRoot,
           annotations_dir: annotationsDir,
           subject,
           image_list: imageList,
           complete_override: confirmed,
         });
-        const derived = derivedRes.statuses ?? {};
+        const derived = derivedRes.statuses;
         const { writes, staleMarks: contentStale } = reconcileImageStatuses(
           stored,
           derived,
@@ -81,12 +73,10 @@ export function useImageStatusHydrate({
         if (Object.keys(writes).length) {
           try {
             await subjectsApi.setImageStatusBulk(
-              projectRoot,
               writes,
               subject,
               datasetDate,
               datasetRoot,
-              annotationsDir,
               useStore.getState().user || undefined,
             );
           } catch (e) {
@@ -113,5 +103,5 @@ export function useImageStatusHydrate({
     return () => {
       canceled = true;
     };
-  }, [projectRoot, subject, datasetRoot, datasetDate, annotationsDir, imageList]);
+  }, [subject, datasetRoot, datasetDate, annotationsDir, imageList]);
 }

@@ -468,9 +468,9 @@ def test_validate_reference_and_its_exclusive_helpers_moved_to_validation_module
     of review.py into routes/validation.py, public and
     unaliased; the route path is unchanged (checked live in test_review_path_confinement.py and
     test_review_validation_affordance.py, which still call POST /api/review/validate_reference).
-    ``_prediction_digest``, ``_get_engine``, ``_bucket_of_dir``, ``_guard_path`` and ``_audit``
-    stay in review.py: each is also used by a route that stayed (mark_complete, /action,
-    /matches), so validation.py imports them rather than restating them."""
+    ``_prediction_digest``, ``_get_engine``, ``_bucket_of_dir`` and ``_audit`` stay in review.py:
+    each is also used by a route that stayed (mark_complete, /action, /matches), so validation.py
+    imports them rather than restating them."""
     _assert_one_home(
         {"validate_reference", "_recorded_prediction_digests"},
         _web_module_path("routes/review.py"),

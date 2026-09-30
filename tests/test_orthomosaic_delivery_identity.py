@@ -32,18 +32,13 @@ from tests import _trait_fixtures as fx  # noqa: E402
 _ON_FIRST_PLANT = [(8.0, 8.0, 12.0, 12.0)]
 
 
-def _project(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
-
-
 def _raster_bucket(tmp_path, raster_path: Path, boxes) -> Path:
     """A bucket from the real producer: run_inference's whole-raster regime."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
     result = run_inference(
-        _bespoke_detection_checkpoint(tmp_path), output_dir=str(out_dir),
+        tmp_path, _bespoke_detection_checkpoint(tmp_path), output_dir=str(out_dir),
         raster_path=str(raster_path), conf_threshold=0.0, tile_size=TILE)
     assert "error" not in result, result
     _replace_boxes(Path(result["files"][0]), boxes)
@@ -70,7 +65,7 @@ def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
         str(d / "mosaic.json"),
         [Annotation(subject="0", geometry=BBox(8.0, 8.0, 12.0, 12.0), score=0.9)], 64, 64,
         keep_empty=True)
-    write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    write_bound_sidecar(tmp_path, d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     return d
 
 
@@ -89,7 +84,6 @@ def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
 def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path, monkeypatch):
     """Identical pixels at a moved tiepoint resolve every detection onto a different plant, so the
     raster is refused rather than silently believed: the content half alone cannot see this."""
-    _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     moved = tmp_path / "mosaic_moved.tif"
@@ -102,7 +96,7 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(moved), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket), str(moved), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "georeferencing mismatch" in refused["error"]
@@ -112,7 +106,6 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
 def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
     """The content half still refuses on its own: a different mosaic at the same tiepoint."""
-    _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     other = tmp_path / "other.tif"
@@ -125,7 +118,7 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(other), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket), str(other), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "content mismatch" in refused["error"]
@@ -135,7 +128,6 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, monkeypatch):
     """No recorded identity means nothing to check the supplied raster against, so the delivery
     refuses and names the regime that records one rather than trusting whatever it was handed."""
-    _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket = _hand_written_bucket(tmp_path, "preds_no_identity", _validated_count_stamp())
@@ -145,7 +137,7 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "run_inference" in refused["error"]
@@ -160,7 +152,6 @@ def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_unc
     resolves and attributes the detection to its plant. A bare run_inference pass reserved no
     calibration region, so the count operating point never earned a reference and this door takes
     no acknowledgment; the refusal named is the gate's, never the identity check's."""
-    _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, _ON_FIRST_PLANT)
@@ -177,7 +168,7 @@ def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_unc
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
+        tmp_path, str(bucket), str(raster_path), _plant_registry(tmp_path, plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "georeferencing mismatch" not in refused["error"]
     assert "content mismatch" not in refused["error"]
@@ -197,7 +188,7 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
           "measurement_document": "operating_point", "plant_attribution": "detection"}],
         str(tmp_path / name),
         delivered_phenotype="stem_count", operating_point_validated=VALIDATED_HELD_OUT,
-        pred_dirs=[str(bucket)])
+        pred_dirs=[str(bucket)], project=tmp_path)
     return path
 
 

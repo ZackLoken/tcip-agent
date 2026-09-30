@@ -41,7 +41,8 @@ def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[Train
         tmp_path / "data", training_source=f"{__name__}:{body_name}", device="cpu"))
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(run_dir))
     run.deadline = deadline
     ctx = TrainContext(run=run, train_loader=None, val_loader=None)
     run_training_envelope(ctx)

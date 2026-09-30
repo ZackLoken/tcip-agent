@@ -144,7 +144,7 @@ def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_p
     with pytest.raises(json_io.UnreadableLabelDocument, match="import_coco"):
         json_det_targets(str(labels / "img0.json"), BUD_SCOPE)
     with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO"):
-        auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
+        auto_train_val(tmp_path, "detection", {"images_dir": str(images), "labels_dir": str(labels),
                                      "scope": {"subject": BUD}}, None)
 
 

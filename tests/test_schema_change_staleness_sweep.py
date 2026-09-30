@@ -70,11 +70,11 @@ def _save_via_route(client: TestClient, root: Path, bud_attributes: dict,
     way the toolbar carries what it loaded rather than defaulting to an unconditional write."""
     version = client.get(
         "/api/subjects/load",
-        params={"project_root": str(root), "dataset_root": str(root)},
+        params={"dataset_root": str(root)},
     ).json()["version"]
     resp = client.post(
         "/api/subjects/save",
-        json={"project_root": str(root), "dataset_root": str(root),
+        json={"dataset_root": str(root),
               "subjects": _subjects(bud_attributes, bush_attributes), "version": version},
     )
     assert resp.status_code == 200, resp.text
@@ -83,7 +83,7 @@ def _save_via_route(client: TestClient, root: Path, bud_attributes: dict,
 
 def _save_via_tool(root: Path, bud_attributes: dict,
                    bush_attributes: dict | None = None) -> dict:
-    res = write_subject_registry(str(root), subjects=_subjects(bud_attributes, bush_attributes))
+    res = write_subject_registry(root, str(root), subjects=_subjects(bud_attributes, bush_attributes))
     assert "error" not in res, res
     return res
 
@@ -93,7 +93,7 @@ def _confirm_negative_stamped(client: TestClient, root: Path, image_name: str,
     """A confirmation through the GUI route, which stamps the schema in effect at confirm time."""
     resp = client.post(
         "/api/subjects/image_status",
-        json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
+        json={"dataset_root": str(root), "image_name": image_name,
               "status": "negative", "subject": subject},
     )
     assert resp.status_code == 200, resp.text
@@ -105,7 +105,7 @@ def _confirm_complete_stamped(client: TestClient, root: Path, image_name: str,
     covers every status a bucket holds, not the negatives alone."""
     resp = client.post(
         "/api/subjects/image_status",
-        json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
+        json={"dataset_root": str(root), "image_name": image_name,
               "status": "complete", "subject": subject},
     )
     assert resp.status_code == 200, resp.text

@@ -30,7 +30,7 @@ def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
     det = tmp_path / "det.json"
     json_io.write_annotations(det, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
                               100, 80)  # existing GT
-    res = save_annotations(str(img), annotations=[], path=str(det))
+    res = save_annotations(tmp_path, tmp_path.parent, str(img), annotations=[], path=str(det))
     assert "error" in res                                       # refused, never silently applied
     assert det.is_file()                                        # existing GT not deleted
     assert len(json_io.read_annotations(det)) == 1              # GT preserved intact
@@ -45,7 +45,8 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_p
 
     img = _img(tmp_path)
     det = tmp_path / "det.json"
-    res = save_annotations(str(img), annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad],
+    res = save_annotations(tmp_path, tmp_path.parent, str(img),
+                           annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad],
                            path=str(det))
     assert res["error"].startswith("annotation 1 ")
     assert not det.exists()
@@ -110,7 +111,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     json_io.write_annotations(labels / "img_2.json", [], 100, 80, keep_empty=True)  # negative
     json_io.write_annotations(labels / "img_3.json", [], 100, 80, keep_empty=True)  # negative
 
-    res = draw_splits(str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
+    res = draw_splits(tmp_path, str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
                       group_by="stem")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text

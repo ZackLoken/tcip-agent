@@ -18,20 +18,19 @@ import tcip_store as ts
 def _rows(tmp_path: Path) -> list[dict]:
     from tcip_mcp.audit import audit_log_key
 
-    return [row for key in dict.fromkeys((audit_log_key(), audit_log_key(tmp_path)))
-            for row in ts.read_log(key).records]
+    return list(ts.read_log(audit_log_key(tmp_path)).records)
 
 
 def _register_model(tmp_path: Path):
     from tcip_mcp.tools.model_tools import register_model
 
-    return register_model(name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1})
+    return register_model(tmp_path, name="m", checkpoint_path=str(tmp_path / "absent.pt"), config={"a": 1})
 
 
 def _deliver_per_image_counts(tmp_path: Path):
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    return deliver_per_image_counts(predictions_dir=str(tmp_path / "preds"), trait="stem")
+    return deliver_per_image_counts(tmp_path, predictions_dir=str(tmp_path / "preds"), trait="stem")
 
 
 def _import_coco(tmp_path: Path):
@@ -45,41 +44,41 @@ def _import_coco(tmp_path: Path):
 def _build_plant_mapping(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-    return build_plant_mapping(name="../no", images_root=str(tmp_path),
+    return build_plant_mapping(tmp_path, name="../no", images_root=str(tmp_path),
                                plant_registry=str(tmp_path / "plants.csv"))
 
 
 def _redraw_calibration_holdout(tmp_path: Path):
     from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
-    return redraw_calibration_holdout(str(tmp_path), reason="")
+    return redraw_calibration_holdout(tmp_path, str(tmp_path), reason="")
 
 
 def _deliver_per_plant_csv(tmp_path: Path):
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
-    return deliver_per_plant_csv([], str(tmp_path / "out.csv"), "cyme count")
+    return deliver_per_plant_csv(tmp_path, [], str(tmp_path / "out.csv"), "cyme count")
 
 
 def _deliver_orthomosaic_plant_counts(tmp_path: Path):
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     return deliver_orthomosaic_plant_counts(
-        str(tmp_path / "preds"), str(tmp_path / "absent.tif"), str(tmp_path / "plants.csv"),
+        tmp_path, str(tmp_path / "preds"), str(tmp_path / "absent.tif"), str(tmp_path / "plants.csv"),
         str(tmp_path / "out.csv"), "cyme count")
 
 
 def _deliver_phenology_milestones(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    return deliver_phenology_milestones("no-such-trait", "mapping", {}, str(tmp_path / "o.csv"),
-                                        ["p1"])
+    return deliver_phenology_milestones(tmp_path, "no-such-trait", "mapping", {},
+                                        str(tmp_path / "o.csv"), ["p1"])
 
 
 def _save_annotations_on_a_missing_image(tmp_path: Path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    return save_annotations(str(tmp_path / "images" / "absent.png"),
+    return save_annotations(tmp_path, tmp_path.parent, str(tmp_path / "images" / "absent.png"),
                             annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
 
 
@@ -89,7 +88,7 @@ def _calibrate_count_over_an_unstamped_bucket(tmp_path: Path):
     bucket = tmp_path / "predictions" / "m" / "2025-09-14"
     bucket.mkdir(parents=True)
     return calibrate_count_operating_point(
-        str(tmp_path / "m.pt"), "cyme count", str(tmp_path / "labels"), str(tmp_path / "images"),
+        tmp_path, str(tmp_path / "m.pt"), "cyme count", str(tmp_path / "labels"), str(tmp_path / "images"),
         str(tmp_path), str(bucket))
 
 
@@ -97,7 +96,7 @@ def _calibrate_scalar_over_an_unregistered_checkpoint(tmp_path: Path):
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     return calibrate_scalar_operating_point(
-        "cyme count", str(tmp_path / "m.pt"), str(tmp_path / "images"),
+        tmp_path, "cyme count", str(tmp_path / "m.pt"), str(tmp_path / "images"),
         str(tmp_path / "t.csv"), "mae", str(tmp_path / "out"), str(tmp_path))
 
 
@@ -106,7 +105,7 @@ def _calibrate_classifier_for_no_such_trait(tmp_path: Path):
 
     labels = str(tmp_path / "labels")
     return calibrate_classifier_operating_point(
-        "no-such-trait", labels, labels, labels, labels, str(tmp_path / "out"), str(tmp_path),
+        tmp_path, "no-such-trait", labels, labels, labels, labels, str(tmp_path / "out"), str(tmp_path),
         subject="cyme", attribute="stage")
 
 
@@ -114,7 +113,7 @@ def _calibrate_scale_for_no_such_trait(tmp_path: Path):
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     return calibrate_physical_scale(
-        "no-such-trait", str(tmp_path / "preds"), str(tmp_path), str(tmp_path / "images"), "mm",
+        tmp_path, "no-such-trait", str(tmp_path / "preds"), str(tmp_path), str(tmp_path / "images"), "mm",
         "ruler", str(tmp_path / "labels"), str(tmp_path / "ref.csv"))
 
 
@@ -149,6 +148,6 @@ def test_a_decorated_door_whose_body_raises_keeps_its_exception_row(tmp_path: Pa
 
     monkeypatch.setattr(annotation_tools, "write_annotations", _refused_write)
     with pytest.raises(OSError):
-        annotation_tools.save_annotations(str(image), annotations=[{"subject": "cyme",
+        annotation_tools.save_annotations(tmp_path, tmp_path.parent, str(image), annotations=[{"subject": "cyme",
                                                                      "bbox": [1, 1, 5, 5]}])
     assert [(r["tool"], r["status"]) for r in _rows(tmp_path)] == [("save_annotations", "exception")]

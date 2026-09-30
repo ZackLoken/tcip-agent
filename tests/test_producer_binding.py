@@ -56,7 +56,8 @@ def _count_stamp(**overrides) -> dict:
     return operating_point_stamp(op, **fields)
 
 
-def _drawn_selection(root: Path, *, subject: str = "bud", date: str = "2026-03-04") -> Path:
+def _drawn_selection(project: Path, root: Path, *, subject: str = "bud",
+                     date: str = "2026-03-04") -> Path:
     """A real selection over a small dataset, drawn through ``draw_splits``.
 
     A row naming a selection is answered for by the selection itself at delivery, so an
@@ -80,7 +81,7 @@ def _drawn_selection(root: Path, *, subject: str = "bud", date: str = "2026-03-0
             [Annotation(subject=subject, geometry=BBox(2, 2, 12, 12))], 32, 32)
 
     out = root / "selection"
-    result = draw_splits(str(root), output_path=str(out), subject=subject, seed=3,
+    result = draw_splits(project, str(root), output_path=str(out), subject=subject, seed=3,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
     return out
@@ -108,10 +109,10 @@ def _write_raw(pred_dir: Path, stamp: dict, document: str = "operating_point") -
     return pred_dir / f"{document}.json"
 
 
-def _count_validity(pred_dir: Path) -> dict:
+def _count_validity(project: Path, pred_dir: Path) -> dict:
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
 
-    return reconcile_operating_point_validity([str(pred_dir)], trait=TRAIT)
+    return reconcile_operating_point_validity([str(pred_dir)], trait=TRAIT, project=project)
 
 
 def _delivers(validity: dict) -> bool:
@@ -128,7 +129,7 @@ def test_unbacked_stamp_does_not_deliver(tmp_path):
     pred_dir = _bucket(root)
     _write_raw(pred_dir, _count_stamp())
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
 
     assert validity["validated"] == "false"
     assert validity["unvalidated_buckets"] == [str(pred_dir)]
@@ -148,13 +149,13 @@ def test_record_absent_from_the_experiment_store_floors(tmp_path):
                           "validated_by": {"experiment_id": "exp_that_never_ran",
                                            "record_digest": "0123456789abcdef"}})
 
-    no_experiment = _count_validity(pred_dir)
+    no_experiment = _count_validity(tmp_path, pred_dir)
     assert no_experiment["validated"] == "false"
     note = no_experiment["binding_notes"][str(pred_dir)]
-    assert "exp_that_never_ran" in note and str(experiments_dir()) in note
+    assert "exp_that_never_ran" in note and str(experiments_dir(tmp_path)) in note
 
-    opened_run(None, detection_config(tmp_path / "run-data"), experiment_id="exp_that_never_ran")
-    no_row = _count_validity(pred_dir)
+    opened_run(tmp_path, detection_config(tmp_path / "run-data"), experiment_id="exp_that_never_ran")
+    no_row = _count_validity(tmp_path, pred_dir)
     assert no_row["validated"] == "false"
     assert "0123456789abcdef" in no_row["binding_notes"][str(pred_dir)]
     assert not _delivers(no_row)
@@ -164,13 +165,13 @@ def test_edited_threshold_under_a_genuine_pointer_floors(tmp_path):
     """A real record's pointer copied onto an edited threshold answers for a value it never saw."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    bound = write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=root)
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    bound = write_bound_sidecar(tmp_path, pred_dir, _count_stamp(), dataset_root=root)
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
     edited = {**bound, "operating_point": _op(conf=0.05)}
     _write_raw(pred_dir, edited)
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "false"
     assert "disagree" in validity["binding_notes"][str(pred_dir)]
     assert not _delivers(validity)
@@ -185,15 +186,15 @@ def test_edited_classifier_value_under_a_genuine_pointer_floors(tmp_path):
     stamp = {"operating_point": {"classifier": {"validated_against": "held_out_annotations",
                                                 "value": "shedding"}},
              "validated": True, "trait": TRAIT, "checkpoint_sha256": CHECKPOINT_SHA}
-    bound = write_bound_sidecar(pred_dir, stamp, document="classifier_operating_point",
+    bound = write_bound_sidecar(tmp_path, pred_dir, stamp, document="classifier_operating_point",
                                 dataset_root=root)
-    assert reconcile_classifier_validity([str(pred_dir)])["validated"] == "held_out_annotations"
+    assert reconcile_classifier_validity([str(pred_dir)], project=tmp_path)["validated"] == "held_out_annotations"
 
     edited = {**bound, "operating_point": {"classifier": {
         "validated_against": "held_out_annotations", "value": "closed"}}}
     _write_raw(pred_dir, edited, "classifier_operating_point")
 
-    validity = reconcile_classifier_validity([str(pred_dir)])
+    validity = reconcile_classifier_validity([str(pred_dir)], project=tmp_path)
     assert validity["validated"] == "false"
     assert "disagree" in validity["binding_notes"][str(pred_dir)]
 
@@ -207,16 +208,17 @@ def test_edited_criterion_under_a_genuine_pointer_floors(tmp_path):
     stamp = {"operating_point": {"ordinal": {"validated_against": "held_out_annotations",
                                              "criterion": "quadratic_weighted_kappa"}},
              "validated": True, "trait": TRAIT, "checkpoint_sha256": None}
-    bound = write_bound_sidecar(pred_dir, stamp, document="ordinal_operating_point",
+    bound = write_bound_sidecar(tmp_path, pred_dir, stamp, document="ordinal_operating_point",
                                 dataset_root=root)
     assert reconcile_ordinal_validity(
-        [str(pred_dir)], trait=TRAIT)["validated"] == "held_out_annotations"
+        [str(pred_dir)], trait=TRAIT, project=tmp_path)["validated"] == "held_out_annotations"
 
     edited = {**bound, "operating_point": {"ordinal": {
         "validated_against": "held_out_annotations", "criterion": "spearman"}}}
     _write_raw(pred_dir, edited, "ordinal_operating_point")
 
-    assert reconcile_ordinal_validity([str(pred_dir)], trait=TRAIT)["validated"] == "false"
+    assert reconcile_ordinal_validity(
+        [str(pred_dir)], trait=TRAIT, project=tmp_path)["validated"] == "false"
 
 
 def test_edited_claim_scope_flag_floors_every_dimension(tmp_path):
@@ -230,18 +232,18 @@ def test_edited_claim_scope_flag_floors_every_dimension(tmp_path):
     stamp = _count_stamp(operating_point=_op(tile_size=640),
                          tile_size_validated="persisted_training_geometry")
     stamp["claim_scope_validated"] = "same_mosaic_georeferenced_identity"
-    bound = write_bound_sidecar(pred_dir, stamp, dataset_root=root)
+    bound = write_bound_sidecar(tmp_path, pred_dir, stamp, dataset_root=root)
 
     dirs = [str(pred_dir)]
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
-    assert reconcile_tile_size_validity(dirs)["validated"] == "persisted_training_geometry"
-    assert reconcile_claim_scope_validity(dirs)["validated"] == "same_mosaic_georeferenced_identity"
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
+    assert reconcile_tile_size_validity(dirs, project=tmp_path)["validated"] == "persisted_training_geometry"
+    assert reconcile_claim_scope_validity(dirs, project=tmp_path)["validated"] == "same_mosaic_georeferenced_identity"
 
     _write_raw(pred_dir, {**bound, "claim_scope_validated": "false"})
 
-    assert _count_validity(pred_dir)["validated"] == "false"
-    assert reconcile_tile_size_validity(dirs)["validated"] == "false"
-    scope = reconcile_claim_scope_validity(dirs)
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "false"
+    assert reconcile_tile_size_validity(dirs, project=tmp_path)["validated"] == "false"
+    scope = reconcile_claim_scope_validity(dirs, project=tmp_path)
     assert scope["validated"] == "false"
     assert "disagree" in scope["binding_notes"][str(pred_dir)]
 
@@ -250,12 +252,12 @@ def test_changed_bucket_content_floors_the_stamp(tmp_path):
     """A count claim cannot outlive the prediction files it was earned over."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=root)
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    write_bound_sidecar(tmp_path, pred_dir, _count_stamp(), dataset_root=root)
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
     write_prediction(pred_dir, "img_a", count=9)
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "false"
     assert "replaced" in validity["binding_notes"][str(pred_dir)]
     assert not _delivers(validity)
@@ -265,20 +267,20 @@ def test_added_prediction_file_floors_the_stamp(tmp_path):
     """An added prediction changes the covered content just as a replaced one does."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=root)
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    write_bound_sidecar(tmp_path, pred_dir, _count_stamp(), dataset_root=root)
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
     write_prediction(pred_dir, "img_b")
 
-    assert _count_validity(pred_dir)["validated"] == "false"
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "false"
 
 
 def test_same_length_replacement_with_restored_timestamp_floors(tmp_path):
     """The content is re-read every delivery, so a restored size and timestamp hide nothing."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=root)
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    write_bound_sidecar(tmp_path, pred_dir, _count_stamp(), dataset_root=root)
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
     path = pred_dir / "img_a.json"
     before = path.stat()
@@ -289,7 +291,7 @@ def test_same_length_replacement_with_restored_timestamp_floors(tmp_path):
     os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
     assert path.stat().st_size == before.st_size
 
-    assert _count_validity(pred_dir)["validated"] == "false"
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "false"
 
 
 def test_a_row_stating_selection_dir_with_no_selection_disjointness_floors(tmp_path):
@@ -298,16 +300,17 @@ def test_a_row_stating_selection_dir_with_no_selection_disjointness_floors(tmp_p
     never reads a missing check as a passing one."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
+    manifest = tmp_path.resolve() / "some" / "manifest"
     write_bound_sidecar(
-        pred_dir, _count_stamp(), dataset_root=root,
-        reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
+        tmp_path, pred_dir, _count_stamp(), dataset_root=root,
+        reference_identity={"stated_values": {"selection_dir": str(manifest)}},
         selection_disjointness=None,
     )
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "false"
     note = validity["binding_notes"][str(pred_dir)]
-    assert "selection_disjointness" in note and "some/manifest" in note
+    assert "selection_disjointness" in note and repr(str(manifest)) in note
     assert not _delivers(validity)
 
 
@@ -320,13 +323,13 @@ def test_a_row_stating_selection_dir_with_an_unchecked_selection_disjointness_fl
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     write_bound_sidecar(
-        pred_dir, _count_stamp(), dataset_root=root,
+        tmp_path, pred_dir, _count_stamp(), dataset_root=root,
         reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": "no record to check against",
                                 "checked": False, "group_check": None},
     )
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "false"
     assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
 
@@ -343,39 +346,38 @@ def test_a_row_stating_selection_dir_with_a_checked_no_leak_selection_disjointne
     """
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    selection_dir = _drawn_selection(root)
+    selection_dir = _drawn_selection(tmp_path, root)
     write_bound_sidecar(
-        pred_dir, _count_stamp(), dataset_root=root,
+        tmp_path, pred_dir, _count_stamp(), dataset_root=root,
         reference_identity={"stated_values": {"selection_dir": str(selection_dir)}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                                 "group_check": "performed", "labels_moved_draw_to_run": None,
                                 "labels_moved_run_to_now": None, "calibration_labels_moved": None,
-                                "selection_redrawn": None, "calibration_labels_dir": None},
+                                "selection_redrawn": None},
     )
 
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
 
 def test_a_row_stating_selection_dir_with_a_leaking_selection_disjointness_floors(tmp_path):
     """A row that reports checked=True but names a leaked group still floors: "checked with no
     leak" is enforced from the row's own leak fields, not read off the pass/fail booleans alone.
-    The five label-movement keys are present (null), the shape a genuinely checked row carries,
+    The four label-movement keys are present (null), the shape a genuinely checked row carries,
     so the leak is the only clause that can floor this row."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     write_bound_sidecar(
-        pred_dir, _count_stamp(), dataset_root=root,
+        tmp_path, pred_dir, _count_stamp(), dataset_root=root,
         reference_identity={"stated_values": {"selection_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": ["g1"],
                                 "leaked_stems": [], "group_check": "performed",
                                 "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-                                "calibration_labels_moved": None, "selection_redrawn": None,
-                                "calibration_labels_dir": None},
+                                "calibration_labels_moved": None, "selection_redrawn": None},
     )
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "false"
     assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
 
@@ -390,19 +392,20 @@ def test_classifier_trust_set_ignores_unbacked_ids(tmp_path):
     classifier_dir = _bucket(root, name="classifier", stems=())
 
     # The stamp self-declares one run while its record names the real producer; the record wins.
-    write_bound_sidecar(count_dir, _count_stamp(experiment_id="exp-forged"), dataset_root=root,
+    write_bound_sidecar(tmp_path, count_dir, _count_stamp(experiment_id="exp-forged"), dataset_root=root,
                         experiment_id="exp-count-record", producing_experiment_id=PRODUCING_RUN)
     classifier_stamp = {
         "operating_point": {"classifier": {"validated_against": "held_out_annotations",
                                            "value": "shedding"}},
         "validated": True, "trait": TRAIT, "checkpoint_sha256": CHECKPOINT_SHA,
     }
-    write_bound_sidecar(classifier_dir, classifier_stamp, document="classifier_operating_point",
+    write_bound_sidecar(tmp_path, classifier_dir, classifier_stamp, document="classifier_operating_point",
                         dataset_root=root, experiment_id="exp-classifier-record",
                         producing_experiment_id="exp-forged")
 
     state, note = bind_classifier_validity(
-        "held_out_annotations", [str(classifier_dir)], [str(count_dir)], trait=TRAIT)
+        "held_out_annotations", [str(classifier_dir)], [str(count_dir)], trait=TRAIT,
+        project=tmp_path)
 
     assert state == "false"
     assert "exp-forged" in note and PRODUCING_RUN in note
@@ -421,7 +424,8 @@ def test_hand_written_scale_stamp_does_not_deliver(tmp_path):
         "capture_id": None}},
         "validated": True, "trait": TRAIT}, "resolve_scale")
 
-    validity = reconcile_scale_validity([str(pred_dir)], unit="mm", trait=TRAIT, images_dir="unused")
+    validity = reconcile_scale_validity([str(pred_dir)], unit="mm", trait=TRAIT,
+                                        images_dir="unused", project=tmp_path)
 
     assert validity["validated"] == "false"
     assert "validated_by" in validity["binding_notes"][str(pred_dir)]
@@ -438,7 +442,7 @@ def test_claim_scope_reader_floors_an_unbacked_stamp(tmp_path):
     stamp["claim_scope_validated"] = "same_mosaic_georeferenced_identity"
     _write_raw(pred_dir, stamp)
 
-    validity = reconcile_claim_scope_validity([str(pred_dir)])
+    validity = reconcile_claim_scope_validity([str(pred_dir)], project=tmp_path)
 
     assert validity["validated"] == "false"
     assert validity["unvalidated_buckets"] == [str(pred_dir)]
@@ -456,13 +460,13 @@ def test_validated_stamp_without_a_trait_is_refused_at_write(tmp_path):
     untraited = _count_stamp(trait=None, validated_by=pointer)
 
     with pytest.raises(ValueError, match="no trait"):
-        write_sidecar(pred_dir, untraited)
+        write_sidecar(pred_dir, untraited, project=tmp_path)
     with pytest.raises(ValueError, match="no trait"):
-        update_sidecar(pred_dir, lambda stored: untraited)
+        update_sidecar(pred_dir, lambda stored: untraited, project=tmp_path)
     with pytest.raises(ValueError, match="validated_by"):
-        write_sidecar(pred_dir, _count_stamp())
+        write_sidecar(pred_dir, _count_stamp(), project=tmp_path)
 
-    assert write_sidecar(pred_dir, {**untraited, "trait": TRAIT}) is None  # type: ignore[func-returns-value]  # the assert documents the None return this writer contracts to
+    assert write_sidecar(pred_dir, {**untraited, "trait": TRAIT}, project=tmp_path) is None  # type: ignore[func-returns-value]  # the assert documents the None return this writer contracts to
 
 
 # --- the residual, recorded rather than implied away ---------------------------------------
@@ -483,7 +487,7 @@ def test_a_row_appended_through_the_storage_seam_still_delivers(tmp_path):
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     stamp = _count_stamp()
-    run_dir = opened_run(None, detection_config(tmp_path / "run-data"),
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "run-data"),
                          experiment_id=PRODUCING_RUN)
     body = {
         "document": "operating_point", "trait": TRAIT,
@@ -491,15 +495,16 @@ def test_a_row_appended_through_the_storage_seam_still_delivers(tmp_path):
         "validated_against": "held_out_annotations", "checkpoint_sha256": CHECKPOINT_SHA,
         "producing_experiment_id": PRODUCING_RUN,
         "reference_identity": {"stated_values": {"reference": "authored, never presented"}},
-        "covered_buckets": {"predictions/live/2026-03-04": bucket_content_digest(pred_dir)},
-        "dataset_root": str(root.resolve()), "recorded_at": "2026-03-04T12:00:00+00:00",
+        "covered_buckets": {"ds/predictions/live/2026-03-04": bucket_content_digest(pred_dir)},
+        "dataset_root": "ds", "recorded_at": "2026-03-04T12:00:00+00:00",
     }
     append_row(run_dir / VALIDATIONS_FILE, body)
 
     write_sidecar(pred_dir, {**stamp, "validated_by": {
-        "experiment_id": PRODUCING_RUN, "record_digest": validation_digest(body)}})
+        "experiment_id": PRODUCING_RUN, "record_digest": validation_digest(body)}},
+        project=tmp_path)
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "held_out_annotations"
     assert _delivers(validity)
 
@@ -516,8 +521,9 @@ def _passing_evidence():
             dense_records(id_prefix="h", shift=5.0, **common))
 
 
-def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
-    """Earn a count claim the way a door does: gate, publish, seal, stamp last."""
+def _earned_bucket(project: Path, root: Path, *, conf_records=None, stems=("img_a",)):
+    """Earn a count claim for ``project`` the way a door does: gate, publish, seal, stamp
+    last."""
     from tcip_mcp.pipelines.resolution import (
         open_validation, operating_point_stamp, seal_validation, write_sidecar,
     )
@@ -528,7 +534,7 @@ def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
     (labels_dir / "img_a.json").write_text(json.dumps({"annotations": []}), encoding="utf-8")
 
     draft = open_validation(
-        document="operating_point",
+        project=project, document="operating_point",
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "h1", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01,
@@ -547,7 +553,7 @@ def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
         produced_at="2026-03-04T12:00:00+00:00", scope=ClassScope(subject=TRAIT),
     )
     stamped = seal_validation(draft, dataset_root=root, bucket_dirs=[pred_dir], stamp_body=body)
-    write_sidecar(pred_dir, stamped)
+    write_sidecar(pred_dir, stamped, project=project)
     return pred_dir, stamped["validated_by"]["record_digest"], stamped
 
 
@@ -559,18 +565,18 @@ def test_a_claim_earned_through_the_two_phases_delivers_validated(tmp_path):
     from tcip_mcp.prediction_buckets import bucket_content_digest
 
     root = tmp_path / "ds"
-    pred_dir, digest, stamped = _earned_bucket(root)
+    pred_dir, digest, stamped = _earned_bucket(tmp_path, root)
 
     experiment_id = stamped["validated_by"]["experiment_id"]
     assert experiment_id.startswith("calibration_")  # no producing run, so the claim hangs off one
-    rows, _ = read_rows(find_run(experiment_id) / VALIDATIONS_FILE)
+    rows, _ = read_rows(find_run(experiment_id, project=tmp_path) / VALIDATIONS_FILE)
     row = next(r for r in rows if r["claim"])
     assert row["producing_experiment_id"] is None
     assert row["covered_buckets"] == {
-        "predictions/live/2026-03-04": bucket_content_digest(pred_dir)}
+        "ds/predictions/live/2026-03-04": bucket_content_digest(pred_dir)}
     assert row["claim"]["operating_point"]["conf"]["validated_against"] == "held_out_annotations"
 
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "held_out_annotations"
     assert validity["binding_notes"] == {}
     assert _delivers(validity)
@@ -581,51 +587,51 @@ def test_an_untouched_validated_bucket_reconciles_across_repeated_deliveries(tmp
     """Recomputation is not a one-shot: an untouched bucket keeps reconciling to its record."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root, stems=("img_a", "img_b"))
-    write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=root)
+    write_bound_sidecar(tmp_path, pred_dir, _count_stamp(), dataset_root=root)
 
     for _ in range(3):
-        assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+        assert _count_validity(tmp_path, pred_dir)["validated"] == "held_out_annotations"
 
 
-def test_a_dataset_moved_to_a_new_absolute_path_still_verifies(tmp_path, monkeypatch):
-    """Covered buckets are keyed inside the dataset, so moving the dataset whole changes nothing.
-
-    Bound to the file backend: the sqlite backend keeps a connection to the pre-move root open
-    for the test process's life, and Windows refuses to rename a directory holding an open
-    database handle, a mechanical property of that backend rather than of the claim under test,
-    which every other case in this module already exercises against both backends.
-    """
+def test_a_project_moved_to_a_new_absolute_path_still_verifies(tmp_path):
+    """Covered buckets are keyed by their path stored against the project, so moving the project
+    whole changes nothing, while a bucket moved inside it floors."""
     import tcip_store
-    from tcip_store.file_backend import FileBackend
 
-    tcip_store.bind(FileBackend())
-    # The module's seeded trait put the pinned root in the database, so this case pins its own.
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "file_backend_state"))
-    original = tmp_path / "ds"
-    pred_dir = _bucket(original)
-    write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=original)
-    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+    from tests._trait_fixtures import BUD_OPENING, propose_and_confirm
 
-    moved = tmp_path / "ds_moved"
-    shutil.move(str(original), str(moved))
+    # The module's seeded trait sits in tmp_path's database, so this case holds its own project.
+    project = tmp_path.parent / "movable_project"
+    propose_and_confirm(project, BUD_OPENING)
+    pred_dir = _bucket(project / "ds")
+    write_bound_sidecar(project, pred_dir, _count_stamp(), dataset_root=project / "ds")
+    assert _count_validity(project, pred_dir)["validated"] == "held_out_annotations"
 
-    assert _count_validity(moved / "predictions" / "live" / "2026-03-04")["validated"] == (
-        "held_out_annotations")
+    moved = tmp_path.parent / "movable_project_moved"
+    tcip_store.release_root(project)
+    shutil.move(str(project), str(moved))
+    moved_bucket = moved / "ds" / "predictions" / "live" / "2026-03-04"
+    assert _count_validity(moved, moved_bucket)["validated"] == "held_out_annotations"
+
+    elsewhere = moved / "ds" / "predictions" / "live" / "2026-03-05"
+    tcip_store.release_root(moved_bucket)
+    shutil.move(str(moved_bucket), str(elsewhere))
+    assert _count_validity(moved, elsewhere)["validated"] == "false"
 
 
 def test_a_recalibration_at_a_new_threshold_earns_a_new_record(tmp_path):
     """Binding the claim does not freeze it: a genuine re-calibration delivers at the new value."""
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
-    first = write_bound_sidecar(pred_dir, _count_stamp(operating_point=_op(conf=0.42)),
+    first = write_bound_sidecar(tmp_path, pred_dir, _count_stamp(operating_point=_op(conf=0.42)),
                                 dataset_root=root, experiment_id="exp-first-calibration")
-    assert _count_validity(pred_dir)["conf"] == 0.42
+    assert _count_validity(tmp_path, pred_dir)["conf"] == 0.42
 
-    second = write_bound_sidecar(pred_dir, _count_stamp(operating_point=_op(conf=0.61)),
+    second = write_bound_sidecar(tmp_path, pred_dir, _count_stamp(operating_point=_op(conf=0.61)),
                                  dataset_root=root, experiment_id="exp-second-calibration")
 
     assert second["validated_by"]["record_digest"] != first["validated_by"]["record_digest"]
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
     assert validity["validated"] == "held_out_annotations"
     assert validity["conf"] == 0.61
     assert _delivers(validity)
@@ -641,8 +647,8 @@ def test_an_unvalidated_bucket_keeps_the_tile_geometry_it_really_persisted(tmp_p
     _write_raw(pred_dir, _count_stamp(
         validated=False, operating_point=_op(reference="false", tile_size=640)))
 
-    assert _count_validity(pred_dir)["validated"] == "false"
-    tile = reconcile_tile_size_validity([str(pred_dir)])
+    assert _count_validity(tmp_path, pred_dir)["validated"] == "false"
+    tile = reconcile_tile_size_validity([str(pred_dir)], project=tmp_path)
     assert tile["validated"] == "persisted_training_geometry"
     assert tile["binding_notes"] == {}
 
@@ -655,7 +661,7 @@ def test_an_acknowledgment_still_writes_a_flagged_provisional_path(tmp_path):
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     _write_raw(pred_dir, _count_stamp())
-    validity = _count_validity(pred_dir)
+    validity = _count_validity(tmp_path, pred_dir)
 
     gate = check_delivery_gate(
         {"operating_point": validity["validated"]},

@@ -25,8 +25,7 @@ def _training_run_events(root: Path) -> list[dict]:
 
 def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_event(
         tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    run_dir = opened_run(None, detection_config(tmp_path / "data", batch_size=1),
+    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data", batch_size=1),
                          experiment_id="exp-worker-crash")
 
     def _boom(*args, **kwargs):

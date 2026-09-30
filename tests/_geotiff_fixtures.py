@@ -98,6 +98,6 @@ def write_canonical_dataset_raster(
     raster_path = dataset_root / "images" / date / f"{stem}.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
     write_geotiff(raster_path, width=width, height=height, shape=(height, width, channels))
-    result = register_dataset(str(dataset_root), crop=crop, project_root=str(dataset_root))
+    result = register_dataset(dataset_root, str(dataset_root), crop=crop)
     assert "error" not in result, result
     return raster_path

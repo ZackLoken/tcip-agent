@@ -59,7 +59,7 @@ def _images_dir(tmp_path):
     return images_dir
 
 
-def _held_out_bundle():
+def _held_out_bundle(project):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
 
@@ -75,7 +75,8 @@ def _held_out_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "slicing": None, "staged_conf_floor": 0.01,
     }
-    return resolve_operating_point(fx.COUNT_TRAIT, experiment_id=None, **inputs), inputs
+    return resolve_operating_point(fx.COUNT_TRAIT, experiment_id=None, project=project,
+                                   **inputs), inputs
 
 
 def _prepare(tmp_path, monkeypatch):
@@ -100,7 +101,7 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
 
-    r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+    r = itools.deliver_per_image_counts(tmp_path, ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False)
 
     assert "error" in r
@@ -123,7 +124,7 @@ def test_deliver_per_image_counts_takes_no_acknowledge_unvalidated_keyword(tmp_p
 
     with pytest.raises(TypeError):
         itools.deliver_per_image_counts(  # type: ignore[call-arg]
-            ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+            tmp_path, ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
             conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
             acknowledge_unvalidated=True)
 
@@ -142,7 +143,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     )
 
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
-    bundle, inputs = _held_out_bundle()
+    bundle, inputs = _held_out_bundle(tmp_path)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
     monkeypatch.setattr(calibration, "calibrate_operating_point",
@@ -150,7 +151,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     out_csv = tmp_path / "counts.csv"
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), device="cpu", tile=False,
+    r = itools.deliver_per_image_counts(tmp_path, ckpt, str(images_dir), str(out_csv), device="cpu", tile=False,
                                trait=fx.COUNT_TRAIT,
                                calibration_labels_dir=str(images_dir),
                                predictions_dir=str(bucket))
@@ -166,7 +167,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     stamp = read_operating_point_sidecar(bucket)
     assert stamp["validated"] is True
     assert verify_stamp_binding(
-        stamp, bucket, document="operating_point", trait=fx.COUNT_TRAIT).ok
+        stamp, bucket, project=tmp_path, document="operating_point", trait=fx.COUNT_TRAIT).ok
 
 
 def test_deliver_per_image_counts_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
@@ -183,7 +184,7 @@ def test_deliver_per_image_counts_stamps_default_conf_source_when_omitted(tmp_pa
     out_csv = tmp_path / "counts.csv"
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+    r = itools.deliver_per_image_counts(tmp_path, ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                device="cpu", tile=False, predictions_dir=str(bucket))
 
     assert "error" in r
@@ -208,7 +209,7 @@ def test_deliver_per_image_counts_stamps_explicit_conf_source_when_stated_at_the
     out_csv = tmp_path / "counts.csv"
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+    r = itools.deliver_per_image_counts(tmp_path, ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                conf_threshold=DEFAULT_CONF, device="cpu", tile=False,
                                predictions_dir=str(bucket))
 
@@ -227,7 +228,7 @@ def test_run_inference_stamps_default_conf_source_when_omitted(tmp_path, monkeyp
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_dir = tmp_path / "preds"
 
-    r = itools.run_inference(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+    r = itools.run_inference(tmp_path, ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
                              device="cpu", tile=False)
 
     assert "error" not in r, r
@@ -247,7 +248,7 @@ def test_run_inference_stamps_explicit_conf_source_when_stated_at_the_default(
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_dir = tmp_path / "preds"
 
-    r = itools.run_inference(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+    r = itools.run_inference(tmp_path, ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
                              conf_threshold=DEFAULT_CONF, device="cpu", tile=False)
 
     assert "error" not in r, r

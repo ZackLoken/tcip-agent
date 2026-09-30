@@ -88,7 +88,8 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     out_dir = opened_run(tmp_path, config)
     record = read_record(out_dir / RUN_FILE)
     run = TrainRun(id=out_dir.name, config=record["config"],
-                   objective=record["resolved"]["objective"], output_dir=str(out_dir))
+                   objective=record["resolved"]["objective"], project=tmp_path,
+                   output_dir=str(out_dir))
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log.
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
@@ -127,7 +128,7 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     out_dir = tmp_path / "out"
     config = _config(out_dir, epochs=4,
                      early_stopping={"enabled": True, "patience": 1, "min_delta": 1e-4})
-    run = trainer_run(config, out_dir, has_val_loader=True, id="auto-run-76")
+    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
     run = train(run, train_loader, val_loader=val_loader)
 
     assert run.status == "completed", run.error

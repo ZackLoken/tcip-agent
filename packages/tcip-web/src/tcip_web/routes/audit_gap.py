@@ -4,6 +4,7 @@ recorded to the audit log.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -16,9 +17,9 @@ from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
 AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 
-def record_committed(tool: str, arguments: dict, *, scope: str | None) -> None:
-    """Record a mutation a route has already committed, letting a failed append propagate as
-    :class:`~tcip_mcp.audit.AuditEntryNotWritten`.
+def record_committed(tool: str, arguments: dict, *, scope: str | Path) -> None:
+    """Record a mutation a route has already committed in ``scope``'s log, letting a failed append
+    propagate as :class:`~tcip_mcp.audit.AuditEntryNotWritten`.
     """
     record_event_or_raise(tool, arguments, source="gui", scope=scope)
 

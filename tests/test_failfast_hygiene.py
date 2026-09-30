@@ -15,15 +15,10 @@ def test_polygon_iou_valid_and_degenerate():
     assert polygon_iou(a, a.area, bad, 0.0) == 0.0
 
 
-def test_push_panel_event_reports_delivered_flag(tmp_path):
-    from tests.test_canvas_liveview import _mint_binding
-
+def test_push_panel_event_reports_delivered_flag(project):
     from tcip_mcp.tools.gui_tools import push_panel_event
 
-    # A matching binding, so the call reaches the HTTP push this asserts on rather than being
-    # refused by the binding rail before it.
-    _mint_binding(tmp_path)
-    res = push_panel_event("review", "load_matches", {"x": 1}, project_root=str(tmp_path))
+    res = push_panel_event(project, project.parent, "review", "load_matches", {"x": 1})
     # The delivery outcome is now an explicit bool: "backend down" can't read as success.
     assert "delivered" in res and isinstance(res["delivered"], bool)
 

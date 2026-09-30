@@ -7,6 +7,7 @@ annotations by name) via :mod:`tcip_annotation.json_io`, at the label path the c
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -26,7 +27,7 @@ from tcip_mcp.pipelines.image_utils import (
 )
 from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import allowed_optional, allowed_path
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
@@ -63,9 +64,6 @@ class SavePayload(BaseModel):
     # than accepted as a no-op.
     label_path: str = Field(min_length=1)
     annotations: list[AnnotationPayload] = []
-    # Accepted for wire compatibility and read nowhere in this module; the save's audit line
-    # files under the label's own dataset root (_guarded_audit_root), never this field.
-    project_root: Optional[str] = None
     # The label document's version token as the client loaded it: with one, the save is a
     # compare-and-set and a 409 says it changed underneath. Omit to skip the comparison.
     base_mtime: Optional[str] = None
@@ -75,10 +73,7 @@ class SavePayload(BaseModel):
 
 
 def _image_dims(path: str) -> tuple[int, int]:
-    try:
-        p = assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    p = allowed_path(path)
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
@@ -89,32 +84,21 @@ def _image_dims(path: str) -> tuple[int, int]:
         raise HTTPException(400, str(exc)) from exc
 
 
-def _guard_label_path(path: Optional[str]) -> Optional[str]:
-    """Confine a client-supplied label path and hand back its resolved spelling, or None."""
-    if not path:
-        return None
-    try:
-        return str(assert_path_allowed(path))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-
-def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
+def _guarded_audit_root(label_path: Optional[str]) -> Path:
     """The dataset root a label write is audited under, confined before anything is written.
 
-    A label path outside a dataset tree names no such root, so the write is recorded in the
-    platform's own log instead; a dataset root the allow-set does not admit refuses the write
-    before it happens.
+    A label path outside a dataset tree names no such root, so the write is recorded in the open
+    project's log instead (409 while none is open); a dataset root the allow-set does not admit
+    refuses the write before it happens.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
+    from tcip_web.state import store
+
     root = dataset_root_of(label_path) if label_path else None
     if root is None:
-        return None
-    try:
-        return str(assert_path_allowed(root))
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        return store.open_root()
+    return allowed_path(root)
 
 
 def annotation_dict(a: Annotation) -> dict:
@@ -125,9 +109,8 @@ def annotation_dict(a: Annotation) -> dict:
     return {**client_annotation(a), "authorship": authorship_of(a)}
 
 
-def _audit_gui_write(payload: "SavePayload", label_path: str, root: Optional[str]) -> None:
-    """Record a GUI label-write in that dataset's own audit log, or the platform's own when
-    ``root`` is ``None`` (a label path outside any dataset tree, still under an allowed root).
+def _audit_gui_write(payload: "SavePayload", label_path: str, root: Path) -> None:
+    """Record a GUI label-write in ``root``'s audit log.
 
     ``root`` is what :func:`_guarded_audit_root` admitted before the write. A failed append
     raises ``AuditEntryNotWritten``: the write has already committed by the time this runs.
@@ -149,7 +132,7 @@ def _audit_gui_write(payload: "SavePayload", label_path: str, root: Optional[str
 def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     """Read existing labels for an image and return them in pixel coords."""
     w, h = _image_dims(image_path)
-    label_path = _guard_label_path(label_path)
+    label_path = allowed_optional(label_path)
     annotations: list[dict] = []
     token: Optional[str] = None
     if label_path:
@@ -178,12 +161,12 @@ def save_labels(payload: SavePayload) -> dict:
     (``image_status.json``); until then it reads as unannotated.
 
     A save under a dataset root records to that dataset's own audit log; a save under no dataset
-    root records to the platform's own log instead, which depends on the platform state root being
-    writable. Either way, a write that commits and cannot be recorded answers 409 with the marker
-    and the response the write would have returned.
+    root records to the open project's log instead (:func:`_guarded_audit_root`). Either way, a
+    write that commits and cannot be recorded answers 409 with the marker and the response the
+    write would have returned.
     """
     w, h = _image_dims(payload.image_path)
-    label_path = _guard_label_path(payload.label_path)
+    label_path = allowed_optional(payload.label_path)
     assert label_path is not None  # payload.label_path is non-empty; the guard only confines it
     audit_root = _guarded_audit_root(label_path)
 

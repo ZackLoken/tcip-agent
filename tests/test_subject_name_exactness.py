@@ -35,7 +35,6 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     save = client.post(
         "/api/subjects/save",
         json={
-            "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
             "subjects": {
                 "bud": {"description": "the first spelling a human typed"},
@@ -50,7 +49,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 
     subjects = client.get(
         "/api/subjects/load",
-        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path)},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "Bud", "bush"}
     assert subjects["bud"]["description"] == "the first spelling a human typed"
@@ -78,7 +77,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
 
     body = client.get(
         "/api/subjects/load",
-        params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
+        params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
     assert set(body["subjects"]) == {"bud", "Bud", "bush"}
     assert body["unreadable"] == []
@@ -100,7 +99,7 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
 
     body = client.get(
         "/api/subjects/load",
-        params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
+        params={"dataset_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
     assert set(body["subjects"]) == {"bud"}
     assert body["unreadable"] == [str(labels / "IMG_B.json")]
@@ -113,14 +112,14 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     in place, leaving one entry per name rather than a duplicate."""
     first = client.post(
         "/api/subjects/save",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+        json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "first pass"}}, "version": None},
     )
     assert first.status_code == 200, first.text
 
     second = client.post(
         "/api/subjects/save",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+        json={"dataset_root": str(tmp_path),
               "subjects": {"bud": {"description": "corrected"},
                            "hazel_leaf": {"description": "one leaf blade"}},
               "version": first.json()["version"]},
@@ -130,7 +129,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
 
     subjects = client.get(
         "/api/subjects/load",
-        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
+        params={"dataset_root": str(tmp_path)},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}
     assert subjects["bud"]["description"] == "corrected"

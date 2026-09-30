@@ -165,10 +165,9 @@ def test_dims_for_a_grouped_capture_path(grouped_dataset):
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset):
     from tcip_mcp.tools.gui_tools import focus_human_attention
 
-    from tests.test_canvas_liveview import _mint_binding
-
-    _mint_binding(grouped_dataset)
-    res = focus_human_attention("annotate", str(grouped_dataset), str(grouped_dataset), "bud", "2026-04-01")
+    res = focus_human_attention(grouped_dataset, grouped_dataset.parent, "annotate",
+                                str(grouped_dataset), "bud",
+                                "2026-04-01")
     assert "error" not in res
     assert res["n_images"] == 2
     # Sorted names: "capture_001.bandgroup" < "plain_002.jpg"
@@ -243,21 +242,21 @@ def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
     assert (pixels.min(), pixels.max()) == (0, 255)   # each band stretched across the range
 
 
-def test_visualize_annotations_on_a_grouped_capture(grouped_dataset):
+def test_visualize_annotations_on_a_grouped_capture(tmp_path, grouped_dataset):
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import visualize
 
     manifest = image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    result = visualize(source="annotations", path=str(manifest))
+    result = visualize(tmp_path, source="annotations", path=str(manifest))
     assert "error" not in result
     assert result["count"] == 1
     assert Path(result["image_path"]).is_file()
 
 
-def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(grouped_dataset):
+def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(tmp_path, grouped_dataset):
     from tcip_mcp.tools.vision_tools import visualize
 
-    result = visualize(source="dataset", path=str(grouped_dataset), n=16)
+    result = visualize(tmp_path, source="dataset", path=str(grouped_dataset), n=16)
     assert "error" not in result
     assert result["total_images"] == 2  # one grouped capture + one plain photo, never 3 raw files
 
@@ -321,7 +320,7 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
 # ── tools/data_tools.py: draw_splits(materialize=True) ───────────────────────────────────
 
 
-def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(grouped_dataset):
+def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path, grouped_dataset):
     """A drawn selection names a grouped capture by the manifest sitting beside its bands, and
     that path resolves back to the whole group in place: the group's bands are read where they
     were captured, never copied into a side's own directory."""
@@ -345,12 +344,12 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(grouped_
         )
 
     out = grouped_dataset / "splits"
-    result = draw_splits(str(grouped_dataset), output_path=str(out),
+    result = draw_splits(tmp_path, str(grouped_dataset), output_path=str(out),
                          subject="bud", train_ratio=0.5, val_ratio=0.25,
                          calibration_ratio=0.25)
     assert "error" not in result, result
 
-    drawn = read_selection(out)
+    drawn = read_selection(out, project=tmp_path)
     grouped = next(s for s in drawn.samples if Path(s.source).stem == "capture_001")
     assert Path(grouped.source).parent == images_dir  # read in place, never copied
     resolved = resolve_source_path(grouped.source)

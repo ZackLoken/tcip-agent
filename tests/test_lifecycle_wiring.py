@@ -35,7 +35,8 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
     record = read_record(run_dir / RUN_FILE)
     run = TrainRun(id=run_dir.name,
                    config={**record["config"], "data": record["resolved"]["data"]},
-                   objective=record["resolved"]["objective"], output_dir=str(run_dir))
+                   objective=record["resolved"]["objective"], project=root,
+                   output_dir=str(run_dir))
     run_training_envelope(TrainContext(
         run=run, train_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate),
         val_loader=DataLoader(val_ds, batch_size=2, collate_fn=collate)))

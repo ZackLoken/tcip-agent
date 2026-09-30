@@ -17,7 +17,7 @@ from tcip_mcp.traits import TraitUnknownError, read_trait, trait_names
 from tests._regime_fixtures import tiled_regime
 from tests._trait_fixtures import BUD_OPENING
 
-# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's pinned root.
+# seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -69,10 +69,10 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     }
     if validated:
         write_prediction(d, "img_a")
-        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+        write_bound_sidecar(tmp_path, d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
         d.mkdir(parents=True, exist_ok=True)
-        write_sidecar(d, stamp)
+        write_sidecar(d, stamp, project=tmp_path)
     return str(d)
 
 
@@ -80,7 +80,8 @@ def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     # A caller asserting validated cannot open the gate when no sidecar backs it.
     r = reconcile_operating_point_validity(
-        [str(tmp_path / "nope")], trait="bud_opening", asserted=VALIDATED_HELD_OUT)
+        [str(tmp_path / "nope")], trait="bud_opening", asserted=VALIDATED_HELD_OUT,
+        project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["missing_sidecars"] == [str(tmp_path / "nope")]
 
@@ -88,7 +89,7 @@ def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
 def test_reconcile_all_validated_on_disk(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=True)]
-    r = reconcile_operating_point_validity(dirs, trait="bud_opening")  # no caller assertion needed
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening", project=tmp_path)
     assert r["validated"] == VALIDATED_HELD_OUT
     assert r["on_disk_validated"] is True
     assert r["conf"] == 0.6
@@ -98,7 +99,8 @@ def test_reconcile_one_unvalidated_bucket_floors_whole_curve(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     d1 = _bucket(tmp_path, "d1", validated=True)
     d2 = _bucket(tmp_path, "d2", validated=False)
-    r = reconcile_operating_point_validity([d1, d2], trait="bud_opening", asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity([d1, d2], trait="bud_opening", asserted=VALIDATED_HELD_OUT,
+        project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["unvalidated_buckets"] == [d2]
 
@@ -107,7 +109,8 @@ def test_reconcile_asserted_false_lowers_on_disk_validated(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True)]
     # The floor: an explicit asserted='false' lowers even a validated-on-disk bucket.
-    r = reconcile_operating_point_validity(dirs, trait="bud_opening", asserted=VALIDATED_FALSE)
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening", asserted=VALIDATED_FALSE,
+                                           project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
 
 
@@ -116,7 +119,7 @@ def test_reconcile_review_confirmed_reference_preserved(tmp_path):
         VALIDATED_REVIEW_CONFIRMED, reconcile_operating_point_validity,
     )
     dirs = [_bucket(tmp_path, "d1", validated=True, ref=VALIDATED_REVIEW_CONFIRMED)]
-    r = reconcile_operating_point_validity(dirs, trait="bud_opening")
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening", project=tmp_path)
     assert r["validated"] == VALIDATED_REVIEW_CONFIRMED  # provenance records which reference
     from tcip_mcp.pipelines.resolution import default
     assert default("lr", 1e-3).value == 1e-3
@@ -367,8 +370,8 @@ def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
 
 # --- trait knowledge ---
 
-def test_bud_opening_trait_semantics():
-    t = read_trait("bud_opening").latest.entry
+def test_bud_opening_trait_semantics(tmp_path):
+    t = read_trait("bud_opening", tmp_path).latest.entry
     assert t == BUD_OPENING
     assert t.count_objective == "count_unbiased"
     assert t.localization == "center_match"
@@ -378,11 +381,11 @@ def test_bud_opening_trait_semantics():
     assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
 
 
-def test_unknown_trait_lists_available():
+def test_unknown_trait_lists_available(tmp_path):
     with pytest.raises(TraitUnknownError) as exc:
-        read_trait("banana")
+        read_trait("banana", tmp_path)
     assert "bud_opening" in str(exc.value)
-    assert "bud_opening" in trait_names()
+    assert "bud_opening" in trait_names(tmp_path)
 
 
 # --- raw_operating_point: a stated conf/max_dets is never laundered into a default ---
@@ -425,7 +428,7 @@ def test_reconcile_operating_point_validity_floors_a_trait_mismatch(tmp_path):
 
     d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="bud_opening"
 
-    mismatched = reconcile_operating_point_validity([d], trait="second_trait")
+    mismatched = reconcile_operating_point_validity([d], trait="second_trait", project=tmp_path)
     assert mismatched["validated"] == VALIDATED_FALSE
     note = mismatched["binding_notes"][d]
     assert "bud_opening" in note and "second_trait" in note
@@ -438,7 +441,7 @@ def test_reconcile_operating_point_validity_admits_a_matching_trait(tmp_path):
 
     d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="bud_opening"
 
-    matched = reconcile_operating_point_validity([d], trait="bud_opening")
+    matched = reconcile_operating_point_validity([d], trait="bud_opening", project=tmp_path)
     assert matched["validated"] == VALIDATED_HELD_OUT
 
 
@@ -451,9 +454,10 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
     d = tmp_path / "raw_bucket"
     write_sidecar(d, {"validated": False, "trait": None,
                       "operating_point": {"conf": {"validated_against": None}},
-                      "scope": {"subject": None, "attribute": None, "id_map": None}})
+                      "scope": {"subject": None, "attribute": None, "id_map": None}},
+                  project=tmp_path)
 
-    r = reconcile_operating_point_validity([str(d)], trait="bud_opening")
+    r = reconcile_operating_point_validity([str(d)], trait="bud_opening", project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
 
 
@@ -467,19 +471,19 @@ def test_tile_size_explicit_with_no_derived_from_text_refuses():
                                 tile_size_derived_from=None)
 
 
-def test_resolve_operating_point_explicit_tile_size_with_no_text_refuses():
+def test_resolve_operating_point_explicit_tile_size_with_no_text_refuses(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     with pytest.raises(ValueError, match="tile_size_derived_from"):
-        resolve_operating_point("bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512,
+        resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=512,
                                 tile_size_source="explicit")
 
 
-def test_resolve_operating_point_explicit_tile_size_with_text_ships():
+def test_resolve_operating_point_explicit_tile_size_with_text_ships(tmp_path):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "bud_opening", **tiled_regime(), dataset_hash=None, tile_size=512,
+        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=512,
         tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     param = bundle.get("tile_size")
@@ -525,12 +529,11 @@ def test_resolver_selection_disjointness_reads_a_declared_documents_result():
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": [], "leaked_stems": [], "group_check": "performed",
         "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-        "calibration_labels_moved": None, "selection_redrawn": None,
-        "calibration_labels_dir": None}
+        "calibration_labels_moved": None, "selection_redrawn": None}
 
 
 def test_resolver_selection_disjointness_carries_the_leak_fields():
-    """The row's field carries the same twelve keys the live gate evidence does, unresolvable/
+    """The row's field carries the same eleven keys the live gate evidence does, unresolvable/
     leaked_groups/leaked_stems and the label-movement keys included, not only the pass/fail
     booleans a caller cannot floor a leaking or a moved-label row from."""
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
@@ -542,8 +545,7 @@ def test_resolver_selection_disjointness_carries_the_leak_fields():
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed",
         "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
-        "calibration_labels_moved": None, "selection_redrawn": None,
-        "calibration_labels_dir": None}
+        "calibration_labels_moved": None, "selection_redrawn": None}
 
 
 def test_resolver_selection_disjointness_is_none_for_resolve_scale():

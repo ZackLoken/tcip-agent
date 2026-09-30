@@ -13,17 +13,21 @@ function seedDataset(partial: Record<string, unknown>) {
   useStore.getState().patchGui({
     dataset: { ...useStore.getState().gui.dataset, ...partial },
   });
+  useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/ws/proj" } });
 }
 
 const SELECTION = {
-  project_root: "/ws/proj",
   dataset_root: "/ws/proj",
   subject: "subject_a",
   date: "2026-02-11",
+  model_name: "baseline",
   image_list: [],
   current_image_index: 0, // backend resets to 0
+  images_dir: null,
   annotations_dir: "/ws/proj/annotations/2026-02-11",
   predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
+  label_paths: {},
+  prediction_paths: {},
 };
 
 beforeEach(() => {
@@ -37,13 +41,11 @@ describe("applyReviewFocus", () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       selection: SELECTION,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     await applyReviewFocus({
-      project_root: "/ws/proj",
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
@@ -77,6 +79,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
+      model_name: "baseline",
       predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
     });
 
@@ -103,11 +106,11 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
+      model_name: "OTHER",
       predictions_dir: "/ws/proj/predictions/OTHER/2026-02-11",
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       selection: SELECTION,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
@@ -116,7 +119,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline", // different model than the loaded predictions dir
+      model_name: "baseline", // different model than the loaded selection's own
     });
 
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
@@ -134,7 +137,6 @@ describe("applyReviewFocus", () => {
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       selection: SELECTION,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
@@ -154,7 +156,6 @@ describe("applyReviewFocus", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      generation: 1,
       selection: SELECTION,
       label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

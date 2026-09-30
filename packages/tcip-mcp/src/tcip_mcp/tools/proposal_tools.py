@@ -27,7 +27,8 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncomplete, image_dimensions, resolve_image_source,
 )
-from tcip_mcp.server import mcp
+from tcip_mcp.project_paths import viz_output_path
+from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     import numpy as np
@@ -167,9 +168,10 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
     return shifted
 
 
-@mcp.tool()
+@tool()
 @audited(scope_arg="image_path")
 def propose_annotations(
+    project: Path,
     image_path: str,
     engine: str = "sam",
     engine_params: dict | None = None,
@@ -320,7 +322,8 @@ def propose_annotations(
     from tcip_mcp.tools.vision_tools import _display_for_path
 
     read = _display_for_path(image_path)
-    out = render_candidates(read.pixels, candidates, native_size=read.native_size)
+    out = render_candidates(read.pixels, candidates, native_size=read.native_size,
+                            output_path=viz_output_path(project, "candidates"))
 
     # The envelope records the engine so stage_proposals's assignments regime stamps the right
     # producer.
@@ -350,7 +353,6 @@ def propose_annotations(
 
             identity = content_identity(source)
             envelope["image_identity"] = dataclasses.asdict(identity)
-            envelope["image_path"] = str(img.resolve())
             ts.replace(address.key, envelope)
             staged = True
             stage_note = ""
@@ -376,7 +378,7 @@ def propose_annotations(
     }
 
 
-def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddress,
+def _stage_assignments_regime(project: Path, image_path: str, img: Path, address: StagingAddress,
                                assignments: list[dict]) -> dict:
     """The reviewed-candidates regime :func:`stage_proposals` runs when ``assignments`` is given.
 
@@ -458,7 +460,8 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
     idx, index = _subject_indexer()
     read = _display_for_path(image_path)
     out = render_detections(read.pixels, [_box_dict(a, index) for a in proposals],
-                            native_size=read.native_size, class_names=_name_map(idx))
+                            native_size=read.native_size, class_names=_name_map(idx),
+                            output_path=viz_output_path(project, "staged"))
 
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
             f"predictions (created_by={engine!r}) for review, not ground truth.")
@@ -477,7 +480,7 @@ def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddres
     }
 
 
-@mcp.tool()
+@tool()
 def segment_prompt(
     image_path: str,
     points: list[dict] | None = None,
@@ -721,9 +724,10 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     }
 
 
-@mcp.tool()
+@tool()
 @audited(scope_arg="image_path")
 def stage_proposals(
+    project: Path,
     image_path: str,
     *,
     assignments: list[dict] | None = None,
@@ -804,7 +808,7 @@ def stage_proposals(
         if model_name is not None:
             return {"error": "model_name is refused alongside assignments: the staged record's "
                              "own engine names the bucket."}
-        return _stage_assignments_regime(image_path, img, address, assignments)
+        return _stage_assignments_regime(project, image_path, img, address, assignments)
 
     if model_name is None:
         return {"error": "model_name is required with boxes/polygons: the real producer, "

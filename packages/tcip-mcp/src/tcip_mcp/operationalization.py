@@ -51,11 +51,11 @@ class OperationalizationRefused(ValueError):
         return {"kind": "operationalization", "message": str(self)}
 
 
-def latest_confirmed(trait: str, project_root: str | Path | None = None) -> TraitRevision:
+def latest_confirmed(trait: str, project: str | Path) -> TraitRevision:
     """``trait``'s latest confirmed revision. Refuses (:class:`OperationalizationRefused`) naming
     the trait when none of its revisions is confirmed; an unknown trait raises
     ``TraitUnknownError``."""
-    record = read_trait(trait, project_root)
+    record = read_trait(trait, project)
     if record.latest_confirmed is None:
         raise OperationalizationRefused(
             f"Refused for trait {trait!r}: none of its {record.latest.number} revision(s) is "
@@ -69,7 +69,7 @@ def latest_confirmed(trait: str, project_root: str | Path | None = None) -> Trai
 def confirmed_revision(
     delivery_kind: str,
     *,
-    project_root: str | Path | None,
+    project: str | Path,
     trait: str | None = None,
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
@@ -83,8 +83,8 @@ def confirmed_revision(
     (:class:`OperationalizationRefused`) when no trait or several qualify, when the revision states
     no operationalization for ``delivery_kind``, and when :func:`bind` refuses.
     """
-    revision = (latest_confirmed(trait, project_root) if trait is not None
-                else _revision_delivering(str(delivered_phenotype), project_root))
+    revision = (latest_confirmed(trait, project) if trait is not None
+                else _revision_delivering(str(delivered_phenotype), project))
     if delivery_kind not in revision.entry.operationalizations:
         raise OperationalizationRefused(_unstated_text(revision, delivery_kind))
     bind(revision, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
@@ -145,14 +145,14 @@ def bind(
                          f"{sorted(subjects)}")
 
 
-def _revision_delivering(delivered_phenotype: str, project_root: str | Path | None) -> TraitRevision:
+def _revision_delivering(delivered_phenotype: str, project: str | Path) -> TraitRevision:
     """The latest confirmed revision of the one trait whose latest confirmed revision delivers
     ``delivered_phenotype``; refuses (:class:`OperationalizationRefused`) naming the phenotype,
     the confirmed traits delivering it and the traits proposing it when not exactly one does."""
     confirmed: list[TraitRevision] = []
     proposed: list[str] = []
-    for name in trait_names(project_root):
-        record = read_trait(name, project_root)
+    for name in trait_names(project):
+        record = read_trait(name, project)
         if record.latest_confirmed is not None and (
                 delivered_phenotype in record.latest_confirmed.entry.delivers):
             confirmed.append(record.latest_confirmed)

@@ -12,13 +12,13 @@ import pytest
 pytest.importorskip("torch")
 
 
-def _wait_terminal(experiment_id: str, seconds: float = 120) -> dict:
+def _wait_terminal(project: Path, experiment_id: str, seconds: float = 120) -> dict:
     from tcip_mcp.tools.training_tools import monitor_training
 
     deadline = time.monotonic() + seconds
     status: dict = {}
     while time.monotonic() < deadline:
-        status = monitor_training(experiment_id)
+        status = monitor_training(project, experiment_id)
         if status.get("status") in ("completed", "failed", "canceled"):
             return status
         time.sleep(0.5)
@@ -49,11 +49,11 @@ def test_a_classification_config_launches_with_images_and_csv_only(
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
 
-    res = launch_training(cfg)
+    res = launch_training(tmp_path, cfg)
 
     assert "error" not in res, res
     assert res["pid"] != os.getpid()
-    status = _wait_terminal(res["experiment_id"])
+    status = _wait_terminal(tmp_path, res["experiment_id"])
     assert status["status"] == "completed", status
 
 
@@ -68,7 +68,7 @@ def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(tmp_pat
         "data": {"images_dir": str(images_dir), "labels_dir": str(tmp_path / "gone.csv")},
     }
 
-    result = preflight_config(cfg)
+    result = preflight_config(tmp_path, cfg)
 
     assert result["valid"] is False
     assert any("Not found: data.labels_dir" in issue for issue in result["issues"]), \
@@ -86,7 +86,7 @@ def test_a_detection_config_still_needs_its_labels_directory(tmp_path: Path) -> 
         "data": {"images_dir": str(images_dir)},
     }
 
-    result = preflight_config(cfg)
+    result = preflight_config(tmp_path, cfg)
 
     assert result["valid"] is False
     assert any("Missing 'data.labels_dir'" in issue for issue in result["issues"])

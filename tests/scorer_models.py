@@ -68,5 +68,5 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
 
     src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {}, "task": task}
     path = foreign_checkpoint(tmp_path, model_source=src)
-    return build_predictor(load_registered_checkpoint(path, project_path=str(tmp_path)),
+    return build_predictor(load_registered_checkpoint(path, project=tmp_path),
                            device="cpu")

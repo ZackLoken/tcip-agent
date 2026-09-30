@@ -29,13 +29,13 @@ from tests._population import mapped_plants
 def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_real_bindings(
     tmp_path: Path,
 ) -> None:
-    sha = record_producing_run("exp-producer")
+    sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -43,11 +43,11 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
 
     from tcip_mcp.audit import audit_log_key
 
-    records = [r for r in read_delivery_events() if r["door"] == "deliver_phenology_milestones"]
+    records = [r for r in read_delivery_events(tmp_path) if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 1, records
     record = records[0]
     assert record["trait"] == "bud_opening"
-    shipped_under = read_trait("bud_opening").latest_confirmed
+    shipped_under = read_trait("bud_opening", tmp_path).latest_confirmed
     assert shipped_under is not None
     assert (record["trait_revision"], record["trait_revision_sha256"]) == (
         shipped_under.number, shipped_under.entry_sha256)
@@ -75,13 +75,13 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
 ) -> None:
     """A real delivery's document_reconciliations and dimension_reconciliations come back
     through read_delivery_events exactly as the door computed them."""
-    sha = record_producing_run("exp-producer")
+    sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+        tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
     )
@@ -107,7 +107,7 @@ def test_a_completed_crossing_delivery_reads_back_through_read_delivery_events_w
 def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     tmp_path: Path,
 ) -> None:
-    sha = record_producing_run("exp-producer")
+    sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
 
@@ -115,13 +115,13 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     second_csv = tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
         res = deliver_phenology_milestones(
-            trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(mapping_name),
+            tmp_path, trait="bud_opening", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         )
         assert "error" not in res, res
 
-    records = [r for r in read_delivery_events() if r["door"] == "deliver_phenology_milestones"]
+    records = [r for r in read_delivery_events(tmp_path) if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 2, records
     assert records[0]["event_id"] != records[1]["event_id"]
     assert {r["output_path"] for r in records} == {str(first_csv), str(second_csv)}
@@ -129,40 +129,31 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     assert {r["delivery_kind"] for r in records} == {STATE_CROSSING_DATES}
 
 
-def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_pinned_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
+    tmp_path: Path,
 ) -> None:
-    """A web-backend process can serve more than one project, so its process-pinned root can
-    diverge from the project a specific request names, the same divergence already closed
-    for the operationalization record. A request naming a different project than the process
-    pin must still land its delivery_events record under the project it named."""
+    """A delivery through the web backend lands its delivery_events record under the project the
+    backend has open, and nowhere else."""
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app
 
     from tests.test_tcip_web_results_routes import _phenology_fixture
 
-    pinned_root = tmp_path / "pinned"
-    pinned_root.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned_root))
+    other_project = tmp_path / "other_project"
+    other_project.mkdir()
 
-    payload_root = tmp_path / "payload_project"
-    body = _phenology_fixture(payload_root, validated=True, fractions=(0.75, 1.0), detections=4)
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
 
     resp = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/results/export_csv", json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200, resp.text
 
-    payload_records = [
-        r for r in read_delivery_events(payload_root.resolve())
-        if r["door"] == "results.export_csv"
+    open_records = [
+        r for r in read_delivery_events(tmp_path) if r["door"] == "results.export_csv"
     ]
-    assert len(payload_records) == 1, payload_records
-
-    pinned_records = [
-        r for r in read_delivery_events(pinned_root) if r["door"] == "results.export_csv"
-    ]
-    assert pinned_records == []
+    assert len(open_records) == 1, open_records
+    assert read_delivery_events(other_project) == []
 
 
 def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_look(
@@ -208,7 +199,7 @@ def test_record_delivery_binding_event_raises_on_a_failed_store_write_before_any
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
             acknowledgment=None, revision=revision,
-            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+            delivery_kind=STATE_CROSSING_DATES, project=tmp_path, plant_mapping=None,
         )
 
     monkeypatch.undo()
@@ -226,8 +217,7 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     from pydantic import ValidationError
 
     bad_mapping = {
-        "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
-        "dataset_root": "C:/data", "built_at": "2026-02-01T00:00:00+00:00",
+        "name": "valley", "dataset_id": "ds-1", "dataset_root": "data", "built_at": "2026-02-01T00:00:00+00:00",
         "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
         "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
         "images_unattributed_scope": "delivered_dates",
@@ -238,7 +228,7 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
         resolution.record_delivery_binding_event(
             "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
             acknowledgment=None, revision=seed_confirmed_count(tmp_path),
-            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
+            delivery_kind=STATE_CROSSING_DATES, project=tmp_path, plant_mapping=bad_mapping,
         )
 
     assert read_delivery_events(tmp_path) == []
@@ -269,7 +259,7 @@ def test_record_delivery_binding_event_refuses_a_document_entry_missing_a_key_th
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={}, acknowledgment=None,
             revision=seed_confirmed_count(tmp_path),
-            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+            delivery_kind=STATE_CROSSING_DATES, project=tmp_path, plant_mapping=None,
         )
 
     assert read_delivery_events(tmp_path.resolve()) == []
@@ -298,13 +288,13 @@ def test_record_delivery_binding_event_refuses_a_dimension_entry_missing_a_key_t
             "test_door", None, [d], document_reconciliations={"operating_point": recon},
             dimension_reconciliations={"tile_size": tile},
             acknowledgment=None, revision=seed_confirmed_count(tmp_path),
-            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+            delivery_kind=STATE_CROSSING_DATES, project=tmp_path, plant_mapping=None,
         )
 
     assert read_delivery_events(tmp_path.resolve()) == []
 
 
-def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
+def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid() -> None:
     """No two of the three ``plant_mapping`` disclosure shapes share a required key set: a dict
     validates against exactly the one model whose keys it carries, and a hybrid combining keys
     from two shapes resolves to none."""
@@ -318,22 +308,21 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
     )
 
     mapping = {
-        "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
-        "dataset_root": "C:/data", "built_at": "2026-02-01T00:00:00+00:00",
+        "name": "valley", "dataset_id": "ds-1", "dataset_root": "data", "built_at": "2026-02-01T00:00:00+00:00",
         "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
         "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
         "dates_delivered": [], "images_unattributed": 0,
         "images_unattributed_scope": "delivered_dates", "plant_attribution": "image",
     }
     registry = {
-        "plant_registry": {"name": "reg", "digest": "0" * 64}, "project_root": str(tmp_path),
+        "plant_registry": {"name": "reg", "digest": "0" * 64},
         "raster_identity": {"width": 10, "height": 10},
         "nn_tolerance_m": {"value": 1, "source": "stated"}, "detections_unattributed": 0,
         "detections_unattributed_scope": "delivered_raster", "plant_attribution": "detection",
         "plants_outside_raster": [],
     }
     canopy = {
-        "plant_registry": {"name": "reg", "digest": "0" * 64}, "project_root": str(tmp_path),
+        "plant_registry": {"name": "reg", "digest": "0" * 64},
         "raster_identity": {"width": 10, "height": 10},
         "canopy_segments": {"path": "x", "sha256": "0" * 64, "subject": "canopy", "n_segments": 1},
         "segment_ties": [], "segments_without_plant": 0, "plants_outside_raster": [],
@@ -402,15 +391,17 @@ def _client():
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def test_delivery_events_route_lists_a_recorded_event_with_its_revision(tmp_path: Path) -> None:
-    revision = seed_confirmed_count(tmp_path)
+def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
+    opened_project: Path,
+) -> None:
+    revision = seed_confirmed_count(opened_project)
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=revision, delivery_kind="per_image_count",
-        project_root=tmp_path,
+        project=opened_project,
     )
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+    resp = _client().get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]
@@ -420,27 +411,20 @@ def test_delivery_events_route_lists_a_recorded_event_with_its_revision(tmp_path
     assert record["delivery_kind"] == "per_image_count"
 
 
-def test_delivery_events_route_confines_project_root_to_allowed_roots(
-    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    outside = tmp_path_factory.mktemp("outside")
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+def test_delivery_events_route_refuses_while_no_project_is_open() -> None:
+    resp = _client().get(DELIVERY_EVENTS_ROUTE)
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(outside)})
-
-    assert resp.status_code == 403
+    assert resp.status_code == 409
 
 
 def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_the_disclosure(
-    tmp_path: Path,
+    opened_project: Path,
 ) -> None:
     """A record whose ``plant_mapping`` lacks ``dates_delivered``, ``images_unattributed`` and
     ``plant_attribution`` refuses the whole listing by event_id rather than being served with
     the gap silently absent."""
     event_id = "lacking-disclosure"
-    key = resolution.delivery_event_key(project_state_dir(tmp_path), event_id)
+    key = resolution.delivery_event_key(project_state_dir(opened_project), event_id)
     ts.replace(
         key,
         {
@@ -451,9 +435,8 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_
             "output_path": None,
             "plant_mapping": {
                 "name": "valley",
-                "project_root": str(tmp_path),
                 "dataset_id": "ds-1",
-                "dataset_root": "C:/data",
+                "dataset_root": "data",
                 "built_at": "2026-02-01T00:00:00+00:00",
                 "record_sha256": "0" * 64,
                 "nn_tolerance_m": {"value": 3, "source": "stated"},
@@ -467,7 +450,7 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_
         expect=ts.Version.ABSENT,
     )
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+    resp = _client().get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 400
     detail = resp.json()["detail"]
@@ -477,7 +460,7 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_lacks_
 
 
 def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_three_keys(
-    tmp_path: Path,
+    opened_project: Path,
 ) -> None:
     """A ``plant_mapping`` built the way a real delivery builds it (``MappingBuild.
     delivery_disclosure``) carries all three keys, and the route serves them through unchanged."""
@@ -487,7 +470,7 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
 
     dates = ["2026-01-01", "2026-01-08"]
     build = MappingBuild(
-        name="valley", project_root=str(tmp_path), dataset_root=str(tmp_path / "data"),
+        name="valley", dataset_root="data",
         dataset_id="ds-1", built_by="build_plant_mapping",
         built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=dates,
@@ -499,16 +482,16 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
     )
     disclosure = build.delivery_disclosure(
         {"captures_unverified": [], "plant_csvs_unverified": []}, dates)
-    revision = read_trait("bud_opening").latest_confirmed
+    revision = read_trait("bud_opening", opened_project).latest_confirmed
     assert revision is not None
 
     resolution.record_delivery_binding_event(
         "test_door", None, [], document_reconciliations={}, dimension_reconciliations={},
         acknowledgment=None, revision=revision,
-        delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=disclosure,
+        delivery_kind=STATE_CROSSING_DATES, project=opened_project, plant_mapping=disclosure,
     )
 
-    resp = _client().get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+    resp = _client().get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]

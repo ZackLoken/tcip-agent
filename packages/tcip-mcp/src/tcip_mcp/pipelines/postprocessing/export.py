@@ -187,7 +187,7 @@ def export_detection_csv(
     operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledgment: Acknowledgment | None = None,
-    project_root: str | Path | None = None,
+    project: Path,
 ) -> tuple[str, dict, dict]:
     """Export per-image detection counts to CSV.
 
@@ -227,8 +227,8 @@ def export_detection_csv(
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
         acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
-        project_root: The project this delivery event belongs to. ``None`` resolves against this
-            process's pinned platform root.
+        project: The project this delivery belongs to, whose runs verify its buckets and
+            whose log records its event.
 
     Returns:
         ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
@@ -280,9 +280,9 @@ def export_detection_csv(
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
         operating_point_recon = reconcile_operating_point_validity(
-            pred_dirs, trait=trait, asserted=operating_point_validated)
+            pred_dirs, project=project, trait=trait, asserted=operating_point_validated)
         flags["operating_point"] = operating_point_recon["validated"]
-        tile_recon = reconcile_tile_size_validity(pred_dirs)
+        tile_recon = reconcile_tile_size_validity(pred_dirs, project=project)
         if tile_recon["operative"]:
             flags["tile_size"] = tile_recon["validated"]
 
@@ -297,7 +297,7 @@ def export_detection_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
-                           columns=_PROVENANCE_COLUMNS)
+                           columns=_PROVENANCE_COLUMNS, project=project)
     fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
                  + _PROVENANCE_COLUMNS)
 
@@ -326,7 +326,7 @@ def export_detection_csv(
         ),
         dimension_reconciliations={"tile_size": tile_recon} if tile_recon is not None else {},
         acknowledgment=gate.effective_acknowledgment(), revision=revision,
-        delivery_kind=PER_IMAGE_COUNT, project_root=project_root)
+        delivery_kind=PER_IMAGE_COUNT, project=project)
     summary = {
         "stamp": gate.stamp,
         "unvalidated": gate.unvalidated,

@@ -94,25 +94,25 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
         "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
         "scheduler": {"type": "cosine"}, "gradient_accumulation_steps": 1,
     }
-    train_ds, _val, _partition = auto_train_val("detection", data_cfg, None)
+    train_ds, _val, _partition = auto_train_val(project_root, "detection", data_cfg, None)
     collate = task_collate("detection")
-    run = trainer_run(config, out_dir, has_val_loader=True, id=out_dir.name)
+    run = trainer_run(config, out_dir, project=project_root, has_val_loader=True, id=out_dir.name)
     completed = train(run, DataLoader(train_ds, batch_size=2, collate_fn=collate),
                       val_loader=DataLoader(train_ds, batch_size=2, collate_fn=collate))
     assert completed.status == "completed", completed.status
     checkpoint = out_dir / "model_best.pt"
-    registered = register_model(name=out_dir.name, checkpoint_path=str(checkpoint), config={},
-                                project_path=str(project_root))
+    registered = register_model(project_root, name=out_dir.name, checkpoint_path=str(checkpoint),
+                                config={})
     assert "error" not in registered, registered
     return str(checkpoint)
 
 
-def _calibrate(checkpoint: str, images: Path, reference: Path, out: Path) -> dict:
+def _calibrate(project: Path, checkpoint: str, images: Path, reference: Path, out: Path) -> dict:
     from tests import _trait_fixtures as fx
 
     from tcip_mcp.tools.inference_tools import run_inference
 
-    return run_inference(checkpoint_path=checkpoint, images_dir=str(images),
+    return run_inference(project, checkpoint_path=checkpoint, images_dir=str(images),
                          output_dir=str(out), trait=fx.COUNT_TRAIT,
                          calibration_labels_dir=str(reference))
 
@@ -128,7 +128,7 @@ def test_a_run_that_recorded_no_subject_is_refused_calibration_by_name(tmp_path:
     # The producer admitted by shape and recorded an empty scope.
     assert data_cfg["scope"] == {"subject": None, "attribute": None, "id_map": None}
 
-    result = _calibrate(checkpoint, images, reference, tmp_path / "ds" / "predictions" / "a")
+    result = _calibrate(tmp_path, checkpoint, images, reference, tmp_path / "ds" / "predictions" / "a")
 
     assert "records no subject" in result.get("error", ""), result
     assert not (tmp_path / "ds" / "predictions" / "a").exists() or not any(

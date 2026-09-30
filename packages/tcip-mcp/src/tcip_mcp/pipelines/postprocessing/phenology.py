@@ -509,7 +509,7 @@ def _write_phenology_delivery(
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
-    project_root: str | Path | None,
+    project: Path,
     plant_mapping: dict,
 ) -> dict:
     """Gate, compose and write one phenology delivery's provenance cells, then record the
@@ -526,7 +526,7 @@ def _write_phenology_delivery(
     ``acknowledged_by``/``acknowledgment_reason``, all through ``resolution.delivered_tail``) and
     returns them. Records the delivery through
     ``record_delivery_binding_event`` after the file is written, under the caller-stated ``door``
-    and the explicit ``project_root``, with the gate's own ``effective_acknowledgment()``.
+    and the explicit ``project``, with the gate's own ``effective_acknowledgment()``.
 
     ``plant_mapping`` is the mapping this delivery attributed detections through, shaped as
     ``delivery_events_schema.PlantMappingDisclosure`` declares
@@ -587,7 +587,7 @@ def _write_phenology_delivery(
          "images_unattributed": plant_mapping["images_unattributed"],
          "plant_attribution": plant_mapping["plant_attribution"]},
         bindings, gate,
-        columns=tuple(PROVENANCE_COLUMNS))
+        columns=tuple(PROVENANCE_COLUMNS), project=project)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -603,7 +603,7 @@ def _write_phenology_delivery(
         dimension_reconciliations=dimension_reconciliations,
         acknowledgment=gate.effective_acknowledgment(),
         revision=revision, delivery_kind=STATE_CROSSING_DATES,
-        project_root=project_root, plant_mapping=plant_mapping,
+        project=project, plant_mapping=plant_mapping,
     )
     return cells
 
@@ -620,7 +620,7 @@ def write_phenology_csv(
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
-    project_root: str | Path | None,
+    project: Path,
     plant_mapping: dict,
 ) -> dict:
     """Write per-plant milestone rows to the canonical delivery CSV, under the trait's confirmed
@@ -636,7 +636,7 @@ def write_phenology_csv(
         flags=flags, acknowledgment=acknowledgment,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=project_root,
+        predictions_by_date=predictions_by_date, project=project,
         plant_mapping=plant_mapping)
 
 
@@ -652,7 +652,7 @@ def write_phenology_curve_csv(
     producer: dict,
     dimension_reconciliations: Mapping[str, Mapping],
     predictions_by_date: Mapping[str, str],
-    project_root: str | Path | None,
+    project: Path,
     plant_mapping: dict,
 ) -> dict:
     """Write per-(plant, date) curve rows to the delivery CSV, under the trait's confirmed
@@ -664,5 +664,5 @@ def write_phenology_curve_csv(
         flags=flags, acknowledgment=acknowledgment,
         document_reconciliations=document_reconciliations, producer=producer,
         dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project_root=project_root,
+        predictions_by_date=predictions_by_date, project=project,
         plant_mapping=plant_mapping)

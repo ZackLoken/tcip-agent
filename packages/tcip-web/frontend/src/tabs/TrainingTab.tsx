@@ -24,6 +24,7 @@ import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEm
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
+import { selectProjectRoot } from "@/store/slices/gui";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
@@ -166,7 +167,7 @@ function configRow(
 // Training is launched from a config already recorded in this project, or described fresh to
 // the agent; this tab tracks the runs those launches produce and their live metrics.
 export function TrainingTab() {
-  const projectRoot = useStore((s) => s.gui.dataset.project_root);
+  const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const subject = useStore((s) => s.gui.dataset.subject);
 
@@ -242,7 +243,7 @@ export function TrainingTab() {
         const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
         return pruned.size === prev.size ? prev : pruned;
       });
-      // A selected run that left the list (repinned platform root, say) must give up its
+      // A selected run that left the list (another project opened, say) must give up its
       // stream too, or a stale selection keeps reconnecting behind a run this list never shows.
       setSelectedRun((prev) => (prev !== null && !stillPresent.has(prev) ? null : prev));
     } catch (e) {
@@ -327,7 +328,7 @@ export function TrainingTab() {
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
     // the toast names that once per selection, not once per silent retry.
     let errorToasted = false;
-    streamRef.current = openTrainingStream(projectRoot, selectedRun, (msg) => {
+    streamRef.current = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
       } else if (msg.type === "status") {

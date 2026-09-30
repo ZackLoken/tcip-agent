@@ -100,7 +100,7 @@ def test_doctor_reports_nothing_for_a_project_with_no_registered_models(tmp_path
 
 
 def test_identity_resolution_matches_a_registered_checkpoint_by_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A checkpoint copied to a path the registry never saw still resolves to the run that
     produced it, matched on the content hash its final status names: the binding a run's own
@@ -110,16 +110,15 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
 
     root = tmp_path / "proj"
     root.mkdir()
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
-    finished_run(None, experiment_id="leaf_run")
-    trained = Path(registered_checkpoint(None, experiment_id="bud_run3"))
+    finished_run(root, experiment_id="leaf_run")
+    trained = Path(registered_checkpoint(root, experiment_id="bud_run3"))
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()
     delivered.write_bytes(trained.read_bytes())
 
-    checkpoint = load_registered_checkpoint(delivered, project_path=str(root))
+    checkpoint = load_registered_checkpoint(delivered, project=root)
     identity = resolve_model_identity(checkpoint)
     assert identity["sha256"] == hashlib.sha256(trained.read_bytes()).hexdigest()
     assert identity["experiment_id"] == "bud_run3"

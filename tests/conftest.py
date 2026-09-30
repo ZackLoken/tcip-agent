@@ -110,82 +110,67 @@ def pytest_collection_modifyitems(config, items):
         )
 
 
-@pytest.fixture(autouse=True)
-def _restore_platform_root_env():
-    """Keep the process-global platform-state root hermetic across tests.
-
-    ``activate_project`` repins ``TCIP_STATE_ROOT`` in-process (so a project's audit /
-    experiments / registry co-locate under it). Since pytest runs in one process, a test
-    that adopts a tmp project would otherwise leak that now-deleted root, and the
-    :class:`~tcip_mcp.project_paths.RootBinding` naming it, into later tests. Snapshot and
-    restore both the var and the binding around every test.
-    """
-    from tcip_mcp import project_paths
-
-    saved = os.environ.get("TCIP_STATE_ROOT")
-    saved_binding = project_paths.root_binding()
-    yield
-    if saved is None:
-        os.environ.pop("TCIP_STATE_ROOT", None)
-    else:
-        os.environ["TCIP_STATE_ROOT"] = saved
-    # getattr, not a plain import, so this file still collects without restore_binding.
-    restore = getattr(project_paths, "restore_binding", None)
-    if restore is not None:
-        restore(saved_binding)
-
-
 @pytest.fixture
 def tmp_path(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
              monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Each test's ``tmp_path`` is a project directory inside its own fresh workspace.
+    """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own fresh workspace, which
+    ``TCIP_WORKSPACE`` names and the web backend is started with, no additive image roots.
 
-    The web layer's path guard admits only the workspace, the roots registered to its projects,
-    and ``TCIP_IMAGE_ROOTS``. Laying ``tmp_path`` out as ``<workspace>/project`` gives every test
-    the production topology (a workspace root distinct from the project under it, and the
-    platform-state pin below on the project, as ``workspace.activate_project`` leaves it) with
-    no fixture naming the layout. A refusal case uses a directory beside the workspace
-    (``tmp_path_factory.mktemp``); a test of the additive roots sets ``TCIP_IMAGE_ROOTS`` itself.
+    A refusal case uses a directory beside the workspace (``tmp_path_factory.mktemp``); a test of
+    the additive roots starts the backend with them itself.
     """
+    from tcip_web.state import store
+
     name = re.sub(r"[\W]", "_", request.node.name)[:30]
-    workspace = tmp_path_factory.mktemp(name, numbered=True) / "workspace"
+    workspace = (tmp_path_factory.mktemp(name, numbered=True) / "workspace").resolve()
     project = workspace / "project"
     project.mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    store.configure(workspace, ())
     return project
 
 
 @pytest.fixture(autouse=True)
-def _close_open_project():
-    """Leave the web layer's open project closed after each test.
-
-    The GUI state store is a process-wide singleton; a Results door serves only the project it
-    has open, so a test that opened one must not hand it to the next test.
-    """
-    yield
-    state = sys.modules.get("tcip_web.state")
-    if state is not None:
-        state.store.close_project()
-
-
-@pytest.fixture(autouse=True)
-def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Pin every test's platform-state root to its own unique ``tmp_path``.
-
-    Without this, any unpinned write (audit, experiments, the vision candidates cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/``,
-    shared across tests and, under xdist, across worker processes. Uses monkeypatch so it
-    auto-restores; a test that manages the var itself (setenv/delenv in its body) overrides
-    this and is unaffected.
-    """
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+def _own_workspace(tmp_path: Path) -> None:
+    """Give every test its own workspace, whether or not it names ``tmp_path``, so a record kept
+    under the workspace root (the backend's port, the last-opened pointer) never reaches the next
+    test."""
 
 
 @pytest.fixture
-def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Propose and confirm ``tests/_trait_fixtures.BUD_OPENING`` in this test's pinned platform
-    state root, so measurement readers of ``bud_opening`` resolve. Not autouse: an unrelated
-    test's root stays empty.
+def project(tmp_path: Path) -> Path:
+    """``tmp_path`` made a project through the platform's own creation door."""
+    from tests._web_fixtures import new_project
+
+    return new_project(tmp_path)
+
+
+@pytest.fixture
+def opened_project(tmp_path: Path) -> Path:
+    """``tmp_path`` made a project and open in the web backend, the way the picker's open
+    leaves it."""
+    from tests._web_fixtures import open_new_project
+
+    return open_new_project(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _close_open_project():
+    """Leave the web layer's process-wide state store with no project open after each test."""
+    yield
+    state = sys.modules.get("tcip_web.state")
+    if state is not None and state.store.project_root is not None:
+        import asyncio
+
+        asyncio.run(state.store.close_project())
+
+
+@pytest.fixture
+def seed_bud_trait_spec(tmp_path: Path):
+    """Propose and confirm ``tests/_trait_fixtures.BUD_OPENING`` in this test's ``tmp_path``
+    project, so measurement readers of ``bud_opening`` resolve. Not autouse: an unrelated
+    test's project stays empty.
     """
     from tests._trait_fixtures import BUD_OPENING, propose_and_confirm
 
@@ -207,9 +192,7 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own preflight admits: an importable builder and a data
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
-    detection_images``), so a sweep test exercises the search itself rather than the door's
-    refusal. Held admitted by test_split_draws.test_real_hpo_base_config_is_admitted_by_preflight,
-    which runs it through preflight_config directly."""
+    detection_images``)."""
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT, "id_map": {DATA_DIR_SUBJECT: 0}}

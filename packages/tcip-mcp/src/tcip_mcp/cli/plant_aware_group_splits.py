@@ -14,7 +14,7 @@ hands the resulting ``{identity: group_key}`` map to ``draw_splits(group_key_map
 admission and refuses to write a selection without one.
 
 Usage:
-    tcip plant-aware-group-splits <dataset_root> --plant-csv <plants.csv> \
+    tcip plant-aware-group-splits <dataset_root> --project <project> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
         --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> [--seed 42] \
         [--tolerance-m 5.0] [--output-path <dir>]
@@ -117,6 +117,8 @@ def derive_plant_group_key_map(
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("dataset_root", help="Dataset root (canonical images/, annotations/ layout).")
+    parser.add_argument("--project", required=True,
+                        help="The project the draw acts on and records its audit line under.")
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
     parser.add_argument("--train-ratio", type=float, required=True,
@@ -144,15 +146,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                               "of --subject; omitted, every instance of --subject counts.")
     args = parser.parse_args(argv)
 
-    # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.binding import bind_default
-
+    from tcip_mcp.cli import bound_project
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
     from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits
 
-    bind_default()
+    project = bound_project(args.project)
 
     scan = _scan_dataset(args.dataset_root)
     stem_to_raster: dict[str, Path] = {}
@@ -180,6 +180,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     print(f"Resolved {len(group_key_map)} stem(s) to {n_groups} plant/plot group(s).")
 
     result = draw_splits(
+        project,
         folder_path=args.dataset_root,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,

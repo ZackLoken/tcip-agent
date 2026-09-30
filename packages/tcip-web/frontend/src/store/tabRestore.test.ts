@@ -3,75 +3,74 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TAB_NAMES } from "@/api/types.generated";
 import { datasetKey, loadLastTab, recordLastTab, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { DatasetSelection, ReviewFilters, TabName } from "@/store/types";
+import type { DatasetSelection, OpenProject, ReviewFilters, TabName } from "@/store/types";
 
 const s = () => useStore.getState();
 
 const ROOT = "/w/alpha";
+const PROJECT: OpenProject = { id: "a1b2c3d4e5f6", path: ROOT };
 
 function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {
-    project_root: ROOT,
     dataset_root: ROOT,
     subject: "subject_a",
     date: "2026-01-01",
+    model_name: null,
     image_list: ["a.jpg"],
     current_image_index: 0,
     images_dir: null,
     annotations_dir: null,
     predictions_dir: null,
+    label_paths: {},
+    prediction_paths: {},
     ...over,
   };
 }
 
 describe("per-project last-used tab", () => {
   beforeEach(() => {
-    localStorage.removeItem(`tcip.lasttab.${ROOT}`);
+    localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
     useStore.setState((st) => ({
       gui: { ...st.gui, active_tab: "annotate", dataset: selection() },
+      openProject: PROJECT,
     }));
   });
 
   it("records the tab per project as the user switches", () => {
     s().setActiveTab("results");
-    expect(loadLastTab(ROOT)).toBe("results");
+    expect(loadLastTab(PROJECT.id)).toBe("results");
   });
 
   it("does not record a tab when no project is open", () => {
-    useStore.setState((st) => ({
-      gui: {
-        ...st.gui,
-        dataset: selection({ project_root: null, dataset_root: null }),
-      },
-    }));
+    useStore.setState({ openProject: null });
     s().setActiveTab("results");
-    expect(loadLastTab(ROOT)).toBeNull();
+    expect(loadLastTab(PROJECT.id)).toBeNull();
   });
 
   it("opening a project restores its recorded tab", () => {
-    recordLastTab(ROOT, "inference");
-    s().applyRestoredDataset(selection(), 1);
+    recordLastTab(PROJECT.id, "inference");
+    s().applyRestoredDataset(selection(), PROJECT);
     expect(s().gui.active_tab).toBe("inference");
   });
 
   it("first-ever open of a project lands on Annotate", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, active_tab: "review" } }));
-    s().applyRestoredDataset(selection(), 1);
+    s().applyRestoredDataset(selection(), PROJECT);
     expect(s().gui.active_tab).toBe("annotate");
   });
 
-  it("loadLastTab rejects a value that is not a tab name", () => {
-    localStorage.setItem(`tcip.lasttab.${ROOT}`, "garbage");
-    expect(loadLastTab(ROOT)).toBeNull();
+  it("loadLastTab refuses a recorded value that is not a tab name", () => {
+    localStorage.setItem(`tcip.lasttab.${PROJECT.id}`, "garbage");
+    expect(() => loadLastTab(PROJECT.id)).toThrow(/names no tab: garbage/);
   });
 
   it("restores each of the app's tabs, not just some of them", () => {
     expect(TAB_NAMES).toHaveLength(8);
     for (const tab of TAB_NAMES) {
       const other: TabName = tab === "annotate" ? "review" : "annotate";
-      recordLastTab(ROOT, tab);
+      recordLastTab(PROJECT.id, tab);
       useStore.setState((st) => ({ gui: { ...st.gui, active_tab: other } }));
-      s().applyRestoredDataset(selection(), 1);
+      s().applyRestoredDataset(selection(), PROJECT);
       expect(s().gui.active_tab).toBe(tab);
     }
   });
@@ -96,16 +95,17 @@ describe("saved review filters on reopening a dataset", () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    localStorage.removeItem(`tcip.lasttab.${ROOT}`);
+    localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
     useStore.setState((st) => ({
       gui: { ...st.gui, review: LIVE_FILTERS, dataset: selection() },
       imageStatus: { ...st.imageStatus, activeFilter: "all" },
+      openProject: PROJECT,
     }));
   });
 
   it("brings back the filters the reviewer left on this dataset", () => {
     const sel = selection({ image_list: ["a.jpg", "b.jpg", "c.jpg"] });
-    const key = datasetKey(sel);
+    const key = datasetKey(PROJECT, sel);
     expect(key).not.toBeNull();
     saveDatasetUi(key as string, {
       index: 2,
@@ -113,7 +113,7 @@ describe("saved review filters on reopening a dataset", () => {
       statusFilter: "negative",
     });
 
-    s().applyRestoredDataset(sel, 1);
+    s().applyRestoredDataset(sel, PROJECT);
 
     expect(s().gui.review.iou_threshold).toBe(0.7);
     expect(s().gui.review.conf_threshold).toBe(0.4);
@@ -125,7 +125,7 @@ describe("saved review filters on reopening a dataset", () => {
   });
 
   it("keeps the live filters when this dataset has nothing saved", () => {
-    s().applyRestoredDataset(selection(), 1);
+    s().applyRestoredDataset(selection(), PROJECT);
     expect(s().gui.review).toEqual(LIVE_FILTERS);
     expect(s().imageStatus.activeFilter).toBe("all");
   });
@@ -134,7 +134,7 @@ describe("saved review filters on reopening a dataset", () => {
     useStore.setState((st) => ({
       imageStatus: { ...st.imageStatus, staleMarks: ["a.jpg"] },
     }));
-    s().applyRestoredDataset(selection({ subject: "subject_b" }), 1);
+    s().applyRestoredDataset(selection({ subject: "subject_b" }), PROJECT);
     expect(s().imageStatus.staleMarks).toEqual([]);
   });
 });

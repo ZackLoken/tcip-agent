@@ -77,7 +77,7 @@ def test_model_registry_index_reads_as_an_empty_list_for_a_fresh_project(tmp_pat
 def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):
     root = tmp_path / "dataset"
     root.mkdir()
-    result = register_dataset(str(root), "chestnut", str(tmp_path))
+    result = register_dataset(tmp_path, str(root), "chestnut")
     assert "error" not in result, result
 
     entries = read_datasets(tmp_path)

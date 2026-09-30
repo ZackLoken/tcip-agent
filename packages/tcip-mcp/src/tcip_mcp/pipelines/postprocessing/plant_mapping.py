@@ -97,9 +97,9 @@ class PlantRecord:
 
 @dataclass
 class Assignment:
-    """The mapping we produce for a single image."""
+    """The mapping we produce for a single image, named by its file name in its date folder."""
 
-    image_path: str
+    image: str
     stem: str
     date_folder: str
     plot_name: Optional[str]
@@ -146,13 +146,13 @@ class MappingBuild:
     before :func:`persist_mapping` writes it and the receipt behind it.
 
     ``dataset_root``/``dataset_id`` are the door's own resolved facts (``dataset_id`` is the
-    dataset identity record's minted id); ``project_root``/``built_by``/``name`` are likewise the
+    dataset identity record's minted id; ``dataset_root`` is spelled against the owning project
+    by :func:`~tcip_mcp.registry_paths.stored_path`); ``built_by``/``name`` are likewise the
     door's own facts. ``capture_digests`` is ``capture_identity``'s per-capture counterpart
     (:func:`capture_digests`, one entry per stem, derived from the same row builder).
     """
 
     name: str
-    project_root: str
     dataset_root: str
     dataset_id: str
     built_by: str
@@ -262,7 +262,6 @@ class MappingBuild:
         dates_delivered = sorted(dates)
         return {
             "name": self.name,
-            "project_root": self.project_root,
             "dataset_id": self.dataset_id,
             "dataset_root": self.dataset_root,
             "built_at": self.built_at,
@@ -287,17 +286,22 @@ _EXIF_IFD_TAG = 0x8769
 _GPS_IFD_TAG = 0x8825
 
 
-def _exif_dms_to_decimal(dms, ref: str) -> Optional[float]:
-    if not dms:
+def _exif_dms_to_decimal(dms, ref, *, axis: str, negative: str, positive: str,
+                         path: Path) -> Optional[float]:
+    """Degrees, minutes and seconds with their hemisphere reference as signed decimal degrees, or
+    ``None`` when ``dms`` is absent. Raises ``ValueError`` naming ``path`` for a value that is not
+    three numbers or a reference that is not ``negative`` or ``positive``."""
+    if dms is None:
         return None
     try:
         d, m, s = (float(x) for x in dms)
-    except Exception:
-        return None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path}'s GPS {axis} {dms!r} is not degrees, minutes and seconds") from exc
+    if ref not in (negative, positive):
+        raise ValueError(f"{path}'s GPS {axis} reference {ref!r} is neither {negative!r} nor "
+                         f"{positive!r}, so its hemisphere is not stated")
     val = d + m / 60 + s / 3600
-    if ref in ("S", "W"):
-        val = -val
-    return val
+    return -val if ref == negative else val
 
 
 def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
@@ -305,7 +309,8 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
 
     The ``try`` covers ``Image.open`` alone: a capture PIL cannot open (a HEIC with no decoder
     installed, a locked file) becomes a stamp with ``readable=False``; an image that opens and
-    carries no EXIF stays ``readable=True`` with ``None`` fields.
+    carries no EXIF stays ``readable=True`` with ``None`` fields. A capture time, GPS coordinate or
+    positioning error present in malformed form raises ``ValueError`` naming the image.
     """
     stamp = ImageStamp(
         path=str(path), stem=path.stem, date_folder=date_folder, kind="image", name=path.name,
@@ -324,20 +329,25 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
         if dt_raw is not None:
             try:
                 stamp.timestamp = datetime.strptime(str(dt_raw), "%Y:%m:%d %H:%M:%S")
-            except Exception:
-                pass
+            except ValueError as exc:
+                raise ValueError(f"{path}'s capture time {dt_raw!r} does not read") from exc
 
         gps_raw = exif.get_ifd(_GPS_IFD_TAG)
         if gps_raw:
             gps = {ExifTags.GPSTAGS.get(k, k): v for k, v in gps_raw.items()}
-            stamp.lat = _exif_dms_to_decimal(gps.get("GPSLatitude"), str(gps.get("GPSLatitudeRef", "N")))
-            stamp.lon = _exif_dms_to_decimal(gps.get("GPSLongitude"), str(gps.get("GPSLongitudeRef", "E")))
+            stamp.lat = _exif_dms_to_decimal(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"),
+                                             axis="latitude", negative="S", positive="N",
+                                             path=path)
+            stamp.lon = _exif_dms_to_decimal(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef"),
+                                             axis="longitude", negative="W", positive="E",
+                                             path=path)
             hpe = gps.get("GPSHPositioningError")
             if hpe is not None:
                 try:
                     stamp.h_pos_err = float(hpe)
-                except Exception:
-                    pass
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"{path}'s GPS positioning error {hpe!r} is not a number") from exc
     return stamp
 
 
@@ -678,51 +688,55 @@ register_store(
 )
 
 
-def plant_registry_key(project_root: Path | str, name: str) -> Key:
+def plant_registry_key(project: Path | str, name: str) -> Key:
     """One project's named plant registry: identity state for a plant-locations CSV set, under
     ``.tcip/state`` like :func:`plant_mapping_key`.
     """
-    return Key(PLANT_REGISTRY_STORE, str(project_state_dir(Path(project_root).absolute())), (name,))
+    return Key(PLANT_REGISTRY_STORE, str(project_state_dir(project)), (name,))
 
 
-def load_registry(project_root: Path | str, name: str) -> Optional[dict]:
+def load_registry(project: Path | str, name: str) -> Optional[dict]:
     """The named registry record, or ``None`` when nothing is stored under that name (including
     a name that was never registered, or one deleted since a mapping recorded it)."""
-    return tcip_store.read(plant_registry_key(project_root, name), default=None)
+    return tcip_store.read(plant_registry_key(project, name), default=None)
 
 
-def registry_csv_entries(record: Optional[dict]) -> list[dict]:
-    """The ``{path, sha256, n_plants}`` entries a loaded registry record carries, or an empty list
-    when ``record`` is ``None``. What a missing or mismatched registry means is
-    :func:`registry_entries_or_refusal`'s.
+def registry_csv_entries(record: Optional[dict], project: Path | str) -> list[dict]:
+    """The ``{path, sha256, n_plants}`` entries a loaded registry record of ``project``
+    carries, each ``path`` resolved through
+    :func:`~tcip_mcp.registry_paths.resolved_registry_path`, or an empty list when ``record`` is
+    ``None``. What a missing or mismatched registry means is :func:`registry_entries_or_refusal`'s.
     """
-    return list(record["csvs"]) if record else []
+    from tcip_mcp.registry_paths import resolved_registry_path
+
+    return [{**e, "path": str(resolved_registry_path(project, e["path"]))}
+            for e in record["csvs"]] if record else []
 
 
 def registry_entries_or_refusal(
-    build: "MappingBuild", project_root: Path | str,
+    build: "MappingBuild", project: Path | str,
 ) -> tuple[list[dict], Optional[str]]:
     """The CSV entries ``build.plant_registry`` names, or the refusal naming the registry, the
-    mapping and ``project_root`` when they cannot be trusted: the named registry no longer loads,
+    mapping and ``project`` when they cannot be trusted: the named registry no longer loads,
     or its own ``digest`` no longer matches ``build.plant_registry["digest"]``.
     """
     registry_name = (build.plant_registry or {}).get("name")
     if not registry_name:
         return [], None
-    record = load_registry(project_root, registry_name)
+    record = load_registry(project, registry_name)
     if record is None:
         return [], (
-            f"plant registry {registry_name!r} under {project_root} named by mapping "
+            f"plant registry {registry_name!r} under {project} named by mapping "
             f"{build.name!r} no longer loads (deleted since this mapping was built); "
             "re-register it with register_plant_registry, or rebuild the mapping against a "
             "different registry")
     stored_digest = (build.plant_registry or {}).get("digest")
     if stored_digest is not None and record.get("digest") != stored_digest:
         return [], (
-            f"plant registry {registry_name!r} under {project_root} named by mapping "
+            f"plant registry {registry_name!r} under {project} named by mapping "
             f"{build.name!r} has moved (built against digest {stored_digest!r}, now "
             f"{record.get('digest')!r}); rebuild the mapping against the current registry")
-    return registry_csv_entries(record), None
+    return registry_csv_entries(record, project), None
 
 
 def verify_registry_csv_bytes(
@@ -753,14 +767,19 @@ def verify_registry_csv_bytes(
     return missing, rewritten, bytes_by_path
 
 
-def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
-    """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, the
-    content digest over every parsed row and the total plant count, committing nothing.
+def parse_plant_registry_csvs(
+    csv_paths: list[Path], project: Path | str,
+) -> tuple[list[dict], str, int]:
+    """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, each
+    ``path`` spelled against ``project`` by :func:`~tcip_mcp.registry_paths.stored_path`,
+    the content digest over every parsed row and the total plant count, committing nothing.
 
     Raises :class:`NoGeoreferencedPlantsRefusal`, naming every file that parsed no georeferenced,
     named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
     included).
     """
+    from tcip_mcp.registry_paths import stored_path
+
     failed: list[str] = []
     csvs_meta: list[dict] = []
     all_plants: list[PlantRecord] = []
@@ -775,7 +794,7 @@ def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, i
             continue
         all_plants.extend(records)
         csvs_meta.append({
-            "path": str(p),
+            "path": stored_path(p, project),
             "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
             "n_plants": len(records),
         })
@@ -790,7 +809,7 @@ def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, i
 
 
 def register_plant_registry_record(
-    project_root: Path | str,
+    project: Path | str,
     name: str,
     csv_paths: list[Path],
     *,
@@ -809,15 +828,15 @@ def register_plant_registry_record(
     second registration under a taken name returns the existing record unchanged when the digest
     matches, and raises :class:`PlantRegistryNameConflict` otherwise, naming the two digests.
     """
-    csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths)
-    key = plant_registry_key(project_root, name)
+    csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
+    key = plant_registry_key(project, name)
     with tcip_store.transaction(key) as txn:
         existing = txn.read(key, default=None)
         if existing is not None:
             if existing.get("digest") == digest:
                 return existing
             raise PlantRegistryNameConflict(
-                f"plant registry {name!r} under {project_root} already names different plants "
+                f"plant registry {name!r} under {project} already names different plants "
                 f"(digest {existing.get('digest')!r}, this registration would write "
                 f"{digest!r}); register under a new name")
         record = {
@@ -983,7 +1002,7 @@ def assign_plants(
         for s in stamps:
             out.append(
                 Assignment(
-                    image_path=s.path,
+                    image=s.name,
                     stem=s.stem,
                     date_folder=s.date_folder,
                     plot_name=None,
@@ -1005,7 +1024,7 @@ def assign_plants(
             if s.lat is None or s.lon is None:
                 out.append(
                     Assignment(
-                        image_path=s.path,
+                        image=s.name,
                         stem=s.stem,
                         date_folder=s.date_folder,
                         plot_name=None,
@@ -1032,7 +1051,7 @@ def assign_plants(
                 if plant is None or nn_d is None or nn_d > nn_tolerance_m * NEAREST_MATCH_FACTOR:
                     out.append(
                         Assignment(
-                            image_path=s.path,
+                            image=s.name,
                             stem=s.stem,
                             date_folder=s.date_folder,
                             plot_name=None,
@@ -1044,7 +1063,7 @@ def assign_plants(
                 else:
                     out.append(
                         Assignment(
-                            image_path=s.path,
+                            image=s.name,
                             stem=s.stem,
                             date_folder=s.date_folder,
                             plot_name=plant.plot_name,
@@ -1059,7 +1078,7 @@ def assign_plants(
             claimed.add(best_idx)
             out.append(
                 Assignment(
-                    image_path=s.path,
+                    image=s.name,
                     stem=s.stem,
                     date_folder=s.date_folder,
                     plot_name=p.plot_name,
@@ -1070,8 +1089,8 @@ def assign_plants(
             )
 
     # Return in the original stamp order so callers can merge with their image lists
-    by_path = {a.image_path: a for a in out}
-    return [by_path[s.path] for s in stamps]
+    by_image = {(a.date_folder, a.image): a for a in out}
+    return [by_image[(s.date_folder, s.name)] for s in stamps]
 
 
 # ── Whole-dataset driver ────────────────────────────────────────────────
@@ -1139,7 +1158,7 @@ def build_mapping(
     name: str,
     dataset_root: Path | str,
     dataset_id: str,
-    project_root: Path | str,
+    project: Path | str,
     built_by: str,
     plant_registry: dict,
     dates: Optional[list[str]] = None,
@@ -1148,8 +1167,8 @@ def build_mapping(
     """Build one project's named plant mapping: per-date assignments plus the provenance that binds
     the record to the inputs it was built from.
 
-    ``name``/``dataset_root``/``dataset_id``/``project_root``/``built_by`` are the caller's own
-    resolved facts. ``plant_csv_paths`` are the files this build reads the plants from (resolved by
+    ``name``/``dataset_root``/``dataset_id``/``built_by`` are the caller's own resolved facts, and
+    ``project`` the project the mapping belongs to. ``plant_csv_paths`` are the files this build reads the plants from (resolved by
     the caller from ``plant_registry``'s own ``name``); ``plant_registry`` is the ``{"name": ...,
     "digest": ...}`` reference stored on the record in their place.
 
@@ -1208,10 +1227,11 @@ def build_mapping(
         raise UngeoreferencedCaptureRefusal(
             ungeoreferenced_capture_message(str(images_root), all_unreadable))
 
+    from tcip_mcp.registry_paths import stored_path
+
     return MappingBuild(
         name=name,
-        project_root=str(project_root),
-        dataset_root=str(dataset_root),
+        dataset_root=stored_path(dataset_root, project),
         dataset_id=dataset_id,
         built_by=built_by,
         built_at=datetime.now(timezone.utc).isoformat(),
@@ -1242,20 +1262,20 @@ register_store(
 )
 
 
-def plant_mapping_key(project_root: Path | str, name: str) -> Key:
+def plant_mapping_key(project: Path | str, name: str) -> Key:
     """One project's named plant-mapping build, addressed by the project that owns it.
 
     A mapping is project state: a dataset can be read by more than one project, and each project's
-    mapping is its own. The key root is ``<project_root>/.tcip/state``; the document lives at
+    mapping is its own. The key root is ``<project>/.tcip/state``; the document lives at
     ``plant_mappings/<name>.json`` under it.
 
     ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
         later build under the same name replaces it. No writer reads the record first.
     """
-    return Key(PLANT_MAPPING_STORE, str(project_state_dir(Path(project_root).absolute())), (name,))
+    return Key(PLANT_MAPPING_STORE, str(project_state_dir(project)), (name,))
 
 
-def plant_mapping_names(project_root: Path | str) -> list[str]:
+def plant_mapping_names(project: Path | str) -> list[str]:
     """Every mapping name persisted under this project, sorted.
 
     Enumerated through the store's own key listing (the ``STATE``-scoped claim's
@@ -1264,7 +1284,7 @@ def plant_mapping_names(project_root: Path | str) -> list[str]:
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
-    root = str(project_state_dir(Path(project_root).absolute()))
+    root = str(project_state_dir(project))
     names = (key.parts[-1] for key in tcip_store.keys(PLANT_MAPPING_STORE, root))
     return sorted(name for name in names if NAME_SEGMENT.fullmatch(name))
 
@@ -1287,7 +1307,7 @@ class MappingRebuildRefusal(Exception):
         self.status = status
 
 
-def _citing_delivery_event_ids(project_root: Path | str, name: str, digest: str) -> list[str]:
+def _citing_delivery_event_ids(project: Path | str, name: str, digest: str) -> list[str]:
     """Every delivery event under this project whose own ``plant_mapping`` disclosure names
     (``name``, ``digest``): the events a same-name rebuild would strand by silently replacing the
     record they cite, sorted for a stable refusal message.
@@ -1300,7 +1320,7 @@ def _citing_delivery_event_ids(project_root: Path | str, name: str, digest: str)
     from tcip_mcp.pipelines.resolution import read_delivery_events
 
     ids = [
-        record["event_id"] for record in read_delivery_events(project_root)
+        record["event_id"] for record in read_delivery_events(project)
         if is_mapping_disclosure(record.get("plant_mapping"))
         and record["plant_mapping"]["name"] == name
         and record["plant_mapping"]["record_sha256"] == digest
@@ -1309,7 +1329,7 @@ def _citing_delivery_event_ids(project_root: Path | str, name: str, digest: str)
 
 
 def persist_mapping(
-    build: MappingBuild, project_root: Path | str, name: str, *, supersede: bool = False,
+    build: MappingBuild, project: Path | str, name: str, *, supersede: bool = False,
 ) -> None:
     """Write the mapping record, then the receipt that binds it to this build.
 
@@ -1318,12 +1338,12 @@ def persist_mapping(
     record no receipt names, which :func:`load_mapping` refuses to read until a rebuild replaces
     it.
 
-    ``project_root`` names which log the receipt lands in.
+    ``project`` names which log the receipt lands in.
 
     A rebuild under ``name`` whose current record is still cited by a delivery event under this
     project raises :class:`MappingRebuildRefusal`, naming the citing events, unless
     ``supersede=True``. In that case the current record is archived first, under
-    ``plant_mapping_key(project_root, f"{name}@{digest[:12]}")`` (a name
+    ``plant_mapping_key(project, f"{name}@{digest[:12]}")`` (a name
     :func:`plant_mapping_names` never lists, since it carries ``@`` and fails ``NAME_SEGMENT``),
     with a fresh ``plant_mapping_built`` receipt appended under that archived name so
     :func:`load_mapping` can still read it back; ``build.supersedes`` is set to the archived digest
@@ -1335,67 +1355,65 @@ def persist_mapping(
     """
     from tcip_mcp.audit import record_event_or_raise
 
-    existing_raw = tcip_store.read(plant_mapping_key(project_root, name), default=None)
+    existing_raw = tcip_store.read(plant_mapping_key(project, name), default=None)
     archived_digest: Optional[str] = None
     if existing_raw is not None:
         try:
-            existing_record = _validated_record(existing_raw, project_root, name)
+            existing_record = _validated_record(existing_raw, project, name)
         except ValueError as exc:
             raise MappingRebuildRefusal(
-                f"plant mapping {name!r} under {project_root} is stored in a shape this reader "
+                f"plant mapping {name!r} under {project} is stored in a shape this reader "
                 f"no longer recognizes ({exc}); a rebuild cannot tell whether a delivery event "
                 "still cites it, and no operator door repairs an existing record in place, so "
                 "this record must be corrected to the current shape before rebuilding",
                 event_ids=[],
             ) from exc
         existing_digest = record_digest(existing_record)
-        citing = _citing_delivery_event_ids(project_root, name, existing_digest)
+        citing = _citing_delivery_event_ids(project, name, existing_digest)
         if citing and not supersede:
             raise MappingRebuildRefusal(
-                f"plant mapping {name!r} under {project_root} is cited by delivery event(s) "
+                f"plant mapping {name!r} under {project} is cited by delivery event(s) "
                 f"{citing}: rebuilding under this name would strand them. Pass supersede=True to "
                 "archive the current record and rebuild.",
                 event_ids=citing,
             )
         if citing:
             archived_name = f"{name}@{existing_digest[:12]}"
-            tcip_store.replace(plant_mapping_key(project_root, archived_name), existing_record)
+            tcip_store.replace(plant_mapping_key(project, archived_name), existing_record)
             record_event_or_raise(
                 "plant_mapping_built",
                 {
                     "name": archived_name,
-                    "project_root": str(project_root),
                     "dataset_root": existing_record.get("dataset_root"),
                     "built_at": existing_record.get("built_at"),
                     "record_sha256": existing_digest,
                 },
-                scope=project_root,
+                scope=project,
             )
             archived_digest = existing_digest
             build.supersedes = archived_digest
 
     record = build.to_record()
-    tcip_store.replace(plant_mapping_key(project_root, name), record)
+    tcip_store.replace(plant_mapping_key(project, name), record)
     record_sha256 = record_digest(record)
     record_event_or_raise(
         "plant_mapping_built",
         {
             "name": name,
-            "project_root": str(project_root),
             "dataset_root": build.dataset_root,
             "built_at": build.built_at,
             "record_sha256": record_sha256,
             "supersedes": archived_digest,
         },
-        scope=project_root,
+        scope=project,
     )
 
 
-def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dict]]:
+def load_mapping_rows(project: Path | str, name: str) -> dict[str, list[dict]]:
     """The persisted mapping as plain per-date rows, read through :func:`load_mapping`. ``{}`` when
     no mapping is stored under ``name``.
     """
-    build = load_mapping(project_root, name)
+    build = load_mapping(project, name)
     return build.rows() if build is not None else {}
 
 
@@ -1415,7 +1433,6 @@ apart silently."""
 
 _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
     "name": str,
-    "project_root": str,
     "dataset_root": str,
     "dataset_id": str,
     "built_by": str,
@@ -1433,51 +1450,51 @@ _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
 assert set(_REQUIRED_TOP_KEYS) == set(_PERSISTED_FIELD_NAMES), (
     "MappingBuild's own fields and _REQUIRED_TOP_KEYS's key set have drifted apart")
 _ASSIGNMENT_ROW_KEYS = (
-    "image_path", "stem", "date_folder", "plot_name", "accession_name", "source", "distance_m")
+    "image", "stem", "date_folder", "plot_name", "accession_name", "source", "distance_m")
 _VALID_SOURCES = {"sequence", "nearest_neighbor", "unmapped"}
 
 
-def _validated_record(raw: object, project_root: Path | str, name: str) -> dict:
+def _validated_record(raw: object, project: Path | str, name: str) -> dict:
     """``raw`` as a plant-mapping record, or the ``ValueError`` naming the project, the name and
     the field this reader does not recognize.
     """
     remedy = "no operator door corrects an existing record in place"
     if not isinstance(raw, dict):
         raise ValueError(
-            f"plant mapping {name!r} under {project_root} is not a record document "
+            f"plant mapping {name!r} under {project} is not a record document "
             f"(found {type(raw).__name__}); {remedy}")
     for key, kind in _REQUIRED_TOP_KEYS.items():
         if key not in raw:
             raise ValueError(
-                f"plant mapping {name!r} under {project_root} is missing {key!r}; {remedy}")
+                f"plant mapping {name!r} under {project} is missing {key!r}; {remedy}")
         if not isinstance(raw[key], kind):
             raise ValueError(
-                f"plant mapping {name!r} under {project_root} carries {key!r} of the wrong type "
+                f"plant mapping {name!r} under {project} carries {key!r} of the wrong type "
                 f"(found {type(raw[key]).__name__}); {remedy}")
     for date in raw["capture_identity"]:
         if not isinstance(raw["capture_digests"].get(date), dict):
             raise ValueError(
-                f"plant mapping {name!r} under {project_root}: capture_identity names date "
+                f"plant mapping {name!r} under {project}: capture_identity names date "
                 f"{date!r} but capture_digests carries no digest map for it; {remedy}")
     for date, rows in raw["assignments"].items():
         if not isinstance(rows, list):
             raise ValueError(
-                f"plant mapping {name!r} under {project_root}: assignments[{date!r}] is not a "
+                f"plant mapping {name!r} under {project}: assignments[{date!r}] is not a "
                 f"list; {remedy}")
         for row in rows:
             if not isinstance(row, dict) or any(k not in row for k in _ASSIGNMENT_ROW_KEYS):
                 raise ValueError(
-                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"plant mapping {name!r} under {project}: a row under "
                     f"assignments[{date!r}] is missing one of {_ASSIGNMENT_ROW_KEYS}; {remedy}")
             if row["source"] not in _VALID_SOURCES:
                 raise ValueError(
-                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"plant mapping {name!r} under {project}: a row under "
                     f"assignments[{date!r}] carries source {row['source']!r}, not one of "
                     f"{sorted(_VALID_SOURCES)}; {remedy}")
             dm = row["distance_m"]
             if dm is not None and not (isinstance(dm, (int, float)) and math.isfinite(dm)):
                 raise ValueError(
-                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"plant mapping {name!r} under {project}: a row under "
                     f"assignments[{date!r}] carries a non-finite distance_m ({dm!r}); {remedy}")
     return raw
 
@@ -1488,10 +1505,10 @@ _receipt_cursor: dict[str, str] = {}
 _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
 
-def _scan_receipts(project_root: Path | str, root_key: str, *, after: Optional[str]) -> None:
+def _scan_receipts(project: Path | str, root_key: str, *, after: Optional[str]) -> None:
     from tcip_mcp.audit import audit_log_key
 
-    key = audit_log_key(project_root)
+    key = audit_log_key(project)
     page = tcip_store.read_log(key, after=after)
     if page.corrupt:
         raise ValueError(
@@ -1515,25 +1532,25 @@ def _scan_receipts(project_root: Path | str, root_key: str, *, after: Optional[s
     _receipt_cursor[root_key] = page.cursor
 
 
-def _require_receipt(project_root: Path | str, name: str, record_sha256: str) -> None:
+def _require_receipt(project: Path | str, name: str, record_sha256: str) -> None:
     """Refuse unless a ``plant_mapping_built`` event under ``name`` names ``record_sha256`` in
     the project's own audit log. Any matching receipt admits, not only the latest: the record
     write and the receipt append cannot be ordered across two concurrent legitimate builds of
     one name, so a latest-receipt rule could wedge a name permanently after an honest race."""
-    root_key = str(Path(project_root).resolve())
+    root_key = str(Path(project).resolve())
     if root_key not in _receipt_cursor:
-        _scan_receipts(project_root, root_key, after=None)
+        _scan_receipts(project, root_key, after=None)
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
-        _scan_receipts(project_root, root_key, after=_receipt_cursor.get(root_key))
+        _scan_receipts(project, root_key, after=_receipt_cursor.get(root_key))
     if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
         raise ValueError(
-            f"plant mapping {name!r} under {project_root} carries no plant_mapping_built "
+            f"plant mapping {name!r} under {project} carries no plant_mapping_built "
             f"receipt naming record {record_sha256}: this record was not written by "
             "build_plant_mapping or the web build route (a forged or hand-restored record, or "
             "one whose receipt could not be written); rebuild with build_plant_mapping")
 
 
-def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
+def load_mapping(project: Path | str, name: str) -> Optional[MappingBuild]:
     """One project's named, persisted plant-mapping build, or ``None`` when nothing is stored
     under that name (the delivery's "build one first" refusal stands).
 
@@ -1541,17 +1558,17 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
     before trusting it: a record shaped correctly but never built through the platform's own
     writers is refused, a forgery naming the real inputs' identities included.
     """
-    raw = tcip_store.read(plant_mapping_key(project_root, name), default=None)
+    raw = tcip_store.read(plant_mapping_key(project, name), default=None)
     if raw is None:
         return None
-    record = _validated_record(raw, project_root, name)
+    record = _validated_record(raw, project, name)
     record_sha256 = record_digest(record)
-    _require_receipt(project_root, name, record_sha256)
+    _require_receipt(project, name, record_sha256)
     assignments: dict[str, list[Assignment]] = {}
     for date, rows in record["assignments"].items():
         assignments[date] = [
             Assignment(
-                image_path=r["image_path"], stem=r["stem"], date_folder=r["date_folder"],
+                image=r["image"], stem=r["stem"], date_folder=r["date_folder"],
                 plot_name=r["plot_name"], accession_name=r["accession_name"],
                 source=r["source"], distance_m=r["distance_m"],
             )
@@ -1563,7 +1580,7 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
 
 
 def resolved_mapping_key_for_citation(
-    project_root: Path | str, name: str, record_sha256: str,
+    project: Path | str, name: str, record_sha256: str,
 ) -> Optional[str]:
     """The name a reader loads to see exactly the record a delivery event's own
     ``plant_mapping.record_sha256`` cites: ``name`` itself when the record currently stored under
@@ -1571,15 +1588,15 @@ def resolved_mapping_key_for_citation(
     (``f"{name}@{record_sha256[:12]}"``) when that key holds a stored record, or ``None`` when
     neither does.
     """
-    current = tcip_store.read(plant_mapping_key(project_root, name), default=None)
+    current = tcip_store.read(plant_mapping_key(project, name), default=None)
     if isinstance(current, dict):
         try:
-            if record_digest(_validated_record(current, project_root, name)) == record_sha256:
+            if record_digest(_validated_record(current, project, name)) == record_sha256:
                 return name
         except ValueError:
             pass
     archived_name = f"{name}@{record_sha256[:12]}"
-    if tcip_store.exists(plant_mapping_key(project_root, archived_name)):
+    if tcip_store.exists(plant_mapping_key(project, archived_name)):
         return archived_name
     return None
 
@@ -1599,10 +1616,11 @@ def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
 
 
 def verify_mapping_inputs(
-    build: MappingBuild, dataset_root: Path | str, predictions_by_date: dict[str, str],
+    build: MappingBuild, dataset_root: Path | str, predictions_by_date: dict[str, str], *,
+    project: Path | str,
 ) -> dict:
-    """Check what this delivery can verify about a mapping's recorded inputs against what is on
-    disk now, for the captures it actually reads, at delivery time.
+    """Check what this delivery can verify about a mapping of ``project``'s recorded inputs
+    against what is on disk now, for the captures it actually reads, at delivery time.
 
     A mapped date not named in ``predictions_by_date`` is never walked (no enumeration, no EXIF):
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
@@ -1649,7 +1667,7 @@ def verify_mapping_inputs(
 
     # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
     # A registry that no longer loads or whose digest has moved refuses rather than verifying nothing.
-    registry_entries, registry_refusal = registry_entries_or_refusal(build, build.project_root)
+    registry_entries, registry_refusal = registry_entries_or_refusal(build, project)
     if registry_refusal:
         return {"refusal": registry_refusal}
     plant_csvs_unverified, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(
@@ -1706,7 +1724,7 @@ def verify_mapping_inputs(
             # An unmapped capture (a raster, a band group) is never read through predictions, so
             # it always lands here unless the whole-date digest below re-checks it instead.
             unverified_names.update(
-                Path(recorded_by_stem[s].image_path).name for s in (missing_stems | unread_stems))
+                recorded_by_stem[s].image for s in (missing_stems | unread_stems))
 
         read_logical = {s: logical[s] for s in read_set}
         stamps = _read_date_stamps(read_logical, date)
@@ -1803,7 +1821,7 @@ class MappingDeliveryRefusal(Exception):
 
 
 def resolve_delivery_mapping(
-    project_root: Path | str, name: str, predictions_by_date: dict[str, str],
+    project: Path | str, name: str, predictions_by_date: dict[str, str],
 ) -> tuple[MappingBuild, dict]:
     """Load the named mapping, refuse a ``predictions_by_date`` date it does not cover, resolve the
     delivered buckets' one dataset root and require it to carry the mapping's own minted dataset
@@ -1825,7 +1843,7 @@ def resolve_delivery_mapping(
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     try:
-        mapping_build = load_mapping(project_root, name)
+        mapping_build = load_mapping(project, name)
     except (StoreError, ValueError) as exc:
         raise MappingDeliveryRefusal(
             f"could not read mapping {name!r}: {exc}", status=409) from exc
@@ -1869,7 +1887,7 @@ def resolve_delivery_mapping(
                 "date(s)")
         # Re-reading captures for a delivery that can attribute nothing would disclose about
         # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
-        registry_entries, registry_refusal = registry_entries_or_refusal(mapping_build, project_root)
+        registry_entries, registry_refusal = registry_entries_or_refusal(mapping_build, project)
         if registry_refusal:
             raise MappingDeliveryRefusal(registry_refusal, status=409)
         paths = [entry["path"] for entry in registry_entries]
@@ -1894,7 +1912,8 @@ def resolve_delivery_mapping(
             f"plant in {paths}{unpositioned_note}; check the plant CSV names this block, or "
             "rebuild the mapping with a stated tolerance")
 
-    verified = verify_mapping_inputs(mapping_build, delivered_root, predictions_by_date)
+    verified = verify_mapping_inputs(mapping_build, delivered_root, predictions_by_date,
+                                     project=project)
     if "refusal" in verified:
         raise MappingDeliveryRefusal(verified["refusal"])
     return mapping_build, verified

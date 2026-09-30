@@ -36,7 +36,7 @@ def _named(reg, name: str) -> dict:
 def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(tmp_path):
     from tcip_mcp.tools.model_tools import rank_registered_models
 
-    project = str(tmp_path)
+    project = tmp_path
 
     # Empty registry, no metric: an empty listing, not a refusal.
     assert rank_registered_models(project) == {"models": [], "count": 0, "available_metrics": []}
@@ -76,11 +76,11 @@ def test_rank_registered_models_excludes_unverified_entries_by_default(tmp_path)
 
     _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
 
-    res = rank_registered_models(str(tmp_path), metric="val_map50")
+    res = rank_registered_models(tmp_path, metric="val_map50")
     assert "unverified" in res["error"]
     assert res["excluded_unverified"] == [{"name": "asserted", "metrics_source": "caller"}]
 
-    res = rank_registered_models(str(tmp_path), metric="val_map50", include_unverified=True)
+    res = rank_registered_models(tmp_path, metric="val_map50", include_unverified=True)
     assert res["name"] == "asserted"
     assert res["unverified_included"] is True
     assert res["excluded_unverified"] == []
@@ -94,8 +94,8 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
 
     _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
 
-    no_direction = rank_registered_models(str(tmp_path), metric="val_map99")["error"]
-    all_unverified = rank_registered_models(str(tmp_path), metric="val_map50")["error"]
+    no_direction = rank_registered_models(tmp_path, metric="val_map99")["error"]
+    all_unverified = rank_registered_models(tmp_path, metric="val_map50")["error"]
 
     assert no_direction == (
         "'val_map99' has no declared ranking direction (evaluation.HIGHER_IS_BETTER_BY_METRIC "
@@ -145,9 +145,9 @@ def test_a_foreign_registrations_source_is_read_off_whether_it_carries_metrics(t
     from tcip_mcp.tools.model_tools import register_model
 
     register_model(name="a", checkpoint_path=_checkpoint(tmp_path, "a"),
-                   project_path=str(tmp_path), metrics={"val_map50": 0.5})
+                   project=tmp_path, metrics={"val_map50": 0.5})
     register_model(name="b", checkpoint_path=_checkpoint(tmp_path, "b"),
-                   project_path=str(tmp_path))
+                   project=tmp_path)
 
     reg = ModelRegistry(str(tmp_path))
     assert _named(reg, "a")["metrics_source"] == "caller"
@@ -189,10 +189,9 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     from tests._verified_checkpoint_fixtures import worker_run
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
-    run_dir = worker_run(None, {
+    run_dir = worker_run(tmp_path, {
         "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
                          "task": "regression"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},

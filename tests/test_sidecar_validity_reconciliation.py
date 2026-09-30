@@ -54,7 +54,8 @@ def _count_bucket(bucket: Path, *, bundle_flag: bool, recorded_reference: str | 
                     recorded_reference=recorded_reference, value=conf, validation_kind="annotations")
 
 
-def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_reference: str,
+def _bound_sidecar(project: Path, bucket: Path, filename: str, param_key: str, *,
+                   recorded_reference: str,
                    document: str, dataset_root: Path, experiment_id: str,
                    **param_fields: object) -> str:
     """A sidecar genuinely answered for by a validation record, the same shape :func:`_sidecar`
@@ -72,9 +73,9 @@ def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_refe
     if document == "operating_point":
         write_prediction(bucket, "img_a")
         pred_dirs = [bucket]
-    bound = file_validation_record(stamp, document=document, dataset_root=dataset_root,
+    bound = file_validation_record(project, stamp, document=document, dataset_root=dataset_root,
                                    pred_dirs=pred_dirs, experiment_id=experiment_id)
-    write_sidecar(bucket, bound, document)
+    write_sidecar(bucket, bound, document, project=project)
     return str(bucket)
 
 
@@ -86,7 +87,8 @@ def test_a_count_bucket_stamped_unvalidated_never_reads_back_its_recorded_refere
     reinstate the bucket, and the threshold it names must not travel out of it either."""
     d = _count_bucket(tmp_path / "b1", bundle_flag=False,
                       recorded_reference=VALIDATED_HELD_OUT, conf=0.62)
-    r = reconcile_operating_point_validity([d], trait="bud_opening", asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity([d], trait="bud_opening", asserted=VALIDATED_HELD_OUT,
+                                           project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]
@@ -98,7 +100,7 @@ def test_a_classifier_stamp_flagged_unvalidated_never_reads_back_its_recorded_re
     """The same two-part read on the classifier dimension's own sidecar file and param key."""
     d = _sidecar(tmp_path / "b1", "classifier_operating_point.json", "classifier",
                  bundle_flag=False, recorded_reference=VALIDATED_REVIEW_CONFIRMED, value=0.41)
-    r = reconcile_classifier_validity([d], asserted=VALIDATED_REVIEW_CONFIRMED)
+    r = reconcile_classifier_validity([d], asserted=VALIDATED_REVIEW_CONFIRMED, project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["unvalidated_buckets"] == [d]
     assert r["on_disk_validated"] is False
@@ -111,7 +113,7 @@ def test_a_scale_stamp_flagged_unvalidated_never_reads_back_its_recorded_referen
     d = _sidecar(tmp_path / "b1", "resolve_scale.json", "scale", bundle_flag=False,
                  recorded_reference=VALIDATED_PHYSICAL_MEASUREMENT, value=0.037, unit="mm")
     r = reconcile_scale_validity([d], unit="mm", trait="bud_opening", images_dir="unused",
-                                 asserted=VALIDATED_PHYSICAL_MEASUREMENT)
+                                 asserted=VALIDATED_PHYSICAL_MEASUREMENT, project=tmp_path)
     assert r["operative"] is True
     assert r["validated"] == VALIDATED_FALSE
     assert r["unvalidated_buckets"] == [d]
@@ -120,11 +122,11 @@ def test_a_scale_stamp_flagged_unvalidated_never_reads_back_its_recorded_referen
 def test_a_classifier_stamp_that_did_clear_still_reports_its_reference(tmp_path):
     """The rail must admit valid work: a genuinely persisted classifier calibration reports the
     reference it earned, so the checks above refuse a shape rather than refusing everything."""
-    d = _bound_sidecar(tmp_path / "b1", "classifier_operating_point.json", "classifier",
+    d = _bound_sidecar(tmp_path, tmp_path / "b1", "classifier_operating_point.json", "classifier",
                        recorded_reference=VALIDATED_REVIEW_CONFIRMED,
                        document="classifier_operating_point", dataset_root=tmp_path,
                        experiment_id="exp-b1", value=0.41)
-    r = reconcile_classifier_validity([d])
+    r = reconcile_classifier_validity([d], project=tmp_path)
     assert r["validated"] == VALIDATED_REVIEW_CONFIRMED
     assert r["on_disk_validated"] is True
     assert r["unvalidated_buckets"] == []
@@ -137,13 +139,13 @@ def test_a_bucket_with_no_sidecar_floors_a_curve_assembled_beside_a_validated_on
     bucket that never had an operating point written for it floors the whole curve, rather than the
     validated bucket beside it reporting its reference for both."""
     root = tmp_path / "ds"
-    good = _bound_sidecar(root / "predictions" / "b1", "operating_point.json", "conf",
+    good = _bound_sidecar(tmp_path, root / "predictions" / "b1", "operating_point.json", "conf",
                           recorded_reference=VALIDATED_HELD_OUT, document="operating_point",
                           dataset_root=root, experiment_id="exp-b1", value=0.62,
                           validation_kind="annotations")
     absent = tmp_path / "b2"
     absent.mkdir()
-    r = reconcile_operating_point_validity([good, str(absent)], trait="bud_opening")
+    r = reconcile_operating_point_validity([good, str(absent)], trait="bud_opening", project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["on_disk_validated"] is False
     assert r["missing_sidecars"] == [str(absent)]
@@ -159,7 +161,7 @@ def test_a_missing_classifier_stamp_floors_a_dimension_two_other_buckets_cleared
                         bundle_flag=True, recorded_reference=VALIDATED_REVIEW_CONFIRMED, value=0.31)
     absent = tmp_path / "b3"
     absent.mkdir()
-    r = reconcile_classifier_validity([held_out, reviewed, str(absent)])
+    r = reconcile_classifier_validity([held_out, reviewed, str(absent)], project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["on_disk_validated"] is False
     assert r["missing_sidecars"] == [str(absent)]
@@ -169,23 +171,23 @@ def test_buckets_that_ran_at_different_thresholds_report_no_single_operating_poi
     """A reconciled curve reports one conf only when every bucket agrees on it; buckets produced at
     different thresholds have no single operating point to report, and none of theirs is picked."""
     root = tmp_path / "ds"
-    a = _bound_sidecar(root / "predictions" / "b1", "operating_point.json", "conf",
+    a = _bound_sidecar(tmp_path, root / "predictions" / "b1", "operating_point.json", "conf",
                        recorded_reference=VALIDATED_HELD_OUT, document="operating_point",
                        dataset_root=root, experiment_id="exp-a", value=0.62,
                        validation_kind="annotations")
-    b = _bound_sidecar(root / "predictions" / "b2", "operating_point.json", "conf",
+    b = _bound_sidecar(tmp_path, root / "predictions" / "b2", "operating_point.json", "conf",
                        recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
                        dataset_root=root, experiment_id="exp-b", value=0.41,
                        validation_kind="annotations")
-    mixed = reconcile_operating_point_validity([a, b], trait="bud_opening")
+    mixed = reconcile_operating_point_validity([a, b], trait="bud_opening", project=tmp_path)
     assert mixed["validated"] == VALIDATED_HELD_OUT
     assert mixed["conf"] is None
 
-    c = _bound_sidecar(root / "predictions" / "b3", "operating_point.json", "conf",
+    c = _bound_sidecar(tmp_path, root / "predictions" / "b3", "operating_point.json", "conf",
                        recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
                        dataset_root=root, experiment_id="exp-c", value=0.41,
                        validation_kind="annotations")
-    agreed = reconcile_operating_point_validity([b, c], trait="bud_opening")
+    agreed = reconcile_operating_point_validity([b, c], trait="bud_opening", project=tmp_path)
     assert agreed["validated"] == VALIDATED_REVIEW_CONFIRMED
     assert agreed["conf"] == 0.41
 
@@ -198,7 +200,7 @@ def test_a_raster_identity_reference_never_clears_the_count_dimension(tmp_path):
     clear it because it happens to be a real reference somewhere."""
     d = _count_bucket(tmp_path / "b1", bundle_flag=True,
                       recorded_reference=VALIDATED_SAME_MOSAIC_IDENTITY, conf=0.62)
-    r = reconcile_operating_point_validity([d], trait="bud_opening")
+    r = reconcile_operating_point_validity([d], trait="bud_opening", project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]
@@ -210,7 +212,8 @@ def test_an_annotations_reference_never_clears_a_bucket_scale_even_when_the_stam
     cannot ground it however confidently the stamp itself reports success."""
     d = _sidecar(tmp_path / "b1", "resolve_scale.json", "scale", bundle_flag=True,
                  recorded_reference=VALIDATED_HELD_OUT, value=0.037, unit="mm")
-    r = reconcile_scale_validity([d], unit="mm", trait="bud_opening", images_dir="unused")
+    r = reconcile_scale_validity([d], unit="mm", trait="bud_opening", images_dir="unused",
+                                 project=tmp_path)
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]

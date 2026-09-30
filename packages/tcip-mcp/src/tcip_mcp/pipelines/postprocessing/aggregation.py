@@ -259,7 +259,7 @@ def export_aggregated_csv(
     door: str = "export_aggregated_csv",
     plant_mapping: dict | None = None,
     acknowledgment: Acknowledgment | None = None,
-    project_root: str | Path | None = None,
+    project: Path,
 ) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
 
@@ -337,8 +337,8 @@ def export_aggregated_csv(
             a whole-raster frame (validated whole by ``PlantMappingDisclosure`` /
             ``PlantRegistryDisclosure``). ``None`` when the caller names no verified mapping.
         acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
-        project_root: The project whose traits this delivery reads and whose delivery event it
-            writes. ``None`` resolves against this process's pinned platform root.
+        project: The project whose traits and runs this delivery reads and whose delivery
+            event it writes.
 
     Returns:
         ``(path, tail)``: the path to the written CSV and the ``_PROVENANCE_COLUMNS`` tail
@@ -419,7 +419,7 @@ def export_aggregated_csv(
 
     delivery_kind = aggregate_delivery_kind(measurement_document)
     revision = confirmed_revision(
-        delivery_kind, project_root=project_root, delivered_phenotype=delivered_phenotype,
+        delivery_kind, project=project, delivered_phenotype=delivered_phenotype,
         value_keys=[r.get("value_key", "") for r in results])
     trait = revision.entry.name
 
@@ -432,14 +432,15 @@ def export_aggregated_csv(
     scale_recon: dict | None = None
     # Claim scope is a fact about the bucket, not the document being delivered: any bucket recording
     # one reconciles, regardless of measurement_document.
-    claim_scope_recon: dict | None = reconcile_claim_scope_validity(pred_dirs) if pred_dirs else None
+    claim_scope_recon: dict | None = (
+        reconcile_claim_scope_validity(pred_dirs, project=project) if pred_dirs else None)
     operating_point_recon: dict | None = None
     if pred_dirs:
         operating_point_recon = _reconcilers[measurement_document](
-            pred_dirs, trait=trait, asserted=operating_point_validated)
+            pred_dirs, project=project, trait=trait, asserted=operating_point_validated)
         state = operating_point_recon["validated"]
         if measurement_document == "operating_point":
-            tile_recon = reconcile_tile_size_validity(pred_dirs)
+            tile_recon = reconcile_tile_size_validity(pred_dirs, project=project)
         if scale_document is not None:
             assert linear_basis is not None, (
                 "scale_document is only ever stated alongside a value_key that implies a unit, "
@@ -450,8 +451,8 @@ def export_aggregated_csv(
                     "no images_dir; a scale claim's imagery digest cannot be recomputed without it."
                 )
             scale_recon = reconcile_scale_validity(
-                pred_dirs, unit=linear_basis, trait=trait, images_dir=images_dir,
-                capture_id=scale_capture_id)
+                pred_dirs, project=project, unit=linear_basis, trait=trait,
+                images_dir=images_dir, capture_id=scale_capture_id)
     else:
         # No pred_dirs, no on-disk source; a bare caller-asserted string is never trusted alone.
         state = VALIDATED_FALSE
@@ -475,7 +476,7 @@ def export_aggregated_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
-                           columns=_PROVENANCE_COLUMNS)
+                           columns=_PROVENANCE_COLUMNS, project=project)
     fieldnames = [
         "plant_id", "crop", "delivered_phenotype", "value", "units", "value_key",
         "measurement_document", "scale_document",
@@ -519,7 +520,7 @@ def export_aggregated_csv(
         ),
         dimension_reconciliations=dimension_reconciliations,
         acknowledgment=gate.effective_acknowledgment(), revision=revision,
-        delivery_kind=delivery_kind, project_root=project_root, plant_mapping=plant_mapping)
+        delivery_kind=delivery_kind, project=project, plant_mapping=plant_mapping)
     return output_path, stamp
 
 

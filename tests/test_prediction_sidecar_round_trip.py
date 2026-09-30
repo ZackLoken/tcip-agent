@@ -66,20 +66,20 @@ def _export(tmp_path, monkeypatch, *, tile, tile_size=None):
             fp_score=0.05)
         for side, shift in (("calibration_records", 0.0), ("holdout_records", 5.0))}
 
-    def _calibrate(p, *a, **k):
+    def _calibrate(p, *a, project, **k):
         inputs = {**calibration_pipeline.pass_resolver_inputs(p), **reference,
                   "dataset_hash": "H", "staged_conf_floor": 0.01}
-        bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
+        bundle = resolve_operating_point("bud_opening", experiment_id=None, project=project,
+                                         **inputs)
         evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                     "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
         return bundle, "H", 0, evidence
 
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _calibrate)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = foreign_checkpoint(tmp_path)
     result = itools.run_inference(
-        str(ckpt), images_dir=str(images_dir),
+        tmp_path, str(ckpt), images_dir=str(images_dir),
         output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
         device="cpu", tile=tile, tile_size=tile_size, trait="bud_opening",
         calibration_labels_dir=str(images_dir))
@@ -98,7 +98,8 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
     bucket = result["output_dir"]
 
     assert read_operating_point_sidecar(bucket) is not None
-    reconciled = reconcile_operating_point_validity([bucket], trait="bud_opening")
+    reconciled = reconcile_operating_point_validity([bucket], trait="bud_opening",
+                                                    project=tmp_path)
     assert reconciled["missing_sidecars"] == []
     assert reconciled["unvalidated_buckets"] == []
     assert reconciled["on_disk_validated"] is True
@@ -120,7 +121,8 @@ def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_cla
 
     stamp = read_operating_point_sidecar(bucket)
     assert well_formed_validated_by(stamp) is not None
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
+    binding = verify_stamp_binding(stamp, bucket, project=tmp_path, document="operating_point",
+                                   trait="bud_opening")
     assert binding.ok is True
     assert binding.claimed is True
     assert binding.note == ""
@@ -145,7 +147,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
     assert (bucket / "capture_a.json").is_file()  # written once the registered checkpoint admits
     pointer = read_operating_point_sidecar(bucket)["validated_by"]
     assert pointer["experiment_id"].startswith("calibration_")
-    run_dir = find_run(pointer["experiment_id"])
+    run_dir = find_run(pointer["experiment_id"], project=tmp_path)
     assert run_dir is not None
     calibration = observe(run_dir)
     assert calibration.state == "completed"
@@ -154,7 +156,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
     row = find_validation(calibration, pointer["record_digest"])
     assert row["producing_experiment_id"] is None
     assert row["trait"] == "bud_opening"
-    assert list(row["covered_buckets"]) == ["predictions/baseline/2026-03-01"]
+    assert list(row["covered_buckets"]) == [str(bucket.resolve())]
 
 
 def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_path, monkeypatch):
@@ -174,7 +176,8 @@ def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_pat
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert (bucket / "capture_a.json").is_file()
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)], trait="bud_opening")["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity(
+        [str(bucket)], trait="bud_opening", project=tmp_path)["validated"] == VALIDATED_FALSE
 
 
 def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, monkeypatch):
@@ -198,10 +201,11 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
         _export(tmp_path, monkeypatch, tile=False)
 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
-    assert find_validation(find_observation(sealed["experiment_id"]),
+    assert find_validation(find_observation(sealed["experiment_id"], project=tmp_path),
                            sealed["record_digest"]) is not None
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)], trait="bud_opening")["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity(
+        [str(bucket)], trait="bud_opening", project=tmp_path)["validated"] == VALIDATED_FALSE
 
 
 def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monkeypatch):
@@ -214,7 +218,7 @@ def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monk
     result = _export(tmp_path, monkeypatch, tile=True, tile_size=64)
     bucket = result["output_dir"]
 
-    reconciled = reconcile_tile_size_validity([bucket])
+    reconciled = reconcile_tile_size_validity([bucket], project=tmp_path)
     assert reconciled["operative"] is True
     assert reconciled["unvalidated_buckets"] == []
     assert reconciled["validated"] == VALIDATED_EXPLICIT_GEOMETRY

@@ -10,6 +10,8 @@ a tool defined here, and on whichever backend the suite is bound to.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import tcip_mcp.audit as audit_module
@@ -25,19 +27,19 @@ def _refuse_append(*args: object, **kwargs: object) -> None:
     raise _AppendRefused("the audit log could not be appended to")
 
 
-def _rows_for(tool: str) -> list[dict]:
-    """Every platform-log row a call left behind, read through the seam."""
-    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+def _rows_for(project: Path, tool: str) -> list[dict]:
+    """Every row a call left behind in ``project``'s log, read through the seam."""
+    key = audit_module.audit_log_key(project)
     return [row for row in ts.read_log(key).records if row["tool"] == tool]
 
 
 def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_call(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A committed mutation with no audit line is told to the caller, not left to a log line."""
 
     @audited
-    def stage_something(count: int) -> dict:
+    def stage_something(project: Path, count: int) -> dict:
         return {"ok": True, "count": count}
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
@@ -45,7 +47,7 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
     # Raising at all is the property; the type is asserted after, so a decorator that returns
     # normally here fails on the behavior rather than on a name it does not carry.
     with pytest.raises(RuntimeError) as caught:
-        stage_something(3)
+        stage_something(tmp_path, 3)
 
     assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLine
     assert caught.value.tool == "stage_something"
@@ -54,75 +56,88 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
 
 
 def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_written(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The audit-of-failure is the decorator's business; the failure itself is the caller's."""
 
     @audited
-    def stage_something() -> dict:
+    def stage_something(project: Path) -> dict:
         raise KeyError("the body's own failure")
 
     monkeypatch.setattr(audit_module, "append", _refuse_append)
 
     with pytest.raises(KeyError, match="the body's own failure"):
-        stage_something()
+        stage_something(tmp_path)
 
 
-def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_one_entry() -> None:
+def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_one_entry(
+    tmp_path: Path,
+) -> None:
     """The rail admits the work it exists beside: nothing about a healthy call changes."""
 
     @audited
-    def stage_something(count: int) -> dict:
+    def stage_something(project: Path, count: int) -> dict:
         return {"ok": True, "count": count}
 
-    assert stage_something(3) == {"ok": True, "count": 3}
+    assert stage_something(tmp_path, 3) == {"ok": True, "count": 3}
 
-    rows = _rows_for("stage_something")
+    rows = _rows_for(tmp_path, "stage_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "ok"
     assert rows[0]["arguments"] == {"count": 3}
 
 
-def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_raises() -> None:
+def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_raises(
+    tmp_path: Path,
+) -> None:
     """The other half of admitting valid work: a refusing tool is audited and stays refusing."""
 
     @audited
-    def stage_something() -> dict:
+    def stage_something(project: Path) -> dict:
         raise ValueError("the body refused")
 
     with pytest.raises(ValueError, match="the body refused"):
-        stage_something()
+        stage_something(tmp_path)
 
-    rows = _rows_for("stage_something")
+    rows = _rows_for(tmp_path, "stage_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "exception"
     assert rows[0]["error"] == "the body refused"
+
+
+def test_a_door_with_no_project_parameter_is_refused_at_decoration() -> None:
+    with pytest.raises(ValueError, match="needs a project parameter"):
+        @audited
+        def stage_something(count: int) -> dict:
+            return {"count": count}
 
 
 # ── record_event_or_raise: record_event's sibling for a mutation that has already committed ──
 
 
 def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fails(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A confirmation that already committed must not be reported as silently unrecorded."""
     monkeypatch.setattr(audit_module, "append", _refuse_append)
 
     with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
-        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"})
+        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"}, scope=tmp_path)
 
     assert caught.value.tool == "confirm_something"
     assert "do not retry it blind" in str(caught.value)
     assert isinstance(caught.value.__cause__, _AppendRefused)
 
 
-def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently() -> None:
+def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently(
+    tmp_path: Path,
+) -> None:
     """The rail admits the work it exists beside: a healthy append behaves like record_event's."""
     audit_module.record_event_or_raise(
-        "confirm_something", {"trait": "bloom"}, status="ok", note="confirmed"
+        "confirm_something", {"trait": "bloom"}, status="ok", scope=tmp_path, note="confirmed"
     )
 
-    rows = _rows_for("confirm_something")
+    rows = _rows_for(tmp_path, "confirm_something")
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "ok"
     assert rows[0]["arguments"] == {"trait": "bloom"}

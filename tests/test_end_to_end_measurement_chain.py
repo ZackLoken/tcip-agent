@@ -63,10 +63,7 @@ def _synthetic_capture(root: Path) -> tuple[Path, Path]:
                                         fill=(230, 230, 230))
         frame.save(raw / f"{stem}.png")
 
-    ingested = ingest_images(
-        source=str(raw), name="block_bud_count", site="the chain detector's synthetic block",
-        project_path=str(root), date_from=DATE,
-    )
+    ingested = ingest_images(root, source=str(raw), date_from=DATE)
     assert "error" not in ingested, ingested
     assert ingested["copied"] == len(STEMS), ingested
 
@@ -82,14 +79,14 @@ def _synthetic_capture(root: Path) -> tuple[Path, Path]:
     return images_dir, labels_dir
 
 
-def _draw_reference_selection(root: Path, out: Path):
+def _draw_reference_selection(project: Path, root: Path, out: Path):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=2,
+    result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=2,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
-    return read_selection(out)
+    return read_selection(out, project=project)
 
 
 BUILDER = "tests.bespoke_models:build_bright_region_detector"
@@ -166,14 +163,14 @@ def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "ch
     root = tmp_path / "ds"
     images_dir, labels_dir = _synthetic_capture(root)
     selection_dir = tmp_path / "selection"
-    _draw_reference_selection(root, selection_dir)
+    _draw_reference_selection(tmp_path, root, selection_dir)
     checkpoint_path = _train_on(selection_dir, tmp_path, experiment_id)
 
     fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
     bucket = root / "predictions" / bucket_name / DATE
     published = run_inference(
-        checkpoint_path=checkpoint_path,
+        tmp_path, checkpoint_path=checkpoint_path,
         images_dir=str(images_dir),
         output_dir=str(bucket),
         trait=fx.COUNT_TRAIT,
@@ -191,7 +188,7 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(tm
     without re-reading the draw."""
     root = tmp_path / "ds"
     _synthetic_capture(root)
-    selection = _draw_reference_selection(root, tmp_path / "selection")
+    selection = _draw_reference_selection(tmp_path, root, tmp_path / "selection")
 
     calibration = selection.on("calibration")
     assert calibration, selection.counts()
@@ -212,7 +209,7 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(tmp_
 
     root = tmp_path / "ds"
     _synthetic_capture(root)
-    selection = _draw_reference_selection(root, tmp_path / "selection")
+    selection = _draw_reference_selection(tmp_path, root, tmp_path / "selection")
 
     for sample in selection.on("calibration"):
         assert ground_truth_digest(Path(sample.ground_truth)) == sample.ground_truth_digest, (
@@ -228,11 +225,11 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     root = tmp_path / "ds"
     images_dir, _labels_dir = _synthetic_capture(root)
     selection_dir = tmp_path / "selection"
-    _draw_reference_selection(root, selection_dir)
+    _draw_reference_selection(tmp_path, root, selection_dir)
 
     checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-train")
 
-    checkpoint = load_registered_checkpoint(checkpoint_path, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
     predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
     results = predictor.predict_batch(
         [str(images_dir / f"{stem}.png") for stem in STEMS[:3]])
@@ -254,14 +251,14 @@ def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_pa
     root = tmp_path / "ds"
     images_dir, labels_dir = _synthetic_capture(root)
     selection_dir = tmp_path / "selection"
-    _draw_reference_selection(root, selection_dir)
+    _draw_reference_selection(tmp_path, root, selection_dir)
     checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-publish")
 
     fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
 
     bucket = root / "predictions" / "chain" / DATE
     published = run_inference(
-        checkpoint_path=checkpoint_path,
+        tmp_path, checkpoint_path=checkpoint_path,
         images_dir=str(images_dir),
         output_dir=str(bucket),
         trait=fx.COUNT_TRAIT,
@@ -282,7 +279,7 @@ def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_pa
     assert pointer["experiment_id"] == "exp-chain-publish"
     run_dir = Path(checkpoint_path).parent
     assert find_validation(observe(run_dir), pointer["record_digest"]) is not None
-    assert [e["experiment_id"] for e in list_experiments()] == ["exp-chain-publish"]
+    assert [e["experiment_id"] for e in list_experiments(tmp_path)] == ["exp-chain-publish"]
 
 
 # -- the three detectors -------------------------------------------------------
@@ -308,7 +305,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(
-        predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
+        tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "error" not in delivered, delivered
     assert out_csv.is_file()
@@ -342,14 +339,14 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
     _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
 
     # Move one object on the calibration side: the reference the gate was measured against.
-    selection = read_selection(chain.selection_dir)
+    selection = read_selection(chain.selection_dir, project=tmp_path)
     edited = Path(selection.on("calibration")[0].ground_truth)
     json_io.write_annotations(
         str(edited), [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], IMG, IMG)
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(
-        predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
+        tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "error" in delivered, delivered
     assert edited.name in str(delivered["error"]), delivered["error"]
@@ -377,11 +374,11 @@ def test_a_reference_selection_that_can_no_longer_be_read_refuses_the_delivery(t
     # Through the store's own door, so the selection is gone under either storage backend.
     tcip_store.delete(selection_key(chain.selection_dir))
     with pytest.raises(ValueError):
-        read_selection(chain.selection_dir)
+        read_selection(chain.selection_dir, project=tmp_path)
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(
-        predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
+        tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "error" in delivered, delivered
     assert "cannot be read now" in str(delivered["error"]), delivered["error"]
@@ -405,7 +402,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: P
     assert before
 
     republished = run_inference(
-        checkpoint_path=chain.checkpoint_path,
+        tmp_path, checkpoint_path=chain.checkpoint_path,
         images_dir=str(chain.images_dir),
         output_dir=str(chain.bucket),
         trait=fx.COUNT_TRAIT,
