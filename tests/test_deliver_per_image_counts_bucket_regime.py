@@ -12,12 +12,18 @@ import sys
 from pathlib import Path
 
 import pytest
+from tcip_store.file_backend import _is_bookkeeping
 
 from tests import _trait_fixtures as fx
 
 pytest.importorskip("torch")
 
 SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+
+
+def _images(images_dir: Path) -> list[Path]:
+    """The capture's image files, without the file backend's lock sidecars beside them."""
+    return sorted(p for p in images_dir.iterdir() if not _is_bookkeeping(p.name))
 
 
 @pytest.fixture(autouse=True)
@@ -114,11 +120,11 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(tmp_pa
     assert res["producer"] == chain.assessment["producer"]
     with open(res["csv_path"], newline="") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == res["image_count"] == len(list(chain.images_dir.iterdir()))
+    assert len(rows) == res["image_count"] == len(_images(chain.images_dir))
     assert {r["validated"] for r in rows} == {"True"}
     (event,) = read_delivery_events(tmp_path)
     assert event.door == "deliver_per_image_counts"
-    assert event.population == sorted(p.stem for p in chain.images_dir.iterdir())
+    assert event.population == [p.stem for p in _images(chain.images_dir)]
 
 
 def test_reading_a_published_bucket_to_a_delivered_csv_imports_no_torch(tmp_path):
