@@ -1,18 +1,7 @@
-"""The storage seam's contract: what every backend must do, whatever it stores bytes in.
-
-Most of these run against real OS processes rather than threads, because the guarantee under
-test is exactly the one threads cannot check: two interpreters sharing a lock registry would
-pass a same-process test against a backend with no cross-process exclusion at all.
-
-The isolation cases are the ones that pin the defect this layer exists to remove, so they
-are also run against a weakened backend and observed failing there: on the file backend one
-whose writes skip the lock (``TCIP_STORE_CONTRACT_UNLOCKED=1``), on the database backend one
-that never compares ``expect`` (``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``).
-
-The ``store`` fixture runs every case it serves against both backends. A handful of cases are
-about one backend's own mechanics rather than the contract, and each says at its top which
-backend it is about and why; everything else must pass unchanged on both.
-"""
+"""The storage seam's contract on both backends, through the ``store`` fixture; a case about one
+backend's own mechanics skips the other. Isolation cases run across real OS processes, and also
+against a weakened backend (``TCIP_STORE_CONTRACT_UNLOCKED=1`` on files,
+``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1`` on the database) where they fail."""
 
 from __future__ import annotations
 
@@ -108,11 +97,7 @@ class Harness:
         return sqlite3.connect(str(database_path(str(self.root))), isolation_level=None)
 
     def damage_record(self, key: ts.Key, data: bytes) -> None:
-        """Put bytes that will not decode behind a record, wherever this backend keeps them.
-
-        The corruption has to reach the same place the backend reads from, or the case would
-        report absence on one backend and corruption on the other for the same setup.
-        """
+        """Put bytes that will not decode behind a record, where this backend reads it from."""
         if self.name == FILE:
             self.path(key).write_bytes(data)
             return
@@ -183,12 +168,8 @@ def store(request, tmp_path, monkeypatch):
 
 
 def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(store):
-    """``release_root`` releases whatever a prior read of one root opened, on a single thread, so
-    that root can be renamed out from under the bound backend, and leaves another root's handle
-    open. This proves the single-threaded contract only, nothing about a connection another thread
-    is mid-statement on; the denial assertions have content only on the sqlite backend under
-    Windows, where CI's own job selects this test by node id.
-    """
+    """``release_root`` releases what a read of one root opened, on one thread, so that root can
+    be renamed, and leaves another root's handle open."""
     key = store.key(LWW, "before-close")
     other_root = store.root.parent / f"{store.root.name}-other"
     other_root.mkdir()
@@ -1707,8 +1688,7 @@ _DATABASE_MECHANICS = (
 
 
 def test_the_database_backend_declares_exactly_these_guarantees(store):
-    """A capability is what a caller refuses on rather than degrades against, so a false
-    declaration cannot be allowed to ship quietly."""
+    """The database backend's declared capabilities, exactly."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     assert ts.capabilities() == ts.Capabilities(
         multi_key_atomic_commit=True,
@@ -1720,12 +1700,8 @@ def test_the_database_backend_declares_exactly_these_guarantees(store):
 
 
 def test_a_database_and_its_sidecars_are_never_keys_of_the_store_they_sit_inside(store):
-    """The database backend keeps its files in ``.tcip/``, which is a directory a store's own
-    entries live in, so enumeration has to tell one from the other by name.
-
-    The build temp is asked for by the same helper the creation path names it with, so this
-    checks the name that is actually produced rather than a pattern restated here.
-    """
+    """Enumerating a store whose entries share ``.tcip/`` with the database returns none of the
+    database's own files or its build temp."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     ts.replace(store.key(LWW, "opens-the-database"), {"n": 1})
     entry = store.key(STATE_FILES, "note.txt")
@@ -1740,14 +1716,7 @@ def test_a_database_and_its_sidecars_are_never_keys_of_the_store_they_sit_inside
 
 
 def test_two_spellings_of_one_root_address_one_database(store):
-    """Root strings arrive from callers that do not canonicalize them the same way, and a
-    second database for the same directory would silently split one store in two.
-
-    The connection slot is what this asserts on. Reading the same value back through both
-    spellings does not pin the backend: the filesystem resolves the detour on its own, so that
-    much passes even with canonicalization reduced to identity. One slot for two spellings is
-    only true if the backend canonicalized them itself.
-    """
+    """Two spellings of one root share one connection slot and one database."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     detour = store.root / "detour"
     detour.mkdir()
@@ -1784,8 +1753,7 @@ def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
 
 
 def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(store):
-    """The parts column's spelling, pinned here rather than left to whatever json.dumps
-    defaults to on the day: two spellings of one key would address two rows."""
+    """A key's parts are stored as ASCII-escaped compact JSON."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     key = store.key(NESTED, "grüne/reihe", "ü_2")
     ts.replace(key, {"n": 1})
@@ -1803,8 +1771,7 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelli
 
 
 def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(store):
-    """A metrics tail reads a log other processes are appending to, so the cursor has to be
-    exact under concurrency: a gap loses an epoch and a repeat double-counts one."""
+    """Reading a log by cursor while two processes append returns every entry exactly once."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     key = store.key(LOG, "streamed-live")
     workers = [store.spawn("append", store.root, "streamed-live", f"proc{n}", 20) for n in range(2)]
@@ -1840,8 +1807,8 @@ class _RecordingSyncBackend(SqliteBackend):
 
 
 def test_a_write_commits_at_the_synchronous_level_its_store_declares(store):
-    """The three live-state stores declare relaxed durability, and that declaration has to keep
-    meaning something once a commit rather than an fsync is what makes a write durable."""
+    """A write to a relaxed store commits at the relaxed synchronous level, a durable one at the
+    durable level."""
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     backend = _RecordingSyncBackend()
     ts.bind(backend)
@@ -1891,10 +1858,7 @@ SUBJECT_REGISTRY_BYTES = (
     '  }\n'
     '}\n'
 ).encode("utf-8")
-"""The documents a human or a tool reads as files hold bytes at the seam and are encoded by the
-module that owns them, so their spelling is written out here rather than reached for through a
-codec the descriptor no longer carries. What each writer produces is pinned separately, against
-these same spellings, by ``test_document_store_bytes``."""
+"""The exact bytes of the documents whose owning module encodes them."""
 
 DATASET_IDENTITY_BYTES = (
     '{\n'
@@ -1920,10 +1884,6 @@ IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store
 LABEL_BYTES = '{"annotations": [{"subject": "bud", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
 
 
-def _review_state_dir(root: Path) -> Path:
-    return root / ".tcip" / "state"
-
-
 def _generic_label_dir(root: Path) -> Path:
     """A label tree no layout resolver describes, the shape a materialized split writes."""
     return root / "labels"
@@ -1943,10 +1903,6 @@ def _curated_dir(root: Path) -> Path:
     return root / "curated"
 
 
-def _plant_mapping_dir(root: Path) -> Path:
-    return root / ".tcip" / "state"
-
-
 def _stamp_bucket(root: Path) -> Path:
     """The prediction bucket a run's provenance stamps sit in, from the layout's own resolver."""
     return dataset_layout.prediction_dir(root, "live", "2026-03-04")
@@ -1954,21 +1910,9 @@ def _stamp_bucket(root: Path) -> Path:
 
 @dataclass(frozen=True)
 class Registered:
-    """One registered store: a value of the shape it holds, and how the seam addresses it.
-
-    ``golden`` is written through the seam and the file's bytes are compared against the
-    store's own codec applied to it. That is not a restatement of the codec: it is the proof
-    that nothing between the codec and the disk adds a byte-order mark, translates a newline
-    or wraps an envelope. The canonical spelling itself is pinned once, centrally, by
-    ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out``.
-
-    Each owner module's own tests assert its written content; this suite proves placement and
-    encoding, for every store at once.
-
-    ``relative`` is the path under the root the store is given. ``root_of`` is the root the
-    store's own keys hang off, which for the review shards and the experiment members is a
-    directory below that.
-    """
+    """One registered store: a ``golden`` value of the shape it holds, the key it is written
+    under (``key_of``), the path under the root its file lands at (``relative``), and the root
+    its keys hang off (``root_of``)."""
 
     golden: object
     key_of: Callable[[Path], ts.Key]
@@ -1977,10 +1921,8 @@ class Registered:
 
 
 def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
-    """Call ``build`` with a throwaway file backend bound only for the call, and a throwaway
-    directory removed once ``build`` returns: these fixtures are built at import time, before any
-    test's own ``store`` fixture has bound one, so this is the only bind/unbind and scratch
-    directory a caller here can use."""
+    """Call ``build`` with a file backend bound and a scratch directory, both only for the call,
+    and return what it built."""
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
@@ -1992,8 +1934,7 @@ def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
 
 
 def _real_selection() -> dict:
-    """The record ``selection.write_selection`` writes today, called for real into a throwaway
-    project so this golden cannot drift from the writer silently."""
+    """The record ``selection.write_selection`` writes, into a scratch project."""
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Sample, Selection, selection_key, write_selection,
     )
@@ -2015,8 +1956,8 @@ def _real_selection() -> dict:
 
 
 def _real_cal_holdout_lock() -> dict:
-    """The shape ``splits.resolve_locked_cal_holdout_split`` writes today, drawn for real over a
-    throwaway directory and read back from its lock rather than hand-typed."""
+    """The lock ``splits.resolve_locked_cal_holdout_split`` writes, drawn in a scratch
+    directory."""
     def draw(scratch: Path) -> dict:
         splits.resolve_locked_cal_holdout_split(
             ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=scratch)
@@ -2056,8 +1997,8 @@ REGISTERED = {
     "review_verdicts": Registered(
         {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
         lambda root: review_engine.review_verdict_key(
-            _review_state_dir(root), "predictions", "a_1.jpg"),
-        ".tcip/state/review/predictions/a_1.jpg.json", root_of=_review_state_dir),
+            project_state_dir(root), "predictions", "a_1.jpg"),
+        ".tcip/state/review/predictions/a_1.jpg.json", root_of=project_state_dir),
     "canvas_meta": Registered(
         {"tab": "annotate", "image": "ü.jpg"},
         lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
@@ -2225,11 +2166,6 @@ REGISTERED = {
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
          "status": "ok", "source": "gui"},
         lambda root: audit.audit_log_key(root), ".tcip/audit.jsonl"),
-    "learning_capture": Registered(
-        {"ts": "2026-03-04T12:00:00+00:00", "session_id": "s_1", "reason": "clear",
-         "active_project": "grüne_reihe", "note": "session ended"},
-        lambda root: web_client.learning_capture_key(root),
-        ".tcip/learning_capture.jsonl"),
     "confidence_sweep": Registered(
         {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
          "checkpoint_sha256": "0" * 64,
@@ -2245,14 +2181,14 @@ REGISTERED = {
                          "date_folder": "2026-03-04", "plot_name": "plot_ü",
                          "accession_name": "ü", "source": "sequence", "distance_m": 1.25}]},
         lambda root: plant_mapping.plant_mapping_key(root, "valley"),
-        ".tcip/state/plant_mappings/valley.json", root_of=_plant_mapping_dir),
+        ".tcip/state/plant_mappings/valley.json", root_of=project_state_dir),
     "plant_registries": Registered(
         {"name": "valley-plants", "crop": "currant", "site": "north orchard",
          "csvs": [{"path": "dü/plants.csv", "sha256": "0" * 64, "n_plants": 2}],
          "n_plants": 2, "digest": "0" * 64, "registered_by": "agent:register_plant_registry",
          "registered_at": "2026-03-04T12:00:00+00:00"},
         lambda root: plant_mapping.plant_registry_key(root, "valley-plants"),
-        ".tcip/state/plant_registries/valley-plants.json", root_of=_plant_mapping_dir),
+        ".tcip/state/plant_registries/valley-plants.json", root_of=project_state_dir),
     "delivery_supersessions": Registered(
         {"superseded_event_id": EVENT_ID_UNDER_TEST, "output_sha256": "0" * 64,
          "replacement_event_id": None, "reason": "a mis-stated crop was corrected upstream",
@@ -2311,31 +2247,22 @@ CODEC_EXEMPT = {
     "retrospectives": "the value is the markdown document itself",
     "workspace_last_opened": "the value is the last-opened project's id",
 }
-"""Every registered record or log whose codec is deliberately not the canonical constant.
+"""Every registered record or log whose codec is not its kind's canonical one, with why."""
 
-Naming one here is what makes an exemption a decision somebody made rather than a default
-somebody got: a store that picks its own spelling fails the identity check below until its
-reason is written down.
-"""
+
+def is_test_scaffolding(name: str) -> bool:
+    """Whether the registered store ``name`` was declared by a test module."""
+    return ts.get_descriptor(name).declared_in.startswith(("tests", "test_"))
 
 
 def test_every_registered_store_has_a_byte_and_path_identity_case():
-    """A store registered without one would be a placement nothing has checked.
-
-    Stores a test declares for its own scaffolding are not the platform's, and are told
-    apart by the module that declared them rather than by a naming convention.
-    """
-    declared = {
-        name for name in ts.registered_stores()
-        if not ts.get_descriptor(name).declared_in.startswith(("tests", "test_"))
-    }
+    """Every platform store has a case in ``REGISTERED``, and nothing else does."""
+    declared = {name for name in ts.registered_stores() if not is_test_scaffolding(name)}
     assert declared == set(REGISTERED)
 
 
 def test_the_delivery_events_golden_sample_validates_against_its_declared_shape():
-    """The registered golden here and ``DeliveryEventRecord`` (``delivery_events_schema.py``) are
-    two statements of the same shape; a golden the model refuses would mean the two had already
-    drifted apart without either side's own tests catching it."""
+    """The registered delivery-event golden validates as a ``DeliveryEventRecord``."""
     DeliveryEventRecord.model_validate(REGISTERED["delivery_events"].golden)
 
 
@@ -2345,7 +2272,7 @@ def test_every_json_store_encodes_through_the_one_codec_its_kind_declares():
     off_canon = {}
     for name in ts.registered_stores():
         descriptor = ts.get_descriptor(name)
-        if descriptor.declared_in.startswith(("tests", "test_")) or descriptor.kind == "blob":
+        if is_test_scaffolding(name) or descriptor.kind == "blob":
             continue
         expected = ts.RECORD_JSON if descriptor.kind == "record" else ts.LOG_JSON
         if descriptor.codec is not expected and name not in CODEC_EXEMPT:
@@ -2356,8 +2283,7 @@ def test_every_json_store_encodes_through_the_one_codec_its_kind_declares():
 
 
 def test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out():
-    """The one place the record spelling is pinned, so changing it shows up in a diff here
-    rather than rippling silently through every store that carries it."""
+    """The record and log codecs' exact bytes."""
     golden = {"b": {"nested": True}, "a": "ü", "ratio": 0.5, "absent": None}
 
     assert ts.RECORD_JSON.encode(golden) == (
@@ -2376,8 +2302,7 @@ def test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out():
 
 
 def test_a_text_store_refuses_a_value_that_is_not_text_and_accepts_one_that_is(store, monkeypatch):
-    """Calling str() on whatever arrived would fabricate a value out of its repr, the way a
-    JSON default does, so a text store takes text and the caller formats the rest."""
+    """A text store refuses a non-text value and stores text."""
     key = web_client.backend_port_key(store.root)
 
     with pytest.raises(ts.StoreError):
@@ -2388,22 +2313,23 @@ def test_a_text_store_refuses_a_value_that_is_not_text_and_accepts_one_that_is(s
 
 
 def test_a_value_the_codec_cannot_spell_names_the_store_the_key_and_the_type(store):
-    """The refusal has to say which entry and what about it, since json.dumps names neither,
-    and the same store takes the explicitly converted value."""
+    """The refusal names the store, the key and the value's type; the converted value stores."""
     key = store.key(LWW, "convertible")
+    where = Path("a/b")
 
     with pytest.raises(ts.StoreError) as raised:
-        ts.replace(key, {"where": Path("a/b")})
+        ts.replace(key, {"where": where})
     message = str(raised.value)
-    assert LWW in message and "convertible" in message and "PosixPath" in message or "Path" in message
+    assert LWW in message
+    assert "convertible" in message
+    assert type(where).__name__ in message
 
     ts.replace(key, {"where": Path("a/b").as_posix()})
     assert ts.read(key) == {"where": "a/b"}
 
 
 def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_no_type_for(store):
-    """NaN and Infinity are not JSON and no strict parser reads them, so a producer states
-    the non-finite value instead of the codec inventing a spelling for it."""
+    """A NaN is refused; its ``stored_number`` form stores."""
     key = store.key(LWW, "measurement")
 
     with pytest.raises(ts.StoreError):
@@ -2445,7 +2371,7 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
 def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(tmp_path):
     """An image key carrying a separator is one filename, a bucket key carrying separators is one
     directory, and the keys recoverable from that path place the very same file."""
-    state_dir = _review_state_dir(tmp_path)
+    state_dir = project_state_dir(tmp_path)
     engine = review_engine.ReviewEngine(state_dir, current_user="ü")
     key = review_engine.review_verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
     locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
@@ -2461,7 +2387,7 @@ def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(t
 def test_a_verdict_with_no_prediction_bucket_places_its_shard_under_the_review_dir(tmp_path):
     """A ground-truth-only review names no bucket, and its shard sits directly under ``review/``
     rather than in a directory standing in for one."""
-    state_dir = _review_state_dir(tmp_path)
+    state_dir = project_state_dir(tmp_path)
     key = review_engine.review_verdict_key(state_dir, review_engine.NO_BUCKET, "a_1.jpg")
     locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
 
@@ -2471,14 +2397,9 @@ def test_a_verdict_with_no_prediction_bucket_places_its_shard_under_the_review_d
 
 
 def test_enumerating_review_verdicts_answers_with_identities_that_read_back(store):
-    """``keys`` returns identities, not whatever a path happened to be able to spell.
-
-    The shard filename sanitizes a separator out of the image name and folds a bucket key into
-    one directory, so the path alone recovers a key that names a different entry. Both backends
-    answer with the key the payload states, and the proof that it is an identity rather than a
-    label is that reading it back works.
-    """
-    state_dir = _review_state_dir(store.root)
+    """``keys`` answers the verdict's own key, which reads it back, though its shard path
+    sanitizes the image name and folds the bucket."""
+    state_dir = project_state_dir(store.root)
     bucket, image = "predictions/live/2026-03-04", "a/b.jpg"
     key = review_engine.review_verdict_key(state_dir, bucket, image)
     ts.replace(
@@ -2598,14 +2519,7 @@ def test_put_blob_from_path_refuses_a_stale_expect_and_leaves_the_previous_bytes
 
 
 def test_put_blob_from_path_refuses_a_missing_source_before_any_byte_moves(store):
-    """A source path that isn't there refuses before the destination is touched at all: the
-    version check ahead of it passes (there is nothing stale about it), and only then does the
-    missing source itself raise, leaving whatever the destination held untouched.
-
-    Coverage, not a fix: fsync-before-replace on a successful write is held by inspection of
-    ``put_blob_from_path``'s one implementation (``store.py``), never exercised by a test, since
-    there is no portable way to observe an fsync from outside the process that issued it.
-    """
+    """A missing source path raises and leaves whatever the destination held untouched."""
     key = store.key(BLOB, "from-path-missing-source")
     held = ts.put_blob(key, b"prior", expect=ts.Version.ABSENT)
     source = store.root / "does-not-exist.bin"
@@ -2641,11 +2555,7 @@ def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_
 
 
 def test_the_generic_key_a_dated_write_uses_lands_where_dataset_layout_computes_the_path(store):
-    """``write_annotations`` addresses a real dataset's label through the store's own generic,
-    directory-rooted key, never a layout-specific one; ``dataset_layout``'s readers find the same
-    file by plain path arithmetic instead. The two must name one file, or a document the store
-    places would sit somewhere its own layout's readers never look.
-    """
+    """The generic annotation key and ``dataset_layout.annotation_path`` name one file."""
     only_on(store, FILE, "the agreement asserted here is between the store's locator and "
                          "dataset_layout's own path arithmetic, which path_for exposes only on "
                          "the file backend")

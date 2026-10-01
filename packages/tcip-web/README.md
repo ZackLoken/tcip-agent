@@ -1,7 +1,7 @@
 # tcip-web
 
 Browser-based GUI for TCIP: a FastAPI backend + React frontend that both human
-operators and the Claude agent drive through the same state store.
+operators and the agent drive through the same state store.
 
 ## Layout
 
@@ -13,7 +13,7 @@ packages/tcip-web/
     paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
     identity.py         # current-user identity for created_by/accepted_by provenance stamping
     jobstore.py         # background job tracking (training/inference/tuning)
-    terminal.py         # in-app agent terminal (spawns a hardened `claude` process)
+    terminal.py         # in-app agent terminal (spawns a provider table row's harness)
     routes/
       annotate.py       # label CRUD, Annotate-tab commands
       canvas.py         # live canvas capture for the agent's own image-capable read tool
@@ -110,7 +110,7 @@ Calls made for this single-operator desktop GUI:
 - Trust boundary. A connection from this machine (a loopback address) is served with no auth;
   a connection through a network address is refused, whatever the bind, until the operator sets
   `TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands a network client filesystem reads
-  and writes and the interactive agent terminal (keyboard access to Claude Code) with no login.
+  and writes and the interactive agent terminal (keyboard access to a coding agent) with no login.
   The Host header must name this backend as reached (its arrival address, its own hostname, or
   an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
   and every WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/

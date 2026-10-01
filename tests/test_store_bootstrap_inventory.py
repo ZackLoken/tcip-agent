@@ -1,16 +1,5 @@
-"""The bootstrap import set, the contract suite's inventory, and the claim table are one list.
-
-Three maintained statements about every store exist for three different reasons: the contract
-suite names each store to pin its bytes and its placement, the bootstrap imports each store's
-owning module so a tool that has to write every store back out can see it, and the claim table
-says where each store's files sit so the conform rail can answer without importing anything. A
-store in one and not the others either has no byte identity, silently exports as nothing, or is
-invisible to the rail that decides whether its files were left behind, so the three are compared
-rather than each trusted on its own.
-
-The claim table restates each locator's path shape as data, so the two are held together here
-by round-tripping a golden key through the locator onto a path the row must match, and by a set
-of near misses the row must reject.
+"""The bootstrap import set, the contract suite's inventory, and the claim table name the same
+stores, and each claim row matches the path its store's locator produces and rejects near misses.
 """
 
 from __future__ import annotations
@@ -38,18 +27,14 @@ from tcip_store.layout_claims import (
 
 from tcip_mcp.store_catalog import bootstrapped_stores
 
-from tests.test_store_contract import REGISTERED
+from tests.test_store_contract import REGISTERED, is_test_scaffolding
 
 _PACKAGES = Path(__file__).resolve().parent.parent / "packages"
 
 
 def _platform_stores() -> set[str]:
     """Every registered store the platform owns, leaving out a test's own scaffolding."""
-    return {
-        name
-        for name in bootstrapped_stores()
-        if not ts.get_descriptor(name).declared_in.startswith(("tests", "test_"))
-    }
+    return {name for name in bootstrapped_stores() if not is_test_scaffolding(name)}
 
 
 def _stores_owed_a_claim() -> set[str]:
@@ -213,7 +198,6 @@ from tcip_mcp.store_catalog import bootstrapped_stores
 
 stores = bootstrapped_stores()
 assert "tcip_web" not in sys.modules, sorted(sys.modules)
-assert "learning_capture" in stores, stores
 assert "annotation_stats" in stores, stores
 print(tcip_mcp.__file__)
 """
@@ -239,23 +223,8 @@ print(json.dumps({
 
 
 def test_the_catalog_registers_every_store_the_claim_table_speaks_for():
-    """In a process that imports nothing but the catalog, the claim table and the catalog
-    name one set of stores.
-
-    The direction this exists for is claim row to catalog. The claim table is what the conform
-    rail answers from without importing any owning module, so a row whose store the catalog
-    never registers means the rail speaks for files that ``export-store``, ``adopt-store`` and
-    ``generate_frozen_manifest`` cannot see: a record kind declared frozen, sitting outside the
-    shipped freeze commitment, with the manifest check agreeing with the gap. The other direction
-    already refuses at the point of use, where :func:`~tcip_store.layout_claims.claim_of` raises
-    naming the declaration the store owes, so it is asserted here only because it is free.
-
-    A fresh child, not this process: ``bootstrapped_stores`` reads the process-global registry,
-    and any import of an owning module anywhere in the suite hides a missing catalog import
-    from every in-session check. The child prints the ``tcip_mcp`` it imported so a run whose
-    environment resolves an installed copy elsewhere fails here rather than proving the fact
-    about another tree.
-    """
+    """In a fresh process that imports nothing but the catalog, from this repository's own
+    ``tcip_mcp``, the claim table and the catalog's record and log stores are one set."""
     result = subprocess.run(
         [sys.executable, "-c", _CATALOG_AGAINST_CLAIMS],
         capture_output=True, text=True, timeout=180,
@@ -269,15 +238,8 @@ def test_the_catalog_registers_every_store_the_claim_table_speaks_for():
 
 
 def test_the_catalog_reaches_every_web_owned_store_without_importing_tcip_web():
-    """A caller that only needs the catalog (``export-store``, ``adopt-store``, this test
-    suite) must not pull the web package in as a side effect: the stores the web package owns
-    register through :mod:`tcip_mcp.web_client`, which the catalog already imports.
-
-    The child prints the ``tcip_mcp`` it imported, and the assertion holds it to this
-    repository's own package, so a run whose environment resolves an installed copy elsewhere
-    fails here rather than proving the fact about another tree. The catalog's import chain
-    reaches torch, so a cold child takes longer than a warm one.
-    """
+    """In a fresh process, from this repository's own ``tcip_mcp``, the catalog registers the
+    web-owned stores without importing ``tcip_web``."""
     result = subprocess.run(
         [sys.executable, "-c", _CATALOG_IMPORT_ONLY],
         capture_output=True, text=True, timeout=180,

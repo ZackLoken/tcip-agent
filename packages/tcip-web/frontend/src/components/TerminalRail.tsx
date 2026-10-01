@@ -1,14 +1,13 @@
 /**
- * The agent rail: the real Claude Code CLI, embedded. An xterm.js terminal attached
- * over WebSocket to a server-side PTY running `claude` in the repo root, so the breeder
- * talks to the same agent (CLAUDE.md, skills, MCP tools, permission prompts) the
- * platform is designed around: full fidelity, no translation layer. The terminal is
- * recolored to the field-station palette via the ANSI theme (Claude Code paints its TUI
- * with ANSI colors, so it renders in our palette natively); its internal layout is
- * untouched, that's the exact-experience point.
+ * The agent rail: a real agent harness from the backend's provider table, embedded. An
+ * xterm.js terminal attached over WebSocket to a server-side PTY running the harness in the
+ * repo root, so the breeder talks to the agent the platform is designed around with no
+ * translation layer. The terminal is recolored to the field-station palette via the ANSI
+ * theme; the harness's own layout is untouched. Each launch's session-start ritual is shown
+ * above the terminal, and staged requests are submitted to the session for its agent.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -19,7 +18,6 @@ import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import type { TerminalInputFrame, TerminalResizeFrame } from "@/api/types.generated";
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
-import { selectProjectRoot } from "@/store/slices/gui";
 
 type TerminalSendFrame = TerminalInputFrame | TerminalResizeFrame;
 
@@ -33,7 +31,7 @@ function clampWidth(px: number): number {
 }
 
 /**
- * Field-station terminal theme. Claude Code draws with the 16 ANSI slots, so mapping
+ * Field-station terminal theme. A terminal UI draws with the 16 ANSI slots, so mapping
  * them to the app palette re-skins the real TUI: green → SI-green (the app accent), yellow
  * → late-summer gold, red → FP red, dim gray → sage. Background stays tcip-bg so the rail
  * sits flush with the app chrome; the cursor is persimmon, the accent the SeasonRail ends on.
@@ -66,28 +64,43 @@ const FIELD_STATION_THEME = {
 export function TerminalRail() {
   const open = useStore((s) => s.terminalOpen);
   const setOpen = useStore((s) => s.setTerminalOpen);
-  const [status, setStatus] = useState<{ available: boolean; reason?: string } | null>(null);
+  // The provider row the rail launches (the table's first row) and why it cannot launch; a
+  // backend that could not be asked leaves no row and its own reason.
+  const [status, setStatus] = useState<{ provider?: string; reason: string | null } | null>(null);
+  const available = status?.reason === null;
   const [error, setError] = useState<string | null>(null);
   // Live PTY link state, surfaced as a header dot (green = attached, amber = (re)connecting).
   const [conn, setConn] = useState<"connecting" | "open" | "reconnecting">("connecting");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const termRef = useRef<Terminal | null>(null);
-  // The lifecycle effect's `send` closure, exposed so the pending-message effect below can
-  // reach the live socket without a second write path.
-  const sendRef = useRef<((payload: TerminalSendFrame) => void) | null>(null);
+  // True while a restart is asked for, and while staged requests are being submitted.
+  const restartingRef = useRef(false);
+  const submittingRef = useRef(false);
+  const pendingMessages = useStore((s) => s.pendingTerminalMessages);
 
-  // A request staged via `sendToAgentTerminal` (TuningTab, ResultsTab, ...): sent as terminal
-  // input once the PTY socket is actually open, not before, so a message sent while the rail
-  // is still (re)connecting isn't dropped.
-  const pendingMessage = useStore((s) => s.pendingTerminalMessage);
-  const clearPendingMessage = useStore((s) => s.clearPendingTerminalMessage);
+  // Submit staged requests, oldest first, to the session's current launch, each leaving the
+  // queue once the backend took it; the backend delivers them after that launch's ritual.
+  const submitStaged = useCallback(async () => {
+    const id = sessionRef.current;
+    if (!id || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      for (;;) {
+        const [next] = useStore.getState().pendingTerminalMessages;
+        if (next === undefined || sessionRef.current !== id || restartingRef.current) break;
+        await terminalApi.submit(id, { text: next });
+        useStore.getState().dropDeliveredTerminalMessages(1);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      submittingRef.current = false;
+    }
+  }, []);
 
-  // Show a starter hint until a project is open or they've sent their first input; a first-time
-  // breeder otherwise meets a blank cursor.
-  const projectRoot = useStore(selectProjectRoot);
-  const [hasInput, setHasInput] = useState(false);
-  const showStarterHint = !!status?.available && !projectRoot && !hasInput;
+  // The launch's session-start ritual, shown until the breeder types.
+  const [ritual, setRitual] = useState<string | null>(null);
 
   const [width, setWidth] = useState<number>(() => {
     try {
@@ -125,21 +138,22 @@ export function TerminalRail() {
     if (!open || status !== null) return;
     terminalApi
       .status()
-      .then(setStatus)
+      .then(({ providers: [row] }) =>
+        setStatus({ provider: row.id, reason: row.unavailable_reason }),
+      )
       .catch(() =>
-        // Backend unreachable is not "claude missing"; say so, and keep Retry viable.
+        // Backend unreachable is not a missing harness; say so, and keep Retry viable.
         setStatus({
-          available: false,
           reason: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
         }),
       );
   }, [open, status]);
 
-  // Terminal lifecycle: build xterm, attach the PTY WebSocket, wire input/resize.
-  // Unmounting (rail closed) drops the socket; the server session (and Claude Code's
-  // conversation) stays alive, and reopening replays the scrollback.
+  // Terminal lifecycle: build xterm, attach the PTY WebSocket, wire input/resize. Closing the
+  // rail drops the socket; the server session stays alive and reopening replays the scrollback.
   useEffect(() => {
-    if (!open || !status?.available || !hostRef.current) return;
+    const provider = status?.provider;
+    if (!open || status?.reason !== null || !provider || !hostRef.current) return;
     setConn("connecting");
 
     const term = new Terminal({
@@ -162,23 +176,10 @@ export function TerminalRail() {
     term.focus();
     termRef.current = term;
 
-    // Claude Code turns on SGR mouse tracking, which hands every mouse and wheel event to it
-    // and disables xterm's own selection and scrollback. Swallowing the mouse-mode set/reset
-    // (DEC private 1000-1016) keeps tracking from engaging, so xterm stays a normal selectable
-    // terminal: drag selects, the wheel scrolls the scrollback, drag-to-edge auto-scrolls, a
-    // selection survives streaming output, and it works at the shell prompt after /exit too.
-    const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
-    const swallowMouseMode = (params: (number | number[])[]) => {
-      for (const p of params) if (MOUSE_MODES.has(Array.isArray(p) ? p[0] : p)) return true;
-      return false; // not a mouse mode (alt-screen, bracketed paste, cursor…), let xterm handle it
-    };
-    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, swallowMouseMode);
-    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, swallowMouseMode);
-
     // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the browser
     // does not always route it there (focus, or the app swallowing the key). Intercept in the
     // capture phase and hand the text to term.paste(), which wraps it in bracketed-paste mode,
-    // so a multi-line paste reaches Claude Code as one paste, not a line-per-Enter burst.
+    // so a multi-line paste reaches the agent as one paste, not a line-per-Enter burst.
     const onPaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData("text");
       if (text) {
@@ -188,10 +189,8 @@ export function TerminalRail() {
       }
     };
 
-    // With mouse tracking suppressed above, xterm does normal selection, so the copy wiring is
-    // simple: copy-on-select (a drag ending with a selection lands on the clipboard); right-click
-    // copies the selection or else pastes (conhost style); Ctrl/Cmd+Shift+C / Ctrl+Insert copy;
-    // Ctrl+Shift+V / Shift+Insert paste; and Ctrl+C copies when text is selected, else stays SIGINT.
+    // Copy-on-select; right-click copies a selection or else pastes; Ctrl/Cmd+Shift+C and
+    // Ctrl+Insert copy, Ctrl+Shift+V and Shift+Insert paste; Ctrl+C copies a selection, else SIGINT.
     const copySelection = () => {
       const sel = term.getSelection();
       if (sel) void navigator.clipboard?.writeText(sel).catch(() => {});
@@ -252,28 +251,7 @@ export function TerminalRail() {
       return true;
     });
 
-    // Wheel scroll: mouse tracking is suppressed so drag selects locally, but Claude still expects
-    // mouse reports (it enabled tracking; xterm just swallowed the enable), so forward the wheel as
-    // SGR wheel events and Claude scrolls its own full-screen conversation (which has no xterm
-    // scrollback to scroll). Without this the wheel falls through to xterm's alternate-screen
-    // behavior and becomes cursor keys that Claude's prompt reads as history navigation.
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const btn = e.deltaY < 0 ? 64 : 65; // SGR mouse: 64 = wheel up, 65 = wheel down
-      const px =
-        e.deltaMode === 1
-          ? e.deltaY * 16
-          : e.deltaMode === 2
-            ? e.deltaY * term.rows * 16
-            : e.deltaY;
-      const ticks = Math.min(5, Math.max(1, Math.round(Math.abs(px) / 40)));
-      for (let i = 0; i < ticks; i++) term.input(`\x1b[<${btn};1;1M`);
-    };
-
     host.addEventListener("paste", onPaste, true);
-    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
     host.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mouseup", onWindowMouseUp);
 
@@ -284,8 +262,15 @@ export function TerminalRail() {
       url: async () => {
         try {
           if (!sessionRef.current) {
-            const { session_id } = await terminalApi.createSession(term.rows, term.cols);
-            sessionRef.current = session_id;
+            const created = await terminalApi.createSession({
+              provider,
+              rows: term.rows,
+              cols: term.cols,
+            });
+            if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
+            sessionRef.current = created.session_id;
+            setRitual(created.ritual);
+            void submitStaged();
           }
         } catch (e) {
           setError(String(e));
@@ -310,11 +295,10 @@ export function TerminalRail() {
     });
 
     const send = (payload: TerminalSendFrame) => socket.send(JSON.stringify(payload));
-    sendRef.current = send;
     socket.start();
 
     const dataSub = term.onData((data) => {
-      setHasInput(true);
+      setRitual(null);
       send({ type: "input", data });
     });
     const resizeSub = term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
@@ -332,39 +316,37 @@ export function TerminalRail() {
       socket.stop();
       observer.disconnect();
       host.removeEventListener("paste", onPaste, true);
-      host.removeEventListener("wheel", onWheel, true);
       host.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("mouseup", onWindowMouseUp);
       dataSub.dispose();
       resizeSub.dispose();
       term.dispose();
       termRef.current = null;
-      sendRef.current = null;
     };
-  }, [open, status]);
+  }, [open, status, submitStaged]);
 
-  // Deliver a request staged via `sendToAgentTerminal`. Depends on `conn` (not just
-  // `pendingMessage`) so a message staged before the socket finished (re)connecting is sent the
-  // moment it opens, rather than being dropped or sent into a closed socket.
   useEffect(() => {
-    if (!pendingMessage || conn !== "open") return;
-    const send = sendRef.current;
-    if (!send || !termRef.current) return;
-    send({ type: "input", data: `${pendingMessage}\r` });
-    setHasInput(true);
-    clearPendingMessage();
-  }, [pendingMessage, conn, clearPendingMessage]);
+    if (pendingMessages.length) void submitStaged();
+  }, [pendingMessages, submitStaged]);
 
   async function restart() {
     const id = sessionRef.current;
     const term = termRef.current;
-    if (!id) return;
+    if (!id || !term || !status?.provider) return;
+    restartingRef.current = true;
+    term.reset(); // the replacement process paints a fresh screen
     try {
-      await terminalApi.restart(id, term?.rows ?? 30, term?.cols ?? 100);
-      term?.reset();
-      setHasInput(false); // a fresh conversation with still no project open re-shows the hint
+      const restarted = await terminalApi.restart(id, {
+        provider: status.provider,
+        rows: term.rows,
+        cols: term.cols,
+      });
+      setRitual(restarted.ritual);
     } catch (e) {
       setError(String(e));
+    } finally {
+      restartingRef.current = false;
+      void submitStaged();
     }
   }
 
@@ -388,7 +370,7 @@ export function TerminalRail() {
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
           <span className="tcip-eyebrow">TCIP Agent</span>
-          {status?.available && (
+          {available && (
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
                 conn === "open" ? "bg-tcip-accent" : "bg-tcip-warn animate-pulse"
@@ -440,26 +422,21 @@ export function TerminalRail() {
         </div>
       </div>
 
-      {status && !status.available ? (
+      {status && status.reason !== null ? (
         <div className="p-4 flex flex-col gap-3">
-          <p className="text-[12px] text-tcip-muted">
-            {status.reason ??
-              "Claude Code is not available. Install the claude CLI and sign in to enable the agent terminal."}
-          </p>
+          <p className="text-[12px] text-tcip-muted">{status.reason}</p>
           <button className="tcip-btn self-start" onClick={() => setStatus(null)}>
             Retry
           </button>
         </div>
       ) : (
         <>
-          {showStarterHint && (
+          {ritual && (
             <div
-              data-testid="terminal-starter-hint"
+              data-testid="terminal-ritual"
               className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted"
             >
-              Tell the agent what you&rsquo;re working on, for example: &ldquo;I have photos of my{" "}
-              <span className="italic">[crop]</span> and want to measure{" "}
-              <span className="italic">[trait]</span>.&rdquo;
+              {ritual}
             </div>
           )}
           <div className="flex-1 min-h-0 relative">

@@ -1,7 +1,7 @@
 """Meta-loop tools for self-improvement.
 
-Tools that let Claude sessions leave the system smarter than they started:
-- report_friction: structured friction logging when Claude hits a problem
+Tools that let an agent session leave the system smarter than it started:
+- report_friction: structured friction logging when the agent hits a problem
 - write_retrospective: end-of-project reflection written to markdown
 - load_project_memory: read recent reports or retrospectives at session start (closes the loop)
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,11 +46,7 @@ REPORT_CATEGORIES = {
 
 
 _REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".json")
-"""One friction report per document, under the project.
-
-A report is one whole JSON document, not a line of a stream, so it carries the extension
-that says so and every reader decodes the whole document rather than its first line.
-"""
+"""One friction report per JSON document, under the project."""
 
 _RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffix=".md")
 """One retrospective per project identifier, under the project."""
@@ -90,38 +86,24 @@ register_store(
 
 
 def friction_report_key(project_path: str, report_id: str) -> Key:
-    """One friction report.
-
-    ``last_writer_wins``: the identifier carries a timestamp and a random suffix, so each
-    report is written once, whole, by the call that produced it, and a conflict on the
-    create-only write means some other call already owns that name.
-    """
+    """One friction report."""
     return Key(FRICTION_REPORT_STORE, str(project_path), (report_id,))
 
 
 def retrospective_key(project_path: str, project_id: str) -> Key:
-    """One project's retrospective document.
-
-    ``cas``: a retrospective is appended to by reading the stored text and writing the
-    concatenation, so :func:`write_retrospective` writes against the version it read and
-    re-merges on conflict rather than dropping a section.
-    """
+    """One project's retrospective document."""
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
 
-def _report_path(project_path: str, report_id: str) -> Path:
+def _document_path(locator: RootedFileLocator, project_path: str, name: str) -> Path:
+    """Where ``locator`` places the document ``name`` under ``project_path``."""
     root = Path(project_path)
-    return root.joinpath(*_REPORT_DOC.relative_path(str(root), (report_id,)).parts)
+    return root.joinpath(*locator.relative_path(str(root), (name,)).parts)
 
 
 def _path_if_written(path: Path) -> str | None:
     """The document's file path when the bound backend wrote one (the file backend), else None."""
     return str(path) if path.is_file() else None
-
-
-def _retrospective_path(project_path: str, project_id: str) -> Path:
-    root = Path(project_path)
-    return root.joinpath(*_RETROSPECTIVE_DOC.relative_path(str(root), (project_id,)).parts)
 
 
 def report_document_name(report_id: str) -> str:
@@ -258,7 +240,7 @@ def report_friction(
 
     return {
         "report_id": report_id,
-        "report_path": _path_if_written(_report_path(str(project), report_id)),
+        "report_path": _path_if_written(_document_path(_REPORT_DOC, str(project), report_id)),
         "category": category,
         "timestamp": entry["timestamp"],
         "user_disagreement": user_disagreement,
@@ -359,9 +341,6 @@ def read_audit_log(
 
     A page carrying undecodable entries, unknown-schema-version entries, or a torn tail is refused.
 
-    This call's own audit entry is written after this function returns, so it is never present in
-    this call's own result.
-
     Args:
         scope: Dataset root, project root, a path under either, or ``None`` for the project's own
             log.
@@ -447,49 +426,49 @@ def read_audit_log(
     }
 
 
+def _memory_page(corpus: str, noun: str, documents: list[MemoryDocument], limit: int,
+                 row: Callable[[MemoryDocument], dict | None]) -> dict:
+    """Up to ``limit`` rows ``row`` makes of ``documents`` in order (a ``None`` row is skipped)
+    under ``corpus``, with their count and how many documents exist; with no documents, a note
+    naming ``noun``."""
+    if not documents:
+        return {corpus: [], "count": 0, "total_available": 0,
+                "note": f"no {noun} recorded under this project yet."}
+    rows: list[dict] = []
+    for document in documents:
+        made = row(document)
+        if made is not None:
+            rows.append(made)
+            if len(rows) >= limit:
+                break
+    return {corpus: rows, "count": len(rows), "total_available": len(documents)}
+
+
 def _load_reports(
     project_path: str, limit: int, category: str, filter_substring: str
 ) -> dict:
-    documents = report_documents(project_path)
-    if not documents:
-        return {
-            "reports": [],
-            "count": 0,
-            "total_available": 0,
-            "note": "no friction reports recorded under this project yet.",
-        }
-
     cat = category.strip()
     needle = filter_substring.lower().strip()
-    results: list[dict] = []
-    for document in documents:
-        entry = document.value
-        if cat and entry.get("category") != cat:
-            continue
-        filename = report_document_name(document.name)
-        if needle:
-            haystack = (filename + " " + json.dumps(entry)).lower()
-            if needle not in haystack:
-                continue
 
-        results.append({
+    def row(document: MemoryDocument) -> dict | None:
+        entry = document.value
+        filename = report_document_name(document.name)
+        if cat and entry.get("category") != cat:
+            return None
+        if needle and needle not in (filename + " " + json.dumps(entry)).lower():
+            return None
+        return {
             "file": filename,
             "report_id": document.name,
-            "path": _path_if_written(_report_path(project_path, document.name)),
+            "path": _path_if_written(_document_path(_REPORT_DOC, project_path, document.name)),
             "timestamp": entry.get("timestamp"),
             "category": entry.get("category", ""),
             "detail": entry.get("detail", ""),
             "context": entry.get("context", {}),
             "user_disagreement": entry.get("user_disagreement", False),
-        })
-        if len(results) >= limit:
-            break
+        }
 
-    return {
-        "reports": results,
-        "count": len(results),
-        "total_available": len(documents),
-    }
+    return _memory_page("reports", "friction reports", report_documents(project_path), limit, row)
 
 
 @tool()
@@ -524,7 +503,7 @@ def write_retrospective(
     """
     now = datetime.now(timezone.utc)
     project_path = str(project)
-    retro_path = _retrospective_path(project_path, project_id)
+    retro_path = _document_path(_RETROSPECTIVE_DOC, project_path, project_id)
 
     section_header = f"## Retrospective: {now.isoformat()}"
     body = f"""{section_header}
@@ -592,12 +571,8 @@ def write_retrospective(
 @tool()
 @audited
 def record_distillation_pass(project: Path) -> dict:
-    """Record that you reviewed this project's friction/retrospectives (e.g. via ``tcip
-    distill-learnings``); resets its distillation-backlog counters.
-
-    Call this after reading a distillation worksheet. It records only that a review happened; it
-    never applies, promotes, or writes anything from the worksheet itself.
-    """
+    """Record that this project's friction reports and retrospectives were reviewed, resetting
+    its distillation-backlog counters; records nothing else."""
     from tcip_mcp.project_status import record_distillation
 
     record_distillation(str(project))
@@ -607,32 +582,19 @@ def record_distillation_pass(project: Path) -> dict:
 def _load_retrospectives(
     project_path: str, limit: int, filter_substring: str
 ) -> dict:
-    documents = retrospective_documents(project_path)
-    if not documents:
-        return {
-            "retrospectives": [],
-            "count": 0,
-            "total_available": 0,
-            "note": "no retrospectives recorded under this project yet.",
-        }
-
     needle = filter_substring.lower().strip()
-    results: list[dict] = []
-    for document in documents:
+
+    def row(document: MemoryDocument) -> dict | None:
         content = document.value
         if needle and needle not in document.name.lower() and needle not in content.lower():
-            continue
-        results.append({
+            return None
+        return {
             "project_id": document.name,
-            "path": _path_if_written(_retrospective_path(project_path, document.name)),
+            "path": _path_if_written(
+                _document_path(_RETROSPECTIVE_DOC, project_path, document.name)),
             "timestamp": document.timestamp,
             "content": content,
-        })
-        if len(results) >= limit:
-            break
+        }
 
-    return {
-        "retrospectives": results,
-        "count": len(results),
-        "total_available": len(documents),
-    }
+    return _memory_page("retrospectives", "retrospectives", retrospective_documents(project_path),
+                        limit, row)

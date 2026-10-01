@@ -1,19 +1,6 @@
 """HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the
 declarations of the stores, the GUI state shape and the tab vocabulary (``ActiveTab``) the web
 package owns.
-
-Port discovery order, under the workspace the caller names:
-  1. The port record under the workspace root: the port actually bound, so a substituted port
-     (the requested one was taken) is still the one found. A record that does not parse raises.
-  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when there is no record.
-  3. Default: 8765.
-
-Host discovery:
-  1. ``TCIP_WEB_HOST`` environment variable.
-  2. Default: 127.0.0.1.
-
-Connection failures are treated as soft errors: the MCP tool returns ``{"status":
-"no_subscribers"}`` rather than raising.
 """
 
 from __future__ import annotations
@@ -25,7 +12,7 @@ from typing import Any, Literal, Optional, get_args
 
 import tcip_store
 from pydantic import BaseModel, ConfigDict, Field
-from tcip_store import LOG_JSON, RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -52,12 +39,7 @@ register_store(
 
 
 def backend_port_key(workspace: Path) -> Key:
-    """Where the backend serving ``workspace`` publishes the port it bound, for MCP tools in other
-    processes.
-
-    ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
-        first.
-    """
+    """The port the backend serving ``workspace`` bound."""
     return Key(BACKEND_PORT_STORE, str(Path(workspace).resolve()), _PORT_PARTS)
 
 
@@ -81,11 +63,7 @@ register_store(
 
 
 def gui_snapshot_key(project: str | Path) -> Key:
-    """This project's persisted GUI snapshot.
-
-    ``last_writer_wins``: the backend holds the live state in memory and writes the whole snapshot
-    from it on each change. ``durable=False``: a lost snapshot costs a re-selection, not history.
-    """
+    """This project's persisted GUI snapshot."""
     return Key(GUI_SNAPSHOT_STORE, str(project), _SNAPSHOT_PARTS)
 
 
@@ -115,41 +93,13 @@ for _canvas_store in (CANVAS_META_STORE, CANVAS_GEOMETRY_STORE):
 
 
 def canvas_meta_key(project: str) -> Key:
-    """The small meta document every push overwrites.
-
-    ``last_writer_wins``: each push writes the document whole from the payload it was given and
-        reads nothing first. ``durable=False``: the next push repaints a lost one.
-    """
+    """The canvas meta document a push writes."""
     return Key(CANVAS_META_STORE, project, _META_PARTS)
 
 
 def canvas_geometry_key(project: str) -> Key:
-    """The display-resolved geometry a full push writes, on the same terms as the meta
-    document, and written before it so a reader pairing new meta with old geometry sees an
-    identity mismatch rather than a false match."""
+    """The display-resolved geometry a full push writes."""
     return Key(CANVAS_GEOMETRY_STORE, project, _GEOMETRY_PARTS)
-
-
-_CAPTURE_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
-"""The capture log under a root's own ``.tcip/``."""
-
-LEARNING_CAPTURE_STORE = "learning_capture"
-_CAPTURE_PARTS = ("learning_capture",)
-register_store(
-    StoreDescriptor(
-        name=LEARNING_CAPTURE_STORE,
-        kind="log",
-        key_fields=("document",),
-        frozen=True,
-        codec=LOG_JSON,
-        locator=_CAPTURE_LOG,
-    )
-)
-
-
-def learning_capture_key(root: str | Path) -> Key:
-    """The session-boundary log under ``root``."""
-    return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
 
 
 ANNOTATION_STATS_STORE = "annotation_stats"
@@ -196,9 +146,8 @@ what they serialize to."""
 
 
 class DatasetSelection(BaseModel):
-    """Which dataset the GUI is looking at inside the open project, with the references the
-    browser reads it through; every path is built by :func:`selection_for`, never by the
-    browser."""
+    """Which dataset the GUI is looking at inside the open project, with the image list and the
+    paths of each image's records."""
 
     model_config = _TRANSPORT
 
@@ -239,18 +188,24 @@ class ReviewFilters(BaseModel):
     detection_idx: int = 0
 
 
-class GuiState(BaseModel):
+class _GuiFields(BaseModel):
+    """The GUI state's fields other than its dataset, the same in the broadcast and the
+    persisted form."""
+
+    active_tab: ActiveTab = "annotate"
+    view: ViewState = Field(default_factory=ViewState)
+    mode: AnnotateMode = "box"
+    active_subject: Optional[str] = None
+    review: ReviewFilters = Field(default_factory=ReviewFilters)
+
+
+class GuiState(_GuiFields):
     """The GUI state the backend holds for its open project and broadcasts to browsers; only
     ``dataset`` is the backend's own, the rest advisory."""
 
     model_config = _TRANSPORT
 
-    active_tab: ActiveTab = "annotate"
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
-    view: ViewState = Field(default_factory=ViewState)
-    mode: AnnotateMode = "box"
-    active_subject: Optional[str] = None
-    review: ReviewFilters = Field(default_factory=ReviewFilters)
 
 
 class _DatasetChoice(BaseModel):
@@ -266,17 +221,12 @@ class _DatasetChoice(BaseModel):
     current_image_index: int
 
 
-class _PersistedGuiState(BaseModel):
+class _PersistedGuiState(_GuiFields):
     """``gui.json``'s whole shape: :class:`GuiState` with its dataset held as the choice."""
 
     model_config = ConfigDict(extra="forbid")
 
-    active_tab: ActiveTab
     dataset: Optional[_DatasetChoice]
-    view: ViewState
-    mode: AnnotateMode
-    active_subject: Optional[str]
-    review: ReviewFilters
 
 
 def require_whole(model: BaseModel, where: str) -> None:
@@ -386,11 +336,9 @@ def resolve_web_host() -> str:
 
 
 def resolve_web_port(workspace: Path) -> int:
-    """Return the port the FastAPI backend serving ``workspace`` is listening on, in the order the
-    module docstring gives: the record under the workspace root, then ``TCIP_WEB_PORT``, then the
-    default. Raises ``ValueError`` naming a recorded port or a ``TCIP_WEB_PORT`` that is not an
-    integer.
-    """
+    """The port the backend serving ``workspace`` listens on: the one it recorded under the
+    workspace, else ``TCIP_WEB_PORT``, else the default. Raises ``ValueError`` naming a recorded
+    port or a ``TCIP_WEB_PORT`` that is not an integer."""
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     try:
         if recorded is not None:

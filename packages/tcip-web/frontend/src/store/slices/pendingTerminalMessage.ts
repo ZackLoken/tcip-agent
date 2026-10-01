@@ -3,14 +3,12 @@ import type { StateCreator } from "zustand";
 import type { AppState } from "@/store/appState";
 
 export interface PendingTerminalMessageSlice {
-  /** A request staged for the agent terminal: any component that would otherwise make the
-   *  breeder hand-author a CV/ML decision (a training config, a search space, a calibration
-   *  trigger) calls `sendToAgentTerminal` instead of exposing the raw control. Opens the rail
-   *  and stages the text here; TerminalRail sends it as terminal input once its socket is
-   *  open, then clears it so it never resends. */
-  pendingTerminalMessage: string | null;
+  /** Requests staged for the agent terminal, oldest first, until delivered. */
+  pendingTerminalMessages: string[];
+  /** Open the agent rail and stage `text` behind the requests already staged. */
   sendToAgentTerminal: (text: string) => void;
-  clearPendingTerminalMessage: () => void;
+  /** Drop the `count` oldest staged requests. */
+  dropDeliveredTerminalMessages: (count: number) => void;
 }
 
 export const createPendingTerminalMessageSlice: StateCreator<
@@ -19,10 +17,11 @@ export const createPendingTerminalMessageSlice: StateCreator<
   [],
   PendingTerminalMessageSlice
 > = (set, get) => ({
-  pendingTerminalMessage: null,
+  pendingTerminalMessages: [],
   sendToAgentTerminal: (text) => {
     get().setTerminalOpen(true);
-    set({ pendingTerminalMessage: text });
+    set({ pendingTerminalMessages: [...get().pendingTerminalMessages, text] });
   },
-  clearPendingTerminalMessage: () => set({ pendingTerminalMessage: null }),
+  dropDeliveredTerminalMessages: (count) =>
+    set({ pendingTerminalMessages: get().pendingTerminalMessages.slice(count) }),
 });

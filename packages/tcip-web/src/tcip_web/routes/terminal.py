@@ -1,17 +1,7 @@
-"""Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`.
-
-The API is session-plural. The WebSocket carries raw PTY output as text frames (server → browser)
-and JSON control messages (browser → server), validated as
-``TerminalInputFrame``/``TerminalResizeFrame``:
-
-    {"type": "input",  "data": "<keystrokes>"}
-    {"type": "resize", "rows": 34, "cols": 96}
-
-Delivery model: the PTY reader thread appends output to a capped scrollback and pushes it to one
-queue per connected WebSocket via ``loop.call_soon_threadsafe`` (FIFO), and a single pump task per
-socket drains that queue, so exactly one writer task per socket. On (re)connect the scrollback
-snapshot and queue registration happen under the writer's lock, so the replay is gap-free and
-duplicate-free. All endpoints sit behind the loopback + Origin trust boundary.
+"""Agent terminal routes: provider status, session launch, restart and submitted requests over
+HTTP, and per session a WebSocket carrying raw PTY output as text frames out and
+``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. A reconnecting socket receives
+the scrollback first, then live output, with nothing lost or repeated between them.
 """
 
 from __future__ import annotations
@@ -22,6 +12,7 @@ import json
 import logging
 import os
 import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -45,7 +36,7 @@ MAX_DIM = 500  # sanity bound on client-supplied rows/cols
 # that socket: the client reconnects and repaints from the scrollback replay.
 QUEUE_MAX_CHUNKS = 2048
 
-_EXIT_NOTE = "\r\n\x1b[2m[Claude Code exited, use Restart in the rail header]\x1b[22m\r\n"
+_EXIT_NOTE = "\r\n\x1b[2m[the agent exited, use Restart in the rail header]\x1b[22m\r\n"
 
 
 def _offer(queue: asyncio.Queue, data: str) -> None:
@@ -65,25 +56,76 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
         queue.put_nowait(None)
 
 
-def _record_start(session_id: str, launched: dict, project: Path | None) -> None:
+class LaunchedProgram(BaseModel):
+    """What a launch ran: the provider row's id, the executable, and the version it declares."""
+
+    provider: str
+    executable: str
+    version: Optional[str]
+
+
+class TerminalLaunch(BaseModel):
+    """A started session: its id, whether it was already running when asked for, what it
+    launched, and the session-start ritual that launch was given."""
+
+    session_id: str
+    existing: bool
+    launched: LaunchedProgram
+    ritual: str
+
+
+class ProviderStatus(BaseModel):
+    """One provider row and why it cannot launch here, ``None`` when it can."""
+
+    id: str
+    name: str
+    unavailable_reason: Optional[str]
+
+
+class TerminalStatus(BaseModel):
+    """Every provider row, in table order."""
+
+    providers: list[ProviderStatus]
+
+
+def _record_start(session_id: str, launched: LaunchedProgram, project: Path | None) -> None:
     """One audit line in ``project``'s log per launch for it, naming the session id and the
-    program it launched; a launch for no project has no log to land in and records nothing. A
-    failed append raises ``AuditEntryNotWritten``.
+    provider and program it launched; a launch for no project has no log to land in and records
+    nothing. A failed append raises ``AuditEntryNotWritten``.
     """
     from tcip_web.routes.audit_gap import record_committed
 
     if project is not None:
-        record_committed("agent_terminal_started", {"session_id": session_id, **launched},
-                         scope=project)
+        record_committed("agent_terminal_started",
+                         {"session_id": session_id, **launched.model_dump()}, scope=project)
+
+
+@dataclass
+class _Launch:
+    """One launch of a session's agent: its generation (a stale reader's output carries an older
+    one and is dropped), its session-start ritual once known, whether that ritual was delivered,
+    whether the agent has bracketed paste on, the requests waiting behind the ritual, and the
+    output tail an escape sequence split across reads continues from."""
+
+    gen: int
+    ritual: Optional[str] = None
+    ritual_sent: bool = False
+    ready: bool = False
+    queued: list[str] = field(default_factory=list)
+    tail: str = ""
+
+
+_TAIL_CHARS = 32
 
 
 class TerminalSession:
-    """One PTY-attached Claude Code process and its subscriber queues."""
+    """One PTY-attached agent process, its current launch and its subscriber queues."""
+
+    launch: TerminalLaunch
+    """What the last start launched; set by :meth:`start`."""
 
     def __init__(self, session_id: str):
         self.id = session_id
-        # What the last start launched (executable and declared version), None before a start.
-        self.launched: Optional[dict] = None
         self._pty = None
         self._lock = threading.Lock()
         self._scrollback: list[str] = []
@@ -91,25 +133,28 @@ class TerminalSession:
         # ws-id → (queue, that websocket's event loop)
         self._subs: dict[int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = {}
         self._next_sub = 0
-        # PTY generation: bumped on every (re)start so a stale reader thread (the old
-        # process draining after a restart) can't inject output or its exit note into
-        # the fresh session's scrollback/stream.
-        self._gen = 0
+        self._launch = _Launch(gen=0)
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
-    def start(self, rows: int, cols: int) -> Optional[str]:
-        """Spawn the CLI in a PTY. Returns an error reason, or None on success."""
+    def start(self, rows: int, cols: int, provider: pty_host.Provider) -> Optional[str]:
+        """Spawn ``provider``'s harness in a PTY for the open project as the current launch, or a
+        new one when the current launch already spawned. Returns an error reason, or None on
+        success."""
         with self._lock:
             if self._pty is not None and self._pty.isalive():
                 return None
+            if self._launch.ritual is not None:
+                self._launch = _Launch(gen=self._launch.gen + 1)
             from tcip_web.state import store
 
             project = store.project_root
-            argv = pty_host.resolve_terminal_command(project)
-            if argv is None:
-                return pty_host.terminal_status().get("reason")
-            launched = pty_host.launched_program(argv)
+            command = pty_host.resolve_terminal_command(provider)
+            if command is None:
+                return provider.unavailable_reason
+            argv = pty_host.render_argv(command[0], project)
+            launched = LaunchedProgram(
+                provider=provider.id, **pty_host.launched_program(argv, command[1]))
             try:
                 pty = pty_host.spawn_pty(
                     argv, pty_host.terminal_cwd(), rows, cols, pty_host.spawn_env(self.id)
@@ -118,9 +163,10 @@ class TerminalSession:
                 self._pty = None
                 return f"could not start the agent terminal: {exc}"
             self._pty = pty
-            self.launched = launched
-            self._gen += 1
-            gen = self._gen
+            self._launch.ritual = pty_host.session_ritual(project)
+            self.launch = TerminalLaunch(session_id=self.id, existing=False, launched=launched,
+                                         ritual=self._launch.ritual)
+            gen = self._launch.gen
         pty_host.start_reader(
             pty,
             lambda data: self._on_output(data, gen),
@@ -142,9 +188,14 @@ class TerminalSession:
             return reason
         return None
 
-    def restart(self, rows: int, cols: int) -> Optional[str]:
-        # A survivor here stays attached under the old generation: start() below would find
-        # self._pty alive and report success with no process spawned and no line written.
+    def restart(self, rows: int, cols: int, provider: pty_host.Provider) -> Optional[str]:
+        """Open the next launch, holding the current launch's undelivered requests and every
+        request submitted from here on behind its ritual, end the current process and start
+        ``provider`` as that launch. Returns an error reason, or None on success."""
+        with self._lock:
+            self._launch = _Launch(gen=self._launch.gen + 1, queued=self._launch.queued)
+        # A survivor here stays attached: start() below would find self._pty alive and report
+        # success with no process spawned and no line written.
         if not self.terminate():
             return (
                 "the previous agent process could not be stopped and stays attached to this "
@@ -153,7 +204,13 @@ class TerminalSession:
         with self._lock:
             self._scrollback = []
             self._scrollback_len = 0
-        return self.start(rows, cols)
+        return self.start(rows, cols, provider)
+
+    def submit(self, text: str) -> None:
+        """Queue ``text`` for the current launch's agent, delivered after its ritual."""
+        with self._lock:
+            self._launch.queued.append(text)
+            self._deliver()
 
     def terminate(self) -> bool:
         """Kill the PTY. Returns True when no process remains afterward, False when it survives:
@@ -208,10 +265,28 @@ class TerminalSession:
 
     # ── output pump (called from the reader thread) ─────────────────────
 
+    def _deliver(self) -> None:
+        """Paste the current launch's ritual, then its queued requests, once its agent has
+        bracketed paste on; each leaves the launch only once written. Called under the lock."""
+        launch = self._launch
+        if not launch.ready or launch.ritual is None:
+            return
+        if not launch.ritual_sent:
+            if not self.write(pty_host.paste(launch.ritual)):
+                return
+            launch.ritual_sent = True
+        while launch.queued and self.write(pty_host.paste(launch.queued[0])):
+            launch.queued.pop(0)
+
     def _on_output(self, data: str, gen: Optional[int] = None) -> None:
         with self._lock:
-            if gen is not None and gen != self._gen:
+            launch = self._launch
+            if gen is not None and gen != launch.gen:
                 return  # stale reader from a restarted PTY: drop, don't pollute
+            seen = launch.tail + data
+            launch.ready = pty_host.bracketed_paste(seen, launch.ready)
+            launch.tail = seen[-_TAIL_CHARS:]
+            self._deliver()
             self._scrollback.append(data)
             self._scrollback_len += len(data)
             while self._scrollback_len > SCROLLBACK_MAX_CHARS and len(self._scrollback) > 1:
@@ -256,14 +331,14 @@ class TerminalSession:
             self._subs.pop(sub_id, None)
 
     def scrollback_snapshot(self) -> str:
-        """The current scrollback text (diagnostics / smoke checks)."""
+        """The current scrollback text."""
         with self._lock:
             return "".join(self._scrollback)
 
 
 _SESSIONS: dict[str, TerminalSession] = {}
 # Serializes attach-or-spawn and restart across the request threadpool: without it,
-# two concurrent POSTs each spawn a Claude Code process and one runs orphaned.
+# two concurrent POSTs each spawn an agent process and one runs orphaned.
 _SESSIONS_LOCK = threading.Lock()
 
 
@@ -279,8 +354,12 @@ def shutdown_all() -> None:
 
 
 @router.get("/status")
-def get_status() -> dict:
-    return pty_host.terminal_status()
+def get_status() -> TerminalStatus:
+    """Every provider row with the reason it cannot launch here."""
+    return TerminalStatus(providers=[
+        ProviderStatus(id=row.id, name=row.name, unavailable_reason=pty_host.launch_problem(row))
+        for row in pty_host.PROVIDERS
+    ])
 
 
 class TerminalInputFrame(BaseModel):
@@ -291,7 +370,7 @@ class TerminalInputFrame(BaseModel):
 
 
 class TerminalResizeFrame(BaseModel):
-    """The rail's terminal dimensions, applied to the PTY's window size."""
+    """Terminal dimensions, applied to the PTY's window size."""
 
     type: Literal["resize"]
     rows: int
@@ -299,24 +378,40 @@ class TerminalResizeFrame(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
+    """A launch: the id of the :data:`~tcip_web.terminal.PROVIDERS` row to run and the terminal
+    dimensions."""
+
+    provider: str
     rows: int = pty_host.DEFAULT_ROWS
     cols: int = pty_host.DEFAULT_COLS
 
 
 def _clamp(v: int) -> int:
-    return max(2, min(MAX_DIM, int(v)))
+    return max(2, min(MAX_DIM, v))
+
+
+def _provider(provider_id: str) -> pty_host.Provider:
+    """The table row whose id is exactly ``provider_id``; refuses with 422 naming the ids the
+    table lists."""
+    for row in pty_host.PROVIDERS:
+        if row.id == provider_id:
+            return row
+    raise HTTPException(422, f"no agent provider {provider_id!r}; the provider table lists "
+                             f"{[row.id for row in pty_host.PROVIDERS]}")
 
 
 @router.post("/sessions")
-def create_session(req: CreateSessionRequest) -> dict:
-    """Return the live session (attach semantics, like tmux) or spawn a fresh one."""
+def create_session(req: CreateSessionRequest) -> TerminalLaunch:
+    """Return the live session (attach semantics, like tmux) or spawn a fresh one running the
+    requested provider."""
+    provider = _provider(req.provider)
     with _SESSIONS_LOCK:
         for s in _SESSIONS.values():
             if s.alive():
-                return {"session_id": s.id, "existing": True, "launched": s.launched}
+                return s.launch.model_copy(update={"existing": True})
         session_id = "term_" + os.urandom(6).hex()
         session = TerminalSession(session_id)
-        err = session.start(_clamp(req.rows), _clamp(req.cols))
+        err = session.start(_clamp(req.rows), _clamp(req.cols), provider)
         if err:
             # A survivor of the failed start's own termination attempt stays reachable, so a
             # retry attaches to it instead of spawning a second process beside it.
@@ -324,7 +419,7 @@ def create_session(req: CreateSessionRequest) -> dict:
                 _SESSIONS[session_id] = session
             raise HTTPException(503, err)
         _SESSIONS[session_id] = session
-        return {"session_id": session_id, "existing": False, "launched": session.launched}
+        return session.launch
 
 
 def _require(session_id: str) -> TerminalSession:
@@ -335,20 +430,36 @@ def _require(session_id: str) -> TerminalSession:
 
 
 @router.post("/sessions/{session_id}/restart")
-def restart_session(session_id: str, req: CreateSessionRequest) -> dict:
+def restart_session(session_id: str, req: CreateSessionRequest) -> TerminalLaunch:
+    """End the session's process and launch the requested provider in its place."""
     session = _require(session_id)
+    provider = _provider(req.provider)
     with _SESSIONS_LOCK:
         # One live agent at a time: restarting a stale session while a different one is
-        # live would silently run two Claude Code processes.
+        # live would silently run two agent processes.
         for other in _SESSIONS.values():
             if other.id != session_id and other.alive():
                 raise HTTPException(
                     409, f"another agent session is live ({other.id}); attach to it instead"
                 )
-        err = session.restart(_clamp(req.rows), _clamp(req.cols))
+        err = session.restart(_clamp(req.rows), _clamp(req.cols), provider)
     if err:
         raise HTTPException(503, err)
-    return {"session_id": session_id, "alive": True, "launched": session.launched}
+    return session.launch
+
+
+class SubmitRequest(BaseModel):
+    """A request for the agent: text it receives as one pasted message."""
+
+    text: str
+
+
+@router.post("/sessions/{session_id}/submit")
+def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
+    """Queue ``req.text`` for the session's current launch (see :meth:`TerminalSession.submit`);
+    404 for an unknown session."""
+    _require(session_id).submit(req.text)
+    return {}
 
 
 async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
@@ -364,7 +475,7 @@ async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
-    """Raw terminal bridge. Origin-checked like every other WS route."""
+    """Raw terminal bridge: PTY output out as text frames, input and resize frames in."""
     session = _SESSIONS.get(session_id)
     if session is None:
         await websocket.close(code=1008, reason="unknown session")

@@ -92,8 +92,6 @@ breeder or an operator runs against a project are documented in `README.md` and
 - `smoke_phenology_e2e.py` - offline end-to-end smoke: builds synthetic geolocated imagery,
   runs `build_plant_mapping` + `deliver_phenology_milestones`, and asserts the delivered CSV and the
   measurement-integrity refusal both behave correctly.
-- `smoke_terminal_e2e.py` - live smoke exercising the in-app agent terminal against the real
-  `claude` CLI end to end (spawn, websocket attach, prompt, response). Costs one model turn.
-- `smoke_fence_e2e.py` - live smoke confirming the fenced `claude` CLI actually refuses to
-  edit platform internals when run through the in-app terminal's own settings. Costs one
-  model turn.
+- `smoke_terminal_e2e.py` - live smoke exercising the in-app agent terminal against one provider
+  row's real harness end to end (spawn, websocket attach, prompt, response), named by its id.
+  Costs one model turn.

@@ -50,7 +50,7 @@ _ORIGIN_REFUSAL_HTTP = (
 EXPOSURE_REFUSAL = (
     "this connection arrived through a network address and the backend is not opted into network "
     "exposure: an exposed GUI hands an unauthenticated network client filesystem reads and writes "
-    "and an interactive agent terminal, which is keyboard access to Claude Code. Set "
+    "and an interactive agent terminal, which is keyboard access to a coding agent. Set "
     f"{_OPT_IN_ENV}=1 only on a trusted network."
 )
 
@@ -190,9 +190,13 @@ def exposed_arrival(scope: Mapping[str, Any]) -> bool:
     return at is not None and _is_routable_ip(at[0])
 
 
-def _request_scheme(scope: Mapping[str, Any]) -> str:
-    scheme = str(scope.get("scheme") or "http")
+def _http_scheme(scheme: str) -> str:
+    """``scheme`` with a WebSocket scheme named by its HTTP counterpart."""
     return {"ws": "http", "wss": "https"}.get(scheme, scheme)
+
+
+def _request_scheme(scope: Mapping[str, Any]) -> str:
+    return _http_scheme(str(scope.get("scheme") or "http"))
 
 
 def _header_values(scope: Mapping[str, Any], name: bytes) -> list[str]:
@@ -253,7 +257,7 @@ def _parse_origin(origin: str) -> tuple[str, Authority] | None:
         return None
     if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
         return None
-    scheme = {"ws": "http", "wss": "https"}.get(parts.scheme, parts.scheme)
+    scheme = _http_scheme(parts.scheme)
     try:
         return scheme, parse_authority(parts.netloc, _DEFAULT_PORTS[scheme])
     except ValueError:

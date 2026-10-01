@@ -18,15 +18,17 @@ Neither RESEARCH nor VALIDATE is optional.
 
 ## 1. Research: academic sources only
 
-Your web access is governed and scoped to academic sources by the fence (WebSearch to find
-papers; WebFetch allowed only for a fixed set of academic hosts). Treat that as the floor, not the
-ceiling: even where a fetch would technically succeed, prefer primary academic sources and stay out
-of the open web. The allowed/preferred set:
+In the in-app agent terminal, Claude Code's permission lists scope your web access to academic
+sources (WebSearch to find papers; WebFetch allowed only for a fixed set of academic hosts). Treat
+that as the floor, not the ceiling, and hold to it in any harness: even where a fetch would
+technically succeed, prefer primary academic sources and stay out of the open web.
+The allowed/preferred set:
 
-- arXiv (`arxiv.org`): preprints; the fastest path to method detail and often the reference
-  implementation link.
-- Semantic Scholar (`semanticscholar.org`): citation graph, "cited by", influential-citation
-  signal; use it to gauge whether a method is established or a one-off.
+- arXiv (`arxiv.org`, `www.arxiv.org`): preprints; the fastest path to method detail and often
+  the reference implementation link.
+- Semantic Scholar (`semanticscholar.org`, `www.semanticscholar.org`): citation graph, "cited
+  by", influential-citation signal; use it to gauge whether a method is established or a
+  one-off.
 - OpenReview (`openreview.net`): peer reviews and rebuttals; read the *reviews*, they surface
   the failure modes and the ablations that matter.
 - Papers With Code (`paperswithcode.com`): links method → code → benchmark; use it to find the
@@ -48,7 +50,7 @@ Search discipline:
 - Capture provenance. When you adopt a technique, record the source (title, venue, arXiv id) in
   the experiment lineage / retrospective.
 
-If a technique lives only behind a paywalled journal the fence can't reach, do not guess its
+If a technique lives only behind a paywalled journal the allowed hosts can't reach, do not guess its
 internals from a blog summary; file a `report_friction` note describing the gap rather than
 implementing a half-understood method.
 

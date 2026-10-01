@@ -1,13 +1,5 @@
-"""Concurrency invariant for the embedded agent terminal: two tcip-mcp instances (the
-operator's own terminal agent and the in-app Claude Code session, each spawning its own MCP
-server) may append to one audit log concurrently. The append-only log must not tear or lose
-lines.
-
-What the store promises is that every append which returned is in the log, once, not that no
-append times out under saturation. So each appender here records what returned and reports what
-raised, and the log is compared against exactly that record: a refusal is then named as the
-refusal it was instead of reading as a lost line.
-"""
+"""Concurrent appenders to one audit log, in threads and in separate processes: every append
+that returned is in the log exactly once, and every append that raised is reported."""
 
 from __future__ import annotations
 
@@ -24,12 +16,7 @@ from tcip_mcp.audit import audit_log_key, record_event
 
 
 def _generous_lock_timeout_s() -> float:
-    """The lock wait these tests bind their backend with.
-
-    Four times the seam's own default, so a shared runner's slow disk cannot starve one
-    appender out of its turn, while a real deadlock is still bounded rather than endless. The
-    claim under test is completeness, not latency.
-    """
+    """The lock wait these tests bind their backend with: four times the store's default."""
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
     return 4 * DEFAULT_LOCK_TIMEOUT_S
