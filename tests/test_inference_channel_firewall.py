@@ -1,9 +1,8 @@
 """Whether a source can be read at the checkpoint's band count is the predictor's own read.
 
 ``load_image`` converts any photographic frame to the model's width itself, so a one-channel
-checkpoint over ordinary RGB captures is a legitimate run that must ship; a container with no such
-coercion is refused by name before any pixels reach the model. The calibrated inference door
-reports what it predicted rather than judging the bands a second time.
+checkpoint over ordinary RGB captures is a legitimate pass that must run; a container with no such
+coercion is refused by name before any pixels reach the model.
 """
 
 from __future__ import annotations
@@ -12,87 +11,56 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
-
 torch = pytest.importorskip("torch")
 np = pytest.importorskip("numpy")
-pytest.importorskip("pycocotools")
 
 
-def _rgb_image(tmp_path: Path) -> str:
+def _rgb_image(images_dir: Path) -> str:
     from PIL import Image
 
-    path = tmp_path / "capture.png"
+    path = images_dir / "capture.png"
     Image.new("RGB", (120, 90), color=(40, 80, 120)).save(path)  # a non-square frame
     return str(path)
 
 
-def _five_band_raster(tmp_path: Path) -> str:
-    path = tmp_path / "capture.npy"
+def _five_band_raster(images_dir: Path) -> str:
+    path = images_dir / "capture.npy"
     np.save(path, np.zeros((90, 120, 5), dtype=np.uint8))
     return str(path)
 
 
-def _held_out_bundle(project):
-    """A conf resolved for ``project`` from a dense reference that passes its own held-out gate,
-    with the resolver arguments behind it."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._dense_op_fixtures import dense_records
+def _predicted(tmp_path, images_dir: Path, *, in_chans, builder_kwargs=None, **stated):
+    """The pass of a real checkpoint built at ``in_chans`` over ``images_dir``, and its results."""
+    from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
 
-    n_images, objects_per_image = 20, 80
-    miss, fp = [0] * n_images, [1] * n_images
-    inputs = {
-        "dataset_hash": "H",
-        "calibration_records": dense_records(
-            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
-        "holdout_records": dense_records(
-            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
-            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
-        "slicing": None, "staged_conf_floor": 0.01,
-    }
-    return resolve_operating_point("bud_opening", experiment_id=None, project=project,
-                                   **inputs), inputs
-
-
-def _run(tmp_path, monkeypatch, *, in_chans, image, builder_kwargs=None, **overrides):
-    """A calibrated run of a real checkpoint built at ``in_chans`` over one target image."""
-    import tcip_mcp.pipelines.calibration as calibration
-    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
-
-    bundle, inputs = _held_out_bundle(tmp_path)
-    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
-                "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
-    monkeypatch.setattr(calibration, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, "H", 0, evidence))
     ckpt = registered_checkpoint(tmp_path, model_source={
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
         "task": "detection",
     }, data={"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
-    return run_inference_verified(
-        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
-        trait="bud_opening", calibration_labels_dir=str(tmp_path), **overrides)
+    return predicted_over(tmp_path, str(ckpt), str(images_dir), device="cpu", **stated)
 
 
-def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(tmp_path, monkeypatch):
+def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(tmp_path):
     """A five-band raster under a three-channel checkpoint has no safe coercion, so the read
     refuses by name instead of truncating the bands the model trained on."""
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    _five_band_raster(images_dir)
     with pytest.raises(ValueError, match="refusing to silently truncate"):
-        _run(tmp_path, monkeypatch, in_chans=3, image=_five_band_raster(tmp_path),
-             tile=True, tile_size=64)
+        _predicted(tmp_path, images_dir, in_chans=3, tile=True, tile_size=64)
 
 
-def test_a_photographic_source_the_model_reads_leaves_the_run_shippable(tmp_path, monkeypatch):
+def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
     """The legitimate case: an RGB capture under a one-channel checkpoint is converted by the
-    loader itself, so the run predicts and its held-out calibration still ships."""
+    loader itself, so the pass predicts it."""
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
-    image = _rgb_image(tmp_path)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    image = _rgb_image(images_dir)
     mean, std, _read = band_normalization_stats([image], 1)  # this capture's own single-band stats
-    r = _run(tmp_path, monkeypatch, in_chans=1, image=image, tile=False,
-             builder_kwargs={"image_mean": mean, "image_std": std})
+    _pass, results = _predicted(tmp_path, images_dir, in_chans=1, tile=False,
+                                builder_kwargs={"image_mean": mean, "image_std": std})
 
-    assert "error" not in r, r
-    assert r["shippable_issues"] == []
-    assert r["validated"] is True
+    assert [Path(r["image"]).name for r in results] == ["capture.png"]

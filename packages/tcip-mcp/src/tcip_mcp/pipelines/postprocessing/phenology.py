@@ -17,17 +17,17 @@ helper, not the delivered trait.
 
 from __future__ import annotations
 
-import csv
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from tcip_mcp.dataset_layout import label_filename
-from tcip_mcp.pipelines.resolution import Acknowledgment, bucket_scope
 
 if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.delivery import Result
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.traits import TraitRevision
 
@@ -49,94 +49,48 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
     return cols
 
 
-def milestone_date_columns(spec) -> list[str]:
-    """The milestone/date column names a trait's phenology delivery carries, without its
-    ``plant_id`` and provenance columns.
-    """
-    return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
+REQUIRE_ALL_DATES_COMPLETE = True
+"""The missingness rule a phenology measurement takes when its caller states none: a plant's
+milestones are computed only when every one of its dates is complete. Every door defaults to this,
+and the delivery event records the rule a delivery ran under."""
+
+
+def milestone_date_columns(spec) -> list[dict[str, str]]:
+    """The milestone columns a trait's phenology delivery carries, each as ``{"date", "bound"}``:
+    the milestone's date column and the column holding that date's evidentiary bound."""
+    return [{"date": f"{spec.phenology_prefix}_{sfx}_date",
+             "bound": f"{spec.phenology_prefix}_{sfx}_date_bound"}
+            for sfx, _ in _milestone_columns(spec)]
 
 
 def phenology_csv_columns(spec) -> list[str]:
-    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitEntry``.
+    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitEntry``:
+    the plant, its coverage, each milestone date and its evidentiary bound, then the delivery
+    columns every delivered CSV carries."""
+    from tcip_mcp.delivery import DELIVERY_COLUMNS
 
-    The milestone/alias column names come from the spec (``phenology_prefix`` + each milestone key,
-    plus the majority alias column built from ``majority_label``). The surrounding provenance
-    columns (operating point, classifier validation, producer identity, coverage disclosure) are
-    trait-neutral.
-    """
+    columns = milestone_date_columns(spec)
     return [
-        "plant_id",
-        "accession",
-        "n_dates",
-        # A plant can be fully classified and fully observed (0 unclassified, 0 missing) while
-        # still having zero real detections on every date (before emergence, or a genuinely empty
-        # scene), n_dates alone doesn't distinguish that from real detection data. per_plant_phenology
-        # already computes this per row; without it here it would be silently dropped by
-        # DictWriter's extrasaction="ignore" for not being in this column set.
-        "n_observed_dates",
-        "n_dates_unclassified",
-        "n_dates_missing_images",
-        *milestone_date_columns(spec),
-        # Each milestone's evidentiary bound, beside the date it qualifies.
-        # ``plant_milestones`` has always emitted these; without this column,
-        # ``write_phenology_csv``'s DictWriter would drop them and a left-censored crossing, one
-        # where the first observation already met the target, so the true date is only an upper
-        # bound, would be delivered indistinguishable from a measured one. That is a precision
-        # claim the data does not support, which is the failure mode this platform exists to
-        # prevent.
-        *[f"{c}_bound" for c in milestone_date_columns(spec)],
-        *PROVENANCE_COLUMNS,
+        "plant_id", "accession", "n_dates", "n_observed_dates", "n_dates_unclassified",
+        "n_dates_missing_images", "complete",
+        *[c["date"] for c in columns], *[c["bound"] for c in columns],
+        *DELIVERY_COLUMNS,
     ]
 
 
-# How the counts behind a delivered number were produced, and whether the measurement is
-# trustworthy, a delivered phenotype must carry this so it can be traced. Trait-neutral, and the
-# single owner of the tail, so every delivered shape (milestones, curves) carries the same chain
-# rather than each door listing its own.
-PROVENANCE_COLUMNS = [
-    # float, or one entry per date in dates_delivered order, joined with ";" when the dates
-    # recorded different confs, blank for a date with no numeric conf.
-    "operating_point_conf",
-    "operating_point_validated",
-    "positive_state_classifier_validated",
-    # Every gated dimension that did not validate, ";"-joined, blank when none.
-    "unvalidated_dimensions",
-    # Producing-model identity, the exact checkpoint (content hash) + run behind the counts.
-    "producer_model_sha256",
-    "producing_experiment_id",
-    "produced_at",
-    # Which experiment and row answered for the buckets' claims, empty when any read bucket is unbound.
-    "validation_record",
-    # The plant mapping this delivery attributed detections through. What verify_mapping_inputs
-    # could not check travels once, on the delivery event, never repeated on every row.
-    "plant_mapping_sha256",
-    # The delivered dates and this delivery's own unattributed-capture count scoped to them
-    # (never the mapping's own n_dates_missing_images span), plus the attribution granularity.
-    "dates_delivered",
-    "images_unattributed",
-    "plant_attribution",
-    # Who acknowledged this delivery unvalidated, and why; blank on either when nothing was
-    # acknowledged (a fully-validated delivery, or one refused outright).
-    "acknowledged_by",
-    "acknowledgment_reason",
-]
-
-
-# The per-(plant, date) columns ``per_plant_series`` produces, before the provenance tail.
 CURVE_MEASUREMENT_COLUMNS = [
     "plant_id", "accession", "date",
     "n_images", "n_total", "n_positive", "n_unclassified", "n_missing", "ratio",
 ]
+"""The per-(plant, date) columns ``per_plant_series`` produces."""
 
 
 def curve_csv_columns() -> list[str]:
-    """The delivered per-(plant, date) curve CSV schema.
+    """The delivered per-(plant, date) curve CSV schema: the counts the fraction is built from,
+    then the delivery columns every delivered CSV carries."""
+    from tcip_mcp.delivery import DELIVERY_COLUMNS
 
-    A curve is the same phenology measurement as the milestone summary, un-summarized, which is why it
-    takes the identical delivery gate, so it carries the identical provenance tail. Trait-neutral:
-    unlike the milestone schema it names no crossings, only the counts the fraction is built from.
-    """
-    return [*CURVE_MEASUREMENT_COLUMNS, *PROVENANCE_COLUMNS]
+    return [*CURVE_MEASUREMENT_COLUMNS, *DELIVERY_COLUMNS]
 
 
 # ── ISO date helpers ─────────────────────────────────────────────────────
@@ -239,57 +193,35 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     The column names (``phenology_prefix`` + each milestone key, plus the majority alias), the
     crossing fractions and the majority mapping come from ``spec``, which is required.
     """
-    prefix = spec.phenology_prefix
     crossings = {key: crossing_date(series, frac) for key, frac in _milestone_targets(spec).items()}
     out: dict = {}
-    # The majority alias is just another entry in ``_milestone_columns`` pointing at the crossing
-    # the spec names for it, so it carries the same date + evidentiary bound as every other
-    # milestone and cannot be emitted under a different condition than the schema declares it under.
-    for sfx, key in _milestone_columns(spec):
+    # The majority alias is another entry in ``_milestone_columns``, so it carries its crossing's
+    # date and bound under the same condition as every other milestone.
+    for (_sfx, key), column in zip(_milestone_columns(spec), milestone_date_columns(spec)):
         crossing = crossings.get(key)
-        out[f"{prefix}_{sfx}_date"] = crossing.date if crossing else None
-        out[f"{prefix}_{sfx}_date_bound"] = crossing.bound if crossing else None
+        out[column["date"]] = crossing.date if crossing else None
+        out[column["bound"]] = crossing.bound if crossing else None
     return out
 
 
 # ── positive-fraction from classified predictions ────────────────────────
 
 
-def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
-    """Resolve a trait's positive class id from a prediction bucket's own recorded ``id_map``.
-
-    Returns ``(class_id, message)``; ``class_id`` is ``None`` when no bucket's ``id_map`` contains
-    the trait's positive value.
-    """
-    name = spec.positive_value
-    if not name:
-        return None, f"trait {spec.name!r} defines no positive_value"
-    for pred_dir in predictions_by_date.values():
-        scope = bucket_scope(Path(pred_dir))
-        id_map = scope.id_map if scope is not None else None
-        if id_map is not None and name in id_map:
-            return id_map[name], f"resolved {name!r} -> class {id_map[name]} from {pred_dir}"
-    return None, (f"no prediction bucket's recorded id_map contains {name!r}, the classifier that "
-                  "produced these predictions never assessed this trait's positive class")
-
-
 def count_by_class(
-    json_path: Path, positive_value: str, *, scope: ClassScope | None,
+    json_path: Path, positive_value: str, *, scope: ClassScope,
 ) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
-    ``scope`` is the bucket's own recorded scope
-    (:func:`~tcip_mcp.pipelines.resolution.bucket_scope`). Under no scope, a detector scope, or a
-    classified scope whose recorded ``id_map`` lacks ``positive_value``, every detection is
-    unclassified: a whole-bucket decision. A detector bucket whose one map key happens to equal
+    ``scope`` is the bucket's own recorded scope. When it classifies no ``positive_value``
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.positive_id`), every detection is
+    unclassified: a whole-bucket decision, so a detector bucket whose one map key happens to equal
     ``positive_value`` never counts a positive.
 
     Under a classified scope, every record is held to
     :func:`~tcip_annotation.json_io.require_classified_record` under the bucket's own recorded
     vocabulary (``id_map``'s keys): a value outside that vocabulary refuses by name. A record whose
     value equals ``positive_value`` counts positive; every other classified record counts toward
-    neither positive nor unclassified. A classified bucket's record carries the object class in
-    ``subject`` and the classifier's decoded call in ``attributes[attribute]``.
+    neither positive nor unclassified.
 
     Called only for a prediction file confirmed to exist.
     """
@@ -297,14 +229,13 @@ def count_by_class(
 
     annotations = json_io.detection_annotations(json_path)
     total = len(annotations)
-    if (scope is None or not scope.classified or not scope.id_map
-            or positive_value not in scope.id_map):
+    if scope.positive_id(positive_value) is None:
         return total, 0, total
     positive = 0
     for i, a in enumerate(annotations):
         value = json_io.require_classified_record(
             a, subject=cast(str, scope.subject), attribute=cast(str, scope.attribute),
-            vocabulary=set(scope.id_map), source=f"{json_path}#{i}")
+            vocabulary=set(cast(dict, scope.id_map)), source=f"{json_path}#{i}")
         if value == positive_value:
             positive += 1
     return total, positive, 0
@@ -324,131 +255,110 @@ def measurement_refusals() -> tuple[type[Exception], ...]:
     return (UnreadableLabelDocument, ClassifiedRecordRefused, StoreError, EmptyPopulation)
 
 
-def _population(plants: Sequence[str]) -> list[str]:
+def population(plants: Sequence[str]) -> list[str]:
     """The delivery population as one ordered list of distinct plant ids, refusing an empty one."""
     ordered = list(dict.fromkeys(str(p) for p in plants))
     if not ordered:
         raise EmptyPopulation(
-            "a phenology measurement needs the plants it is for: pass the plant ids to deliver "
-            "(plants=[...]); a mapping names every plot in its plant CSVs, never the population."
+            "a delivery needs the plants it is for: pass the plant ids to deliver "
+            "(plants=[...]); a mapping or registry names every plot, never the population."
         )
     return ordered
 
 
 def per_plant_series(
-    mapping: dict[str, list],
-    predictions_by_date: dict[str, str],
-    positive_value: str,
-    plants: Sequence[str],
+    mapping: dict[str, list], buckets: dict[str, Bucket], positive_value: str,
+    plants: list[str],
 ) -> dict[str, dict]:
     """Aggregate classified predictions into a per-plant positive-fraction series, for exactly the
-    plants in ``plants``.
+    plants in ``plants`` (:func:`population`'s list).
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
-    ``.plot_name`` / ``.accession_name`` (attributes or dict keys). ``plants`` is the delivery's
-    population: every plant in it gets an entry, in the order given, and a plant the mapping names
-    that is not in it is never read. A population plant the mapping never names on a date has no
-    entry for that date; one the mapping never names at all has an empty series. Returns
-    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing, n_images),
-    ...]}}``. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is
-    excluded from every plant's coverage; its count is
-    ``plant_mapping.MappingBuild.unattributed``'s.
+    ``.plot_name`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
+    date's published bucket, by its recorded date. ``plants`` is the delivery's population: every
+    plant in it gets an entry, in the order given, and a plant the mapping names that is not in it
+    is never read. Every population plant has a series point on every date the mapping names, one
+    the mapping assigns it no capture on carrying no image. Returns ``{plant_id: {accession,
+    series: [(date, total, positive, unclassified, missing, n_images), ...]}}``. An entry naming no
+    plant (``plant_mapping.assignment_is_attributed`` false) is excluded from every plant's
+    coverage.
 
     Coverage is measured against the stems the plant mapping names for each (plant, date): a named
-    stem with no corresponding prediction file is a missing observation, and a date the mapping
-    names with no ``predictions_by_date`` entry counts every stem it names as missing. Which stems
-    count as read is ``plant_mapping.stems_delivery_reads``.
+    stem with no corresponding prediction document is a missing observation, and a date the
+    mapping names with no delivered bucket counts every stem it names as missing.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        assignment_is_attributed,
-        stems_delivery_reads,
+        assignment_is_attributed, attr, stems_delivery_reads,
     )
 
-    def _attr(a, name):
-        return getattr(a, name, None) if not isinstance(a, dict) else a.get(name)
-
-    population = _population(plants)
     per_plant: dict[str, dict] = {
-        plant_id: {"accession": None, "series": []} for plant_id in population
+        plant_id: {"accession": None, "series": []} for plant_id in plants
     }
-    # Iterate the mapping's own dates, not predictions_by_date's, the mapping is the coverage
-    # reference, so a date it names is never silently absent just because the caller dropped it.
+    # The mapping's own dates are the coverage reference, so a date it names is never absent.
     for date_str in mapping:
-        pred_dir = predictions_by_date.get(date_str)
-        pred_path = Path(pred_dir) if pred_dir else None
-        scope = bucket_scope(pred_path) if pred_path is not None else None
-        read_stems = stems_delivery_reads(mapping[date_str], pred_dir) if pred_dir else set()
-        # [total, positive, unclassified, missing, n_images] per plant: n_images is every stem
-        # the mapping names for this (plant, date), missing is one this delivery doesn't read.
-        by_plant: dict[str, list[int]] = {}
-        accession: dict[str, Optional[str]] = {}
+        bucket = buckets.get(date_str)
+        read_stems = stems_delivery_reads(mapping[date_str], bucket) if bucket else set()
+        by_plant: dict[str, list[int]] = {plant_id: [0, 0, 0, 0, 0] for plant_id in plants}
         for a in mapping[date_str]:
-            if not assignment_is_attributed(a):
+            plant_id = attr(a, "plot_name")
+            if not assignment_is_attributed(a) or plant_id not in per_plant:
                 continue
-            plant_id = _attr(a, "plot_name")
-            if plant_id not in per_plant:
-                continue
-            acc = by_plant.setdefault(plant_id, [0, 0, 0, 0, 0])
+            acc = by_plant[plant_id]
             acc[4] += 1
-            accession.setdefault(plant_id, _attr(a, "accession_name"))
-            stem = _attr(a, "stem")
-            if pred_path is None or stem not in read_stems:
+            if per_plant[plant_id]["accession"] is None:
+                per_plant[plant_id]["accession"] = attr(a, "accession_name")
+            stem = attr(a, "stem")
+            if bucket is None or stem not in read_stems:
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                pred_path / label_filename(stem), positive_value, scope=scope)
+                bucket.path / label_filename(str(stem)), positive_value, scope=bucket.scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
-        for plant_id, (total, positive, unclassified, missing, n_images) in by_plant.items():
-            entry = per_plant[plant_id]
-            if entry["accession"] is None:
-                entry["accession"] = accession.get(plant_id)
-            entry["series"].append((date_str, total, positive, unclassified, missing, n_images))
+        for plant_id, counts in by_plant.items():
+            per_plant[plant_id]["series"].append((date_str, *counts))
     return per_plant
 
 
 def per_plant_phenology(
-    mapping: dict[str, list],
-    predictions_by_date: dict[str, str],
-    spec,
-    plants: Sequence[str],
+    mapping: dict[str, list], buckets: dict[str, Bucket], spec, plants: list[str], *,
+    require_all_dates_complete: bool,
 ) -> dict:
     """Full canonical pipeline: classified predictions + plant mapping -> per-plant milestones
     against ``spec``'s ``positive_value`` and milestones, one row per plant in ``plants`` and no
     other, in its order (see :func:`per_plant_series`).
 
     Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the
-    positive-fraction series, the milestone dates, and coverage-disclosure fields
-    (``n_dates_unclassified``, ``n_dates_missing_images``). A plant's milestones are computed only
-    when every one of its dates is both fully classified (``unclassified == 0``) and fully observed
-    (``missing == 0``); otherwise it earns disclosure of which dates were excluded and why.
+    positive-fraction series, the milestone dates, coverage-disclosure fields
+    (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on
+    no image counting as missing) and ``complete``, whether every one of its dates is complete:
+    imaged, fully classified and fully observed. With ``require_all_dates_complete`` a plant's
+    milestones are computed only when it is complete, and otherwise from its complete dates alone.
     ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
-    fully classified.
+    complete.
     """
-    per_plant = per_plant_series(mapping, predictions_by_date, spec.positive_value, plants)
+    per_plant = per_plant_series(mapping, buckets, spec.positive_value, plants)
     rows = []
     any_classified_date = False
     for plant_id, info in per_plant.items():
         usable_dates = [(d, total, positive)
-                        for (d, total, positive, unclassified, missing, _n_images) in info["series"]
-                        if unclassified == 0 and missing == 0]
-        n_dates_unclassified = sum(1 for s in info["series"] if s[3] > 0)
-        n_dates_missing_images = sum(1 for s in info["series"] if s[4] > 0)
+                        for (d, total, positive, unclassified, missing, n_images) in info["series"]
+                        if unclassified == 0 and missing == 0 and n_images > 0]
         if usable_dates:
             any_classified_date = True
-        # total==0 detected no objects, so it's not an observation of the positive fraction
-        # (pre-emergence or a detection gap), excluded from the milestone series; total>0 with
-        # positive==0 is a real 0% and kept.
+        # total==0 detected no objects, so it is not an observation of the fraction; kept only when
+        # something was detected, a real 0% included.
         frac_series = [(d, positive / total) for (d, total, positive) in usable_dates if total]
-        plant_fully_classified = len(usable_dates) == len(info["series"]) and len(info["series"]) > 0
+        complete = len(usable_dates) == len(info["series"]) and len(info["series"]) > 0
         row = {
             "plant_id": plant_id,
             "accession": info["accession"],
             "n_dates": len(info["series"]),
             "n_observed_dates": len(frac_series),
-            "n_dates_unclassified": n_dates_unclassified,
-            "n_dates_missing_images": n_dates_missing_images,
+            "n_dates_unclassified": sum(1 for s in info["series"] if s[3] > 0),
+            "n_dates_missing_images": sum(1 for s in info["series"] if s[4] > 0 or s[5] == 0),
+            "complete": complete,
             "series": [
                 {"date": d, "n_total": total, "n_positive": positive, "n_unclassified": unclassified,
                  "n_missing": missing, "n_images": n_images,
@@ -456,213 +366,113 @@ def per_plant_phenology(
                 for (d, total, positive, unclassified, missing, n_images) in info["series"]
             ],
         }
-        # A plant with any unclassified/missing date earns no milestone dates, but must still carry
-        # the same keys as one that does, so both branches go through the producer (an empty series
-        # crosses nothing) rather than one of them rebuilding the key set from the column names:
-        # reconstructing the keys directly from column names omits every ``*_date_bound`` key, giving
-        # an excluded plant's row a different shape than an included one's within a single delivery.
-        row.update(plant_milestones(frac_series if plant_fully_classified else [], spec))
+        # An excluded plant goes through the producer with an empty series, so every row has one
+        # key set.
+        row.update(plant_milestones(
+            frac_series if complete or not require_all_dates_complete else [], spec))
         rows.append(row)
     return {"rows": rows, "positive_class_assessed": any_classified_date}
 
 
-def phenology_delivery_flags(
-    classifier_state: str | None, operating_point_state: str | None, tile_recon: dict,
-) -> dict[str, str | None]:
-    """The ``check_delivery_gate`` flags dict a phenology delivery gates on, from the caller's
-    reconciled classifier and count operating point states. ``tile_size`` enters only when
-    ``tile_recon["operative"]`` is true; an untiled delivery's flags carry no ``tile_size`` key.
+@dataclass(frozen=True)
+class PhenologyMeasurement:
+    """One trait's per-plant phenology over a plant mapping and its delivered buckets: the
+    confirmed revision it is measured under, the buckets by date, the rows, the missingness rule
+    they were computed under, and the mapping's delivery disclosure."""
+
+    revision: TraitRevision
+    buckets: dict[str, Bucket]
+    rows: list[dict]
+    positive_class_assessed: bool
+    require_all_dates_complete: bool
+    plant_mapping: dict
+    plants: list[str]
+
+    def curve_rows(self) -> list[dict]:
+        """Per-(plant, date) rows: the milestone rows' own series, not a second aggregation."""
+        return [{"plant_id": row["plant_id"], "accession": row["accession"], **point}
+                for row in self.rows for point in row["series"]]
+
+    def milestone_rows(self) -> list[dict]:
+        return [{k: v for k, v in row.items() if k != "series"} for row in self.rows]
+
+    def result(self, *, curves: bool) -> Result:
+        """The delivered result: the milestone rows, or the curve rows with ``curves``, under
+        their columns, with the population, missingness rule and mapping disclosure."""
+        from tcip_mcp.delivery import Result
+
+        return Result(curve_csv_columns() if curves else phenology_csv_columns(self.revision.entry),
+                      self.curve_rows() if curves else self.milestone_rows(),
+                      population=self.plants,
+                      require_all_dates_complete=self.require_all_dates_complete,
+                      plant_mapping=self.plant_mapping)
+
+
+def measure_phenology(
+    project: Path, *, trait: str, mapping_name: str, buckets: Sequence[str | Path],
+    plants: Sequence[str], require_all_dates_complete: bool,
+) -> PhenologyMeasurement:
+    """Measure ``trait``'s phenology over the published ``buckets``, each at the capture date its
+    record states (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant mapping
+    ``mapping_name``, for exactly ``plants``.
+
+    Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
+    operationalization, bound against the delivered dataset's registry (refusing, ``ValueError``,
+    buckets whose dataset has none), then the buckets and the mapping
+    (``plant_mapping.resolve_delivery_mapping``); each refuses as it does, and so does
+    :func:`per_plant_phenology` (:func:`measurement_refusals`).
     """
-    flags: dict[str, str | None] = {
-        "classifier": classifier_state, "operating_point": operating_point_state,
-    }
-    if tile_recon["operative"]:
-        flags["tile_size"] = tile_recon["validated"]
-    return flags
-
-
-def _operating_point_conf_cell(
-    dates_delivered: Sequence[str], predictions_by_date: Mapping[str, str],
-    operating_point_confs: Mapping[str, float | None],
-) -> float | str | None:
-    """The delivered ``operating_point_conf`` cell: the single value every delivered bucket
-    records, when they all record the same one, otherwise one entry per date in ``dates_delivered``
-    order, ``;``-joined, an empty entry for a bucket with no numeric conf.
-    """
-    values = [operating_point_confs.get(str(predictions_by_date[d])) for d in dates_delivered]
-    non_none = {v for v in values if v is not None}
-    if values and len(non_none) == 1 and all(v is not None for v in values):
-        return next(iter(non_none))
-    return ";".join("" if v is None else str(v) for v in values)
-
-
-def _write_phenology_delivery(
-    door: str,
-    rows: list[dict],
-    out_path: Path,
-    revision: TraitRevision,
-    columns: list[str],
-    *,
-    flags: dict[str, str | None],
-    acknowledgment: Acknowledgment | None,
-    document_reconciliations: Mapping[str, Mapping],
-    producer: dict,
-    dimension_reconciliations: Mapping[str, Mapping],
-    predictions_by_date: Mapping[str, str],
-    project: Path,
-    plant_mapping: dict,
-) -> dict:
-    """Gate, compose and write one phenology delivery's provenance cells, then record the
-    delivery.
-
-    Runs ``check_delivery_gate`` over ``flags``: a gate that does not pass raises ``ValueError``
-    with the gate's own reason, and nothing is written. ``acknowledgment`` is the breeder's own
-    act (or ``None``) the caller already resolved. ``revision`` is the trait's confirmed revision
-    ``operationalization.confirmed_revision`` returned: its entry names the columns and the event
-    names it.
-
-    Composes every provenance cell the schema declares (the operating-point and classifier validity
-    columns, the producer tail and ``produced_at``, the delivery's own
-    ``acknowledged_by``/``acknowledgment_reason``, all through ``resolution.delivered_tail``) and
-    returns them. Records the delivery through
-    ``record_delivery_binding_event`` after the file is written, under the caller-stated ``door``
-    and the explicit ``project``, with the gate's own ``effective_acknowledgment()``.
-
-    ``plant_mapping`` is the mapping this delivery attributed detections through, shaped as
-    ``delivery_events_schema.PlantMappingDisclosure`` declares
-    (``MappingBuild.delivery_disclosure``); required. Its ``dates_delivered`` fills the CSV's own
-    column (``";"``-joined), ``images_unattributed`` and ``plant_attribution`` fill theirs
-    directly, and the whole dict travels to the delivery event unchanged.
-
-    ``document_reconciliations`` and ``dimension_reconciliations`` are threaded straight through to
-    ``record_delivery_binding_event``; the count operating point's ``bindings`` and ``confs`` are
-    read from ``document_reconciliations["operating_point"]``. When ``predictions_by_date`` is
-    non-empty, both ``operating_point`` and ``classifier_operating_point`` must have an entry,
-    checked before the gate runs and before anything is written.
-
-    Raises:
-        ValueError: ``predictions_by_date`` is non-empty but ``document_reconciliations`` lacks an
-            entry this writer declares, the gate refused, or ``flags`` carries no ``classifier``
-            dimension; nothing is written in any of these cases.
-        AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
-            appended, raised by ``record_delivery_binding_event`` after the CSV and the
-            ``delivery_events`` record were written.
-    """
-    if predictions_by_date:
-        missing = [doc for doc in ("operating_point", "classifier_operating_point")
-                   if doc not in document_reconciliations]
-        if missing:
-            raise ValueError(
-                f"{door}: predictions_by_date names {len(predictions_by_date)} bucket(s) but "
-                f"document_reconciliations carries no entry for {missing}; a phenology delivery "
-                "reads both operating_point and classifier_operating_point, so both must be "
-                "reconciled before the gate runs and before anything is written."
-            )
-    op_recon = document_reconciliations.get("operating_point", {})
-    bindings = op_recon.get("bindings", {})
-    operating_point_confs = op_recon.get("confs", {})
-
+    from tcip_mcp.buckets import by_recorded_date, read_bucket
+    from tcip_mcp.operationalization import confirmed_revision
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.subject_registry import registry_for_pred_dirs
     from tcip_mcp.traits import STATE_CROSSING_DATES
-    from tcip_mcp.pipelines.resolution import (
-        check_delivery_gate, delivered_tail, record_delivery_binding_event,
-    )
 
-    gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
-    if not gate.ok:
-        raise ValueError(gate.reason)
-    if "classifier" not in gate.stamp:
+    registry = registry_for_pred_dirs([str(b) for b in buckets])
+    if registry is None:
         raise ValueError(
-            "a phenology delivery's flags carry no 'classifier' dimension: this writer stamps the "
-            "delivered classifier-validity column from it, so flags composed some other way than "
-            "phenology_delivery_flags must still include it."
-        )
-
-    cells: dict = delivered_tail(
-        {"producer_model_sha256": producer.get("sha256"),
-         "producing_experiment_id": producer.get("experiment_id"),
-         "operating_point_conf": _operating_point_conf_cell(
-             plant_mapping["dates_delivered"], predictions_by_date, operating_point_confs),
-         "plant_mapping_sha256": plant_mapping["record_sha256"],
-         "dates_delivered": ";".join(plant_mapping["dates_delivered"]),
-         "images_unattributed": plant_mapping["images_unattributed"],
-         "plant_attribution": plant_mapping["plant_attribution"]},
-        bindings, gate,
-        columns=tuple(PROVENANCE_COLUMNS), project=project)
-
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({**row, **cells})
-
-    record_delivery_binding_event(
-        door, str(out_path), list(predictions_by_date.values()),
-        document_reconciliations=document_reconciliations,
-        dimension_reconciliations=dimension_reconciliations,
-        acknowledgment=gate.effective_acknowledgment(),
-        revision=revision, delivery_kind=STATE_CROSSING_DATES,
-        project=project, plant_mapping=plant_mapping,
-    )
-    return cells
+            f"no subject registry is reachable for the dataset behind {list(map(str, buckets))}: "
+            "register the dataset or write its subjects.json, so the trait's positive value can "
+            "be checked against it.")
+    revision = confirmed_revision(STATE_CROSSING_DATES, project=project, trait=trait,
+                                  registry=registry)
+    wanted = population(plants)
+    dated = by_recorded_date(map(read_bucket, buckets))
+    mapping_build, verified = plant_mapping.resolve_delivery_mapping(project, mapping_name, dated)
+    measured = per_plant_phenology(mapping_build.rows(), dated, revision.entry, wanted,
+                                   require_all_dates_complete=require_all_dates_complete)
+    positive = revision.entry.positive_value
+    return PhenologyMeasurement(
+        revision=revision, buckets=dated, rows=measured["rows"],
+        positive_class_assessed=(measured["positive_class_assessed"] and any(
+            b.scope.positive_id(positive) is not None for b in dated.values())),
+        require_all_dates_complete=require_all_dates_complete,
+        plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
+        plants=wanted)
 
 
-def write_phenology_csv(
-    door: str,
-    rows: list[dict],
-    out_path: Path,
-    revision: TraitRevision,
-    *,
-    flags: dict[str, str | None],
-    acknowledgment: Acknowledgment | None,
-    document_reconciliations: Mapping[str, Mapping],
-    producer: dict,
-    dimension_reconciliations: Mapping[str, Mapping],
-    predictions_by_date: Mapping[str, str],
-    project: Path,
-    plant_mapping: dict,
-) -> dict:
-    """Write per-plant milestone rows to the canonical delivery CSV, under the trait's confirmed
-    ``revision``.
+def deliver_phenology(
+    project: Path, measurement: PhenologyMeasurement, *, curves: bool, output_path: Path,
+    acknowledgment_id: str | None, door: str,
+) -> dict[str, Any]:
+    """Deliver ``measurement``'s milestone rows, or its per-(plant, date) curve rows with
+    ``curves``, as the CSV at ``output_path``.
 
-    Emits exactly ``phenology_csv_columns(revision.entry)`` through ``_write_phenology_delivery``.
-    ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
-    ``predictions_by_date`` is the date-to-bucket mapping the delivery reads. The other arguments
-    are ``_write_phenology_delivery``'s.
+    The buckets clear the one gate for a ``state_crossing_dates`` delivery, the recorded
+    acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
+    Writes exactly :func:`phenology_csv_columns` (or :func:`curve_csv_columns`) with the
+    delivery's one event under ``door``, its population, missingness rule and plant-mapping
+    disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
-    return _write_phenology_delivery(
-        door, rows, out_path, revision, phenology_csv_columns(revision.entry),
-        flags=flags, acknowledgment=acknowledgment,
-        document_reconciliations=document_reconciliations, producer=producer,
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=project,
-        plant_mapping=plant_mapping)
+    from tcip_mcp.delivery import deliver_csv, gate
+    from tcip_mcp.traits import STATE_CROSSING_DATES
 
-
-def write_phenology_curve_csv(
-    door: str,
-    rows: list[dict],
-    out_path: Path,
-    revision: TraitRevision,
-    *,
-    flags: dict[str, str | None],
-    acknowledgment: Acknowledgment | None,
-    document_reconciliations: Mapping[str, Mapping],
-    producer: dict,
-    dimension_reconciliations: Mapping[str, Mapping],
-    predictions_by_date: Mapping[str, str],
-    project: Path,
-    plant_mapping: dict,
-) -> dict:
-    """Write per-(plant, date) curve rows to the delivery CSV, under the trait's confirmed
-    ``revision``: exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``. The
-    arguments are :func:`write_phenology_csv`'s.
-    """
-    return _write_phenology_delivery(
-        door, rows, out_path, revision, curve_csv_columns(),
-        flags=flags, acknowledgment=acknowledgment,
-        document_reconciliations=document_reconciliations, producer=producer,
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=project,
-        plant_mapping=plant_mapping)
+    result = measurement.result(curves=curves)
+    clearance = gate(project, list(measurement.buckets.values()),
+                     delivery_kind=STATE_CROSSING_DATES, revision=measurement.revision,
+                     result=result, acknowledgment_id=acknowledgment_id)
+    delivered = deliver_csv(project, output_path, result, clearance=clearance,
+                            revision=measurement.revision, door=door,
+                            delivery_kind=STATE_CROSSING_DATES)
+    return {**delivered, "n_rows": len(result.rows), "columns": list(result.columns),
+            "require_all_dates_complete": measurement.require_all_dates_complete}

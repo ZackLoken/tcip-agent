@@ -9,9 +9,6 @@ from typing import Any
 
 from tcip_mcp.subject_registry import SubjectRegistry, positive_value_problem
 from tcip_mcp.traits import (
-    PER_PLANT_COUNT_AGGREGATE,
-    PER_PLANT_ORDINAL_AGGREGATE,
-    PER_PLANT_REGRESSION_AGGREGATE,
     PHENOTYPE_NAMING_KINDS,
     STATE_CROSSING_DATES,
     VALUE_KEY_KINDS,
@@ -20,26 +17,6 @@ from tcip_mcp.traits import (
     read_trait,
     trait_names,
 )
-
-_AGGREGATE_KIND_BY_DOCUMENT: dict[str, str] = {
-    "operating_point": PER_PLANT_COUNT_AGGREGATE,
-    "ordinal_operating_point": PER_PLANT_ORDINAL_AGGREGATE,
-    "regression_operating_point": PER_PLANT_REGRESSION_AGGREGATE,
-}
-"""Which aggregate kind a per-plant delivery is recorded under, by the sidecar document the
-delivery's own records stated as their ``measurement_document``."""
-
-
-def aggregate_delivery_kind(measurement_document: str) -> str:
-    """The delivery kind a per-plant aggregate resting on ``measurement_document`` is delivered
-    under. A document outside the set a per-plant aggregate may rest on raises.
-    """
-    if measurement_document not in _AGGREGATE_KIND_BY_DOCUMENT:
-        raise ValueError(
-            f"no aggregate delivery kind for measurement_document {measurement_document!r}; a "
-            f"per-plant aggregate rests on one of {sorted(_AGGREGATE_KIND_BY_DOCUMENT)}"
-        )
-    return _AGGREGATE_KIND_BY_DOCUMENT[measurement_document]
 
 
 class OperationalizationRefused(ValueError):
@@ -98,15 +75,14 @@ def bind(
     *,
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
-    buckets: Mapping[str, tuple[str | None, Collection[str]]] | None = None,
+    buckets: Mapping[str, Collection[str]] | None = None,
     registry: SubjectRegistry | None = None,
 ) -> None:
     """Refuse (:class:`OperationalizationRefused`) a delivery ``revision``'s ``delivery_kind``
     operationalization does not bind: a delivered phenotype it does not cover, a row value key
-    outside its set or missing, a bucket (``buckets``: path to the trait its stamp records and the
-    object classes its detections are of) recorded for another trait or not counting its measured
-    subject, or, with ``registry`` given, a positive class the delivered dataset's registry no
-    longer declares."""
+    outside its set or missing, a bucket (``buckets``: path to the object classes its detections
+    are of) not counting its measured subject, or, with ``registry`` given, a positive class the
+    delivered dataset's registry no longer declares."""
     entry = revision.entry
     stated = entry.operationalizations[delivery_kind]
 
@@ -136,10 +112,7 @@ def bind(
         if offending:
             raise refuse(f"covers value keys {list(stated.delivered_value_keys)}, and these "
                          f"rows carry {offending}")
-    for bucket, (bucket_trait, subjects) in (buckets or {}).items():
-        if bucket_trait is not None and bucket_trait != entry.name:
-            raise refuse(f"is {entry.name!r}'s, and bucket {bucket} was recorded for trait "
-                         f"{bucket_trait!r}")
+    for bucket, subjects in (buckets or {}).items():
         if stated.measured_subject not in subjects:
             raise refuse(f"measures {stated.measured_subject!r}, and bucket {bucket} counted "
                          f"{sorted(subjects)}")

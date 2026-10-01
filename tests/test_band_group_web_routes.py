@@ -219,6 +219,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob, _worker
 
     images_dir = tmp_path / "images"
@@ -247,8 +248,8 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
 
     job = InferenceJob(
         job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms", project=str(tmp_path),
+        output_dir=str(out_dir), project=str(tmp_path), stated=Stated(
+            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 

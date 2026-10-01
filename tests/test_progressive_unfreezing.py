@@ -27,7 +27,7 @@ from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale, snapshot_optimizer_state, restore_optimizer_state,
 )
-from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64

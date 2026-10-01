@@ -18,6 +18,7 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
@@ -28,8 +29,8 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
 
     job = inference.InferenceJob(job_id="canceled-job", checkpoint_path=ckpt,
                                  images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
-                                 tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
-                                 project=str(tmp_path))
+                                 project=str(tmp_path), stated=Stated(
+                                     tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
     inference._register(job)
     job.cancel_event.set()
     try:

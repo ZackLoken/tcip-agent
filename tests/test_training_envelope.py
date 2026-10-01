@@ -17,7 +17,6 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe  # noqa: E402
-from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
@@ -73,7 +72,6 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert ctx.run.status == "completed"
     assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [1]
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
-    assert best["kind"] == KIND_TCIP_MODULE
     assert best["config"]["model_source"] == config["model_source"]
     assert "model_source" not in best
 
@@ -84,16 +82,11 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
 
     # Completion names the checkpoint, and the registry reads that one record for its producer.
     checkpoint = completed_checkpoint(run_dir)
-    assert checkpoint is not None and checkpoint["kind"] == KIND_TCIP_MODULE
+    assert checkpoint is not None
     assert checkpoint["path"].endswith("model_best.pt")
     verified = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
     assert verified.sha256 == checkpoint["sha256"]
     assert verified.experiment_id == run_dir.name
-
-    from tcip_mcp.pipelines.resolution import corroborated_producer
-
-    assert corroborated_producer(checkpoint["sha256"], run_dir.name, project=tmp_path) == (
-        checkpoint["sha256"], run_dir.name)
 
 
 def _agent_train_default_tag_no_override(ctx):

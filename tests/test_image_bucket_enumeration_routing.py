@@ -243,7 +243,7 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
                          "task": "detection"},
         "data": {"images_dir": str(bucket), "labels_dir": str(labels_dir),
                  "scope": {"subject": SUBJECT},
-                 "tiling": {"enabled": True},
+                 "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
                  "split": {"reserve_calibration_fraction": 0.2}},
     }
     r = preflight_config(tmp_path, cfg)

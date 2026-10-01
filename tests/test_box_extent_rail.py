@@ -31,15 +31,14 @@ def client() -> TestClient:
 # ── the shared constructor ──────────────────────────────────────────────────
 
 
-def test_a_count_before_the_write_counts_what_the_write_stores(tmp_path: Path):
-    """The delivered count and the prediction write read one extent decision on the stored
-    grid: a box that rounds to no width, and a mask whose rings have none, count as nothing
-    beside the one detection the write keeps."""
+def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid():
+    """A box that rounds to no width, and a mask whose rings have none, are no detection: the
+    encoding keeps the one detection with extent, and the count it reports is the document's."""
     import numpy as np
 
-    from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.json_io import annotations_from_bytes
     from tcip_annotation.mask_contours import mask_to_polygon_rings
-    from tcip_mcp.pipelines.postprocessing.export import positive_detections, write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     solid = np.zeros((40, 40), dtype=np.uint8)
     solid[5:30, 5:30] = 1
@@ -49,16 +48,16 @@ def test_a_count_before_the_write_counts_what_the_write_stores(tmp_path: Path):
     past_the_edge = {"segmentation": [[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]}
 
     def result() -> dict:
-        return {"width": 40, "height": 40, "labels": [1, 1, 1], "scores": [0.9, 0.8, 0.7],
+        return {"image": "a.jpg", "width": 40, "height": 40, "labels": [1, 1, 1],
+                "scores": [0.9, 0.8, 0.7],
                 "boxes": [[5.0, 5.0, 30.0, 30.0], [5.0, 5.0, 30.0, 30.0], [10.0, 5.0, 10.004, 30.0]],
                 "masks": [past_the_edge, blob], "count": 3}
 
-    counted, scores = positive_detections(result())
     written = result()
-    write_predictions_json(tmp_path / "a.json", written,
-                           scope=ClassScope(subject="bur", id_map={"bur": 0}))
-    assert counted == len(read_annotations(tmp_path / "a.json")) == written["count"] == 1
-    assert scores == written["scores"] == [0.8]
+    data, _dropped = encode_predictions(written, scope=ClassScope(subject="bur", id_map={"bur": 0}))
+    (kept,) = annotations_from_bytes(data, source="a.json")
+    assert written["count"] == 1
+    assert kept.score == written["scores"][0] == 0.8
 
 
 def test_check_box_extent_refuses_an_inverted_box():
@@ -244,8 +243,9 @@ def test_annotate_save_admits_every_selected_dataset_save(
 
 def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None) -> tuple[Path, Path]:
     from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
+    from tests._web_fixtures import open_new_project
 
-    dataset_root = tmp_path
+    dataset_root = open_new_project(tmp_path)
     img = dataset_root / "images" / "img_001.jpg"
     _write_image(img)
     write_registry(dataset_root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
@@ -254,18 +254,19 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
         [Annotation(subject="leaf", geometry=BBox(*gt_box))] if gt_box is not None else []
     )
     write_annotations(str(gt_path), gt_annotations, 200, 150, keep_empty=True)
-    pred_path = dataset_root / "predictions" / "m" / "img_001.json"
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
     x1, y1, x2, y2 = pred_box
-    if x2 > x1 and y2 > y1:
-        write_annotations(
-            str(pred_path),
-            [Annotation(subject="leaf", geometry=BBox(*pred_box), score=0.9, created_by="m")],
-            200, 150, keep_empty=True,
-        )
-    else:
-        # A degenerate box can no longer reach this file through write_annotations (the
-        # persistence boundary refuses it); placed directly, as a foreign/hand-edited file would.
-        pred_path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = x2 > x1 and y2 > y1
+    bucket = published(dataset_root, dataset_root / "predictions" / "m", [
+        {"image": str(img), "width": 200, "height": 150,
+         "boxes": [list(pred_box) if ordered else [10, 10, 20, 20]], "scores": [0.9],
+         "labels": [1]}], scope={"subject": "leaf", "attribute": None, "id_map": {"leaf": 0}})
+    pred_path = bucket.path / "img_001.json"
+    if not ordered:
+        # A degenerate box can reach a document only by an edit in place after publication,
+        # as a hand-edited file would carry it.
         pred_path.write_text(json.dumps({
             "image": "img_001", "width": 200, "height": 150,
             "annotations": [{"subject": "leaf", "bbox": [x1, y1, x2 - x1, y2 - y1],
@@ -342,13 +343,14 @@ def test_review_action_admits_an_ordered_edited_box(client: TestClient, tmp_path
 def test_review_action_refuses_accepting_a_degenerate_prediction(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # A degenerate prediction reaching the store bypasses the staging door's own drop (a file
-    # placed directly, as a foreign bucket might hold): the accept branch still refuses it.
+    # A degenerate prediction reaching the document bypasses the publication's own drop (an
+    # edit in place): the accept branch still refuses it.
     gt_path, pred_path = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
 
     resp = client.post("/api/review/action", json=_action_payload(tmp_path, gt_path, pred_path))
 
-    assert resp.status_code == 400
+    assert resp.status_code == 400, resp.text
+    assert "bucket" not in resp.json()["detail"]
     assert json.loads(gt_path.read_text())["annotations"] == []
 
 
@@ -366,68 +368,66 @@ def test_review_action_admits_accepting_an_ordered_prediction(
 # ── prediction writers drop a degenerate box and report it, rather than fail ─
 
 
-def test_write_predictions_json_drops_a_degenerate_box_and_reports_the_count(tmp_path):
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+LEAF = ClassScope(subject="leaf", id_map={"leaf": 0})
 
-    out = tmp_path / "preds.json"
+
+def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+
     result = {
-        "width": 200, "height": 150,
+        "image": "preds.jpg", "width": 200, "height": 150,
         "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]],  # the second collapses to zero width
         "scores": [0.9, 0.8],
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
+    data, dropped = encode_predictions(result, scope=LEAF)
 
     assert dropped == 1
-    saved = json.loads(out.read_text(encoding="utf-8"))
-    assert len(saved["annotations"]) == 1
+    assert len(json.loads(data)["annotations"]) == 1
 
 
-def test_write_predictions_json_drops_a_box_that_rounds_to_zero_extent(tmp_path):
+def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
     """A box with real pre-round extent that collapses to nothing at the document's stored
-    2-decimal quantum is dropped here, the same as an already-zero-extent box: the writer must
+    2-decimal quantum is dropped here, the same as an already-zero-extent box: the encoder must
     never be handed a box it would refuse and fail the whole run over."""
-    from tcip_annotation.json_io import read_annotations
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    out = tmp_path / "preds.json"
     result = {
-        "width": 200, "height": 150,
+        "image": "preds.jpg", "width": 200, "height": 150,
         "boxes": [[10, 10, 20, 20], [30, 30, 30.003, 30.003]],
         "scores": [0.9, 0.8],
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
+    data, dropped = encode_predictions(result, scope=LEAF)
 
     assert dropped == 1
-    assert len(read_annotations(out)) == 1
+    assert len(json.loads(data)["annotations"]) == 1
 
 
-def test_write_predictions_json_refuses_a_reserved_stem(tmp_path):
-    """An image stem reserved for a bucket's own provenance stamp must never reach a per-image
-    prediction write: the stamp write into that same bucket would otherwise destroy or refuse
-    over it, naming the operator at a file that was never the actual cause."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+def test_encode_predictions_refuses_the_buckets_record_name():
+    """An image stem that names a bucket's own record never reaches a per-image prediction
+    document: the record written into that same bucket would otherwise destroy or refuse over
+    it."""
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    out = tmp_path / "operating_point.json"
-    result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
+    result = {"image": "bucket.jpg", "width": 100, "height": 100, "boxes": [[1, 1, 5, 5]],
+              "scores": [0.9], "labels": [1]}
 
-    with pytest.raises(ValueError, match="operating_point"):
-        write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
-    assert not out.exists()
+    with pytest.raises(ValueError, match="bucket"):
+        encode_predictions(result, scope=LEAF)
 
 
-def test_write_predictions_json_still_writes_an_ordinary_stem(tmp_path):
-    from tcip_annotation.json_io import read_annotations
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+def test_encode_predictions_still_encodes_an_ordinary_stem():
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    out = tmp_path / "IMG_0001.json"
-    result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
+    result = {"image": "IMG_0001.jpg", "width": 100, "height": 100, "boxes": [[1, 1, 5, 5]],
+              "scores": [0.9], "labels": [1]}
 
-    write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
-    assert len(read_annotations(out)) == 1
+    data, _dropped = encode_predictions(result, scope=LEAF)
+    assert json.loads(data)["image"] == "IMG_0001"
+    assert len(json.loads(data)["annotations"]) == 1
 
 
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):

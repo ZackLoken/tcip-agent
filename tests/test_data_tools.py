@@ -49,19 +49,17 @@ def test_doctor_check_data_quality_missing_dir(tmp_path: Path):
 
 
 def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path: Path):
-    """The census walks with a raw glob and counts a label named like a bucket's own provenance
-    stamp, unlike every bucket walk through prediction_documents; reserved_name_labels names it so
-    a caller does not read the difference as a disagreement."""
+    """The census walks with a raw glob and counts a label named like a bucket's own record,
+    unlike every bucket walk through prediction_documents; reserved_name_labels names it so a
+    caller does not read the difference as a disagreement."""
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
     labels_dir = root / "annotations" / "2-11-26"
     labels_dir.mkdir(parents=True)
-    json_io.write_annotations(
-        labels_dir / "operating_point.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
-    )
-    reserved_label = str(labels_dir / "operating_point.json")
+    # Written by hand: the platform's own encoder refuses a document under a reserved stem.
+    (labels_dir / "bucket.json").write_text('{"annotations": []}', encoding="utf-8")
+    reserved_label = str(labels_dir / "bucket.json")
 
     scan_result = scan_dataset(str(root))
 
@@ -69,15 +67,15 @@ def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path:
 
 
 def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path):
-    """An image whose own stem is reserved for a bucket's own provenance stamp must be named,
-    not folded into unlabeled_images with no signal that its label can never be read through
-    any bucket walk."""
+    """An image whose own stem is reserved for a bucket's own record must be named, not folded
+    into unlabeled_images with no signal that its label can never be read through any bucket
+    walk."""
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    (images_dir / "operating_point.jpg").write_bytes(b"\xff\xd8\xff")
+    (images_dir / "bucket.jpg").write_bytes(b"\xff\xd8\xff")
     (images_dir / "ordinary.jpg").write_bytes(b"\xff\xd8\xff")
-    reserved_image = str(images_dir / "operating_point.jpg")
+    reserved_image = str(images_dir / "bucket.jpg")
 
     scan_result = scan_dataset(str(root))
 
@@ -85,23 +83,20 @@ def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path
     assert scan_result["unlabeled_images"] == 2
 
 
-def test_scan_dataset_drops_a_cleared_bucket_from_the_prediction_count(tmp_path: Path):
-    """A document ``clear_prediction_bucket`` has moved into the cleared archive is never counted
-    as a live prediction: the census walks ``predictions/`` with a raw ``rglob``, which would
-    otherwise see it exactly like a live bucket's own document."""
-    from tcip_mcp.dataset_layout import cleared_prediction_dir, prediction_dir
+def test_scan_dataset_counts_only_the_documents_of_published_buckets(tmp_path: Path):
+    """A directory of documents under ``predictions/`` holding no ``bucket.json`` is no
+    bucket, so the census counts only a published bucket's documents."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
-    live = prediction_dir(root, "modelA", "2-11-26")
-    live.mkdir(parents=True)
+    published(tmp_path, root / "predictions" / "modelA" / "2-11-26",
+              [predicted("imgA", ["bud"], {"bud": 0})],
+              scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    staged = root / "predictions" / "modelB" / "2-11-26"
+    staged.mkdir(parents=True)
     json_io.write_annotations(
-        live / "imgA.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
-    )
-
-    cleared = cleared_prediction_dir(root, "modelB", "2-11-26", "20260906T120000Z")
-    cleared.mkdir(parents=True)
-    json_io.write_annotations(
-        cleared / "imgB.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
+        staged / "imgB.json", [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
     )
 
     scan_result = scan_dataset(str(root))
@@ -132,7 +127,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
     # groups, exactly the manifest floor (one each for train/val, two for calibration).
     result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     assert result["total_stems"] == 4
     assert result["groups"] == 4
@@ -159,14 +154,14 @@ def test_draw_splits_refuses_a_version_refused_subject_registry_as_an_error(data
         subject_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
     )
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result, result
     assert "schema_version" in result["error"]
 
 
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
-    """A stats-only call (no output_path) may pass any calibration_ratio; only writing a
-    selection requires a non-zero one."""
+    """A stats-only call (no output_path) may pass any calibration_ratio, a zero holdout_ratio
+    included; only writing a selection requires every ratio non-zero."""
     result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
     assert "error" not in result, result
     assert result["splits"]["calibration"] > 0
@@ -179,7 +174,7 @@ def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     bad.write_bytes(b"{not json")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -195,7 +190,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     bad.write_bytes(b"{not json")
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -216,7 +211,7 @@ def test_draw_splits_writes_nothing_when_a_confirmed_negative_will_not_read(
     out = tmp_path / "selection"
 
     result = draw_splits(data_dir, str(data_dir), output_path=str(out), subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -268,7 +263,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
     result = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -386,7 +381,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(tmp_path: P
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "plotA" in result["error"] and "R" in result["error"]
@@ -428,79 +423,44 @@ def test_place_logical_image_leaves_an_existing_destination_alone_without_writin
     assert calls == []
 
 
-def test_draw_splits_stats_only_carries_dataset_hash(data_dir: Path):
-    """A stats-only call's answer identifies the labels it partitioned, the same as a manifest
-    call's own per-date record."""
-    result = draw_splits(data_dir, str(data_dir))
-    assert "error" not in result
-    assert result["dataset_hash"]
-    assert result["dataset_hashes_by_date"] == {"2-11-26": result["dataset_hash"]}
-
-
-def test_draw_splits_stats_only_over_two_dates_names_both_hashes_and_no_single_hash(
-    tmp_path: Path,
-):
-    """A stats-only call over a tree with more than one labels directory names each date's own
-    hash and carries no single dataset_hash, which would be blind to every other date's
-    content: the same hash implementation the manifest write calls per date."""
-    from PIL import Image
-
-    root = tmp_path / "ds"
-    for date, stems in (("2-11-26", ("a", "b")), ("2-12-01", ("c", "d"))):
-        images_dir = root / "images" / date
-        labels_dir = root / "annotations" / date
-        images_dir.mkdir(parents=True)
-        labels_dir.mkdir(parents=True)
-        for stem in stems:
-            Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            json_io.write_annotations(
-                labels_dir / f"{stem}.json",
-                [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-            )
-
-    result = draw_splits(tmp_path, str(root))
-
-    assert "error" not in result, result
-    assert result["dataset_hash"] is None
-    assert set(result["dataset_hashes_by_date"]) == {"2-11-26", "2-12-01"}
-    assert result["dataset_hashes_by_date"]["2-11-26"] != result["dataset_hashes_by_date"]["2-12-01"]
-
 def test_draw_splits_bad_ratios(data_dir: Path):
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.5)
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.5, val_ratio=0.5,
+                         calibration_ratio=0.25, holdout_ratio=0.25)
     assert "error" in result
 
 
-def test_draw_splits_train_val_calibration_not_summing_to_one_names_all_three(data_dir: Path):
-    """The sum-check message names all three standing constraints, not just the raw sum."""
-    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.2)
+def test_draw_splits_ratios_not_summing_to_one_names_all_four(data_dir: Path):
+    """The sum-check message names all four standing constraints, not just the raw sum."""
+    result = draw_splits(data_dir, str(data_dir), train_ratio=0.7, val_ratio=0.2,
+                         calibration_ratio=0.1, holdout_ratio=0.1)
     assert "error" in result
-    assert "calibration_ratio" in result["error"]
+    assert "calibration_ratio" in result["error"] and "holdout_ratio" in result["error"]
     assert "train_ratio" in result["error"] and "val_ratio" in result["error"]
 
 
-def test_draw_splits_manifest_write_refuses_a_zero_calibration_ratio(tmp_path: Path):
-    """A selection's calibration side is the universe every calibration under it draws from, so
-    writing one states a non-zero calibration_ratio; the keyword names the missing input."""
+def test_draw_splits_manifest_write_refuses_zero_reference_ratios(tmp_path: Path):
+    """A selection's calibration and holdout sides are the reference an assessment reads, so
+    writing one states both ratios non-zero; the keywords name the missing inputs."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud")
 
     assert "error" in result
-    assert "calibration_ratio" in result["error"]
+    assert "calibration_ratio" in result["error"] and "holdout_ratio" in result["error"]
     assert not out.exists()
 
 
-def test_draw_splits_selection_carries_all_three_split_sides(tmp_path: Path):
+def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" not in result, result
     counts = read_selection(out, project=tmp_path).counts()
-    assert set(counts) == {"train", "val", "calibration"}
+    assert set(counts) == {"train", "val", "calibration", "holdout"}
     assert all(counts.values())
 
 
@@ -514,7 +474,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
                          stratify_foreground=False)
 
     assert "error" in result
@@ -523,13 +483,14 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
 
 
 def test_draw_splits_manifest_write_refuses_a_zero_ratio_on_any_side_by_name(tmp_path: Path):
-    """Writing a selection requires all three ratios non-zero, refused by name naming the zero
+    """Writing a selection requires all four ratios non-zero, refused by name naming the zero
     one, before the foreground floor is ever reached: no side is dropped by zeroing its ratio."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="bud", seed=1,
-                         train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.25)
+                         train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.125,
+                         holdout_ratio=0.125)
 
     assert "error" in result
     assert "val_ratio" in result["error"] and "must be non-zero" in result["error"]
@@ -571,7 +532,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "foreground group" in result["error"]
@@ -619,8 +580,8 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
     for seed in range(1, 21):
         out = tmp_path / f"m{seed}"
         result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", seed=seed,
-                             train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.1,
-                             stratify_foreground=False)
+                             train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.05,
+                             holdout_ratio=0.05, stratify_foreground=False)
         assert "error" not in result, (seed, result)
         assert result["calibration_foreground_groups"] >= 2, (seed, result)
 
@@ -648,7 +609,7 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1, subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
@@ -669,7 +630,7 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
         "2-11-26/w_0_0": "gC", "2-11-26/v_0_0": "gD",
     }
     result = draw_splits(tmp_path, str(root), output_path=str(out), seed=1,
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125,
                          group_by="tile_prefix", group_key_map=group_key_map, subject="bud")
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
@@ -687,7 +648,7 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result
     assert not out.exists() or not (out / "selection.json").is_file()
 
@@ -698,7 +659,7 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(tmp_path: Path
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out),
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" in result and "subject" in result["error"]
     assert not out.exists()
 
@@ -735,7 +696,7 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
 
@@ -744,7 +705,7 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     assert len(shared) == 2
     assert {Path(s.source).parent.name for s in shared} == {"2-11-26", "2-12-01"}
     assert {Path(s.ground_truth).parent.name for s in shared} == {"2-11-26", "2-12-01"}
-    assert len({s.identity for s in shared}) == 2
+    assert len({s.location for s in shared}) == 2
     # Each sample's own label document is the one under its own date, never the other's.
     boxes = {
         json_io.read_annotations(s.ground_truth)[0].geometry.x1 for s in shared  # type: ignore[union-attr]
@@ -783,7 +744,7 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Pa
     root = _two_subject_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
     drawn = read_selection(out, project=tmp_path)
@@ -831,7 +792,7 @@ def test_draw_splits_attribute_scoped_selection_holds_only_assessed_samples(tmp_
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", attribute="condition",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
     assert result["total_stems"] == 4
     drawn = read_selection(out, project=tmp_path)
@@ -869,7 +830,7 @@ def test_draw_splits_refuses_two_dated_label_dirs_sharing_a_flat_images_root(tmp
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
@@ -902,7 +863,7 @@ def test_draw_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "2-11-26" in result["error"]
@@ -929,7 +890,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_directories_and_the_unp
     out = tmp_path / "m"
 
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" in result
     assert "annotations/ (loose labels)" in result["error"]
@@ -960,7 +921,7 @@ def test_draw_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Pat
     root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0", "p1", "p2", "p3", "p4"))
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result
     assert result["total_stems"] == 5
     assert result["admission_counts"]["annotated"] == 5
@@ -991,7 +952,7 @@ def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
 
     assert "error" not in result
     assert result["total_stems"] == 5
@@ -1002,16 +963,16 @@ def test_draw_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
         str(Path("annotations") / "2-11-26"), "annotations"}
 
 
-def test_split_date_dirs_ignores_a_stray_stamp_named_document(tmp_path: Path):
-    """A bucket's own provenance stamp sitting loose directly under ``annotations/`` is not a
-    loose label: it must never mint a dateless entry the way a real loose label would, the same
-    exclusion every bucket walk through ``prediction_documents`` already applies."""
+def test_split_date_dirs_ignores_a_stray_bucket_record(tmp_path: Path):
+    """A bucket's own record sitting loose directly under ``annotations/`` is not a loose label:
+    it must never mint a dateless entry the way a real loose label would, the same exclusion
+    every bucket walk through ``prediction_documents`` already applies."""
     from tcip_mcp.tools.data_tools import _split_date_dirs
 
     root = tmp_path / "ds"
     (root / "annotations" / "2-11-26").mkdir(parents=True)
     (root / "images" / "2-11-26").mkdir(parents=True)
-    (root / "annotations" / "operating_point.json").write_text('{"trait": null}', encoding="utf-8")
+    (root / "annotations" / "bucket.json").write_text('{"checkpoint": "m"}', encoding="utf-8")
 
     entries = _split_date_dirs(root)
 
@@ -1060,7 +1021,7 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(tmp_path: Pa
 
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result
     drawn = read_selection(out, project=tmp_path)
 
@@ -1109,7 +1070,7 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
 
     assert drawn.scope == ClassScope(subject="leaf", id_map={"leaf": 0})
     assert drawn.seed == 1
-    assert [s.identity for s in drawn.samples] == [str(tmp_path.resolve() / "images" / "a.jpg")]
+    assert [s.location for s in drawn.samples] == [str(tmp_path.resolve() / "images" / "a.jpg")]
 
 
 def test_read_selection_refuses_an_absent_record_by_name(tmp_path: Path):

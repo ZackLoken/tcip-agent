@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_tcip_web_results_routes import _phenology_fixture
+pytest.importorskip("torch")
 
 
 def _rows(path: Path) -> list[dict]:
@@ -22,17 +22,18 @@ def _rows(path: Path) -> list[dict]:
 
 def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     """The mapping names PLANT_A and PLANT_B; a population of PLANT_A and a plant the mapping
-    never covers delivers exactly those two rows, in that order, and never PLANT_B."""
+    never covers delivers exactly those two rows, in that order, and never PLANT_B; the uncovered
+    plant is imaged on none of the delivered dates, so it is incomplete on every one."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+    from tests._chain_fixtures import classified_series
 
-    body = _phenology_fixture(tmp_path, validated=True)
+    body = classified_series(tmp_path).body()
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
-        plants=["PLANT_A", "PLANT_UNMAPPED"],
-        classifier_pred_dirs=list(body["predictions_by_date"].values()))
+        buckets=body["buckets"], output_csv_path=str(out_csv),
+        plants=["PLANT_A", "PLANT_UNMAPPED"])
 
     assert "error" not in res, res
     rows = _rows(out_csv)
@@ -40,20 +41,22 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     assert res["n_plants"] == 2
     by_plant = {r["plant_id"]: r for r in rows}
     assert by_plant["PLANT_A"]["n_dates"] == "4"
-    assert by_plant["PLANT_UNMAPPED"]["n_dates"] == "0"
+    assert by_plant["PLANT_UNMAPPED"]["n_dates"] == "4"
+    assert by_plant["PLANT_UNMAPPED"]["n_dates_missing_images"] == "4"
+    assert by_plant["PLANT_UNMAPPED"]["complete"] == "False"
     assert by_plant["PLANT_UNMAPPED"]["bud_50per_date"] == ""
 
 
 def test_an_empty_population_refuses_naming_the_argument(tmp_path: Path) -> None:
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+    from tests._chain_fixtures import classified_series
 
-    body = _phenology_fixture(tmp_path, validated=True)
+    body = classified_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        predictions_by_date=body["predictions_by_date"],
-        output_csv_path=str(tmp_path / "out" / "bud.csv"), plants=[],
-        classifier_pred_dirs=list(body["predictions_by_date"].values()))
+        buckets=body["buckets"],
+        output_csv_path=str(tmp_path / "out" / "bud.csv"), plants=[])
 
     assert "plants=[...]" in res["error"]
     assert not (tmp_path / "out" / "bud.csv").exists()
@@ -63,9 +66,10 @@ def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path) -> N
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app
+    from tests._chain_fixtures import classified_series
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    body = {**_phenology_fixture(tmp_path, validated=True), "plants": ["PLANT_B"]}
+    body = classified_series(tmp_path).body(plants=["PLANT_B"])
 
     resp = client.post("/api/results/phenology_measurement", json=body)
 
@@ -75,43 +79,40 @@ def test_the_web_route_delivers_the_population_it_was_given(tmp_path: Path) -> N
 
 
 def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
-    """Two validated dates whose sidecars name different checkpoints are two producers; the
-    tool refuses naming each date's producer and writes nothing, never a placeholder cell."""
-    from tcip_mcp.pipelines.resolution import (
-        ProducerDiffers,
-        read_operating_point_sidecar,
-        stamped_producer,
-    )
+    """Two dates published by two checkpoints are two producers: the tool refuses naming each
+    bucket's producer and writes nothing, while the same dates from one producer deliver."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+    from tests._chain_fixtures import BLOB_BUILDER, classified_series, run_config
+    from tests._verified_checkpoint_fixtures import worker_run
 
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0))
-    dates = list(body["predictions_by_date"])
-    first = read_operating_point_sidecar(body["predictions_by_date"][dates[0]])
-    second = read_operating_point_sidecar(body["predictions_by_date"][dates[1]])
-    assert first["checkpoint_sha256"] == second["checkpoint_sha256"]
-    assert "error" not in deliver_phenology_milestones(
+    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    body = series.body()
+    first, second = sorted(series.buckets)
+    one = tmp_path / "out" / "one_producer.csv"
+
+    res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        predictions_by_date=body["predictions_by_date"],
-        output_csv_path=str(tmp_path / "out" / "one_producer.csv"), plants=["PLANT_A"],
-        classifier_pred_dirs=list(body["predictions_by_date"].values()))
+        buckets=body["buckets"], output_csv_path=str(one),
+        plants=["PLANT_A"])
+    assert "error" not in res, res
 
-    from tests._binding_fixtures import record_producing_run, write_bound_sidecar
+    config = {**run_config(tmp_path / "selection"), "model_source": dict(BLOB_BUILDER)}
+    other = observe(worker_run(tmp_path, config, experiment_id="exp-other")).checkpoint
+    assert other is not None
+    other_bucket = series.root / "predictions" / "other" / second
+    published = run_inference(tmp_path, checkpoint_path=other["path"],
+                              images_dir=str(series.root / "images" / second),
+                              output_dir=str(other_bucket))
+    assert "error" not in published, published
 
-    other_sha = record_producing_run(tmp_path, "exp-other")
-    second_stamp = {k: v for k, v in second.items() if k != "validated_by"}
-    second_stamp.update({"checkpoint_sha256": other_sha, "experiment_id": "exp-other"})
-    write_bound_sidecar(tmp_path, body["predictions_by_date"][dates[1]], second_stamp,
-                        dataset_root=tmp_path / "ds", experiment_id="exp-op-other",
-                        producing_experiment_id="exp-other", trait="bud_opening")
-
-    with pytest.raises(ProducerDiffers, match=dates[1]):
-        stamped_producer(body["predictions_by_date"])
     out_csv = tmp_path / "out" / "two_producers.csv"
     res = deliver_phenology_milestones(
         tmp_path, trait=body["trait"], mapping_name=body["mapping_name"],
-        predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
-        plants=["PLANT_A"], classifier_pred_dirs=list(body["predictions_by_date"].values()))
+        buckets=[series.buckets[first], str(other_bucket)],
+        output_csv_path=str(out_csv), plants=["PLANT_A"])
 
-    assert "error" in res
-    assert "more than one" in res["error"]
+    assert "more than one checkpoint or run" in res["error"], res
+    assert str(other_bucket) in res["error"]
     assert not out_csv.exists()

@@ -126,7 +126,7 @@ class TestPostPanelEventRoute:
                 "data": {
                     "subject": "bud",
                     "date": "2-11-26",
-                    "model_name": "m1",
+                    "predictions_dir": "predictions/m1/2-11-26",
                     "image_index": 3,
                     "detection_idx": 7,
                     "filter_type": "fp",
@@ -417,6 +417,7 @@ class TestInferenceToolOutputSchema:
         self, tmp_path: Path, monkeypatch,
     ) -> None:
         """A dry run reports each operating-point dimension as the caller named it."""
+        from tcip_mcp.pipelines.execution import Stated
         from tcip_mcp.tools.inference_tools import run_inference
         from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -424,94 +425,43 @@ class TestInferenceToolOutputSchema:
             tmp_path, model_source={"builder": "tests.bespoke_models:build_bright_blob_detector",
                           "task": "detection"})
         res = run_inference(tmp_path, ckpt, images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
-                            dry_run=True, tile=True,
-                            tile_size=512, overlap=0.35, conf_threshold=0.17, max_dets=37,
-                            cross_tile_nms=0.55, postprocess="nmm")
+                            dry_run=True, stated=Stated(
+                                tile=True, tile_size=512, overlap=0.35, conf=0.17, max_dets=37,
+                                cross_tile_nms=0.55, postprocess="nmm"))
 
         assert "error" not in res, res
         assert res["dry_run"] is True
-        op = res["operating_point"]
-        assert op["conf"]["value"] == 0.17
-        assert op["tile_size"]["value"] == 512
-        assert res["slicing"]["overlap"] == 0.35
-        assert op["max_dets"]["value"] == 37
-        assert op["cross_tile_nms"]["value"] == 0.55
-        assert res["slicing"]["postprocess"] == "nmm"
-        assert op["cross_tile_nms"]["source"] == "explicit"
+        execution = res["execution"]
+        assert execution["conf"] == 0.17
+        assert execution["tile_size"] == 512
+        assert execution["overlap"] == 0.35
+        assert execution["max_dets"] == 37
+        assert execution["cross_tile_nms"] == 0.55
+        assert execution["postprocess"] == "nmm"
+        assert execution["sources"]["cross_tile_nms"] == "explicit"
 
-    def test_run_inference_writes_one_file_per_image_carrying_that_images_detections(
-        self, tmp_path: Path, monkeypatch, seed_bud_trait_spec,
+    def test_a_published_bucket_holds_one_file_per_image_carrying_that_images_detections(
+        self, tmp_path: Path,
     ) -> None:
         """A prediction bucket holds one file per image the pass saw, named for its stem and
-        holding its own detections, an image with none included."""
-        import tcip_mcp.tools.inference_tools as itools
-        from tests._binding_fixtures import calibrated_run_fields, run_result
-        from tests._verified_checkpoint_fixtures import project_checkpoint
+        holding its own detections, an image with none included, and its record names each."""
+        pytest.importorskip("torch")
+        from tests._chain_fixtures import published
 
         def _boxes(n: int) -> list[list[float]]:
             return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
 
         counts = {"row3_plant07": 1, "row3_plant11": 0, "row9_plant02": 4}
-        results = [
-            {"image": f"{stem}.jpg", "width": 800, "height": 600, "boxes": _boxes(n),
-             "scores": [0.9] * n, "labels": [1] * n, "count": n}
-            for stem, n in counts.items()
-        ]
-        ckpt = project_checkpoint(tmp_path)
-        sha = "0f1e2d3c4b5a"
-        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
-            results=results,
-            **calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256=sha)))
-
         out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-        res = itools.run_inference(tmp_path, str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
-                                   trait="bud_opening")
+        bucket = published(tmp_path, out, [
+            {"image": f"{stem}.jpg", "width": 800, "height": 600, "boxes": _boxes(n),
+             "scores": [0.9] * n, "labels": [1] * n}
+            for stem, n in counts.items()], scope={"subject": "bud", "id_map": {"bud": 0}})
 
-        assert "error" not in res, res
-        assert res["image_count"] == len(counts)
-        assert res["output_dir"] == str(out)
-        assert sorted(Path(p).stem for p in res["files"]) == sorted(counts)
+        assert sorted(bucket.documents) == sorted(counts)
         written = {p.stem: len(json.loads(p.read_text())["annotations"])
-                   for p in out.glob("*.json") if p.name != "operating_point.json"}
+                   for p in out.glob("*.json") if p.name != "bucket.json"}
         assert written == counts
-
-    def test_deliver_per_image_counts_refuses_a_live_pass_with_no_bucket_naming_each_count(
-        self, tmp_path: Path, monkeypatch,
-    ) -> None:
-        """A live pass with no ``predictions_dir`` has no bucket a reviewer could re-open, and this
-        door takes no acknowledgment for the CSV itself, so it always refuses; the refusal still
-        names the count measured for each image and the run's own narrowed conf reference,
-        distinct from the CSV-facing column, which floors false with nothing on disk behind it.
-        """
-        import tcip_mcp.tools.inference_tools as itools
-        from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
-        from tests._binding_fixtures import run_result
-        from tests._verified_checkpoint_fixtures import project_checkpoint
-
-        counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
-        ckpt = project_checkpoint(tmp_path)
-        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: run_result(
-            {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
-            [{"image": name, "count": n, "scores": [0.9] * n} for name, n in counts.items()],
-            validated=True, conf_source="calibration"))
-
-        from tests import _trait_fixtures as fx
-
-        fx.seed_confirmed_count(tmp_path)
-        out_csv = tmp_path / "block_counts.csv"
-        # No predictions_dir: nothing on disk backs the count, so the delivery refuses outright.
-        res = itools.deliver_per_image_counts(tmp_path, str(ckpt), str(tmp_path), str(out_csv),
-                                     trait=fx.COUNT_TRAIT,
-                                     calibration_labels_dir=str(tmp_path))
-
-        assert "error" in res
-        assert res["image_count"] == len(counts)
-        assert res["total_detections"] == sum(counts.values())
-        # No bucket, so the CSV-facing column floors false regardless; the run's own narrowed
-        # reference travels honestly under its own name instead.
-        assert res["operating_point_validated"] == VALIDATED_FALSE
-        assert res["run_conf_validated_against"] == VALIDATED_HELD_OUT
-        assert not out_csv.exists()
 
 
 class TestHpoToolOutputSchema:

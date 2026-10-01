@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
 import {
-  modelsForDate,
+  bucketsForDate,
   openProjectById,
   openWorkspaceProject,
   subjectsForDate,
@@ -91,17 +91,16 @@ export function ProjectBreadcrumb() {
     if (newDate === dataset.date) return;
     setBusy(true);
     try {
-      // Keep the current subject/model when the new date has them, else fall to that date's first.
+      // Keep the current subject when the new date has it, else fall to that date's first; a
+      // bucket states one capture date, so the new date opens on its own first bucket.
       const subjects = subjectsForDate(current, newDate);
-      const models = modelsForDate(current, newDate);
       const subject =
         dataset.subject && subjects.includes(dataset.subject)
           ? dataset.subject
           : (subjects[0] ?? null);
-      const curModel = dataset.model_name;
-      const model = curModel && models.includes(curModel) ? curModel : (models[0] ?? null);
+      const bucket = Object.values(bucketsForDate(current, newDate))[0] ?? null;
       // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
-      await openWorkspaceProject(current, newDate, subject, model);
+      await openWorkspaceProject(current, newDate, subject, bucket);
     } catch (e) {
       pushToast(`Could not switch date: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

@@ -41,8 +41,8 @@ def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
 
 @pytest.fixture
 def split_instance_dataset(tmp_path: Path) -> Path:
-    """A dataset whose one image carries a two-region ground-truth mask and a two-region
-    predicted mask, each region far from the others."""
+    """A dataset whose one image carries a two-region ground-truth mask, each region far from
+    the other."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, Polygon
 
@@ -57,16 +57,11 @@ def split_instance_dataset(tmp_path: Path) -> Path:
         [Annotation(subject="leaf", geometry=Polygon(rings=[GT_RING_LEFT, GT_RING_RIGHT]))],
         320, 180,
     )
-
-    preds = tmp_path / "predictions" / "live"
-    preds.mkdir(parents=True)
-    json_io.write_annotations(
-        preds / "split.json",
-        [Annotation(subject="leaf", geometry=Polygon(rings=[PRED_RING_LOW, PRED_RING_HIGH]),
-                    score=0.8)],
-        320, 180,
-    )
     return tmp_path
+
+
+def _flat(ring: list[tuple[float, float]]) -> list[float]:
+    return [c for xy in ring for c in xy]
 
 
 def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
@@ -96,9 +91,19 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
 ) -> None:
     """The prediction render covers every ring too: a split predicted mask must look split."""
     from tcip_mcp.tools.vision_tools import visualize
+    from tests._chain_fixtures import published
 
-    result = visualize(split_instance_dataset, "predictions",
-                       str(split_instance_dataset / "images" / "split.png"), task="segment")
+    root = split_instance_dataset
+    image = root / "images" / "split.png"
+    bucket = root / "predictions" / "split-masks"
+    published(root, bucket, [{
+        "image": str(image), "width": 320, "height": 180,
+        "boxes": [[30.0, 15.0, 305.0, 165.0]], "scores": [0.8], "labels": [1],
+        "masks": [{"segmentation": [_flat(PRED_RING_LOW), _flat(PRED_RING_HIGH)]}],
+    }], scope={"subject": "leaf", "id_map": {"leaf": 0}})
+
+    result = visualize(root, "predictions", str(image), task="segment",
+                       predictions_dir=str(bucket))
     assert "error" not in result, result
     assert result["count"] == 1
 
@@ -142,12 +147,13 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
         labels / "miss.json", [Annotation(subject="bud", geometry=BBox(*GT_BOX))], 300, 200,
     )
 
-    preds = tmp_path / "predictions" / "live"
-    preds.mkdir(parents=True)
-    json_io.write_annotations(
-        preds / "miss.json",
-        [Annotation(subject="bud", geometry=BBox(*PRED_BOX), score=0.4)], 300, 200,
-    )
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    published(tmp_path, tmp_path / "predictions" / "live", [
+        {"image": str(images / "miss.png"), "width": 300, "height": 200,
+         "boxes": [list(PRED_BOX)], "scores": [0.4], "labels": [1]}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
     return tmp_path
 
 

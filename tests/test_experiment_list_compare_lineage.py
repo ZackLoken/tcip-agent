@@ -79,45 +79,20 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp
     assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_offset=2)
 
 
-def _calibration(project):
-    """A calibration run of ``project`` opened by its own writer."""
-    from tcip_mcp.experiments import open_calibration_run
-
-    return open_calibration_run({
-        "document": "operating_point", "checkpoint_sha256": None,
-        "reference_identity": {"calibration_dataset_hash": "h"}, "trait": "bud_50per_date",
-        "derived_from": "a calibration door"}, project=project)
-
-
-def test_list_experiments_tool_carries_has_model_source(tmp_path):
-    """A training run's launch record carries a config; a calibration run's does not."""
-    from tcip_mcp.tools.experiment_tools import list_experiments
-
-    _opened(tmp_path, "exp-run")
-    calibration = _calibration(tmp_path)
-
-    listed = {e["experiment_id"]: e for e in list_experiments(tmp_path)["experiments"]}
-    assert listed["exp-run"]["has_model_source"] is True
-    assert listed[calibration.name]["has_model_source"] is False
-
-
 def test_list_experiments_launched_only_serves_the_training_runs_view(tmp_path):
-    """launched_only=True switches list_experiments to the training runs view: training run
-    directories only, calibration runs left out, in the shape _all_training_runs builds."""
+    """launched_only=True switches list_experiments to the training runs view, in the shape
+    _all_training_runs builds."""
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_mcp.tools.training_tools import _all_training_runs
 
     _opened(tmp_path, "exp-launched-view")
-    calibration = _calibration(tmp_path)
 
     default_view = list_experiments(tmp_path)
     assert "experiments" in default_view and "runs" not in default_view
 
     launched_view = list_experiments(tmp_path, launched_only=True)
     assert launched_view == {"runs": _all_training_runs(tmp_path)}
-    by_id = {r["experiment_id"]: r for r in launched_view["runs"]}
-    assert "exp-launched-view" in by_id
-    assert calibration.name not in by_id
+    assert [r["experiment_id"] for r in launched_view["runs"]] == ["exp-launched-view"]
 
 
 def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(tmp_path):

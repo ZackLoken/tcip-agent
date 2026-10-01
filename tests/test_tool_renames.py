@@ -40,14 +40,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 RENAMES = [
-    ("calibrate_ordinal_regression_operating_point", "calibrate_scalar_operating_point"),
     ("cancel_hpo", "cancel_hyperparameter_search"),
     ("run_hpo", "run_hyperparameter_search"),
     ("claude_reports", "report_friction"),
     ("project_retrospective", "write_retrospective"),
     ("domain_knowledge", "serve_domain_knowledge"),
     ("focus", "focus_human_attention"),
-    ("force_redraw_cal_holdout_split", "redraw_calibration_holdout"),
     ("make_splits", "draw_splits"),
     ("push_panel_data", "push_panel_event"),
     ("compute_phenology", "deliver_phenology_milestones"),
@@ -77,6 +75,16 @@ RETIRED = [
     ("validate_data_quality", "script"),
     ("set_active_project", "deleted"),
     ("activate_project", "deleted"),
+    # The calibration doors, their stamps and the bucket clearing went with them; an assessment
+    # (assess_checkpoint, assess_reserved_regions) answers for every delivered number.
+    ("calibrate_ordinal_regression_operating_point", "deleted"),
+    ("calibrate_scalar_operating_point", "deleted"),
+    ("calibrate_classifier_operating_point", "deleted"),
+    ("calibrate_count_operating_point", "deleted"),
+    ("force_redraw_cal_holdout_split", "deleted"),
+    ("redraw_calibration_holdout", "deleted"),
+    ("clear_prediction_bucket", "deleted"),
+    ("supersede_delivery", "deleted"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

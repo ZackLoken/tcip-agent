@@ -15,16 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests._regime_fixtures import tiled_regime
-
 pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.operating_point import (  # noqa: E402
-    derive_max_dets_from_counts,
-    resolve_operating_point,
-)
-
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts  # noqa: E402
 
 
 def test_cap_admits_the_crowded_decile_of_a_skewed_count_distribution():
@@ -46,34 +39,17 @@ def test_cap_on_a_uniform_count_distribution_is_unchanged_by_the_tail_rule():
     assert derive_max_dets_from_counts([2] * 20) == 100  # the documented floor still governs
 
 
-def _skewed_calibration_records() -> list[dict]:
-    """Nine sparse images (5 objects each) and one crowded image (300), each object exactly matched
-    by one detection. Boxes sit 50 px apart, well outside any tolerance this GT derives.
-    """
-    recs = []
-    per_image = [5] * 9 + [300]
-    for i, n in enumerate(per_image):
-        gt, dt = [], []
-        for k in range(n):
-            box = [50.0 * k, 100.0 + 10.0 * i, 20.0, 20.0]
-            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
-            dt.append({"bbox": box, "category_id": 1, "score": 0.9})
-        recs.append({"image_id": f"c{i}", "width": 20000, "height": 2000, "gt": gt, "dt": dt})
-    return recs
+def test_the_cap_covers_the_densest_image_of_a_skewed_reference():
+    """Nine sparse images (5 objects each) and one crowded one (300): the cap the assessment
+    records has to admit the reference's own crowded image, not just its typical one."""
+    counts = [5] * 9 + [300]
+
+    cap = derive_max_dets_from_counts(counts)
+
+    assert cap == 411
+    assert cap > max(counts)
 
 
-def test_resolved_max_dets_covers_the_densest_calibration_image(tmp_path):
-    """End to end through the real door: the cap stamped on the bundle has to admit the reference's
-    own crowded image, not just its typical one.
-    """
-    recs = _skewed_calibration_records()
-    densest = max(len(r["gt"]) for r in recs)
-    assert densest == 300  # the fixture really is skewed, not uniform
-
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                dataset_hash="h", calibration_records=recs)
-    max_dets = b.params["max_dets"]
-
-    assert max_dets._raw == 411
-    assert max_dets._raw > densest
-    assert "p99" in max_dets.derived_from
+def test_an_empty_reference_derives_no_cap_and_refuses():
+    with pytest.raises(ValueError, match="holds none"):
+        derive_max_dets_from_counts([])

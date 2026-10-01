@@ -16,8 +16,7 @@ A mapping is project state with a name, bound to the dataset it was built over a
 receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
 ``persist_mapping`` writes the record and then the receipt that binds it, and ``load_mapping``
 refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: for each
-mapped date a delivery's own ``predictions_by_date`` actually names, it re-reads only the captures
-the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and refuses
+mapped date a delivered bucket records, it re-reads only the captures the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and refuses
 (never raises) when what is on disk now no longer matches what the build was made from; a date the
 delivery omits, or a capture of a delivered date the delivery does not read, is disclosed rather
 than checked.
@@ -34,7 +33,7 @@ import statistics
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Iterable, NamedTuple, Optional, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Iterable, NamedTuple, Optional, Sequence
 
 import tcip_store
 from PIL import ExifTags, Image
@@ -44,6 +43,9 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_mcp.project_paths import project_state_dir
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 logger = logging.getLogger(__name__)
@@ -695,22 +697,29 @@ def plant_registry_key(project: Path | str, name: str) -> Key:
     return Key(PLANT_REGISTRY_STORE, str(project_state_dir(project)), (name,))
 
 
-def load_registry(project: Path | str, name: str) -> Optional[dict]:
-    """The named registry record, or ``None`` when nothing is stored under that name (including
-    a name that was never registered, or one deleted since a mapping recorded it)."""
-    return tcip_store.read(plant_registry_key(project, name), default=None)
+class PlantRegistryNotFound(ValueError):
+    """A plant registry name nothing is registered under in the project."""
 
 
-def registry_csv_entries(record: Optional[dict], project: Path | str) -> list[dict]:
+def load_registry(project: Path | str, name: str) -> dict:
+    """The named registry record. A name nothing is stored under (never registered, or deleted
+    since a mapping recorded it) refuses (:class:`PlantRegistryNotFound`) naming it."""
+    record = tcip_store.read(plant_registry_key(project, name), default=None)
+    if record is None:
+        raise PlantRegistryNotFound(
+            f"plant registry not found: {name!r} under {project}; register it with "
+            "register_plant_registry before naming it.")
+    return record
+
+
+def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
     """The ``{path, sha256, n_plants}`` entries a loaded registry record of ``project``
     carries, each ``path`` resolved through
-    :func:`~tcip_mcp.registry_paths.resolved_registry_path`, or an empty list when ``record`` is
-    ``None``. What a missing or mismatched registry means is :func:`registry_entries_or_refusal`'s.
-    """
+    :func:`~tcip_mcp.registry_paths.resolved_registry_path`."""
     from tcip_mcp.registry_paths import resolved_registry_path
 
     return [{**e, "path": str(resolved_registry_path(project, e["path"]))}
-            for e in record["csvs"]] if record else []
+            for e in record["csvs"]]
 
 
 def registry_entries_or_refusal(
@@ -723,13 +732,10 @@ def registry_entries_or_refusal(
     registry_name = (build.plant_registry or {}).get("name")
     if not registry_name:
         return [], None
-    record = load_registry(project, registry_name)
-    if record is None:
-        return [], (
-            f"plant registry {registry_name!r} under {project} named by mapping "
-            f"{build.name!r} no longer loads (deleted since this mapping was built); "
-            "re-register it with register_plant_registry, or rebuild the mapping against a "
-            "different registry")
+    try:
+        record = load_registry(project, registry_name)
+    except PlantRegistryNotFound as exc:
+        return [], f"mapping {build.name!r} names it: {exc}"
     stored_digest = (build.plant_registry or {}).get("digest")
     if stored_digest is not None and record.get("digest") != stored_digest:
         return [], (
@@ -866,26 +872,21 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return EARTH_RADIUS_M * c
 
 
-def stems_delivery_reads(rows: "Iterable[Assignment | dict]", pred_dir: Path | str) -> set[str]:
-    """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain dict
-    rows :meth:`MappingBuild.rows` produces) :func:`assignment_is_attributed` calls attributed,
-    whose stem also carries a prediction document under ``pred_dir``: which prediction documents
-    this delivery reads, never whether the underlying image still exists on disk.
+def attr(row: object, name: str) -> Any:
+    """One field of an assignment row, an :class:`Assignment` or the plain dict row
+    :meth:`MappingBuild.rows` produces; ``None`` when it carries none."""
+    return row.get(name) if isinstance(row, dict) else getattr(row, name, None)
+
+
+def stems_delivery_reads(rows: "Iterable[Assignment | dict]", bucket: "Bucket") -> set[str]:
+    """Stems of ``rows`` (one date's assignment rows) :func:`assignment_is_attributed` calls
+    attributed, whose stem also carries a prediction document in ``bucket``'s record: which
+    prediction documents this delivery reads, never whether the underlying image still exists on
+    disk.
     """
-    from tcip_mcp.prediction_buckets import bucket_stems
-
-    def _attr(row: object, name: str) -> object:
-        return getattr(row, name, None) if not isinstance(row, dict) else row.get(name)
-
-    pred_stems = bucket_stems(pred_dir)
-    out: set[str] = set()
-    for row in rows:
-        if not assignment_is_attributed(row):
-            continue
-        stem = _attr(row, "stem")
-        if isinstance(stem, str) and stem in pred_stems:
-            out.add(stem)
-    return out
+    pred_stems = set(bucket.documents)
+    return {attr(row, "stem") for row in rows
+            if assignment_is_attributed(row) and attr(row, "stem") in pred_stems}
 
 
 def _nearest_plant(
@@ -1311,21 +1312,14 @@ def _citing_delivery_event_ids(project: Path | str, name: str, digest: str) -> l
     """Every delivery event under this project whose own ``plant_mapping`` disclosure names
     (``name``, ``digest``): the events a same-name rebuild would strand by silently replacing the
     record they cite, sorted for a stable refusal message.
-
-    Reads through :func:`~tcip_mcp.pipelines.resolution.read_delivery_events`, so an event under
-    this project that does not validate refuses the whole call rather than being silently skipped
-    from a citing list a rebuild refusal must be complete to trust.
     """
-    from tcip_mcp.pipelines.delivery_events_schema import is_mapping_disclosure
-    from tcip_mcp.pipelines.resolution import read_delivery_events
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
 
-    ids = [
-        record["event_id"] for record in read_delivery_events(project)
-        if is_mapping_disclosure(record.get("plant_mapping"))
-        and record["plant_mapping"]["name"] == name
-        and record["plant_mapping"]["record_sha256"] == digest
-    ]
-    return sorted(ids)
+    return sorted(
+        event.event_id for event in read_delivery_events(project)
+        if isinstance(event.plant_mapping, PlantMappingDisclosure)
+        and (event.plant_mapping.name, event.plant_mapping.record_sha256) == (name, digest))
 
 
 def persist_mapping(
@@ -1616,13 +1610,14 @@ def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
 
 
 def verify_mapping_inputs(
-    build: MappingBuild, dataset_root: Path | str, predictions_by_date: dict[str, str], *,
+    build: MappingBuild, dataset_root: Path | str, buckets: "Mapping[str, Bucket]", *,
     project: Path | str,
 ) -> dict:
     """Check what this delivery can verify about a mapping of ``project``'s recorded inputs
     against what is on disk now, for the captures it actually reads, at delivery time.
+    ``buckets`` is the delivered buckets by recorded date.
 
-    A mapped date not named in ``predictions_by_date`` is never walked (no enumeration, no EXIF):
+    A mapped date no delivered bucket records is never walked (no enumeration, no EXIF):
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
     image folder is absent. A named date's folder is enumerated once
     (``image_utils.list_logical_images``, refusing by name on
@@ -1689,8 +1684,8 @@ def verify_mapping_inputs(
         recorded_by_stem = {a.stem: a for a in rows}
         recorded_stems = set(recorded_by_stem)
 
-        pred_dir = predictions_by_date.get(date)
-        if pred_dir is None:
+        bucket = buckets.get(date)
+        if bucket is None:
             captures_unverified.append(date)
             continue
 
@@ -1714,7 +1709,7 @@ def verify_mapping_inputs(
 
         missing_stems = recorded_stems - enumerated_stems
         present_stems = recorded_stems & enumerated_stems
-        read_set = stems_delivery_reads(rows, pred_dir) & present_stems
+        read_set = stems_delivery_reads(rows, bucket) & present_stems
         unread_stems = present_stems - read_set
         mapped_stems = {s for s in recorded_stems if assignment_is_attributed(recorded_by_stem[s])}
         full_mapped_coverage = not missing_stems and read_set == mapped_stems
@@ -1799,34 +1794,34 @@ def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ())
     )
 
 
-class UngeoreferencedCaptureRefusal(Exception):
-    """A plant mapping cannot be built or delivered from the captures at hand: none carries a
-    position this door reads, or none could be read. ``str(exc)`` is the caller-facing message;
-    ``status`` is the web door's HTTP status for it."""
+class _StatusRefusal(Exception):
+    """A refusal whose ``str(exc)`` is the caller-facing message and ``status`` the web door's HTTP
+    status for it."""
 
     def __init__(self, message: str, *, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
 
 
-class MappingDeliveryRefusal(Exception):
+class UngeoreferencedCaptureRefusal(_StatusRefusal):
+    """A plant mapping cannot be built or delivered from the captures at hand: none carries a
+    position this door reads, or none could be read."""
+
+
+class MappingDeliveryRefusal(_StatusRefusal):
     """A phenology delivery cannot proceed from a named mapping; ``str(exc)`` is the caller-facing
     message. ``status`` is the HTTP status for it (400 by default, 404 for a mapping that is not
     stored, 409 for a store-level problem reading it).
     """
 
-    def __init__(self, message: str, *, status: int = 400) -> None:
-        super().__init__(message)
-        self.status = status
-
 
 def resolve_delivery_mapping(
-    project: Path | str, name: str, predictions_by_date: dict[str, str],
+    project: Path | str, name: str, buckets: "Mapping[str, Bucket]",
 ) -> tuple[MappingBuild, dict]:
-    """Load the named mapping, refuse a ``predictions_by_date`` date it does not cover, resolve the
-    delivered buckets' one dataset root and require it to carry the mapping's own minted dataset
-    id, then verify the mapping's recorded inputs against that resolved root for exactly the
-    captures ``predictions_by_date`` reads.
+    """Load the named mapping, refuse a delivered bucket's recorded date it does not cover
+    (``buckets`` keyed by those dates), resolve the delivered buckets' one dataset root and require
+    it to carry the mapping's own minted dataset id, then verify the mapping's recorded inputs
+    against that resolved root for exactly the captures the buckets read.
 
     A delivery whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for
     every one of them, a date recorded with no capture at all included) refuses on the record's own
@@ -1852,14 +1847,14 @@ def resolve_delivery_mapping(
             f"mapping not found: {name!r}; build one with build_plant_mapping before "
             "computing phenology", status=404)
 
-    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
+    missing_dates = [d for d in buckets if d not in mapping_build.dates]
     if missing_dates:
         raise MappingDeliveryRefusal(
-            f"predictions_by_date names date(s) {missing_dates} the mapping {name!r} does not "
-            "cover; rebuild the mapping to cover them, or drop the date(s)")
+            f"the delivered buckets record date(s) {missing_dates} the mapping {name!r} does not "
+            "cover; rebuild the mapping to cover them, or drop those buckets")
 
     try:
-        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
+        delivered_root = dataset_root_for_pred_dirs([str(b.path) for b in buckets.values()])
     except RegistryError as exc:
         raise MappingDeliveryRefusal(str(exc)) from exc
     try:
@@ -1873,13 +1868,13 @@ def resolve_delivery_mapping(
             f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
 
     delivered_assignments = [
-        a for date in predictions_by_date for a in mapping_build.assignments.get(date, [])
+        a for date in buckets for a in mapping_build.assignments.get(date, [])
     ]
     if not delivered_assignments or not any(
         assignment_is_attributed(a) for a in delivered_assignments
     ):
         # A no-capture-at-all date is named below only inside this nothing-attributed scope.
-        empty_dates = sorted(d for d in predictions_by_date if not mapping_build.assignments.get(d))
+        empty_dates = sorted(d for d in buckets if not mapping_build.assignments.get(d))
         if empty_dates:
             raise MappingDeliveryRefusal(
                 f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a "
@@ -1912,8 +1907,24 @@ def resolve_delivery_mapping(
             f"plant in {paths}{unpositioned_note}; check the plant CSV names this block, or "
             "rebuild the mapping with a stated tolerance")
 
-    verified = verify_mapping_inputs(mapping_build, delivered_root, predictions_by_date,
-                                     project=project)
+    verified = verify_mapping_inputs(mapping_build, delivered_root, buckets, project=project)
     if "refusal" in verified:
         raise MappingDeliveryRefusal(verified["refusal"])
     return mapping_build, verified
+
+
+def plant_mapping_disclosure(project: Path | str, name: str, buckets: "Mapping[str, Bucket]",
+                             plants: list[str]) -> dict:
+    """The ``plant_mapping`` disclosure a per-plant delivery of the population ``plants`` carries
+    when its plant ids came from mapping ``name``: the mapping resolved and verified against the
+    delivered ``buckets`` by recorded date (:func:`resolve_delivery_mapping`, refusing as it does),
+    and a population plant the mapping assigns on no delivered date refused
+    (:class:`MappingDeliveryRefusal`) naming each."""
+    build, verified = resolve_delivery_mapping(project, name, buckets)
+    assigned = {a.plot_name for d in buckets for a in build.assignments.get(d, [])
+                if assignment_is_attributed(a)}
+    unmapped = sorted(set(plants) - assigned)
+    if unmapped:
+        raise MappingDeliveryRefusal(f"plant(s) {unmapped} are assigned to no plot by mapping "
+                                     f"{name!r} on the delivered dates.")
+    return build.delivery_disclosure(verified, list(buckets))

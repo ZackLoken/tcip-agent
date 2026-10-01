@@ -32,8 +32,7 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 @pytest.fixture
 def grouped_dataset(tmp_path: Path) -> Path:
     """A minimal dataset root: one grouped capture + one plain photo, each with a detection GT
-    label, the canonical images/ + annotations/ layout ``build_dataset``/``label_image_stems``
-    read.
+    label, the canonical images/ + annotations/ layout ``build_dataset`` reads.
     """
     from PIL import Image
     from tcip_annotation import json_io
@@ -92,8 +91,9 @@ def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
         str(annotation_dir(grouped_dataset, "2026-04-01")), subject="bud",
         members=["capture_001"])
     assert ds.expected_channels == 2  # derived from the group's own bands, not defaulted to RGB
-    assert "capture_001" in ds.record_stems
-    idx = ds.record_stems.index("capture_001")
+    members = [ds.sample_of(key).member for key in ds.stems]
+    assert "capture_001" in members
+    idx = members.index("capture_001")
     img, target = ds[idx]
     assert isinstance(img, torch.Tensor)
     assert img.shape[0] == 2  # Green + Red, stacked
@@ -133,22 +133,6 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
                     group="g", side="train", confirmation_bucket="bud")
     with pytest.raises(BandGroupIncomplete):
         _band_count([sample])
-
-
-# ── splits.py ───────────────────────────────────────────────────────────────────────────
-
-
-def test_label_image_stems_intersects_a_grouped_capture(grouped_dataset):
-    from tcip_mcp.dataset_layout import image_dir, annotation_dir
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.data.splits import label_image_stems
-
-    stems, stem_to_image = label_image_stems(
-        annotation_dir(grouped_dataset, "2026-04-01"), image_dir(grouped_dataset, "2026-04-01"),
-    )
-    assert set(stems) == {"capture_001", "plain_002"}
-    assert isinstance(stem_to_image["capture_001"], BandGroupRef)
-    assert isinstance(stem_to_image["plain_002"], Path)
 
 
 # ── annotation_tools.py ─────────────────────────────────────────────────────────────────
@@ -346,7 +330,7 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(tmp_path
     out = grouped_dataset / "splits"
     result = draw_splits(tmp_path, str(grouped_dataset), output_path=str(out),
                          subject="bud", train_ratio=0.5, val_ratio=0.25,
-                         calibration_ratio=0.25)
+                         calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
 
     drawn = read_selection(out, project=tmp_path)

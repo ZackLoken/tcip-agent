@@ -5,11 +5,10 @@ Proves the whole CV-scientist vision at once:
   * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses aspect ratios
     derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from the GT
     size distribution (not torchvision defaults), and every norm layer is GroupNorm (no BatchNorm);
-  * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint, audit
-    bracket and checkpoint recorded by the envelope (``kind=KIND_TCIP_MODULE``), the source and
-    environment in the launch record, and the model registered by completing;
-  * the module actually learns (``overfit_check``), and build -> resolve_operating_point -> predict
-    close the measurement loop.
+  * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint and
+    audit bracket recorded by the envelope, the source and environment in the launch record, and
+    the model registered by completing;
+  * the module actually learns (``overfit_check``), and its predictor answers a detection record.
 """
 
 from __future__ import annotations
@@ -22,10 +21,6 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
-
 # Component registration side-effects (backbones/necks/heads used by build_dataset + eval).
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
 import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
@@ -37,9 +32,8 @@ from torch.utils.data import DataLoader  # noqa: E402
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 IMG = 64
 
@@ -60,10 +54,9 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, build_predictor
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tcip_mcp.pipelines.model_build import build_model, recorded_model_dims
     from tcip_mcp.pipelines.model_contract import overfit_check
-    from tcip_mcp.pipelines.operating_point import records_over_loader, resolve_operating_point
     from tcip_mcp.pipelines.training.collation import task_collate
 
     # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
@@ -114,8 +107,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
 
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
-    predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
-    assert predictor.kind == KIND_TCIP_MODULE
+    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
+    predictor = p.predictor
     anchor_gen = predictor.model.detector.rpn.anchor_generator
     assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios
     assert anchor_gen.sizes == (expected_sizes,)            # anchor sizes are the GT-derived scales
@@ -123,9 +116,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert not any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
                    for m in predictor.model.modules())      # no BatchNorm survived the modification
 
-    # ---- (b) the custom loop's checkpoint is stamped bespoke; provenance snapshot present ----
+    # ---- (b) the custom loop's checkpoint names its builder; provenance snapshot present ----
     best = torch.load(ckpt, weights_only=False)
-    assert best["kind"] == KIND_TCIP_MODULE
     assert best["config"]["model_source"]["builder"].endswith(":build_bespoke_detector")
 
     launch = read_record(out / RUN_FILE)
@@ -147,20 +139,14 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # ---- completion registered the bespoke model into the immutable registry ----
     [entry] = [m for m in ModelRegistry(str(tmp_path)).list_models()
                if m["experiment_id"] == "expBespoke"]
-    assert entry["kind"] == KIND_TCIP_MODULE
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
-    # ---- the module actually learns; resolve_operating_point + predict close the measurement loop ----
+    # ---- the module actually learns, and its predictor answers a detection record ----
     overfit = overfit_check(build_model(config, recorded_model_dims(config)), "detection",
                             steps=30, lr=5e-3,
                             dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
     assert overfit["passed"], overfit["issue"]
 
-    records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")
-    bundle = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                     dataset_hash="test",
-                                     calibration_records=records, holdout_records=records)
-    assert "conf" in bundle.params                          # operating point resolved over bespoke outputs
-
-    pred = predictor.predict(str(images_dir / "img0.png"))
+    assert len(val_loader) > 0
+    (pred,) = p.predict([str(images_dir / "img0.png")])
     assert {"boxes", "scores", "labels", "count"} <= set(pred)  # measurable detection output

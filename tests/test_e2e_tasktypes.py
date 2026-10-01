@@ -32,7 +32,7 @@ from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 
 IMG = 64

@@ -192,19 +192,26 @@ def test_records_from_annotation_omits_a_point_and_its_category() -> None:
 
 
 def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.vision_tools import get_worst_predictions
+    from tests._chain_fixtures import published
 
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
-    pred_dir.mkdir()
     json_io.write_annotations(gt_dir / "IMG_0001.json",
                               [Annotation(subject="bud", geometry=BOX)], 100, 80)
+    published(tmp_path, pred_dir, [
+        {"image": "IMG_0001.jpg", "width": 100, "height": 80,
+         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [1.0], "labels": [1]}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    # A point beside the published box, as an edit in place would leave it: no head emits one.
     json_io.write_annotations(pred_dir / "IMG_0001.json", [
         Annotation(subject="bud", geometry=BOX, score=1.0),
         Annotation(subject="bud", geometry=Point(60.0, 60.0), score=1.0),
     ], 100, 80)
 
-    res = get_worst_predictions(str(pred_dir), str(gt_dir))
+    res = get_worst_predictions(read_bucket(pred_dir), str(gt_dir))
     # 1 GT box vs 1 predicted box: no shortfall, no surplus, full confidence -> a zero error score.
     # Counting the point as a surplus prediction would score this perfect frame as wrong.
     assert res["worst_images"][0]["error_score"] == 0.0
@@ -394,11 +401,17 @@ def test_annotate_route_round_trips_mixed_point_and_box_geometry(
 def test_review_matches_returns_a_point_gt_without_scoring_it(
     client: TestClient, tmp_path: Path
 ) -> None:
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
     img = _img(tmp_path)
     gt = tmp_path / "gt.json"
-    pred = tmp_path / "pred.json"
     json_io.write_annotations(gt, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80)
-    json_io.write_annotations(pred, [Annotation(subject="bud", geometry=BOX, score=0.9)], 100, 80)
+    bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
+        {"image": str(img), "width": 100, "height": 80,
+         "boxes": [[BOX.x1, BOX.y1, BOX.x2, BOX.y2]], "scores": [0.9], "labels": [1]}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    pred = bucket.document(img)
 
     body = client.post("/api/review/matches", json={
         "dataset_root": str(tmp_path / "proj"),

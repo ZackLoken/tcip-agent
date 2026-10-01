@@ -1,11 +1,9 @@
 """The Review routes under a classified bucket's own recorded scope: /matches and /action judge
 the confirmed value of an object a person already placed, rather than the object's presence.
 
-Built over a real staged bucket (``stage_prediction_shapes``) and a hand-authored ground-truth
-file in the classified shape (the object class in ``subject``, the confirmed value under
-``attributes[attribute]``, the same shape a real accept would have written); the bucket's own
-stamp is seeded through the platform's own writers, ``operating_point_stamp`` and
-``write_sidecar``.
+Built over a real published classified bucket (``_chain_fixtures.published``) and a
+hand-authored ground-truth file in the classified shape (the object class in ``subject``, the
+confirmed value under ``attributes[attribute]``, the same shape a real accept would have written).
 """
 
 from __future__ import annotations
@@ -18,11 +16,11 @@ from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import prediction_dir
-from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-from tcip_mcp.prediction_buckets import stage_prediction_shapes
+from tcip_mcp.buckets import bucket_key_of
+from tcip_mcp.dataset_layout import prediction_root
 from tcip_web.app import app
+
+from tests._web_fixtures import open_new_project
 
 DATE = "2026-03-05"
 STEM = "IMG_0100"
@@ -47,30 +45,23 @@ def _image(dataset_root: Path) -> Path:
 
 
 def _stage_classified_prediction(dataset_root: Path, *, value: str) -> dict:
-    """One classified prediction record: the object class in subject, the decoded value under
-    attributes[attribute], the shape write_predictions_json now writes."""
-    return stage_prediction_shapes(
-        str(dataset_root), "classifier", DATE, STEM,
-        annotations=[Annotation(subject=SUBJECT, geometry=BBox(*BOX), score=0.9,
-                               attributes={ATTRIBUTE: value})],
-        img_w=IMG_W, img_h=IMG_H,
-    )
+    """One classified prediction of ``value`` over ``BOX``, published as the bucket
+    ``predictions/classifier/<DATE>`` of the project ``dataset_root`` sits in, that project opened
+    in the web backend; ``{"path": <STEM's document>}``."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-
-def _stamp_classified_bucket(project: Path, bucket: Path) -> None:
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[],
-        scope=ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP),
-        trait=ATTRIBUTE, dataset_hash="H",
-        checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
-        images_dir=None, raster_path=None, produced_at="2026-03-05T00:00:00+00:00",
-    )
-    write_sidecar(bucket, stamp, project=project)
+    bucket = prediction_root(dataset_root) / "classifier" / DATE
+    published(dataset_root.parent, bucket,
+              [{"image": f"{STEM}.jpg", "width": IMG_W, "height": IMG_H, "boxes": [list(BOX)],
+                "scores": [0.9], "labels": [ID_MAP[value] + 1]}],
+              scope={"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": ID_MAP})
+    open_new_project(dataset_root.parent)
+    return {"path": str(bucket / f"{STEM}.json")}
 
 
 def _bare_bucket(dataset_root: Path, *, value: str) -> Path:
-    """A bucket with no stamp at all, holding the same shape."""
+    """A directory of documents holding the same shape, published as no bucket."""
     d = dataset_root / "predictions" / "bare" / DATE
     write_annotations(
         str(d / f"{STEM}.json"),
@@ -98,8 +89,6 @@ def test_matches_resolves_the_classified_scope_with_no_request_side_statement(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -127,8 +116,6 @@ def test_a_scope_stated_beside_a_stamped_bucket_refuses(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -147,6 +134,7 @@ def test_a_bare_directory_under_a_stated_attribute_refuses(
     img = _image(dataset_root)
     bare = _bare_bucket(dataset_root, value="healthy")
     gt = _write_gt(dataset_root, value="diseased")
+    open_new_project(tmp_path)
 
     resp = client.post("/api/review/matches", json={
         "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
@@ -155,7 +143,7 @@ def test_a_bare_directory_under_a_stated_attribute_refuses(
     })
 
     assert resp.status_code == 400
-    assert "carries no stamp and no scope" in resp.json()["detail"]
+    assert "holds no bucket.json" in resp.json()["detail"]
 
 
 def test_a_same_geometry_value_disagreement_pairs_as_an_fp_and_fn(
@@ -167,8 +155,6 @@ def test_a_same_geometry_value_disagreement_pairs_as_an_fp_and_fn(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     resp = client.post("/api/review/matches", json={
@@ -193,8 +179,6 @@ def test_accept_on_the_paired_fp_replaces_the_value_and_keeps_geometry_and_autho
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="diseased")
 
     matches = client.post("/api/review/matches", json={
@@ -230,22 +214,19 @@ def test_accept_on_the_paired_fp_replaces_the_value_and_keeps_geometry_and_autho
 
 
 def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_path: Path) -> None:
-    """The staged prediction is a pre-conform record, its ``subject`` the value rather than this
-    bucket's object class. The pre-mutation checks only test the accepted value against the
-    vocabulary, so an in-vocabulary ``class_name`` admits it and the mutation appends a GT record;
-    the post-mutation recompute then holds every prediction record positively to the object class
-    and refuses this one. The GT file on disk is exactly what it was before the call, never a
-    write behind the 400, and neither the engine's verdict store nor its coverage entry for this
-    image is touched either."""
+    """The prediction document is rewritten on disk after publication as a record whose
+    ``subject`` is the value rather than this bucket's object class. The pre-mutation checks only
+    test the accepted value against the vocabulary, so an in-vocabulary ``class_name`` admits it;
+    the recompute holds every prediction record positively to the object class and refuses this
+    one. The GT file on disk is exactly what it was before the call, never a write behind the 400,
+    and neither the engine's verdict store nor its coverage entry for this image is touched
+    either."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
-    staged = stage_prediction_shapes(
-        str(dataset_root), "classifier", DATE, STEM,
-        annotations=[Annotation(subject="healthy", geometry=BBox(*BOX), score=0.9)],
-        img_w=IMG_W, img_h=IMG_H,
-    )
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    write_annotations(staged["path"], [Annotation(subject="healthy", geometry=BBox(*BOX),
+                                                  score=0.9)], IMG_W, IMG_H)
+    bucket = prediction_root(dataset_root) / "classifier" / DATE
     gt = _write_gt(dataset_root, value="diseased")
     before = gt.read_bytes()
 
@@ -261,7 +242,6 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
     assert resp.status_code == 400
     assert gt.read_bytes() == before
     from tcip_annotation.review_engine import ReviewEngine
-    from tcip_mcp.prediction_buckets import bucket_key_of
     from tcip_mcp.project_paths import project_state_dir
 
     engine = ReviewEngine(str(project_state_dir(dataset_root)))
@@ -277,8 +257,6 @@ def test_accept_paired_to_a_foreign_subject_record_refuses(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt_dir = dataset_root / "annotations" / DATE
     write_annotations(
         str(gt_dir / f"{STEM}.json"),
@@ -311,8 +289,6 @@ def test_reject_on_a_true_positive_under_a_classified_scope_refuses(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
 
     matches = client.post("/api/review/matches", json={
@@ -346,8 +322,6 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt_dir = dataset_root / "annotations" / DATE
     write_annotations(str(gt_dir / f"{STEM}.json"), [], IMG_W, IMG_H, keep_empty=True)
     gt = gt_dir / f"{STEM}.json"
@@ -366,11 +340,10 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     assert "not a value this bucket's own id_map declares" in resp.json()["detail"]
     assert gt.read_bytes() == before
     from tcip_annotation.review_engine import ReviewEngine
-    from tcip_mcp.prediction_buckets import bucket_key_of
     from tcip_mcp.project_paths import project_state_dir
 
     engine = ReviewEngine(str(project_state_dir(dataset_root)))
-    assert engine.image_states(bucket_key_of(bucket)) == {}
+    assert engine.image_states(bucket_key_of(Path(staged["path"]).parent)) == {}
 
 
 def test_edit_under_a_classified_scope_with_an_in_vocabulary_value_replaces_geometry_and_value(
@@ -381,8 +354,6 @@ def test_edit_under_a_classified_scope_with_an_in_vocabulary_value_replaces_geom
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
 
     matches = client.post("/api/review/matches", json={
@@ -424,8 +395,6 @@ def test_edit_under_a_classified_scope_with_an_out_of_vocabulary_value_refuses(
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_classified_bucket(tmp_path, bucket)
     gt = _write_gt(dataset_root, value="healthy")
     before = gt.read_bytes()
 

@@ -187,9 +187,8 @@ export interface ProjectSummary {
   modified: number;
   dates: string[];
   subjects: string[];
-  models: string[];
   subjects_by_date: Record<string, string[]>;
-  models_by_date: Record<string, string[]>;
+  prediction_dirs: Record<string, Record<string, string>>;
   image_count: number;
   is_open: boolean;
   label_problem: string | null;
@@ -213,24 +212,26 @@ export interface RenameRequest {
 
 export interface PhenologyPayload {
   mapping_name: string;
-  predictions_by_date: Record<string, string>;
+  buckets: string[];
   trait: string;
   plants: string[];
+  require_all_dates_complete?: boolean;
   show_unvalidated?: boolean;
 }
 
 export interface AcknowledgmentPayload {
   reason: string;
+  result_sha256: string;
 }
 
 export interface ExportCsvPayload {
   mapping_name: string;
-  predictions_by_date: Record<string, string>;
+  buckets: string[];
   trait: string;
   plants: string[];
+  require_all_dates_complete?: boolean;
   payload: "curves" | "milestones";
   filename?: string | null;
-  user?: string | null;
   acknowledgment?: AcknowledgmentPayload | null;
 }
 
@@ -243,9 +244,9 @@ export interface PerImageCountDelivery {
 export interface OrthomosaicPlantCountsDelivery {
   kind: "orthomosaic_plant_counts";
   predictions_dir: string;
-  raster_path: string;
   plant_registry: string;
   delivered_phenotype: string;
+  plants: string[];
   crop?: string;
   pipeline_version?: string;
   canopy_subject?: string;
@@ -254,7 +255,6 @@ export interface OrthomosaicPlantCountsDelivery {
 export interface ExportCountCsvPayload {
   delivery: PerImageCountDelivery | OrthomosaicPlantCountsDelivery;
   filename: string;
-  user?: string | null;
   acknowledgment?: AcknowledgmentPayload | null;
 }
 
@@ -328,62 +328,45 @@ export interface CanopySegmentDisclosure {
   plant_attribution: string;
 }
 
-export interface DocumentBinding {
-  ok: boolean;
-  claimed: boolean;
+export interface Producer {
+  checkpoint_sha256: string;
   experiment_id: string | null;
-  producing_experiment_id: string | null;
-  checkpoint_sha256: string | null;
-  record_digest: string | null;
-  note: string;
 }
 
-export interface ReconciledDocument {
-  validated: string;
-  on_disk_validated: boolean;
-  missing_sidecars: string[];
-  unvalidated_buckets: string[];
-  binding_notes: Record<string, string>;
-  bindings: Record<string, DocumentBinding>;
-  conf: number | null;
-  confs: Record<string, number | null>;
-  per_bucket: Record<string, string>;
-  bound_validated?: string | null;
-  delivery_note?: string | null;
+export interface BucketFinding {
+  path: string;
+  date: string | null;
+  assessment_id: string | null;
+  validated: boolean;
+  reason: string | null;
 }
 
-export interface ReconciledDimension {
-  operative: boolean;
-  validated: string | null;
-  per_bucket: Record<string, string>;
-  unvalidated_buckets: string[];
-  binding_notes: Record<string, string>;
+export interface Acknowledgment {
+  acknowledgment_id: string;
+  acknowledged_by: string;
+  reason: string;
+  result_sha256: string;
+  recorded_at: string;
 }
 
 export interface DeliveryEventRecord {
   event_id: string;
+  door: string;
+  delivery_kind: string;
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
-  delivery_kind: string;
-  door: string;
-  output_path: string | null;
-  output_sha256: string | null;
-  acknowledged_by: string | null;
-  acknowledgment_reason: string | null;
+  output_path: string;
+  output_sha256: string;
+  producer: Producer;
+  buckets: BucketFinding[];
+  scale_assessment_id: string | null;
+  validated: boolean;
+  acknowledgment: Acknowledgment | null;
+  population: string[];
+  require_all_dates_complete: boolean | null;
   plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
-  document_reconciliations: Record<string, ReconciledDocument>;
-  dimension_reconciliations: Record<string, ReconciledDimension>;
   produced_at: string;
-}
-
-export interface DeliverySupersessionRecord {
-  superseded_event_id: string;
-  output_sha256: string | null;
-  replacement_event_id: string | null;
-  reason: string;
-  superseded_by: string;
-  superseded_at: string;
 }
 
 export interface Operationalization {
@@ -411,6 +394,7 @@ export interface TraitEntry {
   count_error_tolerance: number | null;
   classifier_agreement_floor: number | null;
   ordinal_agreement_floor: number | null;
+  regression_criterion: string;
   regression_skill_floor: number | null;
   scale_tolerance_frac: number | null;
   holdout_match_quality_floor: number | null;
@@ -441,6 +425,16 @@ export interface ConfirmRevisionPayload {
   confirmed: boolean;
 }
 
+export interface Stated {
+  tile?: boolean | null;
+  tile_size?: number | null;
+  overlap?: number | null;
+  postprocess?: string | null;
+  cross_tile_nms?: number | null;
+  conf?: number | null;
+  max_dets?: number | null;
+}
+
 export interface GuiState {
   active_tab: "setup" | "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
   view: ViewState;
@@ -454,7 +448,6 @@ export interface DatasetSelection {
   dataset_root: string | null;
   subject: string | null;
   date: string | null;
-  model_name: string | null;
   image_list: string[];
   current_image_index: number;
   images_dir: string | null;
@@ -498,7 +491,6 @@ export const GUI_STATE_DEFAULTS: GuiState = {
     "dataset_root": null,
     "subject": null,
     "date": null,
-    "model_name": null,
     "image_list": [],
     "current_image_index": 0,
     "images_dir": null,

@@ -161,7 +161,7 @@ def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDat
 def _draw(project: Path, root: Path, out: Path, *, subject: str = SUBJECT,
           attribute: str | None = None, seed: int = 2):
     result = draw_splits(project, str(root), output_path=str(out), subject=subject, attribute=attribute,
-                         seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                         seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -188,13 +188,13 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
 
     train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)
 
-    assert sorted(train_ds.stems) == sorted(s.identity for s in drawn.on("train"))
-    assert sorted(val_ds.stems) == sorted(s.identity for s in drawn.on("val"))
-    held_out = {s.identity for s in drawn.on("calibration")}
+    assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
+    assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
+    held_out = {s.location for s in drawn.on("calibration") + drawn.on("holdout")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
     # The sources the two loaders will open, not a record written beside them.
-    read_from = {Path(train_ds.sample_sources[key]).parent.name for key in train_ds.stems}
-    read_from |= {Path(val_ds.sample_sources[key]).parent.name for key in val_ds.stems}
+    read_from = {Path(train_ds.sample_of(key).source).parent.name for key in train_ds.stems}
+    read_from |= {Path(val_ds.sample_of(key).source).parent.name for key in val_ds.stems}
     assert read_from == set(DATES)
 
     binding = partition["selection"]
@@ -550,8 +550,8 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(tmp_path: 
     negatives = [s for s in drawn.on("train") + drawn.on("val")
                  if Path(s.ground_truth).stem == "n"]
     assert negatives, "the negative landed on neither loader's side"
-    loader = train_ds if negatives[0].identity in train_ds.stems else val_ds
-    _image, target = loader[loader.stems.index(negatives[0].identity)]
+    loader = train_ds if negatives[0].location in train_ds.stems else val_ds
+    _image, target = loader[loader.stems.index(negatives[0].location)]
     assert target["boxes"].shape[0] == 0
 
 
@@ -600,8 +600,8 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
     train_ds, _val_ds, _ = auto_train_val(tmp_path, "detection", data_cfg, None)
 
-    assert sorted(s.identity for s in train_ds.seen_samples) == sorted(
-        s.identity for s in drawn.on("train"))
+    assert sorted(s.location for s in train_ds.seen_samples) == sorted(
+        s.location for s in drawn.on("train"))
     assert train_ds.seen_scope == drawn.scope
 
 
@@ -657,7 +657,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(tmp_pa
     bound_here = [s for s in handed(bound_train, bound_val)
                   if Path(s[0]).parent.name == DATES[0]]
     unbound_here = handed(unbound_train, unbound_val)
-    held_out = {s.identity for s in drawn.on("calibration")}
+    held_out = {s.location for s in drawn.on("calibration") + drawn.on("holdout")}
     unbound_trained = [s for s in unbound_here if s[0] not in held_out]
 
     assert bound_here and unbound_trained
@@ -690,10 +690,10 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(tmp_path: P
 
     assert why is None and batch is not None
     smoked = _RECORDED_BUILDS[before]  # the training side, built first
-    assert sorted(s.identity for s in smoked.seen_samples) == sorted(
-        s.identity for s in drawn.on("train"))
-    held_out = {s.identity for s in drawn.on("val") + drawn.on("calibration")}
-    assert not held_out & {s.identity for s in smoked.seen_samples}
+    assert sorted(s.location for s in smoked.seen_samples) == sorted(
+        s.location for s in drawn.on("train"))
+    held_out = {s.location for s in drawn.on("val") + drawn.on("calibration")}
+    assert not held_out & {s.location for s in smoked.seen_samples}
     # The caller's own config is left exactly as it was found: resolution reads a copy.
     assert config["data"]["split"] == {"selection_dir": str(out)}
 
@@ -811,8 +811,8 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    pool = {s.identity for s in drawn.on("train") + drawn.on("val")}
-    held_out = {s.identity for s in drawn.on("calibration")}
+    pool = {s.location for s in drawn.on("train") + drawn.on("val")}
+    held_out = {s.location for s in drawn.on("calibration")}
 
     data_cfg = _redraw_cfg(root, out, seed=1)
     train_ds, val_ds, partition = auto_train_val(tmp_path, "detection", data_cfg, None)

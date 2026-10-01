@@ -309,7 +309,7 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     reader reads at: the builder, the contract dims and the predictor all take the run's own one
     channel over three-band sources rather than assuming RGB."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tcip_mcp.pipelines.model_build import (
         build_model, recorded_model_dims, resolve_contract_dims,
     )
@@ -332,11 +332,11 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
                str(ckpt))
     assert "error" not in register_model(name="single-band", checkpoint_path=str(ckpt),
                                          config={}, project=tmp_path)
-    predictor = build_predictor(
-        load_registered_checkpoint(str(ckpt), project=tmp_path), device="cpu")
+    p = prepare_pass(load_registered_checkpoint(str(ckpt), project=tmp_path), Stated(tile=False),
+                     device="cpu")
 
-    assert predictor.in_chans == 1
-    assert predictor.predict(image)  # the three-band source reads at the recorded one channel
+    assert p.predictor.in_chans == 1
+    assert p.predict([image])[0]  # the three-band source reads at the recorded one channel
 
 
 def test_a_run_that_states_no_width_records_the_one_its_sources_carry(tmp_path):

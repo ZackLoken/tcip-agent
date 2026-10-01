@@ -19,10 +19,6 @@ from PIL import Image
 
 from tcip_web.app import app
 
-from tests.test_tcip_web_results_routes import _phenology_fixture
-
-pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
-
 PLANTS = (
     ("PLOT1", "AccA", 43.20000, -90.00000),
     ("PLOT2", "AccB", 43.20000, -90.00015),
@@ -80,7 +76,7 @@ def _capture_fixture(root: Path) -> dict:
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
 
-    from tests._binding_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import register_plant_registry_for
     from tests._web_fixtures import open_new_project
 
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
@@ -206,19 +202,22 @@ def test_a_mapping_is_persisted_and_audited_into_the_open_project(
 def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """With prediction buckets whose evidence is fully in order, a mapping name that names
-    nothing at all is refused by name at every door: a legitimately-built mapping covering no
-    dates refuses the requested dates it does not cover, and a name never built refuses as
-    absent. Without either, the doors would answer with a phenology computed over no plants at
-    all, which reads like a project with nothing to show."""
-    from tests._binding_fixtures import write_plant_mapping
+    """With assessed prediction buckets, a mapping that does not cover them is refused by name at
+    every door: one built over only the first date refuses the date it does not cover, and a
+    name never built refuses as absent."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._chain_fixtures import classified_series
 
-    body = _phenology_fixture(tmp_path, validated=True, detections=4)
+    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    body = series.body()
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
-    write_plant_mapping(tmp_path, "empty", {}, dataset_root=tmp_path / "ds")
+    built = build_plant_mapping(tmp_path, name="partial", images_root=str(series.root / "images"),
+                                plant_registry="reg", dates=sorted(series.buckets)[:1])
+    assert "error" not in built, built
     for mapping_name, expected_status, expected_detail in (
-        ("empty", 400, "does not cover"),
+        ("partial", 400, "does not cover"),
         ("not_written_yet", 404, "not_written_yet"),
     ):
         broken = {**body, "mapping_name": mapping_name}

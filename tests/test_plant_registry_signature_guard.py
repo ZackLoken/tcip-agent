@@ -31,5 +31,5 @@ def test_deliver_orthomosaic_plant_counts_refuses_plant_csv_paths_argument(tmp_p
     """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
     with pytest.raises(TypeError, match="plant_csv_paths"):
         deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
-            tmp_path, predictions_dir="preds", raster_path="raster.tif", plant_csv_paths=["nope.csv"],
-            output_csv_path="out.csv", delivered_phenotype="stem_count")
+            tmp_path, predictions_dir="preds", plant_csv_paths=["nope.csv"],
+            output_csv_path="out.csv", delivered_phenotype="stem_count", plants=[])

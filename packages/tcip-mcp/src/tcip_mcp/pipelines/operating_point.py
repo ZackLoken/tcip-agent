@@ -1,179 +1,64 @@
-"""Resolve the calibrated operating points (detection conf/NMS/max_dets/tile, and the classifier,
-ordinal and regression points) per dataset, at runtime.
-
-The confidence threshold requires validation against an annotations reference: derived by a
-center-match count-unbiased sweep over a reference sized to the trait, and validated on a disjoint
-held-out split of that reference, GT annotations (``VALIDATED_HELD_OUT``) or a breeder-confirmed
-sample of the model's own outputs (``VALIDATED_REVIEW_CONFIRMED``), the same gate either way, or
-carried as ``validated=false`` when no reference exists. The raw and block-calibrated-export
-regimes live in ``resolution.py`` and share ``resolve_tile_size_param``.
-"""
+"""The measurement criteria an assessment computes, each reading its tolerances, floors and
+objective from the trait entry it is handed, and the detector knobs an execution record sets."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import statistics
-from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Sequence, cast
 
 from tcip_store import non_finite_state, stored_number
 
-from tcip_annotation.json_io import xywh
-
-from tcip_mcp.pipelines.data.splits import same_directory
-from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
-from tcip_mcp.pipelines.resolution import (
-    DEFAULT_CONF,
-    DEFAULT_MAX_DETS,
-    VALIDATED_FALSE,
-    VALIDATED_HELD_OUT,
-    VALIDATED_REVIEW_CONFIRMED,
-    ResolvedBundle,
-    ResolvedParam,
-    accepted_references,
-    default,
-    derived,
-    moved_since_run,
-    resolve_cross_tile_nms,
-    resolve_tile_size_param,
-)
 from tcip_mcp.pipelines.training.evaluation import (
-    build_coco_image_record,
     classes_with_evidence,
     concordance_correlation_coefficient,
     derive_operating_point_curve,
-    gt_class_avg_size,
     gt_class_typical_count,
-    gt_facts,
     gt_objects,
-    gt_record,
     mean_of_present_counts,
     pick_count_unbiased,
     pick_f1_max,
-    quadratic_weighted_kappa,
     r_squared,
+    resolve_match_criterion,
+    scaled_to,
 )
-from tcip_mcp.operationalization import latest_confirmed
-from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE
+from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitEntry
 
-# Count-objective -> (picker, derivation label), the currently implemented capability catalog, not
-# a closed vocabulary (traits._spec_from_config does not validate count_objective against this; a
-# trait can name any objective, but resolve_operating_point below can only run one that has a
-# registered picker here). The label stamped on ``conf`` is derived from whichever picker actually
-# ran (pick-then-label), never from the reference type alone. PRESENCE deliberately shares
-# DETECTION_F1's F1-max picker/label: presence is a per-object find/no-find call, exactly what F1
-# (harmonic precision/recall) measures on matching quality, unlike COUNT_UNBIASED's sum-agreement
-# objective (the phenotype is a count), which needs its own picker. Add a new entry here (and a new
-# picker function) when a trait's breeder-stated need doesn't match either existing one, the
-# capability grows by registering a picker, not by widening a vocabulary check.
 COUNT_OBJECTIVE_PICKERS: dict[str, tuple[Callable[[dict], float | None], str]] = {
-    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased center-match curve"),
-    DETECTION_F1: (pick_f1_max, "F1-max center-match curve"),
-    PRESENCE: (pick_f1_max, "F1-max center-match curve"),
+    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased count curve"),
+    DETECTION_F1: (pick_f1_max, "F1-max count curve"),
+    PRESENCE: (pick_f1_max, "F1-max count curve"),
 }
-assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
-    "COUNT_OBJECTIVE_PICKERS and traits.COUNT_OBJECTIVES must name the same currently-implemented "
-    "objectives, two lists of the same capability set, kept in sync deliberately")
+"""The count objectives a calibration can fit, each as the picker it runs over the calibration
+curve and the label its conf is recorded under."""
 
-REVIEW_VERDICT_LABEL_SUFFIX = " over review verdicts"
-"""What a picker's label gains when that picker swept confirmed review verdicts instead of GT.
-
-Stated once, beside the labels it extends: the label a run stamps and the entries
-``derivations.DERIVATION_IMPLEMENTATIONS`` holds for it are built from the same two pieces, so
-registering a picker registers its label, and its review-reference variant, with it.
-"""
-
-# The one-sided confidence multiplier for the mean+SE equivalence criterion (~95%) is a stated
-# CV-derivation convention, not a breeder-semantics decision, so it lives here as a named constant
-# rather than buried in a formula.
 _EQUIVALENCE_Z = 1.645
+"""The one-sided multiplier of the mean-plus-standard-error equivalence test (about 95 percent)."""
 
-# The compensating-error floor here is an interim default, not a cited statistical convention like
-# _EQUIVALENCE_Z: Landis & Koch (1977)'s kappa scale describes a magnitude, not a distributional fact.
-
-# How much classifier agreement a trait's phenotype needs is measurement semantics, the domain
-# expert's call, the same as `TraitEntry.count_error_tolerance`.
-
-# This value is an interim, platform-chosen placeholder, never a validated or cited convention,
-# used only when a trait hasn't authored `TraitEntry.classifier_agreement_floor` (None).
-
-# kappa==0 is exactly chance agreement; a floor there alone admits a classifier whose errors are
-# compensating (net count-bias ~0) but substantial.
-_DEFAULT_KAPPA_FLOOR = 0.41
-
-# The same "not yet authored for this trait" shape as `_DEFAULT_KAPPA_FLOOR`: how much relative
-# per-image count error a trait's phenotype can tolerate is measurement semantics, the expert's call.
-
-# This value is an interim, platform-chosen placeholder, never a validated or cited convention,
-# used only when a trait hasn't authored `TraitEntry.count_bias_tolerance_frac` (None).
-_DEFAULT_COUNT_BIAS_TOLERANCE_FRAC = 0.01
-
-# The compensating-error criterion toolkits for the ordinal/regression calibration gates
-# (:func:`resolve_ordinal_operating_point`/:func:`resolve_regression_operating_point`), a small,
-# discoverable, growable set of named statistics rather than one hardcoded "the" criterion: which
-# statistic is scientifically appropriate for a given trait's calibration is a CV-scientist judgment
-# call the caller makes explicitly (the ``criterion`` argument, required, no default), never a
-# platform prescription. Register a new criterion here (a function of ``(pred, gt)`` returning
-# ``float | None``) rather than widening either function's own logic to special-case a new statistic.
-ORDINAL_CRITERIA: dict[str, Callable[[Any, Any, int], float | None]] = {
-    "quadratic_weighted_kappa": quadratic_weighted_kappa,
-}
 REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
     "r_squared": r_squared,
     "concordance_correlation_coefficient": concordance_correlation_coefficient,
 }
-
-# The same interim-platform-default shape as `_DEFAULT_KAPPA_FLOOR`, and literally the same
-# statistic: ordinal's only registered criterion is the classifier path's own kappa.
-
-# An interim, platform-chosen placeholder, never a validated or cited convention, used only
-# when a trait hasn't authored `TraitEntry.ordinal_agreement_floor` (None).
-_DEFAULT_ORDINAL_AGREEMENT_FLOOR = 0.41
-
-# The same interim-platform-default shape, for whichever regression criterion a calibration
-# actually used: a plain "explains more than half the addressable skill" default.
-
-# R² and CCC have different scales (see `TraitEntry.regression_skill_floor`), so
-# this single number is an interim, platform-chosen placeholder for either.
-
-# Never a validated or cited convention: it applies only when a trait hasn't authored its own
-# floor paired with its own criterion choice (None).
-_DEFAULT_REGRESSION_SKILL_FLOOR = 0.5
+"""The regression skill statistics a caller may assess a continuous prediction by."""
 
 
 def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
-    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is held to: the
-    breeder-authored relative ``tolerance_frac`` scaled by that scope's own derived typical
-    per-image count (:func:`training.evaluation.gt_class_typical_count` /
-    :func:`training.evaluation.mean_of_present_counts`), floored at ``1 / n``, one whole miscount
-    spread across the ``n`` samples this scope's own evidence rests on.
-
-    The floor only raises the result, is exactly ``1.0`` at ``n == 1`` and ``<= 0.5`` at every ``n
-    >= 2``. ``n == 0`` returns 0.0 (an unachievable tolerance).
+    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is held to:
+    ``tolerance_frac`` of the scope's typical per-image count, floored at ``1 / n``, one whole
+    miscount spread across the ``n`` samples the scope's evidence rests on; ``0.0`` at ``n == 0``.
     """
     return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
 
 
-def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: float,
-                         typical_count: float) -> bool:
-    """Mean-plus-SE equivalence test: is a bias measured across ``n`` per-image samples small
-    enough, relative to its own sampling uncertainty, to conclude equivalence with zero? SE grows
-    at small ``n``, so less evidence is harder to pass.
-
-    The tolerance is computed here via :func:`_effective_count_bias_tolerance` from the
-    keyword-only breeder-authored fraction and the scope's own derived typical count, never a raw
-    already-converted tolerance float.
-
-    ``mean``/``std``/``n`` must all be measured over the same population the ``typical_count`` was:
-    the samples that actually carry the thing being counted.
-    """
-    if n == 0:
-        return False
-    se = std / math.sqrt(n)
+def _bias_equivalence(mean: float, std: float, n: int, *, tolerance_frac: float,
+                      typical_count: float) -> tuple[bool, float]:
+    """Whether a bias measured over ``n`` present samples is equivalent to zero at the scope's
+    tolerance (mean plus one-sided standard error within it), and that tolerance. ``n == 0`` never
+    passes."""
     tolerance = _effective_count_bias_tolerance(tolerance_frac, typical_count, n)
-    return abs(mean) + _EQUIVALENCE_Z * se <= tolerance
+    if n == 0:
+        return False, tolerance
+    return abs(mean) + _EQUIVALENCE_Z * std / math.sqrt(n) <= tolerance, tolerance
 
 
 OPERATING_POINT_ATTRS = ("score_thresh", "detections_per_img")
@@ -191,9 +76,9 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     """
     det = getattr(model, "detector", None)
     candidates = ((model, "self"), (getattr(det, "roi_heads", None), "detector.roi_heads"),
-                 (det, "detector"))
+                  (det, "detector"))
     matches = [(holder, path) for holder, path in candidates
-              if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
+               if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
     if len(matches) > 1:
         raise ValueError(
             "this model exposes an operating-point knob at more than one location "
@@ -206,7 +91,7 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
                                  detections_per_img: int | None = None,
                                  ) -> tuple[dict, str | None]:
-    """Set the in-model torchvision thresholds so the operating point governs which boxes exist.
+    """Set the in-model thresholds so the operating point governs which boxes exist.
 
     Resolves where the knobs live through :func:`detector_operating_point_holder`. Returns
     ``(applied, attribute_path)``: ``applied`` holds only the knobs actually set, and
@@ -223,961 +108,128 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
 
 
 STAGED_CONF_FLOOR = 0.01
-"""The conf a calibration pass stages its predictor at, so hesitant detections survive to be
-swept; the value applied is recorded as the sweep's ``staged_conf_floor``."""
-
-
-def apply_operating_point(predictor: Any, conf: float, max_dets: int | None
-                          ) -> tuple[dict, str | None]:
-    """Run ``predictor`` at ``conf`` with at most ``max_dets`` detections per image, in-model and
-    in its own post-filter. ``max_dets`` ``None`` leaves the in-model cap as built and lifts the
-    full-frame cap. Returns :func:`set_detector_operating_point`'s ``(applied, attribute_path)``."""
-    applied, path = set_detector_operating_point(
-        predictor.model, score_thresh=conf, detections_per_img=max_dets)
-    predictor.score_threshold = applied.get("score_thresh", conf)
-    predictor.max_dets = max_dets
-    return applied, path
-
-
-def _current_detections_cap(model: Any) -> int | None:
-    """The in-model ``detections_per_img`` a model is currently set to (read through
-    :func:`detector_operating_point_holder`), or ``None`` if unset.
-    """
-    target, _path = detector_operating_point_holder(model)
-    return getattr(target, "detections_per_img", None) if target is not None else None
-
-
-def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list[dict]:
-    """One unfiltered model pass -> per-image COCO records (boxes + scores) for a conf sweep. Set
-    the in-model score threshold low first so hesitant detections survive to be swept.
-
-    Each record's ``image_id`` is what the loader's own dataset calls that sample
-    (:func:`~tcip_mcp.pipelines.data.datasets.record_stems_of`): the member name for a platform
-    loader, and a bespoke dataset's own ``stems`` vocabulary for one the ``dataset_source`` seam
-    admitted.
-    """
-    import torch
-
-    from tcip_mcp.pipelines.data.datasets import record_stems_of
-    from tcip_mcp.pipelines.training.evaluation import records_from_detector
-
-    include_masks = task == "instance_seg"
-    stems = record_stems_of(getattr(loader, "dataset", None))
-    cap = _current_detections_cap(model)
-    model.eval()
-    records: list[dict] = []
-    with torch.no_grad():
-        for images, targets in loader:
-            images = [img.to(device) for img in images]
-            outputs = model(images)
-            for img, tgt, out in zip(images, targets, outputs):
-                rec = records_from_detector(tgt, out, width=img.shape[-1], height=img.shape[-2],
-                                            include_masks=include_masks, detections_cap=cap)
-                idx = tgt.get("image_id")
-                if stems is not None and isinstance(idx, int) and 0 <= idx < len(stems):
-                    rec["image_id"] = stems[idx]  # the member key every join downstream uses
-                records.append(rec)
-    return records
+"""The conf an assessment collects its reference predictions at, so hesitant detections survive to
+be swept; the floor applied is recorded beside the criterion."""
+STAGED_CONF_FLOOR_SOURCE = "staged collection floor"
+"""The source an execution record names for :data:`STAGED_CONF_FLOOR`."""
 
 
 def _min_dt_score(records: list[dict]) -> float | None:
     """Lowest detection score across a reference, or None if it holds no detections."""
-    scores = [d["score"] for rec in records for d in rec.get("dt", []) if "score" in d]
+    scores = [d["score"] for rec in records for d in rec["dt"]]
     return min(scores) if scores else None
 
 
-def _cap_saturated_frac(records: list[dict] | None) -> float | None:
-    """Fraction of records whose raw detection count hit the model's applied per-image cap, over
-    the records carrying a ``cap_hit`` flag; ``None`` when none does. Non-gating provenance only.
+def cap_saturated_frac(records: list[dict]) -> float:
+    """Fraction of ``records`` whose raw detection count hit the collection pass's per-image cap;
+    every record states ``cap_hit``."""
+    return sum(bool(r["cap_hit"]) for r in records) / len(records) if records else 0.0
+
+
+def count_criterion(
+    cal_records: list[dict], hold_records: list[dict], entry: TraitEntry, *,
+    staged_conf_floor: float | None, staged_conf_floor_attribute_path: str | None,
+) -> tuple[float, dict, list[str]]:
+    """The conf the trait's count objective picks on the calibration side, and the held-out count
+    check at that conf: ``(conf, evidence, failures)``.
+
+    The records are per-image COCO records (``gt`` objects and every ``dt`` detection with its
+    score) collected at ``staged_conf_floor``, matched under the trait's localization resolved
+    once over the calibration records
+    (:func:`~tcip_mcp.pipelines.training.evaluation.resolve_match_criterion`, the evidence's
+    ``localization``) and applied to each side
+    (:func:`~tcip_mcp.pipelines.training.evaluation.scaled_to`). The holdout passes when its
+    present-scoped mean count bias, pooled and per class, is equivalent to zero at
+    ``count_bias_tolerance_frac`` of that scope's typical count; when every class the calibration
+    side evidences at the conf is evidenced on the holdout; when the held-out precision and recall
+    both clear ``holdout_match_quality_floor``; and when the held-out 90th-percentile per-image
+    count error is within ``count_error_tolerance``. The entry carries every one of those fields.
+    A floor no module attribute took (``staged_conf_floor`` ``None``, beside the attribute path
+    it was applied on) fails as ``conf_floor_unstated``, a conf at or below a stated one as
+    ``conf_censored``. An objective with no registered picker, or a calibration curve the
+    objective picks no conf on, refuses (``ValueError``).
     """
-    hits = [r["cap_hit"] for r in (records or []) if "cap_hit" in r]
-    return (sum(hits) / len(hits)) if hits else None
-
-
-def _conf_censored(chosen_conf: float, staged_conf_floor: float | None) -> bool:
-    """True when a stated floor sits at or above the picked conf, so the sweep could not see
-    whether an even-lower conf would have done better.
-
-    A conf picked strictly above the staging floor is fully supported by the reference.
-    ``staged_conf_floor is None`` is a distinct failure, ``conf_floor_unstated``, not this one.
-    """
-    return staged_conf_floor is not None and chosen_conf <= staged_conf_floor
-
-
-def _floor_mismatch(records: list[dict] | None, staged_conf_floor: float | None) -> bool:
-    """True when the reference's observed lowest score is inconsistent with the asserted floor.
-
-    A material gap (>0.05) between what the caller asserts the reference was staged at and what the
-    data actually shows is itself evidence the assertion is wrong, or that something else (a stale
-    bucket, cap-trimmed tiles, a bespoke caller) truncated the reference after generation, a
-    distinct failure mode from ``_conf_censored`` (which only compares the picked conf, not the
-    reference's own data, against the asserted floor).
-    """
+    if entry.count_objective not in COUNT_OBJECTIVE_PICKERS:
+        raise ValueError(f"count_objective {entry.count_objective!r} has no registered picker "
+                         f"(registered: {sorted(COUNT_OBJECTIVE_PICKERS)}).")
+    picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
+    criterion = resolve_match_criterion(entry, cal_records)
+    cal_criterion = scaled_to(criterion, cal_records)
+    hold_criterion = scaled_to(criterion, hold_records)
+    cal_curve = derive_operating_point_curve(cal_records, criterion=cal_criterion)
+    picked = picker(cal_curve)
+    if picked is None:
+        raise ValueError(
+            f"the calibration side's count curve holds no conf the {entry.count_objective} "
+            "objective picks: its predictions carry no detection to sweep. Assess a checkpoint "
+            "that detects the subject, over a reference that holds it.")
+    conf = float(picked)
+    hb = derive_operating_point_curve(hold_records, criterion=hold_criterion,
+                                      conf_grid=[conf])["curve"][0]
+    cb = derive_operating_point_curve(cal_records, criterion=cal_criterion,
+                                      conf_grid=[conf])["curve"][0]
+    tolerance_frac = cast(float, entry.count_bias_tolerance_frac)
+    pooled_typical = gt_class_typical_count(hold_records)
+    pooled_ok, pooled_tolerance = _bias_equivalence(
+        hb["count_bias_mean_present"], hb["count_bias_std_present"], hb["n_present"],
+        tolerance_frac=tolerance_frac, typical_count=pooled_typical)
+    per_class: dict[str, dict] = {}
+    for cid, s in hb["per_class"].items():
+        typical = gt_class_typical_count(hold_records, class_id=int(cid))
+        ok, tolerance = _bias_equivalence(
+            s["count_bias_mean_present"], s["count_bias_std_present"], s["n_present"],
+            tolerance_frac=tolerance_frac, typical_count=typical)
+        per_class[cid] = {"bias": s["count_bias_mean_present"], "typical_count": typical,
+                          "tolerance": tolerance, "passed": ok, "n_present": s["n_present"]}
+    missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
+    floor = cast(float, entry.holdout_match_quality_floor)
+    failures: list[str] = []
     if staged_conf_floor is None:
-        return False
-    observed_min = _min_dt_score(records or [])
-    return observed_min is not None and observed_min > staged_conf_floor + 0.05
+        failures.append("conf_floor_unstated")
+    elif conf <= staged_conf_floor:
+        failures.append("conf_censored")
+    if not sum(len(gt_objects(r)) for r in cal_records):
+        failures.append("insufficient_calibration_gt")
+    if not sum(len(gt_objects(r)) for r in hold_records):
+        failures.append("insufficient_holdout_gt")
+    if hb["n_present"] < 2:
+        failures.append("insufficient_holdout_images")
+    if not pooled_ok:
+        failures.append("count_bias_exceeds_tolerance")
+    if any(not c["passed"] for c in per_class.values()):
+        failures.append("count_bias_exceeds_tolerance_per_class")
+    if any(c["n_present"] == 1 for c in per_class.values()):
+        failures.append("insufficient_holdout_images_per_class")
+    if missing_classes:
+        failures.append("holdout_missing_class")
+    if hb["precision"] < floor or hb["recall"] < floor:
+        failures.append("localization_quality_floor_failed")
+    if hb["count_error_p90"] > cast(float, entry.count_error_tolerance):
+        failures.append("count_error_dispersion_too_high")
 
-
-def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
-    """A generous cap = ~1.5x the p99 object count, so dense scenes aren't truncated."""
-    import numpy as np
-    if not counts:
-        return DEFAULT_MAX_DETS
-    return max(floor, int(math.ceil(1.5 * float(np.quantile(counts, 0.99)))))
-
-
-def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
-    """A generous cap = ~1.5x the p99 GT objects-per-image, so dense scenes aren't truncated."""
-    return derive_max_dets_from_counts([len(gt_objects(rec)) for rec in records], floor=floor)
-
-
-def _record_content_hash(rec: dict) -> str | None:
-    """Content identity of one record's GT, its dimensions and :func:`gt_facts`, ignoring
-    ``image_id``. ``None`` for empty GT.
-    """
-    facts = gt_facts(rec)
-    if not facts:
-        return None
-    key = [rec["width"], rec["height"], facts]
-    return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:16]
-
-
-def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
-    """Whether the holdout shares any image's GT content with calibration, one record per image.
-
-    ``shared`` fires on any overlap at all, not only full containment. Two independent images that
-    share both dimensions and identical labeled geometry read as shared content.
-    ``content_overlap_frac`` travels for provenance; ``shared`` is the boolean the gate reads.
-    """
-    cal_hashes = {h for h in (_record_content_hash(r) for r in cal_records) if h is not None}
-    hold_hashes = {h for h in (_record_content_hash(r) for r in hold_records) if h is not None}
-    if not hold_hashes:
-        return {"content_overlap_frac": 0.0, "shared": False}
-    frac = len(hold_hashes & cal_hashes) / len(hold_hashes)
-    return {"content_overlap_frac": frac, "shared": frac > 0}
-
-
-_UNRESOLVABLE_TRAIN_DISJOINTNESS = {
-    "checked": False, "unresolvable": True, "leaked_groups": [], "leaked_stems": [],
-    "group_check": None,
-}
-
-
-def _spatial_strip_geometric_disjointness(
-    spatial: dict, cal_rects: dict | None, hold_rects: dict | None,
-) -> dict:
-    """The geometric form of the spatial_strip check: a cal/holdout rect must be fully contained
-    in a persisted non-train region (``val_region``/``test_region``/``calibration_region``, the
-    last only present on a four-way split) and disjoint from every persisted train region, read
-    from ``spatial`` (the run's resolved ``data.split.spatial_manifest``).
-    Compares real geometry, so it catches a leak the lexical stem-identity check can't: a rect
-    that spills into the reserved train area from a source stem whose name never matches the
-    training stem's own.
-    """
-    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
-
-    train_regions = [tuple(r) for r in spatial.get("train_region", [])]
-    non_train_regions = ([tuple(r) for r in spatial.get("val_region", [])]
-                         + [tuple(r) for r in spatial.get("test_region", [])]
-                         + [tuple(r) for r in spatial.get("calibration_region", [])])
-    leaked_groups: list[str] = []
-    for rects in (cal_rects or {}, hold_rects or {}):
-        for stem, rect in rects.items():
-            rect = tuple(rect)
-            contained = any(rect_contains_rect(nt, rect) for nt in non_train_regions)
-            overlaps_train = any(rects_overlap(tr, rect) for tr in train_regions)
-            if not contained or overlaps_train:
-                leaked_groups.append(stem)
-    return {
-        "checked": True, "unresolvable": False, "leaked_groups": sorted(set(leaked_groups)),
-        "leaked_stems": [], "group_check": "spatial_strip_geometric",
+    observed_min = _min_dt_score(cal_records + hold_records)
+    evidence = {
+        "conf": conf, "conf_derived_from": conf_label, "calibration_curve": cal_curve,
+        "f1_max_conf": pick_f1_max(cal_curve), "localization": criterion,
+        "holdout_at_conf": hb, "calibration_at_conf": cb,
+        "pooled_typical_count": pooled_typical, "pooled_count_bias_tolerance": pooled_tolerance,
+        "per_class": per_class, "holdout_missing_classes": missing_classes,
+        "equivalence_z": _EQUIVALENCE_Z,
+        "staged_conf_floor": staged_conf_floor,
+        "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
+        "observed_min_score": observed_min,
+        "conf_floor_mismatch": (staged_conf_floor is not None and observed_min is not None
+                                and observed_min > staged_conf_floor + 0.05),
+        "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
+        "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),
     }
-
-
-def _samples_under(samples: Sequence[Any], calibration_labels_dir: str | None) -> list[Any]:
-    """The run's own samples whose ground-truth scope is ``calibration_labels_dir``, empty when
-    none is or no directory is named. A bare stem names one image only within one scope, so a run
-    whose selection spanned several is compared against the one a calibration read from."""
-    if calibration_labels_dir is None:
-        return []
-    return [s for s in samples if same_directory(s.ground_truth_scope, calibration_labels_dir)]
-
-
-def _named_group_key_fn(group_by: str | None, date: str | None) -> Callable[[str], str] | None:
-    """The group key a draw records for a bare stem admitted out of ``date``'s directory
-    (:func:`~tcip_mcp.pipelines.data.splits.recorded_group_key_fn`), or ``None`` when the record
-    names no policy this reader recognizes (``explicit_map``, an unrecognized string, a missing
-    field).
-    """
-    from tcip_mcp.pipelines.data.splits import GROUP_KEY_FNS, recorded_group_key_fn
-
-    if not group_by or group_by not in GROUP_KEY_FNS:
-        return None
-    return recorded_group_key_fn(group_by, date=date)
-
-
-def _scoped_side_disjointness(
-    group_by: str, scoped: Sequence[Any], side: str, cal_hold_stems: Sequence[str],
-) -> dict:
-    """The leak resolution for the run's samples under the scope the calibration read from
-    (``scoped``, non-empty), against the members on ``side``. An empty local ``side`` is a real
-    answer: that scope holds none of this run's members on that side."""
-    from tcip_mcp.dataset_layout import annotation_date
-
-    group_of = {s.member: s.group for s in scoped}
-    return _resolve_group_stem_disjointness(
-        sorted({s.member for s in scoped if s.side == side}), cal_hold_stems, group_of.get,
-        _named_group_key_fn(group_by, annotation_date(scoped[0].ground_truth_scope)),
-    )
-
-
-def _train_disjointness(
-    experiment_id: str | None, cal_ids: set, hold_ids: set, *, project: Path,
-    cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
-    hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
-    calibration_labels_dir: str | None = None,
-) -> dict:
-    """Whether the cal/holdout images were also in the checkpoint's own training split.
-
-    ``experiment_id is None`` -> a foreign/unregistered checkpoint with no known training
-    provenance; allowed through. A named run's resolution is read through
-    ``experiments.run_resolution``, which refuses an id naming no training run; a run recording
-    no training member at all stays ``unresolvable: True`` (fail-closed).
-
-    Otherwise group-level resolution is attempted per stem:
-
-      - a persisted ``group_key_map`` resolves whichever stems it actually covers.
-      - a named, recognized strategy (``tile_prefix``/``stem``) resolves the rest, but only where
-        the record says which scope (and so which capture date) the stem belongs to.
-      - anything else (an unrecognized string, a missing field) resolves nothing at the group level
-        beyond what the map covers.
-
-    Every stem the group check couldn't cover falls back to exact stem-set overlap between the
-    training run's own stems and the calibration/holdout stem set (``leaked_stems``).
-    ``group_check`` records how much of the check was group-level: ``"performed"`` (every stem
-    grouped), ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group
-    policy resolved at all, wholly exact-stem), ``"spatial_strip"`` (a within-image split, checked
-    by source stem underneath each region identity), or ``"spatial_strip_geometric"`` (see below).
-    A leak found by either mechanism blocks ``passed``. The group/stem resolution is
-    :func:`_resolve_group_stem_disjointness`.
-
-    A calibration reading a directory no scope of the record answers for gets the exact-stem
-    comparison over the union of the record's scopes.
-
-    ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
-    stem) are optional. When either is given and the run drew a within-image spatial split, the
-    check becomes geometric containment against the persisted
-    ``train_region``/``val_region``/``test_region`` rects
-    (:func:`_spatial_strip_geometric_disjointness`) instead of the same-source check.
-    """
-    if experiment_id is None:
-        return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
-                "group_check": None}
-    from tcip_mcp.experiments import run_resolution
-
-    resolved = run_resolution(experiment_id, project=project)
-    cal_hold_stems = sorted(cal_ids | hold_ids)
-    partition = resolved["partition"]
-    spatial = resolved["data"]["split"].get("spatial_manifest")
-    if spatial is not None:
-        from tcip_mcp.pipelines.data.splits import stem_of_spatial_identity
-
-        if cal_rects or hold_rects:
-            return _spatial_strip_geometric_disjointness(spatial, cal_rects, hold_rects)
-        # A spatial record's members are per-region identities, not bare stems; only a same-source
-        # reference is caught here (a caller with real rects gets the geometric check above).
-        train_source_stems = {stem_of_spatial_identity(s) for s in spatial["train_identities"]}
-        if not train_source_stems:
-            return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-        return {
-            "checked": True, "unresolvable": False,
-            "leaked_groups": sorted(train_source_stems & set(cal_hold_stems)),
-            "leaked_stems": [], "group_check": "spatial_strip",
-        }
-
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
-
-    samples = partition_samples(partition)
-    train_stems = sorted({s.member for s in samples if s.side == "train"})
-    if not train_stems:
-        # Nothing recorded to check against at all, not even the stem-overlap fallback has
-        # anything to compare, so this is unresolvable rather than merely ungrouped.
-        return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-
-    scoped = _samples_under(samples, calibration_labels_dir)
-    if scoped:
-        return _scoped_side_disjointness(partition["group_by"], scoped, "train", cal_hold_stems)
-
-    # No scope of this record answers for the directory the calibration read, so no recorded
-    # group key is in a vocabulary this comparison could use: exact member names only.
-    return _resolve_group_stem_disjointness(
-        train_stems, cal_hold_stems, lambda stem: None, None)
-
-
-def _resolve_group_stem_disjointness(
-    named_side_stems: Sequence[str], cal_hold_stems: Sequence[str],
-    recorded_key_of: Callable[[str], str | None],
-    named_key_fn: Callable[[str], str] | None,
-) -> dict:
-    """The group- and stem-level leak resolution: ``recorded_key_of`` answers for every stem the
-    run's own map covers, ``named_key_fn`` answers for the rest, and a stem neither reaches is
-    uncovered and falls back to exact stem-set overlap between ``named_side_stems`` and
-    ``cal_hold_stems``. ``named_key_fn`` (:func:`_named_group_key_fn`) may be ``None``, resolving
-    no stem.
-    """
-    def _key_of(stem: str) -> str | None:
-        recorded = recorded_key_of(stem)
-        if recorded is not None:
-            return recorded
-        return named_key_fn(stem) if named_key_fn is not None else None
-
-    covered_side = [s for s in named_side_stems if _key_of(s) is not None]
-    covered_cal_hold = [s for s in cal_hold_stems if _key_of(s) is not None]
-    resolves = named_key_fn is not None or bool(covered_side or covered_cal_hold)
-
-    leaked_groups: list[str] = []
-    if resolves:
-        side_groups = {_key_of(s) for s in covered_side}
-        cal_hold_groups = {_key_of(s) for s in covered_cal_hold}
-        leaked_groups = sorted(g for g in side_groups & cal_hold_groups if g is not None)
-
-    uncovered_side = sorted(set(named_side_stems) - set(covered_side))
-    uncovered_cal_hold = sorted(set(cal_hold_stems) - set(covered_cal_hold))
-    leaked_stems = sorted(set(uncovered_side) & set(uncovered_cal_hold))
-
-    if not resolves:
-        group_check = "not_performed"
-    elif uncovered_side or uncovered_cal_hold:
-        group_check = "partial"
-    else:
-        group_check = "performed"
-
-    return {
-        "checked": True,
-        "unresolvable": False,
-        "leaked_groups": leaked_groups,
-        "leaked_stems": leaked_stems,
-        "group_check": group_check,
-    }
-
-
-_NOT_APPLICABLE_SELECTION_SHAPE = {
-    "checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
-    "group_check": None,
-}
-_UNRESOLVABLE_SELECTION_SHAPE = {
-    "checked": False, "unresolvable": True, "leaked_groups": [], "leaked_stems": [],
-    "group_check": None,
-}
-
-
-def _resolve_label_movement(
-    scoped: Sequence[Any], at_run: Mapping[str, str], cal_ids: set,
-    selection_sha256: str | None, recorded_sha256: str | None,
-) -> dict:
-    """The four label-movement keys, from a bound run's samples under the scope the calibration
-    read (``scoped``, each carrying its digest at draw time), the digests its ground truth had
-    when the run read it (``at_run``, by path) and the digest of the selection that run bound
-    (``recorded_sha256``).
-
-    All four keys ``None`` when no scoped sample carries a draw-time digest (an unbound run
-    calibrated under a caller-named selection).
-
-    The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's own
-    universe, and recomputed through :func:`~tcip_mcp.pipelines.resolution.moved_since_run`; it is
-    ``None`` when that scoped set is empty.
-
-    ``selection_redrawn`` answers only when both digests are in hand, else ``None``.
-    """
-    drawn = [s for s in scoped if s.ground_truth_digest is not None]
-    if not drawn:
-        return {
-            "labels_moved_draw_to_run": None,
-            "labels_moved_run_to_now": None,
-            "calibration_labels_moved": None,
-            "selection_redrawn": None,
-        }
-    labels_moved_draw_to_run = sorted(
-        s.member for s in drawn if at_run[s.ground_truth] != s.ground_truth_digest)
-    in_universe = [s for s in scoped if s.member in cal_ids]
-    labels_moved_run_to_now = moved_since_run(in_universe, at_run) if in_universe else None
-
-    moved = set(labels_moved_draw_to_run) | set(labels_moved_run_to_now or [])
-    return {
-        "labels_moved_draw_to_run": labels_moved_draw_to_run,
-        "labels_moved_run_to_now": labels_moved_run_to_now,
-        "calibration_labels_moved": sorted(moved & cal_ids),
-        "selection_redrawn": (
-            selection_sha256 != recorded_sha256
-            if selection_sha256 is not None and recorded_sha256 is not None else None
-        ),
-    }
-
-
-def _selection_disjointness(
-    experiment_id: str | None, cal_ids: set, hold_ids: set, *, project: Path,
-    selection_dir: str | None = None,
-    calibration_labels_dir: str | None = None, selection_sha256: str | None = None,
-) -> dict:
-    """Whether the cal/holdout images were also on the checkpoint's own selection side (its
-    resolved partition's ``val`` side), the side the shipped weights were chosen on.
-
-    ``applicable`` only when the calibration names a selection (``selection_dir``) or the
-    checkpoint's own run was bound to one. Not-applicable, each with a breeder-legible ``reason``,
-    for: no selection named and no binding on the run; a within-image spatial split (that route's
-    own ``calibration_region`` is a different check); an empty ``val``; ``calibration_labels_dir is
-    None``; or a ``calibration_labels_dir`` none of the run's own members live under.
-
-    Unresolvable when the calibration names a selection but ``experiment_id is None``. A named
-    run's resolution is read through ``experiments.run_resolution``, which refuses an id naming no
-    training run.
-
-    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and on
-    the applicable path the four label-movement keys (:func:`_resolve_label_movement`): all four
-    ``null``, and ``reason`` naming why, when no scoped sample carries a draw-time digest.
-    """
-    if experiment_id is None:
-        if selection_dir is not None:
-            return {"applicable": True,
-                    "reason": "the calibration names a selection but this checkpoint has no "
-                              "recorded experiment to check its selection side against",
-                    **_UNRESOLVABLE_SELECTION_SHAPE}
-        return {"applicable": False,
-                "reason": "no selection named and no recorded experiment to read a "
-                          "selection side from",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-
-    from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
-
-    resolved_record = run_resolution(experiment_id, project=project)
-    partition = resolved_record["partition"]
-    selection_binding = partition["selection"]
-    if selection_dir is None and selection_binding is None:
-        return {"applicable": False,
-                "reason": "no selection named and this checkpoint's own run was not bound to one",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-    if "spatial_manifest" in resolved_record["data"]["split"]:
-        return {"applicable": False,
-                "reason": "the run drew a within-image spatial split; its own calibration_region "
-                          "is the selection check for that route, not this one",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-    samples = partition_samples(partition)
-    if not any(s.side == "val" for s in samples):
-        return {"applicable": False, "reason": "the run's partition carries no val members",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-    if calibration_labels_dir is None:
-        return {"applicable": False,
-                "reason": "this calibration named no labels directory to check against the "
-                          "scopes the run's own val members live under",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-    scoped = _samples_under(samples, calibration_labels_dir)
-    if not scoped:
-        return {"applicable": False,
-                "reason": f"the calibration reads labels from {calibration_labels_dir!r}, and the "
-                          f"run's own members live under "
-                          f"{sorted({s.ground_truth_scope for s in samples})}; a bare member name "
-                          "means the same image only within one scope",
-                **_NOT_APPLICABLE_SELECTION_SHAPE}
-
-    cal_hold_stems = sorted(cal_ids | hold_ids)
-    resolved = _scoped_side_disjointness(partition["group_by"], scoped, "val", cal_hold_stems)
-    moved = _resolve_label_movement(
-        scoped, partition["ground_truth_digests"], cal_ids, selection_sha256,
-        selection_binding["selection_sha256"] if selection_binding is not None else None)
-    reason = None
-    if moved["labels_moved_draw_to_run"] is None:
-        reason = (
-            "this run's partition records no draw-time digest, so a calibration label moved "
-            "since the draw cannot be named: the run was calibrated with no bound run under a "
-            "caller-named selection"
-        )
-    return {"applicable": True, "reason": reason, **resolved, **moved}
-
-
-def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None:
-    """Copy the locked cal/holdout split's resolved policy + identity onto the conf param's gate
-    evidence, plus any ``policy_divergence`` / ``unlocked_stems`` the lock resolution reported. In
-    place (the ``gate_evidence`` dict is mutated, never reassigned); a no-op when the bundle has no
-    calibrated ``conf`` gate evidence.
-    """
-    conf = bundle.params.get("conf")
-    if conf is None or conf.gate_evidence is None:
-        return
-    conf.gate_evidence["split_policy"] = {
-        "group_by": locked.get("group_by"), "group_key_map": locked.get("group_key_map"),
-        "seed": locked.get("seed"), "holdout_ratio": locked.get("holdout_ratio"),
-        "identity_hash": locked.get("identity_hash"),
-    }
-    if locked.get("policy_divergence"):
-        conf.gate_evidence["split_policy_divergence"] = locked["policy_divergence"]
-    if locked.get("unlocked_stems"):
-        conf.gate_evidence["split_unlocked_stems"] = locked["unlocked_stems"]
-
-
-def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) -> None:
-    """Same target and shape as :func:`attach_split_policy_provenance`, for a block-calibrated
-    bundle whose reference came from a mosaic's own persisted spatial-strip split (``spatial``,
-    ``split.json``'s ``spatial`` manifest): writes the split-kind fact from the split's recorded
-    geometry. A no-op when the bundle has no calibrated ``conf`` gate evidence. Carries no
-    ``seed``: the spatial-strip split places every side by declared order and share alone.
-    """
-    conf = bundle.params.get("conf")
-    if conf is None or conf.gate_evidence is None:
-        return
-    conf.gate_evidence["split_policy"] = {
-        "group_by": "spatial_strip",
-        "tile_size": spatial.get("tile_size"), "overlap": spatial.get("overlap"),
-    }
-
-
-def resolve_operating_point(
-    trait_name: str,
-    *,
-    project: Path,
-    dataset_hash: str | None,
-    calibration_records: list[dict] | None = None,
-    holdout_records: list[dict] | None = None,
-    slicing: dict | None,
-    cross_tile_nms: Mapping[str, Any] | None = None,
-    tile_size: int | None = None,
-    tile_size_source: str = "default",
-    tile_size_derived_from: str | None = None,
-    max_dets: int | None = None,
-    max_dets_derived_from: str | None = None,
-    validated_reference: str = VALIDATED_HELD_OUT,
-    experiment_id: str | None = None,
-    staged_conf_floor: float | None = None,
-    staged_conf_floor_attribute_path: str | None = None,
-    adjudication_covered: Callable[[dict], bool] | None = None,
-    cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
-    hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
-    selection_dir: str | None = None,
-    calibration_labels_dir: str | None = None,
-    selection_sha256: str | None = None,
-) -> ResolvedBundle:
-    """Resolve the operating point for (trait, dataset) of ``project``, whose trait and runs it
-    reads. Pure over records: callers pass the model pass output (``records_over_loader`` produces
-    it).
-
-    ``cal_rects``/``hold_rects`` are optional, forwarded verbatim to :func:`_train_disjointness`: a
-    block-calibration caller supplies them to get the geometric containment check.
-
-    ``max_dets_derived_from`` is how a caller-supplied ``max_dets`` was produced, in the caller's
-    own words; a caller-supplied cap without it is stamped "caller override". Ignored when
-    ``max_dets`` is ``None``, since the cap is then derived and labeled here.
-
-    ``slicing`` is the record of how the pass that produced the records sliced and merged
-    (:func:`~tcip_mcp.pipelines.slicing.slicing_record`), ``None`` for an untiled pass, and
-    ``cross_tile_nms`` the provenance of the merge threshold a tiled pass ran at
-    (:func:`~tcip_mcp.pipelines.resolution.resolve_cross_tile_nms`), required for one and refused
-    by name when absent; both are carried onto the bundle as they ran. ``tile_size_source`` is the
-    caller's own resolution of whether the edge was an explicit override, derived from the
-    checkpoint's persisted training geometry, or a documented default.
-
-    ``validated_reference`` is the stamp a passing held-out gate earns: ``VALIDATED_HELD_OUT`` when
-    the records came from GT annotations (default), ``VALIDATED_REVIEW_CONFIRMED`` when they were
-    reconstructed from a breeder-confirmed sample of the model's own outputs
-    (feedback.review_calibration), the two references ``accepted_references("annotations")``
-    recognizes.
-
-    ``experiment_id`` is the checkpoint's own training-run id, if known; it gates the held-out pass
-    on train-disjointness. ``None`` (a foreign/unregistered checkpoint) skips that check.
-
-    ``staged_conf_floor`` is the floor the reference's predictions were actually generated /
-    filtered at, a caller-supplied fact. ``None`` gates as ``conf_floor_unstated``, distinct from
-    ``conf_censored`` (see ``_conf_censored``). ``staged_conf_floor_attribute_path`` is the module
-    attribute the floor was applied on (``set_detector_operating_point``'s own
-    ``"attribute_path"``), or ``None`` when the floor has no such producer.
-
-    ``tile_size_derived_from`` is forwarded to
-    :func:`~tcip_mcp.pipelines.resolution.resolve_tile_size_param` unchanged; it matters only for
-    ``tile_size_source == "explicit"``.
-
-    ``selection_dir``/``calibration_labels_dir``/``selection_sha256`` feed
-    :func:`_selection_disjointness`, alongside ``train_disjointness``; a leak or an unresolvable
-    check blocks ``passed``. ``calibration_labels_dir`` is the directory this calibration read its
-    own records from; ``selection_sha256`` is the digest of the selection this calibration read,
-    when it named one.
-
-    ``adjudication_covered``: an optional per-record predicate and a gate, not a filter: every
-        calibration and holdout record must satisfy it, or the whole reference is refused
-        (``insufficient_adjudication_coverage``), before any bias/dispersion statistic is computed.
-        ``None`` (the default) applies no requirement.
-    """
-    if validated_reference not in accepted_references("annotations"):
-        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
-                         f"got {validated_reference!r}")
-    trait = latest_confirmed(trait_name, project).entry
-    # "not yet authored for this trait" falls back to the platform's interim default fraction,
-    # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
-    count_bias_tolerance_frac = (
-        trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
-        else _DEFAULT_COUNT_BIAS_TOLERANCE_FRAC)
-    review = validated_reference == VALIDATED_REVIEW_CONFIRMED
-    # This is a gate, not a filter, see the docstring above for why a filter fails open: every
-    # record must satisfy the predicate or the whole reference is refused, unfiltered, further down.
-    adjudication_ok = adjudication_covered is None or (
-        all(adjudication_covered(r) for r in (calibration_records or []))
-        and all(adjudication_covered(r) for r in (holdout_records or []))
-    )
-    # count_objective is a recorded breeder decision when the trait spec has one; an unset trait
-    # defaults to COUNT_UNBIASED (errors canceling is the right tolerance for a fraction/ratio
-    # phenotype, the common case) rather than refusing to calibrate at all. Nobody, not the agent,
-    # not the breeder, can meaningfully answer "does every object need to be found correctly, or is
-    # it fine if errors cancel out" before any result exists to judge; the real confirmation point
-    # is the delivered result itself, via the review-confirmation loop, not a blind precondition.
-    # Stamped as a real ResolvedParam below so a caller can see whether this run's objective was
-    # breeder-authored or an agent default.
-    count_objective_explicit = bool(trait.count_objective)
-    count_objective = trait.count_objective or COUNT_UNBIASED
-    if count_objective not in COUNT_OBJECTIVE_PICKERS:
-        raise ValueError(
-            f"trait {trait_name!r}'s count_objective {count_objective!r} has no registered "
-            f"picker in COUNT_OBJECTIVE_PICKERS ({sorted(COUNT_OBJECTIVE_PICKERS)}), register one "
-            "(a new picker function + a new entry in this dict) before calibrating this trait."
-        )
-    picker, base_label = COUNT_OBJECTIVE_PICKERS[count_objective]
-    conf_derived_from = base_label + (REVIEW_VERDICT_LABEL_SUFFIX if review else "")
-    params: dict[str, ResolvedParam] = {}
-    if count_objective_explicit:
-        params["count_objective"] = default("count_objective", count_objective,
-                                            derived_from="trait-authored")
-    else:
-        params["count_objective"] = default(
-            "count_objective", count_objective,
-            derived_from="platform default (fraction/ratio phenotype tolerates canceling errors); "
-                         "not breeder-confirmed, judge the delivered result instead")
-
-    # --- conf: the count operating point (calibration) ---
-    if calibration_records:
-        # Derived once from the calibration GT's own nearest-neighbor spacing, then reused for the
-        # holdout tolerance below too, the same "exact-conf, not independently re-picked"
-        # discipline already applied to conf, never re-derived per side, or calibration and
-        # holdout could disagree on what "a hit" means.
-        loc_frac = derive_localization_tolerance_frac(
-            [[a["bbox"] for a in gt_objects(rec)] for rec in calibration_records])
-        if loc_frac is not None:
-            params["localization_tolerance_frac"] = derived(
-                "localization_tolerance_frac", loc_frac,
-                derived_from="GT nearest-neighbor spacing (p10 + margin)")
-        else:
-            loc_frac = trait.localization_tolerance_frac
-            params["localization_tolerance_frac"] = default(
-                "localization_tolerance_frac", loc_frac,
-                derived_from="trait default (underivable: no same-class neighbor in this GT)")
-        tol = loc_frac * gt_class_avg_size(calibration_records)
-        cal_curve = derive_operating_point_curve(calibration_records, tolerance=tol)
-        conf = picker(cal_curve)
-        conf = DEFAULT_CONF if conf is None else conf
-        # conf-censoring guard: a count-unbiased 'validated' claim is only honest if the picked conf
-        # sits strictly above the floor the reference was staged at, not merely if the reference's
-        # own scores happen to look low (that predicate is unfalsifiable from a caller who
-        # mis-asserts the floor; see _floor_mismatch for the reconciling check).
-        censored = _conf_censored(conf, staged_conf_floor)
-        floor_mismatch = _floor_mismatch(calibration_records, staged_conf_floor)
-        if holdout_records:
-            # Disjointness can only be proven from image_ids, so fail closed (not disjoint) when
-            # either set has none, else the same records passed as cal+holdout look validated.
-            cal_ids = {r["image_id"] for r in calibration_records if "image_id" in r}
-            hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
-            disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
-            floor_mismatch = floor_mismatch or _floor_mismatch(holdout_records, staged_conf_floor)
-            hold_tol = loc_frac * gt_class_avg_size(holdout_records)  # same frac as calibration, above
-            # Exact-conf evaluation, not a nearest-grid-point snap, an explicit single-point
-            # conf_grid makes derive_operating_point_curve evaluate exactly the conf that will ship, never
-            # an approximation from the holdout's own independently-built grid (which need not
-            # contain, or be anywhere near, the calibration-chosen conf).
-            hold_curve = derive_operating_point_curve(holdout_records, tolerance=hold_tol, conf_grid=[conf])
-            hb = hold_curve["curve"][0]  # the exact-conf holdout bias entry
-            # The calibration side re-measured at the shipped conf (not read off its own grid, which
-            # need not contain it), the only comparable basis for asking which classes the holdout
-            # was actually able to check, below.
-            cb = derive_operating_point_curve(calibration_records, tolerance=tol, conf_grid=[conf])["curve"][0]
-            # content-overlap gate: a holdout whose GT content is fully cloned from calibration
-            # (same boxes, different image_id) can't function as an independent check.
-            content = _content_overlap(calibration_records, holdout_records)
-            # train-disjointness gate: the cal/holdout images must not also be in the producing
-            # checkpoint's own training split, or the "held-out" bias check is measured partly on
-            # data the model already trained on.
-            td = _train_disjointness(
-                experiment_id, cal_ids, hold_ids, project=project, cal_rects=cal_rects,
-                hold_rects=hold_rects, calibration_labels_dir=calibration_labels_dir)
-            sd = _selection_disjointness(
-                experiment_id, cal_ids, hold_ids, project=project, selection_dir=selection_dir,
-                calibration_labels_dir=calibration_labels_dir,
-                selection_sha256=selection_sha256)
-
-            # Positive-evidence, unconditional, stated per-side (not a union), an all-negative
-            # reference on either side can't validate a count operating point.
-            cal_gt_count = sum(len(gt_objects(r)) for r in calibration_records)
-            hold_gt_count = sum(len(gt_objects(r)) for r in holdout_records)
-            # The mean+SE equivalence/CI criterion, rather than a bare mean, degrades correctly
-            # at small n (SE grows, so less evidence is harder to pass, not easier) and needs no
-            # second, unrelated tolerance constant.
-            #
-            # The tolerance `_bias_equivalence_ok` compares against is relative, the breeder-authored
-            # fraction scaled by this scope's own typical per-image count, derived here from the
-            # holdout GT alone (never calibration): `gt_class_avg_size`'s `loc_frac`/tolerance split
-            # just above is the precedent for this shape (a shared, calibration-derived policy
-            # multiplied by a scale measured on the side it applies to, never a scale borrowed from
-            # the other side), the pooled/per-class typical counts here are that same scale, measured
-            # on the holdout because they gate the holdout's own bias. Deriving from calibration too
-            # would let a caller buy a looser holdout tolerance by padding calibration with denser
-            # images of a class, with no compensating cost in the holdout's own measured bias, a new,
-            # unconstrained lever the locked-split discipline (`resolve_locked_cal_holdout_split`)
-            # does not otherwise close, since it balances total annotation count per group, not
-            # per-class density between sides.
-            #
-            # Both sides of the comparison are measured over the same population: the images that
-            # actually carry the thing being counted. `mean_of_present_counts` already scopes the
-            # typical count that way, so the bias must be scoped that way too. An image with no GT
-            # and no surviving detection contributes a certain zero to the bias and nothing to the
-            # density, and counting it on one side only divides the measured bias by
-            # `n_images / n_present` while leaving the tolerance untouched, so a reference carrying
-            # confirmed negatives reads a systematic miscount as that fraction of itself. The
-            # equivalence test's own sample size is over-counted by the same term (`n_images` counts
-            # images the bias does not rest on), the dilution the per-class scope's `n_present`
-            # denominator already closes.
-            pooled_typical = gt_class_typical_count(holdout_records)
-            count_bias_ok = _bias_equivalence_ok(
-                hb["count_bias_mean_present"], hb["count_bias_std_present"], hb["n_present"],
-                tolerance_frac=count_bias_tolerance_frac, typical_count=pooled_typical)
-            # The pooled test above is blind to a per-class error. Its matcher ignores category, so a
-            # detector that calls every class-A object class B scores tp-only with zero bias, and one
-            # that over-detects A exactly as much as it under-detects B nets to zero too, either way
-            # a phenotype built from per-class counts (an elongated fraction, a per-class total) is
-            # wrong while the stamp says validated. So every class the holdout carries must clear the
-            # same equivalence test at the same trait tolerance, in the same per-image-mean unit, over
-            # the same images (a class absent from an image contributes a zero bias there, exactly as
-            # the pooled term does). Which class is the trait's positive one is deliberately not
-            # consulted: that needs a name->id registry read this does not have, and requiring every
-            # class to be unbiased is the stronger claim anyway.
-            holdout_typical_by_class = {
-                cid: gt_class_typical_count(holdout_records, class_id=int(cid))
-                for cid in hb["per_class"]
-            }
-            per_class_bias_failures = sorted(
-                cid for cid, s in hb["per_class"].items()
-                if not _bias_equivalence_ok(s["count_bias_mean_present"], s["count_bias_std_present"],
-                                            s["n_present"],
-                                            tolerance_frac=count_bias_tolerance_frac,
-                                            typical_count=holdout_typical_by_class[cid]))
-            # The pooled scope's own reference-sufficiency floor (`hb["n_present"] < 2` below) is
-            # scoped to the whole reference, not to one class, and the per-class relative tolerance's
-            # floor (1/n_present) means a class present on exactly one holdout image gets a tolerance
-            # derived from that single image's own density, reachable end to end without any
-            # adversarial construction (an ordinary rare class that happens to show up once, in an
-            # unusually dense frame). Same positive-evidence discipline the pooled
-            # `insufficient_holdout_gt`/`insufficient_holdout_images` conjuncts already apply: one
-            # image is not enough evidence to certify any class's count bias, regardless of what
-            # tolerance it would otherwise clear.
-            #
-            # Exactly ``== 1``, not ``< 2``: ``n_present == 0`` is a different, already-correctly-
-            # named situation, a class with zero holdout presence at the shipped conf is exactly
-            # what ``holdout_missing_class`` below (when the class was evidenced in calibration) or
-            # the ordinary ``count_bias_exceeds_tolerance_per_class`` path
-            # (``_bias_equivalence_ok``'s own ``n == 0`` branch, when it wasn't) already name
-            # correctly. Catching it here too would let this failure's breeder message ("held back in
-            # exactly one image") win the first-match lookup over the true, more specific one for a
-            # class held back in no images at all.
-            per_class_insufficient_images = sorted(
-                cid for cid, s in hb["per_class"].items() if s["n_present"] == 1)
-            # ...and a class the holdout never carries is not a class that passed: its entry is all
-            # zeros, so the test above reads bias 0.0 and says nothing. A class confused entirely
-            # within the calibration half would otherwise read clean on every per-class entry the
-            # gate can see, and the stamp would land anyway. So every
-            # class the calibration reference actually evidences at the shipped conf must be
-            # evidenced in the holdout too, the same positive-evidence rule (never an inference from
-            # absence) the per-side `insufficient_*_gt` conjuncts already apply to the pooled count.
-            holdout_missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
-            # A trait-authored floor (no platform default): held-out precision and recall of the
-            # governing criterion at the shipped conf must both clear it; unauthored gates below.
-            holdout_match_quality_floor = trait.holdout_match_quality_floor
-            localization_floor_ok = (
-                holdout_match_quality_floor is not None
-                and hb["precision"] >= holdout_match_quality_floor
-                and hb["recall"] >= holdout_match_quality_floor)
-            # A p90 tail dispersion floor, gated only once a real value is authored for this trait
-            # (no invented default, see TraitEntry.count_error_tolerance).
-            dispersion_ok = (
-                trait.count_error_tolerance is None
-                or hb["count_error_p90"] <= trait.count_error_tolerance
-            )
-            # Both conjuncts above stay pooled while count bias is per-class, and the per-class
-            # statistics they would need are computed and persisted beside them. This is deliberate,
-            # not an oversight: each is its own measurement question rather than a mechanical repeat
-            # of the bias one, a per-class localization floor refuses a rare class whose single
-            # detection lands just outside tolerance, and a per-class dispersion floor reads a
-            # tolerance no trait has authored (count_error_tolerance is unset on every trait).
-            # Every equivalence test above, pooled and per-class alike, reads its scope's own
-            # present-scoped bias, dispersion and evidence count, so the bias and the typical count
-            # it is judged against are measured over the same images and a scope scarce in the
-            # reference borrows neither a diluted bias nor statistical confidence it doesn't have.
-            # count_bias_tolerance_frac is relative, a fraction of each scope's own derived typical
-            # per-image count, rather than a flat absolute value.
-
-            # Named-failure architecture: every gate condition below is named here, once, so
-            # describe_review_validation (and any future caller) maps failures to breeder-legible
-            # reasons from this same list rather than re-deriving which check actually failed.
-            # cap-saturation is intentionally absent, it is non-gating provenance only.
-            # conf_floor_mismatch is also non-gating: its pinned +/-0.05 band is an ordinary property
-            # of a model's score distribution as often as it is evidence of tampering, and gating on
-            # it would re-create the kind of unsound pinned-constant refusal this design avoids. It
-            # is still computed and surfaced in gate_evidence for a human/agent to notice, never
-            # blocking.
-            failures: list[str] = []
-            if not adjudication_ok:
-                failures.append("insufficient_adjudication_coverage")
-            if not disjoint:
-                failures.append("not_disjoint")
-            if staged_conf_floor is None:
-                failures.append("conf_floor_unstated")
-            elif censored:
-                failures.append("conf_censored")
-            if content["shared"]:
-                failures.append("content_shared_with_calibration")
-            if td["unresolvable"]:
-                failures.append("train_disjointness_unresolvable")
-            if td["leaked_groups"] or td["leaked_stems"]:
-                failures.append("train_disjointness_leaked")
-            if sd["applicable"] and sd["unresolvable"]:
-                failures.append("selection_disjointness_unresolvable")
-            if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
-                failures.append("selection_disjointness_leaked")
-            if cal_gt_count == 0:
-                failures.append("insufficient_calibration_gt")
-            if hold_gt_count == 0:
-                failures.append("insufficient_holdout_gt")
-            # Scoped to the images that carry the thing being counted, the same population the
-            # pooled equivalence test above measures over: a holdout of a hundred images where only
-            # one carries anything is one image worth of evidence about count bias, whatever the
-            # total is. This is also what keeps _effective_count_bias_tolerance's own 1/n floor
-            # bounded below 0.5 wherever it is actually reachable.
-            if hb["n_present"] < 2:
-                failures.append("insufficient_holdout_images")
-            if not count_bias_ok:
-                failures.append("count_bias_exceeds_tolerance")
-            if per_class_bias_failures:
-                failures.append("count_bias_exceeds_tolerance_per_class")
-            if per_class_insufficient_images:
-                failures.append("insufficient_holdout_images_per_class")
-            if holdout_missing_classes:
-                failures.append("holdout_missing_class")
-            if holdout_match_quality_floor is None:
-                failures.append("holdout_match_quality_floor_unauthored")
-            elif not localization_floor_ok:
-                failures.append("localization_quality_floor_failed")
-            if not dispersion_ok:
-                failures.append("count_error_dispersion_too_high")
-            passed = not failures
-
-            gate_evidence = {"calibration": cal_curve, "f1_max_conf": pick_f1_max(cal_curve),
-                          "holdout_bias": hb,
-                          "count_bias_tolerance_frac": count_bias_tolerance_frac,
-                          "count_bias_tolerance_frac_source": (
-                              "trait" if trait.count_bias_tolerance_frac is not None
-                              else "default"),
-                          "holdout_match_quality_floor": holdout_match_quality_floor,
-                          # Reconstructibility: the fraction alone does not say what a pass/refusal
-                          # actually compared against, the derived typical count and the resulting
-                          # absolute tolerance, per scope, so a reviewer can rebuild the gate's own
-                          # arithmetic from this record alone.
-                          "pooled_typical_count": pooled_typical,
-                          "pooled_count_bias_tolerance": _effective_count_bias_tolerance(
-                              count_bias_tolerance_frac, pooled_typical, hb["n_present"]),
-                          "per_class_typical_count": holdout_typical_by_class,
-                          "per_class_count_bias_tolerance": {
-                              cid: _effective_count_bias_tolerance(
-                                  count_bias_tolerance_frac, holdout_typical_by_class[cid],
-                                  s["n_present"])
-                              for cid, s in hb["per_class"].items()
-                          },
-                          "per_class_count_bias_failures": per_class_bias_failures,
-                          "per_class_insufficient_images": per_class_insufficient_images,
-                          "holdout_missing_classes": holdout_missing_classes,
-                          "calibration_bias_at_conf": cb,
-                          "count_error_tolerance": trait.count_error_tolerance,
-                          "equivalence_z": _EQUIVALENCE_Z,
-                          "disjoint": disjoint, "conf_censored": censored,
-                          "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
-                          "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
-                          "adjudication_covered": adjudication_ok,
-                          "passed_holdout": passed, "failures": failures,
-                          "content_overlap_frac": content["content_overlap_frac"],
-                          "content_shared_with_calibration": content["shared"],
-                          "train_disjointness": td, "selection_disjointness": sd,
-                          "calibration_image_ids": sorted(cal_ids), "holdout_image_ids": sorted(hold_ids),
-                          "calibration_observed_min_score": _min_dt_score(calibration_records),
-                          "holdout_observed_min_score": _min_dt_score(holdout_records),
-                          "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
-                          "holdout_cap_saturated_frac": _cap_saturated_frac(holdout_records)}
-            # validated only if the gate above raised no named failure, not merely because a
-            # holdout was supplied. Reference here is the annotations/verdicts, not truth; the stamp
-            # records which reference (GT vs review-confirmed) cleared the gate.
-            validated = validated_reference if passed else VALIDATED_FALSE
-        else:
-            gate_evidence = {"calibration": cal_curve, "conf_censored": censored,
-                          "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
-                          "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
-                          "calibration_observed_min_score": _min_dt_score(calibration_records),
-                          "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
-                          "note": "calibrated but not held-out-measured"}
-            validated = VALIDATED_FALSE
-        params["conf"] = derived("conf", float(conf),
-                                 derived_from=conf_derived_from,
-                                 requires_validation=True, validation_kind="annotations",
-                                 validated_against=validated, dataset_scoped=True,
-                                 dataset_hash=dataset_hash, gate_evidence=gate_evidence)
-        if max_dets is None:
-            max_dets = _max_dets_from_density(calibration_records)
-            max_dets_derived_from = "~1.5x p99 GT objects/image"
-    else:
-        # No GT for this dataset: cannot calibrate. Carry an unvalidated placeholder (un-shippable
-        # via the firewall), no valley heuristic, no chosen value dressed as trustworthy.
-        params["conf"] = derived("conf", DEFAULT_CONF,
-                                 derived_from="no GT for this dataset; unvalidated placeholder",
-                                 requires_validation=True, validation_kind="annotations",
-                                 validated_against=VALIDATED_FALSE, dataset_scoped=True,
-                                 dataset_hash=dataset_hash)
-        params["localization_tolerance_frac"] = default(
-            "localization_tolerance_frac", trait.localization_tolerance_frac,
-            derived_from="trait default (no GT for this dataset)")
-
-    # --- structural facts / distribution statistics / documented-default params ---
-    params["tile_size"] = resolve_tile_size_param(
-        tile_size, tiled=slicing is not None, tile_size_source=tile_size_source,
-        tile_size_derived_from=tile_size_derived_from)
-    if slicing is None:
-        params["cross_tile_nms"] = resolve_cross_tile_nms(None, None)
-    elif cross_tile_nms is None:
-        raise ValueError(
-            "resolve_operating_point was handed a tiled pass's records with no cross_tile_nms: "
-            "state the merge threshold the pass ran at (resolution.resolve_cross_tile_nms), "
-            "since the records mean nothing apart from it.")
-    else:
-        params["cross_tile_nms"] = ResolvedParam.from_provenance(cross_tile_nms)
-    if max_dets is None:
-        params["max_dets"] = default("max_dets", DEFAULT_MAX_DETS)
-    elif max_dets_derived_from:
-        params["max_dets"] = derived("max_dets", int(max_dets),
-                                     derived_from=max_dets_derived_from)
-    else:
-        params["max_dets"] = ResolvedParam("max_dets", int(max_dets), source="explicit",
-                                           derived_from="caller override")
-    return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params,
-                          slicing=slicing)
+    return conf, evidence, failures
 
 
 def _classification_kappa(items: list[dict]) -> float | None:
-    """Cohen's kappa between true and predicted positive/negative class over classification items:
-    a derived compensating-error floor, since a mean count-bias check alone is blind to a
-    classifier that flips k true positives to negative and k true negatives to positive.
-    Chance-corrected from the reference's own observed base rates, so a majority-class guesser
-    scores ~0 and an inverted call scores negative. ``None`` when there are too few items or only
-    one class present.
-    """
+    """Cohen's kappa between the reference's and the model's positive/negative call over matched
+    instances, chance-corrected from the reference's own base rates; ``None`` for no items or a
+    single class on either side."""
     n = len(items)
     if n == 0:
         return None
@@ -1185,7 +237,7 @@ def _classification_kappa(items: list[dict]) -> float | None:
     pred_pos = sum(1 for it in items if it["is_pred_positive"])
     agree = sum(1 for it in items if it["is_true_positive"] == it["is_pred_positive"])
     if true_pos in (0, n) or pred_pos in (0, n):
-        return None  # a single-class reference/prediction set has no chance-agreement rate to derive
+        return None
     po = agree / n
     p_true_pos, p_pred_pos = true_pos / n, pred_pos / n
     pe = p_true_pos * p_pred_pos + (1 - p_true_pos) * (1 - p_pred_pos)
@@ -1194,369 +246,97 @@ def _classification_kappa(items: list[dict]) -> float | None:
     return (po - pe) / (1 - pe)
 
 
-def resolve_classifier_operating_point(
-    trait_name: str,
-    *,
-    project: Path,
-    calibration_items: list[dict] | None = None,
-    holdout_items: list[dict] | None = None,
-    experiment_id: str | None = None,
-    validated_reference: str = VALIDATED_HELD_OUT,
-    adjudication_covered: Callable[[dict], bool] | None = None,
-    calibration_labels_dir: str | None = None,
-) -> dict:
-    """Classification-mode calibration gate for the positive-class call of ``trait_name``, read
-    through its latest confirmed revision in ``project`` (``operationalization.latest_confirmed``):
-    :func:`_content_overlap` and :func:`_train_disjointness` as the detection path runs them, with
-    a derived compensating-error floor (:func:`_classification_kappa`) in place of the
-    localization-quality floor.
+def classifier_criterion(cal_items: list[dict], hold_items: list[dict],
+                         entry: TraitEntry) -> tuple[dict, list[str]]:
+    """The held-out agreement of a positive-state call over matched instances:
+    ``(evidence, failures)``.
 
-    Each item in ``calibration_items``/``holdout_items`` is one classified, already-localized
-    instance: ``{"image_id": str, "is_true_positive": bool, "is_pred_positive": bool, "bbox": [x1,
-    y1, x2, y2]}``, whether the GT/reviewer-confirmed label and the classifier's own call are the
-    trait's positive state, plus the instance's own GT geometry (required).
-
-    Returns ``{"validated_against", "passed", "failures", "gate_evidence"}``, a shape distinct from
-    a ``ResolvedParam``/``ResolvedBundle``, for a classifier-scoped sidecar
-    (``classifier_operating_point.json``, through
-    :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`).
-
-    ``experiment_id is None`` (a foreign/unregistered checkpoint) skips the train-disjointness
-    check. No calibration/holdout items returns ``no_calibration_or_holdout``.
-
-    ``calibration_labels_dir`` gates ``selection_disjointness`` as :func:`resolve_operating_point`
-    does.
+    Each item is one reference instance matched to one prediction, ``{"image_id",
+    "is_true_positive", "is_pred_positive"}``. The holdout passes when Cohen's kappa over its items
+    is above zero and above ``classifier_agreement_floor``, and when its present-scoped per-image
+    positive-count bias is equivalent to zero at ``count_bias_tolerance_frac`` of the typical
+    positive count. Both sides must carry positive evidence and the holdout at least two items over
+    at least two images.
     """
-    if validated_reference not in accepted_references("annotations"):
-        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
-                         f"got {validated_reference!r}")
-    trait = latest_confirmed(trait_name, project).entry
-    if not calibration_items or not holdout_items:
-        return {
-            "validated_against": VALIDATED_FALSE, "passed": False,
-            "failures": ["no_calibration_or_holdout"],
-            "gate_evidence": {"note": "classifier calibration requires both calibration and holdout items"},
-        }
-
-    adjudication_ok = adjudication_covered is None or (
-        all(adjudication_covered(r) for r in calibration_items)
-        and all(adjudication_covered(r) for r in holdout_items)
-    )
-
-    cal_ids = {it["image_id"] for it in calibration_items if "image_id" in it}
-    hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
-    disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
-
-    # Each item list is grouped by image_id once and the grouping reused below (content-overlap's
-    # bbox fingerprint and the per-image bias stats), never re-grouped a second time.
-    def _group_by_image(items: list[dict]) -> dict[str | None, list[dict]]:
-        by_image: dict[str | None, list[dict]] = {}
-        for it in items:
-            by_image.setdefault(it.get("image_id"), []).append(it)
-        return by_image
-
-    def _content_record(image_id: str | None, items: list[dict]) -> dict:
-        # a classifier item is one object, never a crowd region
-        return build_coco_image_record(0, 0, [
-            gt_record(xywh(*it["bbox"]), 1 if it["is_true_positive"] else 0, False)
-            for it in items], [], image_id=image_id)
-
-    cal_by_image = _group_by_image(calibration_items)
-    hold_by_image = _group_by_image(holdout_items)
-    content = _content_overlap(
-        [_content_record(iid, its) for iid, its in cal_by_image.items()],
-        [_content_record(iid, its) for iid, its in hold_by_image.items()])
-    td = _train_disjointness(experiment_id, cal_ids, hold_ids, project=project,
-                             calibration_labels_dir=calibration_labels_dir)
-    sd = _selection_disjointness(experiment_id, cal_ids, hold_ids, project=project,
-                                 calibration_labels_dir=calibration_labels_dir)
-
-    cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
-    hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
-    # "not yet authored for this trait" falls back to the platform's interim default fraction,
-    # the same shape `agreement_floor` below resolves its own kappa floor with.
-    count_bias_tolerance_frac = (
-        trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
-        else _DEFAULT_COUNT_BIAS_TOLERANCE_FRAC)
-    # Per-image mean count-bias (mean+SE equivalence, as the detection path gates on), present-
-    # scoped like typical_positive_count below: an all-negative image would dilute the measured bias.
-    per_image_bias = []
-    for its in hold_by_image.values():
-        n_pred_pos = sum(1 for it in its if it["is_pred_positive"])
-        n_true_pos = sum(1 for it in its if it["is_true_positive"])
-        if n_true_pos or n_pred_pos:
-            per_image_bias.append(n_pred_pos - n_true_pos)
-    n_bias_images = len(per_image_bias)
-    count_bias = statistics.fmean(per_image_bias) if per_image_bias else 0.0
-    # Sample stdev (ddof=1/Bessel's correction), matching the detection path's
-    # np.std(biases, ddof=1) exactly: a population estimator is systematically more
-    # permissive, worst at small n, which is exactly where the equivalence test's SE penalty
-    # must bite hardest.
-    count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
-    # The same relative-tolerance shape the detection path uses, the positive class's own typical
-    # per-image count, reusing `hold_by_image` rather than a second pass over `holdout_items`.
-    typical_positive_count = mean_of_present_counts(
-        sum(1 for it in its if it["is_true_positive"]) for its in hold_by_image.values())
-    count_bias_ok = _bias_equivalence_ok(
-        count_bias, count_bias_std, n_bias_images,
-        tolerance_frac=count_bias_tolerance_frac, typical_count=typical_positive_count)
-
-    kappa = _classification_kappa(holdout_items)
-    # kappa is None only when the holdout is degenerate (a single class throughout), a real
-    # reference for a trait with two states should not be, so treat that as a failure to derive
-    # rather than a pass. Two floors: kappa > 0 is the universal,
-    # domain-input-free minimum (better than pure chance, a classifier that flips a full 40% of
-    # calls symmetrically, net count-bias ~0, clears this alone at kappa=0.2, exactly the
-    # compensating-error case this check exists to catch); `agreement_floor` is the trait's own
-    # authored bar (`TraitEntry.classifier_agreement_floor`), falling back to the platform's
-    # interim default only when the trait hasn't set one.
-    agreement_floor = (
-        trait.classifier_agreement_floor
-        if trait.classifier_agreement_floor is not None else _DEFAULT_KAPPA_FLOOR)
-    compensating_error_ok = kappa is not None and kappa > 0.0 and kappa > agreement_floor
+    by_image: dict[str, list[dict]] = {}
+    for it in hold_items:
+        by_image.setdefault(it["image_id"], []).append(it)
+    biases = [sum(i["is_pred_positive"] for i in its) - sum(i["is_true_positive"] for i in its)
+              for its in by_image.values()
+              if any(i["is_pred_positive"] or i["is_true_positive"] for i in its)]
+    mean = statistics.fmean(biases) if biases else 0.0
+    std = statistics.stdev(biases) if len(biases) > 1 else 0.0
+    typical = mean_of_present_counts(sum(i["is_true_positive"] for i in its)
+                                     for its in by_image.values())
+    bias_ok, tolerance = _bias_equivalence(
+        mean, std, len(biases), tolerance_frac=cast(float, entry.count_bias_tolerance_frac),
+        typical_count=typical)
+    kappa = _classification_kappa(hold_items)
+    floor = cast(float, entry.classifier_agreement_floor)
 
     failures: list[str] = []
-    if not adjudication_ok:
-        failures.append("insufficient_adjudication_coverage")
-    if not disjoint:
-        failures.append("not_disjoint")
-    if content["shared"]:
-        failures.append("content_shared_with_calibration")
-    if td["unresolvable"]:
-        failures.append("train_disjointness_unresolvable")
-    if td["leaked_groups"] or td["leaked_stems"]:
-        failures.append("train_disjointness_leaked")
-    if sd["applicable"] and sd["unresolvable"]:
-        failures.append("selection_disjointness_unresolvable")
-    if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
-        failures.append("selection_disjointness_leaked")
-    if cal_pos == 0:
+    if not any(it["is_true_positive"] for it in cal_items):
         failures.append("insufficient_calibration_positive_evidence")
-    if hold_pos == 0:
+    if not any(it["is_true_positive"] for it in hold_items):
         failures.append("insufficient_holdout_positive_evidence")
-    if len(holdout_items) < 2:
+    if len(hold_items) < 2:
         failures.append("insufficient_holdout_items")
-    if n_bias_images < 2:
-        # Same minimum the detection path requires (hb["n_present"] < 2, present-scoped like
-        # n_bias_images): without this, a single-image holdout forces count_bias_std to 0.0
-        # (no images to vary across), so the equivalence test's SE penalty vanishes and a lone
-        # image can pass at exactly the tolerance with zero uncertainty discount.
+    if len(biases) < 2:
         failures.append("insufficient_holdout_images")
-    if not count_bias_ok:
-        failures.append("count_bias_exceeds_tolerance")
-    if not compensating_error_ok:
-        failures.append("compensating_error_floor_failed")
-    passed = not failures
-
-    gate_evidence = {
-        "content_overlap_frac": content["content_overlap_frac"],
-        "content_shared_with_calibration": content["shared"],
-        "train_disjointness": td, "selection_disjointness": sd, "disjoint": disjoint,
-        "adjudication_covered": adjudication_ok,
-        "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
-        "count_bias_tolerance_frac": count_bias_tolerance_frac,
-        "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
-                                             else "default"),
-        "typical_positive_count": typical_positive_count,
-        # Never the bare "count_bias_tolerance" name for this derived value: reusing the authored
-        # value's own name would silently swap what the same key means. Deliberately not named to
-        # match the detector path's "pooled_count_bias_tolerance" either: this sidecar has no
-        # "pooled" vs "per-class" split to distinguish from, so it needs its own name.
-        "count_bias_tolerance_absolute": _effective_count_bias_tolerance(
-            count_bias_tolerance_frac, typical_positive_count, n_bias_images),
-        "kappa": kappa, "kappa_floor": agreement_floor,
-        "kappa_floor_source": ("trait" if trait.classifier_agreement_floor is not None
-                               else "default"),
-        "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
+    if not bias_ok:
+        failures.append("positive_count_bias_exceeds_tolerance")
+    if kappa is None or kappa <= 0.0 or kappa <= floor:
+        failures.append("classifier_agreement_below_floor")
+    evidence = {
+        "kappa": kappa, "kappa_floor": floor, "positive_count_bias": mean,
+        "positive_count_bias_std": std, "positive_count_bias_images": len(biases),
+        "typical_positive_count": typical, "positive_count_bias_tolerance": tolerance,
+        "n_calibration": len(cal_items), "n_holdout": len(hold_items),
     }
-    return {
-        "validated_against": validated_reference if passed else VALIDATED_FALSE,
-        "passed": passed, "failures": failures, "gate_evidence": gate_evidence,
-    }
+    return evidence, failures
 
 
-def _resolve_scalar_operating_point(
-    trait_name: str,
-    *,
-    project: Path,
-    criterion: str,
-    criteria: dict[str, Callable[[Any, Any], float | None]],
-    true_key: str,
-    pred_key: str,
-    floor_field: str,
-    default_floor: float,
-    calibration_items: list[dict] | None,
-    holdout_items: list[dict] | None,
-    experiment_id: str | None,
-    validated_reference: str,
-    calibration_labels_dir: str | None = None,
-) -> dict:
-    """The calibration gate for a per-image scalar prediction (one rank or one continuous value
-    per image, one CSV row per image stem) against a locked cal/holdout split: disjointness,
-    train-disjointness, then a derived compensating-error floor on the holdout-only criterion
-    score, under the criterion toolkit ``criteria`` and the ``TraitEntry`` floor field named.
-    ``criterion`` must already be a key of ``criteria``.
-
-    The criterion score is computed on holdout only. A holdout of fewer than 2 items still gets a
-    score attempt and fails through ``insufficient_holdout_items``/``criterion_undefined``.
-    ``project`` is the one whose trait and runs it reads.
-    """
-    trait = latest_confirmed(trait_name, project).entry
-    if not calibration_items or not holdout_items:
-        return {
-            "validated_against": VALIDATED_FALSE, "passed": False,
-            "failures": ["no_calibration_or_holdout"],
-            "gate_evidence": {"criterion": criterion,
-                           "note": "calibration requires both calibration and holdout items"},
-        }
-
-    cal_ids = {it["image_id"] for it in calibration_items if "image_id" in it}
-    hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
-    disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
-    # Reuses the shared train-disjointness primitive (stems/groups, no bbox). `_content_overlap`
-    # fingerprints bbox content, which ordinal/regression items (one scalar each) carry none of.
-    td = _train_disjointness(experiment_id, cal_ids, hold_ids, project=project,
-                             calibration_labels_dir=calibration_labels_dir)
-    sd = _selection_disjointness(experiment_id, cal_ids, hold_ids, project=project,
-                                 calibration_labels_dir=calibration_labels_dir)
-
+def scalar_criterion(hold_items: list[dict], *, score: Callable[[Any, Any], float | None],
+                     floor: float, criterion: str) -> tuple[dict, list[str]]:
+    """A per-image scalar prediction's held-out skill: ``criterion``'s ``score`` over the holdout
+    items' ``(predicted, true)`` values must be finite, above zero and above ``floor``.
+    ``(evidence, failures)``."""
     import torch
 
-    holdout_true = torch.tensor([float(it[true_key]) for it in holdout_items])
-    holdout_pred = torch.tensor([float(it[pred_key]) for it in holdout_items])
-    score = criteria[criterion](holdout_pred, holdout_true)
-
-    floor_authored = getattr(trait, floor_field)
-    floor = floor_authored if floor_authored is not None else default_floor
-    floor_source = "trait" if floor_authored is not None else "default"
-    # A non-finite score compares false against every bound, so it is its own failure.
-    score_state = non_finite_state(score) if isinstance(score, float) else None
-    comparable = score is not None and score_state is None
-    # score > 0.0 is the domain-input-free minimum (beat the criterion's chance baseline); floor
-    # is the trait's authored bar or the platform's interim default, as in the kappa check.
-    compensating_error_ok = comparable and score is not None and score > 0.0 and score > floor
-
+    true = torch.tensor([float(it["true"]) for it in hold_items])
+    predicted = torch.tensor([float(it["predicted"]) for it in hold_items])
+    value = score(predicted, true) if hold_items else None
+    state = non_finite_state(value) if isinstance(value, float) else None
     failures: list[str] = []
-    if not disjoint:
-        failures.append("not_disjoint")
-    if td["unresolvable"]:
-        failures.append("train_disjointness_unresolvable")
-    if td["leaked_groups"] or td["leaked_stems"]:
-        failures.append("train_disjointness_leaked")
-    if sd["applicable"] and sd["unresolvable"]:
-        failures.append("selection_disjointness_unresolvable")
-    if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
-        failures.append("selection_disjointness_leaked")
-    if len(holdout_items) < 2:
+    if len(hold_items) < 2:
         failures.append("insufficient_holdout_items")
-    if score is None:
+    if value is None:
         failures.append("criterion_undefined")
-    elif score_state is not None:
+    elif state is not None:
         failures.append("criterion_not_finite")
-    elif not compensating_error_ok:
-        failures.append("compensating_error_floor_failed")
-    passed = not failures
-
-    gate_evidence = {
-        "criterion": criterion, **stored_number("score", score),
-        "floor": floor, "floor_source": floor_source,
-        "disjoint": disjoint, "train_disjointness": td, "selection_disjointness": sd,
-        "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
-    }
-    return {
-        "validated_against": validated_reference if passed else VALIDATED_FALSE,
-        "passed": passed, "failures": failures, "gate_evidence": gate_evidence,
-    }
+    elif not (value > 0.0 and value > floor):
+        failures.append("criterion_below_floor")
+    evidence = {"criterion": criterion, **stored_number("score", value), "floor": floor,
+                "n_holdout": len(hold_items)}
+    return evidence, failures
 
 
-def resolve_ordinal_operating_point(
-    trait_name: str,
-    *,
-    project: Path,
-    criterion: str,
-    num_ranks: int,
-    calibration_items: list[dict] | None = None,
-    holdout_items: list[dict] | None = None,
-    experiment_id: str | None = None,
-    validated_reference: str = VALIDATED_HELD_OUT,
-    calibration_labels_dir: str | None = None,
-) -> dict:
-    """Ordinal-mode calibration gate for a trait's rank prediction.
+def spatial_disjointness(spatial: dict, rects: Sequence[tuple[int, int, int, int]]) -> list[str]:
+    """The reference rects (full-mosaic pixel coordinates) not held out from training under a
+    within-image split's persisted regions (``spatial``, a run's ``data.split.spatial_manifest``):
+    each rect must lie inside one of its ``val_region``/``test_region``/``calibration_region``
+    rects and overlap none of its ``train_region`` rects. A manifest missing any of those four keys
+    refuses naming it."""
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
 
-    ``criterion`` is required (see ``ORDINAL_CRITERIA`` for the registered toolkit); a name no
-    registered ordinal criterion carries raises ``ValueError`` before any other work. It is scored
-    over ``num_ranks``, the producing run's own rank count.
-
-    Each item in ``calibration_items``/``holdout_items`` is one image's rank prediction:
-    ``{"image_id": str, "true_rank": int, "predicted_rank": int}``. Returns the shape
-    :func:`resolve_classifier_operating_point` does, for ``ordinal_operating_point.json``
-    (:func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`).
-
-    ``calibration_labels_dir`` gates ``selection_disjointness`` as :func:`resolve_operating_point`
-    does; ``None`` when the caller's CSV directory holds no labels directory to state.
-
-    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
-    """
-    if criterion not in ORDINAL_CRITERIA:
-        raise ValueError(
-            f"criterion {criterion!r} is not a registered ordinal criterion "
-            f"({sorted(ORDINAL_CRITERIA)}); register a new criterion function in ORDINAL_CRITERIA "
-            "before calibrating with it.")
-    if validated_reference not in accepted_references("annotations"):
-        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
-                         f"got {validated_reference!r}")
-    return _resolve_scalar_operating_point(
-        trait_name, project=project, criterion=criterion,
-        criteria={criterion: lambda pred, gt: ORDINAL_CRITERIA[criterion](pred, gt, num_ranks)},
-        true_key="true_rank", pred_key="predicted_rank", floor_field="ordinal_agreement_floor",
-        default_floor=_DEFAULT_ORDINAL_AGREEMENT_FLOOR,
-        calibration_items=calibration_items, holdout_items=holdout_items,
-        experiment_id=experiment_id, validated_reference=validated_reference,
-        calibration_labels_dir=calibration_labels_dir,
-    )
-
-
-def resolve_regression_operating_point(
-    trait_name: str,
-    *,
-    project: Path,
-    criterion: str,
-    calibration_items: list[dict] | None = None,
-    holdout_items: list[dict] | None = None,
-    experiment_id: str | None = None,
-    validated_reference: str = VALIDATED_HELD_OUT,
-    calibration_labels_dir: str | None = None,
-) -> dict:
-    """Regression-mode calibration gate for a trait's continuous-value prediction.
-
-    ``criterion`` is required: ``r_squared`` and ``concordance_correlation_coefficient`` (see
-    ``REGRESSION_CRITERIA``) measure different things (R²: overall predictive skill vs. a trivial
-    mean baseline, unbounded below; CCC: a bounded precision/accuracy decomposition). A name no
-    registered regression criterion carries raises ``ValueError`` before any other work.
-
-    Each item in ``calibration_items``/``holdout_items`` is one image's value prediction:
-    ``{"image_id": str, "true_value": float, "predicted_value": float}``. Returns the shape
-    :func:`resolve_classifier_operating_point` does, for ``regression_operating_point.json``
-    (:func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`).
-
-    ``calibration_labels_dir`` gates ``selection_disjointness`` as
-    :func:`resolve_ordinal_operating_point` states.
-
-    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
-    """
-    if criterion not in REGRESSION_CRITERIA:
-        raise ValueError(
-            f"criterion {criterion!r} is not a registered regression criterion "
-            f"({sorted(REGRESSION_CRITERIA)}); register a new criterion function in "
-            "REGRESSION_CRITERIA before calibrating with it.")
-    if validated_reference not in accepted_references("annotations"):
-        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
-                         f"got {validated_reference!r}")
-    return _resolve_scalar_operating_point(
-        trait_name, project=project, criterion=criterion, criteria=REGRESSION_CRITERIA,
-        true_key="true_value", pred_key="predicted_value", floor_field="regression_skill_floor",
-        default_floor=_DEFAULT_REGRESSION_SKILL_FLOOR,
-        calibration_items=calibration_items, holdout_items=holdout_items,
-        experiment_id=experiment_id, validated_reference=validated_reference,
-        calibration_labels_dir=calibration_labels_dir,
-    )
+    missing = [k for k in ("train_region", "val_region", "test_region", "calibration_region")
+               if k not in spatial]
+    if missing:
+        raise ValueError(f"the run's spatial manifest records no {missing}: the partition it "
+                         "certifies is not stated whole, so containment cannot be checked.")
+    train = [tuple(r) for r in spatial["train_region"]]
+    held = [tuple(r) for key in ("val_region", "test_region", "calibration_region")
+            for r in spatial[key]]
+    return sorted(str(list(rect)) for rect in rects
+                  if not any(rect_contains_rect(h, rect) for h in held)
+                  or any(rects_overlap(t, rect) for t in train))

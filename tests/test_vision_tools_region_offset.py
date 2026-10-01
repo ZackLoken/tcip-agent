@@ -105,7 +105,8 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
 
-    staged = json_io.read_annotations(tmp_path / "predictions" / "patch" / "region.json")
+    staged = json_io.read_annotations(
+        tmp_path / "predictions" / "patch" / "region" / "region.json")
     assert len(staged) == 1
     pts = [p for ring in staged[0].geometry.rings for p in ring]
     assert pts

@@ -91,7 +91,7 @@ def _loader(task: str, root: Path):
 def _targets(task: str, root: Path) -> dict:
     """Each admitted image's target, read off the loader the ordinary producer builds."""
     loader = _loader(task, root)
-    return {loader.member_of(key): loader[i][1] for i, key in enumerate(loader.stems)}
+    return {loader.sample_of(key).member: loader[i][1] for i, key in enumerate(loader.stems)}
 
 
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: Path):
@@ -449,8 +449,10 @@ def test_a_partial_publish_records_the_documents_written_and_the_error(
     """The bucket publisher's partial write leaves its failed line with the documents written and
     the error, and nothing else beyond the one fact naming its own act."""
     pytest.importorskip("torch")
+    import tcip_mcp.pipelines.postprocessing.export as export
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.dataset_layout import prediction_root
+    from tcip_mcp.pipelines.execution import Stated
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     root = _dataset(tmp_path)
@@ -459,31 +461,32 @@ def test_a_partial_publish_records_the_documents_written_and_the_error(
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, **kw):
+        def predict_batch(self, paths, execution=None, **kw):
             return [{"image": p, "width": IMG, "height": IMG, "boxes": [BOX], "scores": [0.9],
-                     "labels": [1], "count": 1} for p in paths]
+                     "labels": [1], "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", Detector)
-    real_write = itools.write_predictions_json
+    real_encode = export.encode_predictions
     calls: list[str] = []
 
-    def failing_second_write(json_path, result, **kwargs):
-        calls.append(str(json_path))
+    def failing_second_document(result, **kwargs):
+        calls.append(str(result["image"]))
         if len(calls) == 2:
             raise OSError("disk full")
-        return real_write(json_path, result, **kwargs)
+        return real_encode(result, **kwargs)
 
-    monkeypatch.setattr(itools, "write_predictions_json", failing_second_write)
+    monkeypatch.setattr(export, "encode_predictions", failing_second_document)
     ckpt = foreign_checkpoint(tmp_path)
     with pytest.raises(OSError):
         itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
-                             output_dir=str(prediction_dir(root, "detector", DATE)), tile=False)
+                             output_dir=str(prediction_root(root) / "detector" / DATE),
+                             stated=Stated(tile=False))
 
     failed = {row["tool"]: row for row in _rows(root) if row["status"] == "failed"}
     published = failed["prediction_bucket_published"]["arguments"]
     assert set(published) - {"predictions_dir"} == {"written", "error"}
-    assert [Path(p).name for p in published["written"]] == ["tree_01.json"]
+    assert published["written"] == ["tree_01"]
     assert isinstance(published["error"], str) and published["error"]
 
 
@@ -608,7 +611,8 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_p
 
     target = _targets("detection", root)["tree_01"]
     assert target["iscrowd"].tolist() == [0, 1]
-    tiled = TiledDetectionDataset(_loader("detection", root), tile_size=IMG, overlap=0.0)
+    tiled = TiledDetectionDataset(_loader("detection", root), tile_size=IMG, overlap=0.0,
+                                  sliver_frac=0.5)  # stated: one box derives no spread
     assert tiled.num_samples == 1  # tree_01, whole, in its one tile
     assert tiled[0][1]["iscrowd"].tolist() == [0, 1]
     assert tiled.class_distribution == {0: 1}  # the one object; the crowd region is none

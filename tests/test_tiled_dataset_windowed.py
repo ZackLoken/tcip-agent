@@ -75,7 +75,8 @@ def _tiff_project(tmp_path: Path, height: int = 200, width: int = 200, dtype=np.
 
 def _tiled(images_dir, labels_dir, **kwargs) -> TiledDetectionDataset:
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
-    return TiledDetectionDataset(base, tile_size=64, overlap=0.2, **kwargs)
+    # sliver_frac stated: one labeled box derives no size spread.
+    return TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=0.5, **kwargs)
 
 
 def _only_source(ds) -> str:
@@ -154,7 +155,7 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     assert all(isinstance(s, str) and all(isinstance(v, int) for v in box)
                for s, box in entries)
     assert entries[0] == (_only_source(ds), (0, 0, 64, 64))
-    assert ds.member_of(entries[0][0]) == "img0"
+    assert ds.sample_of(entries[0][0]).member == "img0"
     assert entries == [(e["stem"], e["slice"]) for e in ds._index]
 
 
@@ -189,7 +190,7 @@ def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch
         raise AssertionError("construction must not open a raster backend for photographic sources")
 
     monkeypatch.setattr(raster_source, "open_raster", _refuse)
-    ds = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
+    ds = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=0.5)
     assert len(ds) == 16
 
 

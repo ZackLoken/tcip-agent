@@ -739,19 +739,16 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
     assert second["statuses"]["IMG_A.JPG"] == "partial"
 
 
-def test_load_derives_subjects_excludes_a_bucket_sidecar(
+def test_load_derives_subjects_excludes_a_bucket_record(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A bucket's own provenance stamp is not a per-image label: it must not seed the draft
+    """A file named as a bucket's own record is not a per-image label: it must not seed the draft
     registry, and it is not reported under unreadable either, since it was never meant to be read
     as one."""
-    from tcip_mcp.pipelines.resolution import write_sidecar
-
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
-    write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None,
-                       "scope": {"subject": "bud", "attribute": None}}, project=tmp_path)
+    (ann / "bucket.json").write_text('{"scope": {"subject": "bush"}}', encoding="utf-8")
 
     load = client.get(
         "/api/subjects/load",

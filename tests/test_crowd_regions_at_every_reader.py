@@ -3,7 +3,7 @@
 Each fixture is written through the platform's own label writer and read back through the
 reader under test: the loaders and their crop, the trainer's and the validation loss's hand-off
 to the heads, the model contract's overfit probe, the completeness digest, review
-materialization, and the operating point's cap, size and spacing. Where a reader forms a number
+materialization, and the assessment's cap, size, spacing and merge threshold. Where a reader forms a number
 from objects, the same records with and without crowd regions must give the same number.
 """
 
@@ -21,7 +21,6 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
-from tests._regime_fixtures import tiled_regime  # noqa: E402
 
 SUBJECT = "bur"
 IMG = 100
@@ -211,10 +210,21 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
 
 
 def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
-    from tcip_mcp.pipelines.operating_point import _max_dets_from_density
+    """The cap derives from each reference document's foreground count, which a crowd region
+    beside the objects leaves unchanged."""
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.splits import count_label_lines
+    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
 
-    assert _max_dets_from_density(_records(tmp_path, crowd=True)) == _max_dets_from_density(
-        _records(tmp_path, crowd=False)) == 100
+    counts = {}
+    for crowd in (True, False):
+        path = tmp_path / f"cap_{crowd}.json"
+        anns = [Annotation(subject=SUBJECT, geometry=OBJECT)] + (
+            [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3 if crowd else [])
+        json_io.write_annotations(path, anns, IMG, IMG)
+        counts[crowd] = count_label_lines(path, ClassScope(subject=SUBJECT))
+    assert counts[True] == counts[False] == 1
+    assert derive_max_dets_from_counts([counts[True]]) == 100
 
 
 def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
@@ -292,6 +302,10 @@ def test_the_classification_projections_keep_the_crowd_flag(tmp_path: Path):
     assert matches["tp"] == [] and matches["fp"] == [] and matches["fn"] == []
 
 
+CENTER = {"kind": "center_match", "tolerance": 5.0}
+"""A center match at a 5 px tolerance."""
+
+
 def _center_records(tmp_path: Path) -> list[dict]:
     """Nine images holding a crowd region alone with a detection inside it, and one image whose
     one object nothing detected, each written and read back through the label document."""
@@ -315,7 +329,8 @@ def _center_records(tmp_path: Path) -> list[dict]:
 def test_an_ignored_detection_is_no_present_image_observation(tmp_path: Path):
     from tcip_mcp.pipelines.training.evaluation import _count_stats_at_conf
 
-    stats = _count_stats_at_conf(_center_records(tmp_path), tolerance=5.0, conf=0.5, class_id=None)
+    stats = _count_stats_at_conf(_center_records(tmp_path), criterion=CENTER, conf=0.5,
+                                 class_id=None)
     assert (stats["tp"], stats["fp"], stats["fn"]) == (0, 0, 1)
     assert stats["n_present"] == 1
     assert stats["count_bias_mean_present"] == -1.0
@@ -328,9 +343,8 @@ def test_the_governing_center_count_is_the_count_statistics_own(tmp_path: Path):
     # A detection whose center sits 6.4 px from the object's: outside the tolerance, a miss.
     records.append(records[-1] | {"dt": [{"category_id": 1, "bbox": [12.0, 12.0, 15.0, 15.0],
                                          "score": 0.9}]})
-    stats = _count_stats_at_conf(records, tolerance=5.0, conf=0.5, class_id=None)
-    counts = governing_counts(records, {"kind": "center_match", "tolerance": 5.0},
-                              conf_threshold=0.5)
+    stats = _count_stats_at_conf(records, criterion=CENTER, conf=0.5, class_id=None)
+    counts = governing_counts(records, CENTER, conf_threshold=0.5)
     assert {k: counts[k] for k in ("tp", "fp", "fn")} == {k: stats[k] for k in ("tp", "fp", "fn")}
     assert counts["recall"] == round(stats["recall"], 6)
 
@@ -338,9 +352,17 @@ def test_the_governing_center_count_is_the_count_statistics_own(tmp_path: Path):
 def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path: Path):
     """Both sides of the triage's count are objects: a crowd region beside the one matching
     detection is no surplus, and a reference holding crowd regions alone is no missed image."""
+    pytest.importorskip("torch")
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.vision_tools import get_worst_predictions
+    from tests._chain_fixtures import published
 
     preds, labels = tmp_path / "preds", tmp_path / "labels"
+    published(tmp_path, preds, [{"image": "a.png", "width": IMG, "height": IMG,
+                                 "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]],
+                                 "scores": [0.9], "labels": [1]}],
+              scope={"subject": SUBJECT, "attribute": None, "id_map": {SUBJECT: 0}})
+    # Crowd regions beside the detection, as an edit in place would leave them.
     json_io.write_annotations(preds / "a.json", [
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),
         *[Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)] * 5], IMG, IMG)
@@ -349,23 +371,19 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path:
     json_io.write_annotations(labels / "b.json",
                               [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)], IMG, IMG)
 
-    result = get_worst_predictions(str(preds), str(labels))
+    result = get_worst_predictions(read_bucket(preds), str(labels))
     assert result["worst_images"] == [{"stem": "a", "error_score": 0.1}]
 
 
-def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: Path):
-    """The operating point derives its localization spacing and its cross-tile NMS from the
+def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: Path):
+    """An assessment derives its localization spacing and its cross-tile merge threshold from the
     objects of the calibration reference: stacked crowd regions beside them move neither."""
     from tests import _trait_fixtures as fx
 
-    from types import SimpleNamespace
-
-    from tcip_mcp.pipelines.calibration import resolve_pass_merge
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
-    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
-
-    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
+    from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
+    from tcip_mcp.pipelines.training.evaluation import (
+        gt_objects, localization_frac, records_from_annotation,
+    )
 
     def records(crowd: bool) -> list[dict]:
         out = []
@@ -380,19 +398,11 @@ def test_the_resolved_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: 
                                                width=IMG, height=IMG)[1])
         return out
 
-    resolved = [resolve_operating_point(fx.COUNT_TRAIT, project=tmp_path, dataset_hash="h",
-                                        **tiled_regime(),
-                                        calibration_records=records(crowd))
-                for crowd in (True, False)]
-    with_crowd, without = (bundle.get("localization_tolerance_frac") for bundle in resolved)
-    assert without.source == "derived", without
-    assert with_crowd.value == without.value
-
-    slicing = tiled_regime()["slicing"]
-    merges = []
-    for crowd in (True, False):
-        p = SimpleNamespace(slicing=slicing, cross_tile_nms=resolve_cross_tile_nms(None, slicing))
-        resolve_pass_merge(p, [record["gt"] for record in records(crowd)])
-        merges.append(p.cross_tile_nms)
-    assert merges[1].source == "derived", merges[1]
-    assert merges[0].value == merges[1].value
+    boxes = {crowd: [[a["bbox"] for a in gt_objects(r)] for r in records(crowd)]
+             for crowd in (True, False)}
+    with_crowd, without = (localization_frac(fx.COUNT_SPEC, boxes[c]) for c in (True, False))
+    assert without[1] == "GT nearest-neighbor spacing (p10 + margin)", without
+    assert with_crowd == without
+    merges = [derive_cross_tile_nms(boxes[c], metric="IOU") for c in (True, False)]
+    assert merges[1] is not None
+    assert merges[0] == merges[1]

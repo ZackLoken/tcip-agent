@@ -21,8 +21,8 @@ from tcip_mcp.experiments import SWEEP_FILE, TRIAL_DIR_PREFIX
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.split_construction import ResolvedRun, resolve_run, split_seed
+from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.model_build import run_task
-from tcip_mcp.pipelines.resolution import DEFAULT_POSTPROCESS
 
 logger = logging.getLogger(__name__)
 
@@ -658,7 +658,7 @@ def monitor_training(project: Path, experiment_id: str | None = None,
                           "experiment_id=None sweep_id=None"}
 
     observation = experiments.find_observation(experiment_id, project=project)
-    if observation is None or observation.record["config"] is None:
+    if observation is None:
         return {"error": f"Run not found: {experiment_id}"}
     disk = experiments.run_summary(observation,
                                    experiments.read_rows(observation.metrics_log)[0])
@@ -686,7 +686,7 @@ def monitor_training(project: Path, experiment_id: str | None = None,
 def _all_training_runs(project: Path) -> list[dict[str, Any]]:
     """Every training run of the project (:func:`experiments.run_summary`)."""
     return [experiments.run_summary(obs, experiments.read_rows(obs.metrics_log)[0])
-            for obs in experiments.training_runs(project)]
+            for obs in experiments.run_observations(project)]
 
 
 def list_launchable_configs(project: Path) -> list[dict]:
@@ -698,7 +698,7 @@ def list_launchable_configs(project: Path) -> list[dict]:
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     rows = []
-    for obs in experiments.training_runs(project):
+    for obs in experiments.run_observations(project):
         config = obs.record["config"]
         rows.append({
             "experiment_id": obs.directory.name,
@@ -752,7 +752,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.pipelines.data.selection import read_selection_checked
 
-    runs = experiments.training_runs(project)
+    runs = experiments.run_observations(project)
     own = next((obs for obs in runs if obs.directory.name == experiment_id), None)
     if own is None:
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -907,7 +907,7 @@ def inspect_compute_resources(project: Path) -> dict:
         ``gpus``: ``[{index, free_bytes, total_bytes}, ...]``, always populated when CUDA is
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
         ``active_training_runs``: count of every training run whose state is ``"running"``
-            (``experiments.training_runs``).
+            (``experiments.run_observations``).
     """
     cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
     memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}
@@ -931,7 +931,7 @@ def inspect_compute_resources(project: Path) -> dict:
     except Exception:
         logger.info("GPU visibility unavailable", exc_info=True)
 
-    active = sum(1 for obs in experiments.training_runs(project) if obs.state == "running")
+    active = sum(1 for obs in experiments.run_observations(project) if obs.state == "running")
 
     return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
 
@@ -1850,16 +1850,12 @@ def evaluate_model(
     experiment_id_or_ckpt: str,
     images_dir: str,
     labels_dir: str = "",
-    conf_threshold: float | None = None,  # report/select at the ship point
+    stated: Stated | None = None,
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
-    max_dets: int | None = None,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
-    cross_tile_nms: float | None = None,
-    postprocess: str = DEFAULT_POSTPROCESS,
     trait: str | None = None,
-    selection_dir: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and return the result.
 
@@ -1877,7 +1873,7 @@ def evaluate_model(
       * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a tile-trained
       checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Tile
       geometry is resolved from the checkpoint's own persisted or native-frame training geometry,
-      or an explicit override; a checkpoint with none of those refuses (see
+      or the stated one; a checkpoint with none of those refuses (see
       ``run_full_frame_evaluation``).
 
     Args:
@@ -1889,37 +1885,22 @@ def evaluate_model(
         labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
             path (classification/ordinal/regression, one row per image stem); the task is the
             checkpoint's own.
-        conf_threshold: Operating confidence for P/R/F1. ``None`` (default) resolves to the
-            platform default (``DEFAULT_CONF``) on every regime; an explicit value is honored
-            verbatim.
+        stated: The execution values to state rather than derive (``execution.Stated``): the
+            operating ``conf`` and detection cap ``max_dets`` P/R/F1 are reported at, and on the
+            delivery-grade path the ``tile_size``, ``overlap``, ``postprocess`` and
+            ``cross_tile_nms``. The resolved record, each value's source with it, is returned under
+            ``execution``.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
             instance_seg, 'bbox' otherwise.
-        max_dets: Full-frame/COCOeval detection cap. ``None`` (default) resolves per-regime, 100
-            (the COCOeval ``maxDets`` convention) on the tile-level diagnostic path, 1000
-            (``DEFAULT_MAX_DETS``) on the delivery-grade ``use_tiled_inference`` path. An explicit
-            value is honored verbatim on both paths; the delivery-grade path stamps a per-image
-            ``cap_hit``/``max_dets_cap_saturated_frac``.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
             tile-level eval. None + a run id reuses the run's training tiling; None + a checkpoint
             path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
-        cross_tile_nms: Cross-tile merge threshold (tiled paths only). ``None`` (default)
-            resolves to the platform default (``DEFAULT_NMS_IOU``); an explicit value is honored
-            verbatim. The model's own NMS stays as the checkpoint's builder constructed it.
-        postprocess: Cross-tile merge, one of ``resolution.CROSS_TILE_MERGES``.
         trait: When set, the derived localization criterion of the trait's latest confirmed
             revision (traits.py, e.g. a count trait's center-match) governs the reported count
             and the selection f1; AP@0.5 (``iou_threshold``) is kept as a labeled comparability
             metric. Absent -> the IoU convention governs.
-        selection_dir: Score the checkpoint over this selection's ``calibration`` samples whose
-            label documents live under ``labels_dir`` instead of the whole directory, refusing by
-            name the way the calibration door does (detection/instance_seg only, and not combined
-            with ``use_tiled_inference``), with a floor of one foreground group. The result then
-            carries ``selection_dir`` and the evaluated stem count, the
-            loader's own count, refused by name (naming the difference and the remedy) when the
-            loader admits fewer than the universe the selection drew; omitted, the whole directory
-            is scored.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -1929,12 +1910,7 @@ def evaluate_model(
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
-    from tcip_mcp.pipelines.resolution import applied_operating_point
-
-    # The tile-level/single-pass paths apply this directly below; the full-frame path resolves
-    # its own sentinels internally, so its own caller passes the raw arguments through unchanged.
-    applied_conf, _applied_max_dets = applied_operating_point(conf_threshold, None)
+    from tcip_mcp.pipelines.execution import prepare_pass
 
     from tcip_mcp.operationalization import OperationalizationRefused, latest_confirmed
     from tcip_mcp.traits import TraitUnknownError
@@ -1967,41 +1943,15 @@ def evaluate_model(
     except (UnregisteredCheckpoint, ValueError) as exc:
         return {"error": str(exc)}
     run_tiling = checkpoint.data_config.get("tiling")
+    stated = stated or Stated()
 
-    selection_stems: list[str] | None = None
-    selection_samples: dict[str, Any] = {}
-    if selection_dir is not None:
-        if use_tiled_inference:
-            return {"error": "selection_dir is not combined with use_tiled_inference: that "
-                             "delivery-grade path scans images_dir/labels_dir on its own, never "
-                             "narrowed to a selection's samples."}
-        from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.data.splits import selection_calibration_universe
-
-        selection = read_selection(selection_dir, project=project)
-        try:
-            (selection_stems, _group_by, _group_key_map, _excluded, _counts,
-             selection_samples) = selection_calibration_universe(
-                selection, labels_dir, scope, min_foreground_groups={"calibration": 1})
-        except ValueError as exc:
-            return {"error": str(exc)}
-
-    # Delivery-grade full-frame path: conf_threshold/cross_tile_nms/max_dets pass through exactly
-    # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
     if use_tiled_inference and task == "detection":
-        tcfg = tiling or run_tiling or {}
-        # tile_size/overlap pass through as None-if-absent: run_full_frame_evaluation itself
-        # resolves them from persisted training geometry (or refuses), never this wrapper fabricating.
         from tcip_annotation.json_io import UnreadableLabelDocument
 
         try:
             return run_full_frame_evaluation(
-                checkpoint, images_dir, labels_dir,
-                conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-                tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
-                cross_tile_nms=cross_tile_nms, postprocess=postprocess,
-                max_dets=max_dets, trait=trait_entry,
-            )
+                checkpoint, images_dir, labels_dir, stated=stated, iou_threshold=iou_threshold,
+                trait=trait_entry)
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
 
@@ -2011,25 +1961,22 @@ def evaluate_model(
     if task != "detection":
         tiling = None
 
-    # The checkpoint's own predictor, built once: the width it reads images at sizes the loader and
-    # its model scores them, at the operating point it was built with (score_threshold unstated).
+    # The checkpoint's own untiled pass: the width its predictor reads images at sizes the loader,
+    # and its execution record governs the model that scores them.
     try:
-        predictor = build_predictor(checkpoint, score_threshold=None)
+        pass_ = prepare_pass(checkpoint, stated.model_copy(update={"tile": False}))
     except ValueError as exc:
         return {"error": str(exc)}
+    predictor = pass_.predictor
 
-    evaluated_stem_count = None
     try:
-        if selection_stems is not None:
-            measured_samples = [selection_samples[s] for s in selection_stems]
-        else:
-            # Through the producer, over the ground truth this door was pointed at, so the door
-            # and a run over the same data admit one membership.
-            from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
+        # Through the producer, over the ground truth this door was pointed at, so the door and a
+        # run over the same data admit one membership.
+        from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 
-            admitted = admit(images_dir, labels_dir, scope=scope)
-            require_admitted(admitted)
-            measured_samples = admitted.every_sample()
+        admitted = admit(images_dir, labels_dir, scope=scope)
+        require_admitted(admitted)
+        measured_samples = admitted.every_sample()
         # Read at the width the predictor reads at: the model scores these tensors, so a loader
         # sized off the references instead would hand it images of another shape.
         dataset = build_dataset(
@@ -2038,33 +1985,10 @@ def evaluate_model(
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
-    if selection_stems is not None:
-        from tcip_mcp.pipelines.data.datasets import indexed_sample_keys
-
-        # Admission answers for the samples; this answers for the loader built from them, which
-        # tiling can leave naming no example at all for a held-out source.
-        retained = indexed_sample_keys(dataset)
-        dropped = sorted(s for s in selection_stems
-                         if selection_samples[s].identity not in retained)
-        if dropped:
-            return {"error": f"the selection's calibration universe under {labels_dir!r} holds "
-                             f"{len(selection_stems)} sample(s), and the loader indexes nothing "
-                             f"for {len(dropped)} of them ({dropped[:5]}). This run's tiling keeps "
-                             "no tile of those sources, so the measurement would be taken over "
-                             "part of the universe the draw held out and reported as the whole of "
-                             "it. Widen the tiling's keep regions, stop skipping empty tiles, or "
-                             "evaluate untiled."}
-        evaluated_stem_count = len(retained)
-
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # 100 is the COCOeval maxDets convention for this tile-level/diagnostic regime, distinct
-    # from the delivery-grade path's 1000 above; an explicit caller max_dets is honored verbatim.
-    resolved_max_dets = 100 if max_dets is None else max_dets
-    return run_test_evaluation(
-        checkpoint, predictor.model, loader, device,
-        conf_threshold=applied_conf, iou_threshold=iou_threshold,
-        iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait_entry,
-        selection_dir=selection_dir,
-        evaluated_stem_count=evaluated_stem_count,
-    )
+    try:
+        return run_test_evaluation(
+            pass_, loader, device, iou_threshold=iou_threshold, iou_type=iou_type, tiling=tiling, trait=trait_entry)
+    except ValueError as exc:
+        return {"error": str(exc)}

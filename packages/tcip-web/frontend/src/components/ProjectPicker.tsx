@@ -14,7 +14,7 @@ import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import {
   defaultDate,
-  modelsForDate,
+  bucketsForDate,
   openProjectById,
   openWorkspaceProject,
   subjectsForDate,
@@ -213,7 +213,7 @@ export function ProjectPicker() {
   const [selected, setSelected] = useState<string | null>(null);
   const [date, setDate] = useState("");
   const [subject, setSubject] = useState("");
-  const [model, setModel] = useState("");
+  const [bucket, setBucket] = useState("");
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [removalTarget, setRemovalTarget] = useState<OpenableProject | null>(null);
@@ -226,25 +226,25 @@ export function ProjectPicker() {
     const d = defaultDate(p.dates);
     setDate(d);
     setSubject(subjectsForDate(p, d)[0] ?? "");
-    setModel(modelsForDate(p, d)[0] ?? "");
+    setBucket(Object.values(bucketsForDate(p, d))[0] ?? "");
     setOpenError(null);
   }
 
-  // Changing date re-scopes the subject/model choices to that date's data: keep the current
+  // Changing date re-scopes the subject/bucket choices to that date's data: keep the current
   // pick if it's still valid there, else fall to the first available (or none).
   function chooseDate(p: ProjectSummary, newDate: string) {
     setDate(newDate);
     const subjects = subjectsForDate(p, newDate);
-    const models = modelsForDate(p, newDate);
+    const buckets = Object.values(bucketsForDate(p, newDate));
     setSubject((prev) => (subjects.includes(prev) ? prev : (subjects[0] ?? "")));
-    setModel((prev) => (models.includes(prev) ? prev : (models[0] ?? "")));
+    setBucket((prev) => (buckets.includes(prev) ? prev : (buckets[0] ?? "")));
   }
 
   async function openProject(
     p: OpenableProject,
     chosenDate: string,
     chosenSubject: string,
-    chosenModel: string,
+    chosenBucket: string,
   ) {
     if (openedRef.current) return;
     if (!chosenDate) {
@@ -257,7 +257,7 @@ export function ProjectPicker() {
     setOpening(true);
     setOpenError(null);
     try {
-      await openWorkspaceProject(p, chosenDate, chosenSubject, chosenModel);
+      await openWorkspaceProject(p, chosenDate, chosenSubject, chosenBucket);
     } catch (e) {
       openedRef.current = false;
       setOpenError(String(e));
@@ -422,7 +422,7 @@ export function ProjectPicker() {
                           {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
                         </span>
                         <span>
-                          {p.models.length} model{p.models.length === 1 ? "" : "s"}
+                          {Object.values(p.prediction_dirs).flatMap(Object.keys).length} bucket(s)
                         </span>
                       </div>
                       <span className="text-[10px] text-tcip-muted">
@@ -475,20 +475,24 @@ export function ProjectPicker() {
                           <span className="tcip-label">Model</span>
                           <select
                             className="tcip-select"
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
+                            value={bucket}
+                            onChange={(e) => setBucket(e.target.value)}
                           >
                             <option
                               value=""
                               aria-label={
-                                modelsForDate(p, date).length ? "no model chosen" : undefined
+                                Object.keys(bucketsForDate(p, date)).length
+                                  ? "no model chosen"
+                                  : undefined
                               }
                             >
-                              {modelsForDate(p, date).length ? UNSET_GLYPH : "no preds"}
+                              {Object.keys(bucketsForDate(p, date)).length
+                                ? UNSET_GLYPH
+                                : "no preds"}
                             </option>
-                            {modelsForDate(p, date).map((m) => (
-                              <option key={m} value={m}>
-                                {m}
+                            {Object.entries(bucketsForDate(p, date)).map(([name, dir]) => (
+                              <option key={dir} value={dir}>
+                                {name}
                               </option>
                             ))}
                           </select>
@@ -499,7 +503,7 @@ export function ProjectPicker() {
                         <button
                           className="tcip-btn-primary flex-1"
                           disabled={opening || !date}
-                          onClick={() => openProject(p, date, subject, model)}
+                          onClick={() => openProject(p, date, subject, bucket)}
                         >
                           {opening
                             ? "Opening…"

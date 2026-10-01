@@ -7,11 +7,9 @@ golden carrying a shape no producer writes is caught here.
 
 from __future__ import annotations
 
-from tcip_mcp.pipelines.data import selection, splits
+from tcip_mcp.pipelines.data import selection
 
-from tests.test_experiment_validations import _real_selection_disjointness
-from tests.test_experiment_validations import _row as validation_row
-from tests.test_store_contract import LOCK_IDENTITY, REGISTERED
+from tests.test_store_contract import REGISTERED
 
 
 def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_side(tmp_path):
@@ -44,54 +42,30 @@ def test_the_selection_golden_carries_each_sample_s_own_source_label_group_and_s
     assert set(golden) == set(fresh)
 
 
-def test_the_cal_holdout_lock_golden_carries_every_key_the_resolver_writes(tmp_path):
-    import tcip_store as ts
+def test_the_delivery_events_golden_carries_every_key_a_delivery_records(tmp_path):
+    """A real delivery through the chain's own producers leaves an event whose keys, and whose
+    bucket finding's keys, are exactly the golden's."""
+    import pytest
 
-    splits.resolve_locked_cal_holdout_split(
-        ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=tmp_path)
-    fresh = ts.read(splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=tmp_path))
-    golden = REGISTERED["cal_holdout_split_lock"].golden
-    assert isinstance(golden, dict)
-
-    assert set(golden) == set(fresh) == {
-        "identity_hash", "calibration", "holdout", "group_by", "group_key_map", "seed",
-        "holdout_ratio", "redraw_history",
-    }
-
-
-def test_the_shared_validation_row_fixtures_selection_disjointness_is_the_resolvers_own(tmp_path):
-    row = validation_row(tmp_path)
-    assert row["selection_disjointness"] == _real_selection_disjointness(tmp_path)
-    assert len(row["selection_disjointness"]) == 11, (
-        "the resolver produces eleven keys, never a four-key shape")
-
-
-def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tmp_path):
-    """Re-derives the shape from ``calibrate_physical_scale`` itself, the smallest producer that
-    writes a ``resolve_scale.json``, rather than checking the golden only against itself."""
-    from tcip_mcp.pipelines.resolution import read_scale_sidecar
-    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+    pytest.importorskip("torch")
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     from tests import _trait_fixtures as fx
-    from tests.test_delivery_gate import _author_scale_tolerance, _calibration_setup
+    from tests._chain_fixtures import run_the_chain
 
-    fx.seed_delivery_traits(tmp_path)
-    _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
-        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
-    calibrate_physical_scale(
-        tmp_path, trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
-        reference_csv=ref_csv, group_key_map=group_key_map)
-
-    fresh = read_scale_sidecar(pred_dir)
-    golden = REGISTERED["resolve_scale_sidecar"].golden
+    chain = run_the_chain(tmp_path, experiment_id="exp-golden-event")
+    delivered = deliver_per_image_counts(tmp_path, predictions_dir=str(chain.bucket),
+                                         output_path=str(tmp_path / "out.csv"),
+                                         trait=fx.COUNT_TRAIT)
+    assert "error" not in delivered, delivered
+    (event,) = read_delivery_events(tmp_path)
+    fresh = event.model_dump(mode="json")
+    golden = REGISTERED["delivery_events"].golden
     assert isinstance(golden, dict)
     assert set(golden) == set(fresh)
-
-    scale_golden, scale_fresh = golden["operating_point"]["scale"], fresh["operating_point"]["scale"]
-    assert set(scale_golden) == set(scale_fresh)
-    assert "unit" in scale_golden and "units" not in scale_golden
+    assert set(golden["buckets"][0]) == set(fresh["buckets"][0])
+    assert set(golden["producer"]) == set(fresh["producer"])
 
 
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(

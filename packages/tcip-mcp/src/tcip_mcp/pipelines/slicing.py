@@ -4,10 +4,9 @@ SAHI detection model, and the one cross-tile merge every tiled path runs."""
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import sahi
 from sahi.models.base import DetectionModel
 from sahi.postprocess.backends import set_postprocess_backend
 from sahi.postprocess.combine import PostprocessPredictions
@@ -16,7 +15,9 @@ from sahi.prediction import ObjectPrediction
 from sahi.slicing import get_slice_bboxes
 
 from tcip_annotation.mask_contours import mask_to_polygon_rings
-from tcip_mcp.pipelines.resolution import cross_tile_merge_rule
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.execution import Execution
 
 CLASS_AGNOSTIC = False
 """Whether the cross-tile merge compares detections across classes; it never does."""
@@ -43,8 +44,9 @@ def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
 
 
 def prediction_rows(predictions: list[ObjectPrediction]) -> list[dict]:
-    """Shifted full-frame predictions as plain rows (xyxy ``bbox``, ``category_id``, ``score``,
-    ``segmentation`` polygons or ``None``), the form a paused pass records them in."""
+    """Full-frame predictions as plain rows (xyxy ``bbox``, ``category_id``, ``score``,
+    ``segmentation`` polygons or ``None``): the one projection a paused pass records and a detection
+    record is built from."""
     return [{"bbox": [float(v) for v in p.bbox.to_xyxy()], "category_id": p.category.id,
              "score": float(p.score.value),
              "segmentation": p.mask.segmentation if p.mask else None} for p in predictions]
@@ -57,27 +59,16 @@ def predictions_from_rows(rows: list[dict], full_shape: list[int]) -> list[Objec
                              full_shape=full_shape if r["segmentation"] else None) for r in rows]
 
 
-def cross_tile_merge(postprocess: str, cross_tile_nms: float) -> PostprocessPredictions:
-    """The SAHI postprocess ``postprocess`` names, at ``cross_tile_nms`` over its own metric and
-    class-aware, on SAHI's numpy backend, so the merge leaves the process environment as it
-    found it."""
-    kind, metric = cross_tile_merge_rule(postprocess)
+def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
+    """The SAHI postprocess a tiled execution record names, at its threshold over its own match
+    metric and class-aware, on SAHI's numpy backend, so the merge leaves the process environment
+    as it found it."""
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
-    return POSTPROCESS_NAME_TO_CLASS[kind](
-        match_threshold=cross_tile_nms, match_metric=metric, class_agnostic=CLASS_AGNOSTIC)
-
-
-def slicing_record(overlap: float, tile_resize: tuple[int, int] | None, postprocess: str) -> dict:
-    """What a tiled pass ran beside its tile edge and merge threshold: the overlap, the per-slice
-    resize, the merge type and metric, class agnosticism and the ``sahi`` version."""
-    kind, metric = cross_tile_merge_rule(postprocess)
-    return {
-        "overlap": float(overlap),
-        "tile_resize": list(tile_resize) if tile_resize is not None else None,
-        "postprocess": postprocess, "merge_type": kind, "match_metric": metric,
-        "class_agnostic": CLASS_AGNOSTIC, "sahi_version": sahi.__version__,
-    }
+    assert execution.merge_type is not None, "a tiled record names its merge"
+    return POSTPROCESS_NAME_TO_CLASS[execution.merge_type](
+        match_threshold=execution.cross_tile_nms, match_metric=execution.match_metric,
+        class_agnostic=CLASS_AGNOSTIC)
 
 
 class TcipDetectionModel(DetectionModel):
@@ -87,17 +78,18 @@ class TcipDetectionModel(DetectionModel):
     through the predictor's own tensor conversion; ``tile_resize`` stretches a slice PIL represents
     faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and a batch
     holding a slice PIL does not represent logs that the resize was skipped for it. Detections
-    the predictor's score threshold keeps become ``ObjectPrediction``s clipped to the slice, each
-    mask cut at ``mask_binarize``'s value into the rings
+    scoring at least ``conf`` (all of them for ``None``) become ``ObjectPrediction``s clipped to
+    the slice, each mask cut at ``mask_binarize``'s value into the rings
     :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` extracts when ``collect_masks``.
     ``mask_binarize`` is the threshold's provenance, kept whole on the model it cut masks for.
     """
 
     def __init__(
-        self, predictor: Any, *, tile_resize: tuple[int, int] | None,
+        self, predictor: Any, *, conf: float | None, tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None, collect_masks: bool, mask_binarize: dict,
     ) -> None:
         self._predictor = predictor
+        self._conf = conf
         self._tile_resize = tile_resize
         self._band_interpretations = band_interpretations
         self.collect_masks = collect_masks
@@ -153,7 +145,8 @@ class TcipDetectionModel(DetectionModel):
         per_image: list[list[ObjectPrediction]] = []
         for (out, ((sx, sy), h, w)), shift, full in zip(
                 self._original_predictions, shift_amount_list, full_shape_list):
-            keep = self._predictor._kept_by_score(out["scores"])
+            keep = (out["scores"] >= self._conf if self._conf is not None
+                    else torch.ones_like(out["scores"], dtype=torch.bool))
             boxes = out["boxes"][keep].cpu().numpy().astype(np.float64)
             boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]] / sx, 0, w)
             boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]] / sy, 0, h)

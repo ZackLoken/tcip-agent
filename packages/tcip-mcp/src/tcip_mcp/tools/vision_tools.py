@@ -28,13 +28,14 @@ from tcip_annotation.viz import (
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import Rect
 
@@ -216,9 +217,10 @@ def visualize(
     path: str,
     task: str = "detect",
     class_names: str = "",
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
     iou_threshold: float = 0.5,
     n: int = 16,
+    predictions_dir: str = "",
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
@@ -247,22 +249,26 @@ def visualize(
         task: 'detect' or 'segment'.
         class_names: Comma-separated class names (e.g. "fruit,shoot").
         conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
-            and the predictions matched against GT (source='comparison'). Defaults to the shared
-            ``DEFAULT_CONF``.
+            and the predictions matched against GT (source='comparison'). Defaults to the review
+            filter ``matching.REVIEW_CONF_FLOOR``.
         iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
+        predictions_dir: The published bucket whose document for the image is rendered
+            (source='predictions' and 'comparison', where it is required).
     """
     if source == "annotations":
         return _viz_annotations(project, path, task=task, class_names=class_names)
+    if source in ("predictions", "comparison") and not predictions_dir:
+        return {"error": f"source={source!r} requires predictions_dir, the published bucket "
+                         "whose predictions to render."}
     if source == "predictions":
         return _viz_predictions(
-            project, path, task=task, class_names=class_names, conf_threshold=conf_threshold
-        )
+            project, path, predictions_dir, task=task, class_names=class_names,
+            conf_threshold=conf_threshold)
     if source == "comparison":
         return _viz_comparison(
-            project, path, task=task, iou_threshold=iou_threshold, class_names=class_names,
-            conf_threshold=conf_threshold,
-        )
+            project, path, predictions_dir, task=task, iou_threshold=iou_threshold,
+            class_names=class_names, conf_threshold=conf_threshold)
     if source == "dataset":
         return _viz_dataset_sample(project, path, n=n, task=task, class_names=class_names)
     return {
@@ -327,34 +333,39 @@ def _viz_annotations(
     }
 
 
+def _bucket_document(project: Path, predictions_dir: str, image_path: str):
+    """``(document path or None, class scope)`` for ``image_path`` in the published bucket at
+    ``predictions_dir``; a directory that is no bucket, or whose record will not read, refuses
+    (``ValueError``)."""
+    from tcip_mcp.buckets import read_bucket
+
+    bucket = read_bucket(Path(project, predictions_dir))
+    return bucket.document(image_path), bucket.scope
+
+
 def _viz_predictions(
     project: Path,
     image_path: str,
+    predictions_dir: str,
     task: str = "detect",
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render model predictions on a single image. See ``visualize``.
+    """Render a bucket's predictions on a single image. See ``visualize``.
 
-    Under a classified bucket (its own recorded ``bucket_scope``), the legend keys each
-    detection by its decoded value, not the object class every one of them shares.
+    Under a classified bucket (the scope its record states), the legend keys each detection by
+    its decoded value, not the object class every one of them shares.
     """
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    stem = img.stem
-    from tcip_mcp.dataset_layout import find_prediction
-    from tcip_mcp.pipelines.resolution import bucket_scope
-
-    pred_file = find_prediction(image_path)
-    if pred_file is None:
-        return {"error": f"No predictions found for {stem}"}
-
     try:
+        pred_file, scope = _bucket_document(project, predictions_dir, image_path)
+        if pred_file is None:
+            return {"error": f"No predictions found for {img.stem} in {predictions_dir}"}
         preds = read_predictions(str(pred_file))
-        scope = bucket_scope(Path(pred_file).parent)
-    except (UnreadableLabelDocument, ts.StoreError) as exc:
+    except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
@@ -389,10 +400,11 @@ def _viz_predictions(
 def _viz_comparison(
     project: Path,
     image_path: str,
+    predictions_dir: str,
     task: str = "detect",
     iou_threshold: float = 0.5,
     class_names: str = "",
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
     """Render GT vs prediction comparison with match indicators. See ``visualize``.
 
@@ -401,8 +413,7 @@ def _viz_comparison(
     (:func:`_legend_name`).
     """
     from tcip_annotation.matching import compute_matches
-    from tcip_mcp.dataset_layout import find_gt_label, find_prediction
-    from tcip_mcp.pipelines.resolution import bucket_scope
+    from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
     if not img.is_file():
@@ -420,14 +431,16 @@ def _viz_comparison(
         return {"error": str(exc)}
     gt_dicts = [_box_dict(a, index) for a in gt]
 
-    pred_file = find_prediction(image_path)
+    try:
+        pred_file, scope = _bucket_document(project, predictions_dir, image_path)
+    except ValueError as exc:
+        return {"error": str(exc)}
     pred_dicts: list[dict] = []
     tp_matches: list[dict] = []
     if pred_file is not None:
         try:
             preds = _boxable(read_predictions(str(pred_file)))
-            scope = bucket_scope(Path(pred_file).parent)
-        except (UnreadableLabelDocument, ts.StoreError) as exc:
+        except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
         pred_dicts = [_box_dict(a, index, scope=scope) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
@@ -454,30 +467,23 @@ def _viz_comparison(
     }
 
 
-def get_worst_predictions(
-    predictions_dir: str,
-    labels_dir: str,
-    top_k: int = 8,
-) -> dict:
+def get_worst_predictions(bucket: Bucket, labels_dir: str, top_k: int = 8) -> dict:
     """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
     no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)``, purely
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
-    at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched).
+    at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched). Only
+    the documents the bucket's record names are ranked; a labeled image it names none for was not
+    predicted, and is listed under ``not_predicted`` rather than scored.
 
     Args:
-        predictions_dir: Directory with per-image JSON prediction files
-            (``<stem>.json``) written by run_inference / the review engine.
+        bucket: The published bucket whose recorded documents are ranked.
         labels_dir: Directory with per-image JSON ground-truth label files.
         top_k: Number of worst images to return.
     """
-    pred_path = Path(predictions_dir)
     gt_path = Path(labels_dir)
-
-    if not pred_path.is_dir():
-        return {"error": f"Predictions directory not found: {predictions_dir}"}
     if not gt_path.is_dir():
         return {"error": f"Labels directory not found: {labels_dir}"}
 
@@ -485,7 +491,7 @@ def get_worst_predictions(
 
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
-    for pred_file in prediction_documents(pred_path):
+    for pred_file in bucket.document_paths:
         preds = detection_annotations(pred_file)
         gt_anns = detection_annotations(gt_path / pred_file.name)
 
@@ -501,20 +507,14 @@ def get_worst_predictions(
         error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
         scores.append((pred_file.stem, error_score))
 
-    # Also include GT images with no predictions at all (completely missed)
-    for gt_file in prediction_documents(gt_path):
-        pred_file = pred_path / gt_file.name
-        if not pred_file.is_file():
-            gt_anns = detection_annotations(gt_file)
-            if gt_anns:
-                scores.append((gt_file.stem, len(gt_anns) * 3.0))
-
     scores.sort(key=lambda x: x[1], reverse=True)
     worst = scores[:top_k]
 
     return {
         "worst_images": [{"stem": s, "error_score": round(sc, 3)} for s, sc in worst],
         "total_evaluated": len(scores),
+        "not_predicted": [f.stem for f in prediction_documents(gt_path)
+                          if f.stem not in bucket.documents],
     }
 
 
@@ -538,13 +538,19 @@ def render_failure_cases(
     Returns a grid image and individual failure case images.
 
     Args:
-        predictions_dir: Directory with prediction files.
+        predictions_dir: The published bucket whose documents are ranked and rendered.
         labels_dir: Directory with ground-truth label files.
         images_dir: Directory with source images. Auto-detected if empty.
         task: 'detect' or 'segment'.
         top_k: Number of worst cases to render.
         class_names: Comma-separated class names.
     """
+    from tcip_mcp.buckets import read_bucket
+
+    try:
+        bucket = read_bucket(Path(project, predictions_dir))
+    except ValueError as exc:
+        return {"error": str(exc)}
     # Auto-detect images_dir
     if not images_dir:
         from tcip_mcp.dataset_layout import image_root
@@ -557,7 +563,7 @@ def render_failure_cases(
             return {"error": "images_dir not specified and could not be auto-detected"}
 
     try:
-        worst = get_worst_predictions(predictions_dir, labels_dir, top_k=top_k)
+        worst = get_worst_predictions(bucket, labels_dir, top_k=top_k)
     except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
     if "error" in worst:
@@ -583,12 +589,12 @@ def render_failure_cases(
         idx, index = _subject_indexer()
 
         gt_file = Path(labels_dir) / label_filename(stem)
-        pred_file = Path(predictions_dir) / label_filename(stem)
+        pred_file = bucket.document(bucket.documents[stem]) if stem in bucket.documents else None
         try:
             gt_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
                         if gt_file.is_file() else [])
             pred_dicts = ([_box_dict(a, index) for a in _boxable(read_predictions(str(pred_file)))]
-                          if pred_file.is_file() else [])
+                          if pred_file is not None else [])
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 

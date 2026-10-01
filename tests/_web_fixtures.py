@@ -24,3 +24,19 @@ def open_new_project(path: Path) -> Path:
 
     asyncio.run(store.open_project(new_project(path)))
     return path
+
+
+BROWSER = {"Origin": "http://127.0.0.1"}
+"""The Origin a browser on the backend's own page sends, which an acknowledgment requires."""
+
+
+def acknowledged_post(client, url: str, body: dict, *, reason: str):
+    """Post ``body`` to ``url`` as a breeder ships an unvalidated result from the screen: refused
+    first, then posted again from the browser acknowledging, for ``reason``, the result the
+    refusal names; the second response."""
+    refused = client.post(url, json=body)
+    assert refused.status_code == 400, refused.text
+    digest = refused.json()["detail"]["result_sha256"]
+    assert digest is not None, refused.text
+    return client.post(url, headers=BROWSER, json={**body, "acknowledgment": {
+        "reason": reason, "result_sha256": digest}})

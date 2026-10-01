@@ -1,23 +1,17 @@
-"""The ``delivery_events`` record's declared shape.
+"""The declared shapes of a delivery event record and of the acknowledgment it may ship under.
 
-``DeliveryEventRecord.plant_mapping`` carries one of three disclosure shapes, or ``None``: a walked
-capture mapping's :class:`PlantMappingDisclosure`, a whole-raster frame's
-:class:`PlantRegistryDisclosure` (the nearest-neighbor regime of
-``deliver_orthomosaic_plant_counts``), or that door's canopy-segment regime's
-:class:`CanopySegmentDisclosure`. No two of the three declare the same required key set (the
-registry form has ``nn_tolerance_m``, the canopy form ``canopy_segments``, the mapping form
-``name``), so with an extra key forbidden on every one a stored dict validates against at most one,
-with no discriminator field.
-
-Every model forbids an undeclared key, so a stored record or disclosure carrying one is refused by
-name.
+``DeliveryEventRecord.plant_mapping`` is one of three disclosures or ``None``; no two declare the
+same required key set, so with an undeclared key forbidden on every model a stored dict validates
+against at most one.
 """
 
 from __future__ import annotations
 
-from typing import Literal, Mapping, Optional, TypeGuard, Union
+from typing import Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
+
+from tcip_mcp.traits import Text
 
 
 class MatchTolerance(BaseModel):
@@ -154,134 +148,64 @@ class CanopySegmentDisclosure(BaseModel):
     plant_attribution: str
 
 
-def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
-    """Whether ``pm`` is a walked-mapping :class:`PlantMappingDisclosure` dict rather than one of
-    the two whole-raster shapes (:class:`PlantRegistryDisclosure`,
-    :class:`CanopySegmentDisclosure`) or neither.
-    """
-    return isinstance(pm, dict) and "name" in pm and "record_sha256" in pm
+class Producer(BaseModel):
+    """The one checkpoint and run behind every delivered bucket
+    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`)."""
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-class DocumentBinding(BaseModel):
-    """One bucket's binding evidence, exactly as ``record_delivery_binding_event`` renders a
-    :class:`tcip_mcp.pipelines.resolution.StampBinding` into each :class:`ReconciledDocument`'s
-    own ``bindings``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ok: bool
-    claimed: bool
+    checkpoint_sha256: str
     experiment_id: Optional[str]
-    producing_experiment_id: Optional[str]
-    checkpoint_sha256: Optional[str]
-    record_digest: Optional[str]
-    note: str
 
 
-class ReconciledDocument(BaseModel):
-    """One sidecar document's reconciled validity, as
-    :func:`tcip_mcp.pipelines.resolution._reconcile_validity` returns it, keyed by the document
-    name.
+class BucketFinding(BaseModel):
+    """What the gate found for one delivered bucket: validated when no reason refuses it."""
 
-    ``bound_validated`` and ``delivery_note`` are set only on the classifier entry: the
-    delivery-level state ``bind_classifier_validity`` returned (the one the gate actually used),
-    kept beside the reconciler's own ``validated`` since the two differ when the binding floors a
-    validated stamp.
-    """
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    model_config = ConfigDict(extra="forbid")
-
-    validated: str
-    on_disk_validated: bool
-    missing_sidecars: list[str]
-    unvalidated_buckets: list[str]
-    binding_notes: dict[str, str]
-    bindings: dict[str, DocumentBinding]
-    conf: Optional[float]
-    confs: dict[str, Optional[float]]
-    per_bucket: dict[str, str]
-    bound_validated: Optional[str] = None
-    delivery_note: Optional[str] = None
+    path: str
+    date: Optional[str]
+    assessment_id: Optional[str]
+    validated: bool
+    reason: Optional[str]
 
 
-class ReconciledDimension(BaseModel):
-    """One geometry or scope dimension's reconciled validity (``claim_scope``, ``tile_size`` or
-    ``scale``), exactly as ``reconcile_claim_scope_validity``, ``reconcile_tile_size_validity``
-    and ``reconcile_scale_validity`` (``resolution.py``) return it. ``validated`` is ``None``
-    when ``operative`` is ``False``: never operative for this delivery, not a failed reference.
-    """
+class Acknowledgment(BaseModel):
+    """The breeder's recorded act of shipping one unvalidated result: its id, who did it and why
+    (both required non-empty; a blank one refuses, ``ValueError``), the digest of the result it was
+    given for, and when it was recorded."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    operative: bool
-    validated: Optional[str]
-    per_bucket: dict[str, str]
-    unvalidated_buckets: list[str]
-    binding_notes: dict[str, str]
+    acknowledgment_id: str
+    acknowledged_by: Text
+    reason: Text
+    result_sha256: str
+    recorded_at: str
 
 
 class DeliveryEventRecord(BaseModel):
-    """The stored per-delivery record: what shipped, under which trait revision and kind, and the
-    real per-bucket verification evidence the delivering door reconciled at the time."""
+    """The stored per-delivery record: what shipped, under which trait revision and kind, from
+    which producer, what the gate found per bucket, and the acknowledgment it shipped under."""
 
     model_config = ConfigDict(extra="forbid")
 
     event_id: str
+    door: str
+    delivery_kind: str
     trait: str
     trait_revision: int
     trait_revision_sha256: str
-    delivery_kind: str
-    door: str
-    output_path: Optional[str]
-    output_sha256: Optional[str]
-    # Who acknowledged this delivery unvalidated, and why: null on both when nothing was
-    # acknowledged, the same pair DeliveryGateResult carries.
-    acknowledged_by: Optional[str]
-    acknowledgment_reason: Optional[str]
+    output_path: str
+    output_sha256: str
+    producer: Producer
+    buckets: list[BucketFinding]
+    scale_assessment_id: Optional[str]
+    validated: bool
+    acknowledgment: Optional[Acknowledgment]
+    population: list[str]
+    require_all_dates_complete: Optional[bool]
     plant_mapping: Optional[
         Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
     ]
-    # Keyed by the reconciler the delivering door's gate ran.
-    document_reconciliations: dict[str, ReconciledDocument]
-    dimension_reconciliations: dict[str, ReconciledDimension]
     produced_at: str
-
-
-class DeliverySupersessionRecord(BaseModel):
-    """One ``delivery_supersessions`` record, as ``supersede_delivery`` writes it: the superseded
-    event's own id and digest, the replacement event when a re-delivery already exists, and the
-    non-empty reason and actor behind the withdrawal."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    superseded_event_id: str
-    output_sha256: Optional[str]
-    replacement_event_id: Optional[str]
-    reason: str
-    superseded_by: str
-    superseded_at: str
-
-
-def with_supersessions(
-    events: list[dict], supersessions: Mapping[str, dict]
-) -> list[dict]:
-    """Every one of ``events`` with its own supersession attached under ``superseded``: the record
-    ``supersede_delivery`` filed against that event's id, or ``None`` when nothing supersedes it.
-
-    ``supersessions`` maps a superseded event's id to its own stored ``delivery_supersessions``
-    record (:func:`tcip_mcp.pipelines.resolution.load_delivery_supersessions`'s own shape).
-    """
-    def _superseded(event: dict) -> dict | None:
-        event_id = event.get("event_id")
-        assert isinstance(event_id, str), "delivery event record is missing its own event_id"
-        return supersessions.get(event_id)
-
-    return [{**event, "superseded": _superseded(event)} for event in events]
-
-
-def validation_error_detail(exc: ValidationError) -> str:
-    """``exc``'s errors rendered as one line."""
-    return "; ".join(
-        f"{'.'.join(str(p) for p in error['loc']) or 'record'}: {error['msg']}"
-        for error in exc.errors()
-    )

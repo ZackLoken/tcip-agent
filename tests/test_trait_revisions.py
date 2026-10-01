@@ -19,9 +19,8 @@ from fastapi.testclient import TestClient
 import tcip_store as ts
 from tcip_mcp import traits
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
-from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
-from tcip_mcp.pipelines.resolution import Acknowledgment, read_delivery_events
+from tcip_mcp.delivery import read_delivery_events
+from tcip_mcp.operationalization import OperationalizationRefused
 from tcip_web.app import app
 from tests import _trait_fixtures as fx
 
@@ -30,7 +29,7 @@ TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 ROUTES_MODULE = REPO_ROOT / "packages" / "tcip-web" / "src" / "tcip_web" / "routes" / "results.py"
 TRAITS_ROUTE = "/api/results/traits"
 CONFIRM_ROUTE = "/api/results/traits/confirm"
-_ACK = Acknowledgment(acknowledged_by="user:tester", reason="no bucket backs these counts")
+_SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
 
 
 @pytest.fixture
@@ -44,15 +43,32 @@ def _count_entry(**fields) -> traits.TraitEntry:
         fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT, **fields)
 
 
+def _bucket(root: Path) -> Path:
+    """``root``'s one unassessed bucket of three detections on one frame, published on first use
+    (``_chain_fixtures.published``)."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import predicted, published
+
+    bucket = root / "ds" / "predictions" / "counts" / "2026-02-11"
+    if not (bucket / "bucket.json").exists():
+        published(root, bucket, [predicted("a", [fx.COUNT_SUBJECT] * 3, _SCOPE["id_map"])],
+                  scope=_SCOPE)
+    return bucket
+
+
 def _deliver_counts(root: Path, name: str) -> dict:
     """One per-image count delivery of the count trait at ``root``, returning its event."""
+    from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
+
+    from tests._chain_fixtures import acknowledged
+
     out = root / f"{name}.csv"
-    export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         revision=confirmed_revision(
-                             traits.PER_IMAGE_COUNT, project=root, trait=fx.COUNT_TRAIT),
-                         acknowledgment=_ACK, project=root)
-    (event,) = [e for e in read_delivery_events(root) if e["output_path"] == str(out)]
-    return event
+    bucket = _bucket(root)
+    acknowledged(root, lambda ack: deliver_per_image_counts_csv(
+        root, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
+        door="test_trait_revisions"), by="user:tester", reason="no assessment backs these counts")
+    (event,) = [e for e in read_delivery_events(root) if e.output_path == str(out)]
+    return event.model_dump(mode="json")
 
 
 def _confirm(client: TestClient, revision: traits.TraitRevision, **extra):
@@ -108,14 +124,15 @@ def test_a_later_proposal_leaves_deliveries_under_the_confirmed_one_until_it_is_
 
     assert (under_second["trait_revision"], under_second["trait_revision_sha256"]) == (
         2, second.entry_sha256)
-    assert [e["trait_revision"] for e in read_delivery_events(tmp_path)
-            if e["output_path"] == str(tmp_path / "under_first.csv")] == [1]
+    assert [e.trait_revision for e in read_delivery_events(tmp_path)
+            if e.output_path == str(tmp_path / "under_first.csv")] == [1]
 
 
 def test_one_confirmation_covers_every_delivery_kind_the_revision_states(tmp_path: Path) -> None:
     """Spec fields and the operationalization text of every kind are one entry and one
     confirmation: confirming revision 1 makes each kind it states deliverable."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.buckets import read_bucket
+    from tests._chain_fixtures import deliver_acknowledged
 
     both = fx.with_operationalization(
         _count_entry(), traits.PER_PLANT_COUNT_AGGREGATE, delivered_phenotypes=("stem_count",),
@@ -123,13 +140,13 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(tmp_pat
     revision = fx.propose_and_confirm(tmp_path, both)
 
     count_event = _deliver_counts(tmp_path, "per_image")
-    export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
-          "measurement_document": "operating_point", "plant_attribution": "image"}],
-        str(tmp_path / "per_plant.csv"), delivered_phenotype="stem_count",
-        acknowledgment=_ACK, project=tmp_path)
+    deliver_acknowledged(
+        tmp_path, [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+                    "plant_attribution": "image"}],
+        tmp_path / "per_plant.csv", "stem_count", delivery_kind=traits.PER_PLANT_COUNT_AGGREGATE,
+        buckets=[read_bucket(_bucket(tmp_path))])
 
-    kinds = {e["delivery_kind"]: e["trait_revision"] for e in read_delivery_events(tmp_path)}
+    kinds = {e.delivery_kind: e.trait_revision for e in read_delivery_events(tmp_path)}
     assert kinds == {traits.PER_IMAGE_COUNT: 1, traits.PER_PLANT_COUNT_AGGREGATE: 1}
     assert count_event["trait_revision_sha256"] == revision.entry_sha256
 

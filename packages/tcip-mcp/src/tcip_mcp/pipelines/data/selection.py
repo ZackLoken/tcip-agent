@@ -2,15 +2,14 @@
 
 A selection lists, per sample, the image source, where that sample's ground truth lives, the group
 key that keeps related samples together, and the side the draw put it on, plus the class space the
-draw admitted under. Every sample sharing a group key is on one side. Two selections overlap when
-they share a group key or a source identity (the source path, and the rect when a sample is a
-region of a larger raster).
+draw admitted under. Every sample sharing a group key is on one side, and so is every sample at
+one location (the source path, and the rect when a sample is a region of a larger raster).
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import tcip_store
@@ -19,10 +18,13 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
 
-SIDES = ("train", "val", "calibration")
-"""The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration``
-builds neither and is the universe a calibration or an evaluation reads its operating point off,
-held out from both training and selection."""
+SIDES = ("train", "val", "calibration", "holdout")
+"""The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration`` and
+``holdout`` build neither and are the reference an assessment fits its operating point on and
+checks it against, held out from both training and selection."""
+
+REFERENCE_SIDES = ("calibration", "holdout")
+"""The two sides an assessment reads."""
 
 DOCUMENT = "document"
 """Ground truth that is one label document per sample, ``<stem>.json``."""
@@ -93,10 +95,11 @@ class Sample:
     ground_truth_digest: str | None = None
 
     @property
-    def identity(self) -> str:
-        """The sample's source identity: its source path, and the rect when it is a region. Two
-        samples with one identity are the same pixels, whatever they are named or which side each
-        landed on.
+    def location(self) -> str:
+        """Where the sample's pixels are: its source path, and the rect when it is a region. The
+        key a dataset indexes the sample by; two samples at one location are one sample, whatever
+        they are named. Two files at different locations may hold the same pixels, which only
+        :func:`source_digests` tells.
         """
         if self.rect is None:
             return self.source
@@ -170,6 +173,21 @@ class ClassScope:
         """Whether this class space classifies its subject along an attribute."""
         return self.attribute is not None
 
+    @property
+    def subjects(self) -> set[str]:
+        """The object classes this class space's detections are of: its map's names for a
+        detector, its one subject for a classified space or a single-subject read."""
+        if self.id_map and not self.classified:
+            return set(self.id_map)
+        return {self.subject} if self.subject else set()
+
+    def positive_id(self, value: str) -> int | None:
+        """The class id this classified space decodes ``value`` under, or ``None`` when it
+        classifies no attribute or its map names no such value."""
+        if not self.classified or not self.id_map or not value:
+            return None
+        return self.id_map.get(value)
+
     def admitted_for(self, shape: str, source: str) -> "ClassScope":
         """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
         under it: per-image label documents are read for a named subject under its class map, and a
@@ -222,24 +240,31 @@ class Selection:
         """How many samples each side holds, every side named even at zero."""
         return {side: sum(1 for s in self.samples if s.side == side) for side in SIDES}
 
-    def groups(self) -> set[str]:
-        return {s.group for s in self.samples}
 
-    def identities(self) -> set[str]:
-        return {s.identity for s in self.samples}
+def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
+    """Each sample's pixel digest, by its location: sha256 over its source file's bytes (each band
+    file of a grouped capture, in band order), each source read once, and its rect when it is a
+    region. Two samples with one digest are the same image whatever their files are named."""
+    import hashlib
 
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_source_path
 
-def overlap(left: Iterable[Sample], right: Iterable[Sample]) -> dict[str, list[str]]:
-    """What two sample sets share: ``{"groups": [...], "identities": [...]}``, each sorted.
-
-    The one disjointness computation. A shared source identity is the same pixels on both sides;
-    a shared group key is a sample whose sibling crops, tiles or captures are on the other side,
-    which leaks just as surely. Empty lists mean the two are disjoint.
-    """
-    left, right = list(left), list(right)
-    shared_groups = {s.group for s in left} & {s.group for s in right}
-    shared_ids = {s.identity for s in left} & {s.identity for s in right}
-    return {"groups": sorted(shared_groups), "identities": sorted(shared_ids)}
+    by_source: dict[str, bytes] = {}
+    out: dict[str, str] = {}
+    for sample in samples:
+        if sample.source not in by_source:
+            source = resolve_source_path(sample.source)
+            files = list(source.bands.values()) if isinstance(source, BandGroupRef) else [source]
+            h = hashlib.sha256()
+            for path in files:
+                h.update(Path(path).read_bytes())
+                h.update(b"\0")
+            by_source[sample.source] = h.digest()
+        h = hashlib.sha256(by_source[sample.source])
+        if sample.rect is not None:
+            h.update(repr(sample.rect).encode("utf-8"))
+        out[sample.location] = h.hexdigest()
+    return out
 
 
 def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
@@ -247,7 +272,7 @@ def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
     missing: a ``rect`` (a within-image region), which no loader honors.
     """
     samples = list(samples)
-    with_rect = [s.identity for s in samples if s.rect is not None]
+    with_rect = [s.location for s in samples if s.rect is not None]
     if with_rect:
         raise ValueError(
             f"{len(with_rect)} sample(s) of this selection name a pixel rect "
@@ -260,16 +285,16 @@ def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
 def refuse_crossing_sides(samples: Sequence[Sample]) -> None:
     """Refuse a sample list whose sides are not a partition, naming what crosses.
 
-    Two things are refused: one source identity on more than one side (the same pixels trained on
-    and selected on), and one group key on more than one side (crops of one parent, or captures of
-    one tree, split across sides, which is the leakage the group key exists to prevent).
+    Two things are refused: one location on more than one side (the same pixels trained on and
+    selected on), and one group key on more than one side (crops of one parent, or captures of one
+    tree, split across sides, which is the leakage the group key exists to prevent).
     """
-    by_identity: dict[str, set[str]] = {}
+    by_location: dict[str, set[str]] = {}
     by_group: dict[str, set[str]] = {}
     for sample in samples:
-        by_identity.setdefault(sample.identity, set()).add(sample.side)
+        by_location.setdefault(sample.location, set()).add(sample.side)
         by_group.setdefault(sample.group, set()).add(sample.side)
-    crossing_ids = sorted(i for i, sides in by_identity.items() if len(sides) > 1)
+    crossing_ids = sorted(i for i, sides in by_location.items() if len(sides) > 1)
     crossing_groups = sorted(g for g, sides in by_group.items() if len(sides) > 1)
     if crossing_ids:
         raise ValueError(
@@ -313,13 +338,6 @@ def selection_key(selection_dir: str | Path) -> Key:
     it.
     """
     return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
-
-
-def selection_path(selection_dir: str | Path) -> Path:
-    """Where a selection's document lives on disk."""
-    key = selection_key(selection_dir)
-    relative: PurePosixPath = _SELECTION_DOC.relative_path(key.root, key.parts)
-    return Path(key.root, *relative.parts)
 
 
 SAMPLE_PATHS: PathFields = (("source",), ("ground_truth",))
@@ -506,17 +524,56 @@ def _read_selection_document(selection_dir: str | Path, project: str | Path) -> 
     return None if document is None else runtime_paths(document, SELECTION_PATHS, project)
 
 
+def digest_bytes(b: bytes) -> str:
+    """One ground-truth record's digest from its bytes, ``sha256(bytes)[:16]``."""
+    import hashlib
+
+    return hashlib.sha256(b).hexdigest()[:16]
+
+
+def ground_truth_digest(path: str | Path) -> str:
+    """One ground-truth file's own digest (:func:`digest_bytes`), whatever shape the file is. A
+    file that is not there raises ``FileNotFoundError`` naming it."""
+    return digest_bytes(Path(path).read_bytes())
+
+
+def ground_truth_digests(paths: Iterable[str]) -> dict[str, str]:
+    """Each named file's own digest, keyed by its path and read once per file however many members
+    that file answers for."""
+    return {path: ground_truth_digest(path) for path in dict.fromkeys(paths)}
+
+
+def moved_ground_truth(recorded: Mapping[str, str]) -> list[str]:
+    """The files among ``recorded`` (each path to the digest recorded for it) that no longer
+    digest to it, a file gone since among them, sorted."""
+    def moved(path: str, digest: str) -> bool:
+        try:
+            return ground_truth_digest(path) != digest
+        except FileNotFoundError:
+            return True
+
+    return sorted(path for path, digest in recorded.items() if moved(path, digest))
+
+
+def selection_digest(selection: Selection, project: str | Path) -> str:
+    """sha256 over the document a selection of ``project`` is stored as
+    (:func:`stored_selection_document`)."""
+    import hashlib
+
+    return hashlib.sha256(RECORD_JSON.encode(stored_selection_document(selection, project))).hexdigest()
+
+
 def with_sides(selection: Selection, assignment: dict[str, str]) -> Selection:
-    """``selection`` with each sample's side replaced by ``assignment[sample.identity]``, for a
+    """``selection`` with each sample's side replaced by ``assignment[sample.location]``, for a
     redraw that repartitions a selection's own members without changing which samples it holds.
-    Refuses an identity the assignment does not name.
+    Refuses a location the assignment does not name.
     """
-    missing = sorted(s.identity for s in selection.samples if s.identity not in assignment)
+    missing = sorted(s.location for s in selection.samples if s.location not in assignment)
     if missing:
         raise ValueError(
             f"the redraw assigns no side to {len(missing)} of the selection's samples "
             f"({missing[:5]}): a redraw states the whole partition it draws.")
     redrawn = tuple(
-        replace(sample, side=assignment[sample.identity]) for sample in selection.samples)
+        replace(sample, side=assignment[sample.location]) for sample in selection.samples)
     refuse_crossing_sides(redrawn)
     return replace(selection, samples=redrawn)

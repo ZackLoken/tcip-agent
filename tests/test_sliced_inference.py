@@ -1,5 +1,5 @@
 """Sliced inference through SAHI: one lattice, one merge, both source kinds, and one execution
-regime from calibration through the stamp a count claim is sealed over."""
+record from the assessment through the bucket published under it."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
+
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 pytest.importorskip("sahi")
 
 TILE = 128
@@ -54,17 +56,29 @@ def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
     return arr
 
 
-def _predictor(checkpoint):
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+def _pass(checkpoint, **stated):
+    """The tiled pass ``checkpoint`` runs at the fixture's tile edge and overlap, merging by NMM
+    at 0.5 and keeping every score, with ``stated`` over those."""
+    from tcip_mcp.pipelines.execution import prepare_pass
 
-    return GenericPredictor(checkpoint, device="cpu", score_threshold=0.0, max_dets=None)
+    values = dict(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm",
+                  cross_tile_nms=0.5, conf=0.0)
+    values.update(stated)
+    return prepare_pass(checkpoint, Stated(**values), device="cpu", tile_batch_size=2)
 
 
-def _sliced(pred, source, **overrides):
-    kwargs = dict(tile_size=TILE, overlap=OVERLAP, postprocess="nmm", cross_tile_nms=0.5,
-                  tile_batch_size=2, tile_resize=None, require_masks=True)
-    kwargs.update(overrides)
-    return pred.predict_sliced(source, **kwargs)
+def _sliced(p, source, *, require_masks: bool = True, **kwargs):
+    return p.predictor.predict_sliced(source, execution=p.execution,
+                                      tile_batch_size=p.tile_batch_size,
+                                      require_masks=require_masks, **kwargs)
+
+
+def _whole(p, source) -> dict:
+    """The untiled record of ``source`` under the pass's own conf and cap."""
+    from tcip_mcp.pipelines.execution import untiled_execution
+
+    return p.predictor.predict(source, untiled_execution(
+        p.checkpoint, conf=p.execution.conf, max_dets=p.execution.max_dets))
 
 
 def _png(directory: Path, arr: np.ndarray, name: str = "frame.png") -> str:
@@ -97,13 +111,13 @@ def test_objects_across_a_seam_predict_once_through_both_source_kinds(tmp_path):
     from tcip_mcp.pipelines.raster_source import open_raster
 
     _path, checkpoint = _checkpoint(tmp_path)
-    pred = _predictor(checkpoint)
+    p = _pass(checkpoint)
     npy = tmp_path / "frame.npy"
     np.save(npy, _frame())
 
-    whole = _sliced(pred, _png(tmp_path, _frame()))
+    whole = _sliced(p, _png(tmp_path, _frame()))
     with open_raster(str(npy), 3) as reader:
-        windowed = _sliced(pred, reader, source_label="frame")
+        windowed = _sliced(p, reader, source_label="frame")
 
     expected = sorted(list(map(float, b)) for b in BLOBS)
     assert whole["tiles"] == windowed["tiles"] == 4
@@ -117,17 +131,17 @@ def test_a_five_band_slice_reaches_the_model_with_every_band(tmp_path):
 
     band_values = [255, 200, 150, 100, 60]
     _path, checkpoint = _checkpoint(tmp_path, in_chans=5)
-    pred = _predictor(checkpoint)
+    p = _pass(checkpoint)
     npy = tmp_path / "five.npy"
     np.save(npy, _frame(bands=5, value=np.asarray(band_values, dtype=np.uint8)))
 
-    whole = _sliced(pred, str(npy))
+    whole = _sliced(p, str(npy))
     with open_raster(str(npy), 5) as reader:
-        _sliced(pred, reader, source_label="five")
+        _sliced(p, reader, source_label="five")
 
-    assert pred.model.seen_channels == [5] * 8
+    assert p.predictor.model.seen_channels == [5] * 8
     expected = pytest.approx([v / 255 for v in band_values], abs=1e-6)
-    assert any(peaks == expected for peaks in pred.model.seen_band_peaks)
+    assert any(peaks == expected for peaks in p.predictor.model.seen_band_peaks)
     assert len(whole["boxes"]) == len(BLOBS)
 
 
@@ -149,7 +163,7 @@ def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_and_clas
     arr[y0:y1, x0:x1, 0] = 255
     arr[y0:y1, x0:x1, 1] = 255
 
-    result = _sliced(_predictor(checkpoint), _png(tmp_path, arr))
+    result = _sliced(_pass(checkpoint), _png(tmp_path, arr))
 
     assert sorted(result["labels"]) == [1, 2]
     # Contours run through pixel centers, so a blob's polygon ends one pixel inside its box.
@@ -158,11 +172,11 @@ def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_and_clas
 
 def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(tmp_path):
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
-    pred = _predictor(checkpoint)
+    p = _pass(checkpoint)
     path = _png(tmp_path, _frame())
 
-    whole = pred.predict(path)
-    sliced = _sliced(pred, path)
+    whole = _whole(p, path)
+    sliced = _sliced(p, path)
 
     assert whole["count"] == sliced["count"] == len(BLOBS)
     assert _mask_extents(whole) == _mask_extents(sliced)
@@ -183,7 +197,7 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(tmp_path)
     path = _png(tmp_path, np.repeat(disk[..., None] * 255, 3, axis=2), "disk.png")
     expected = [[c for point in ring for c in point] for ring in mask_to_polygon_rings(disk)]
 
-    record = _predictor(checkpoint).predict(path)
+    record = _whole(_pass(checkpoint), path)
 
     assert [m["segmentation"] for m in record["masks"]] == [expected]
 
@@ -192,15 +206,15 @@ def test_masks_are_cut_at_the_platform_binarize_threshold_the_record_names(tmp_p
     import importlib
 
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
-    pred = _predictor(checkpoint)
+    p = _pass(checkpoint)
     path = _png(tmp_path, _frame())
     # The package attribute of this name is a same-named function, so the module comes from sys.modules.
     mask_geometry = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
     real = mask_geometry.resolve_binarize_threshold
 
-    assert all(m["segmentation"] for m in pred.predict(path)["masks"])
+    assert all(m["segmentation"] for m in _whole(p, path)["masks"])
     monkeypatch.setattr(mask_geometry, "resolve_binarize_threshold", lambda *a, **k: real(1.5))
-    record = pred.predict(path)
+    record = _whole(p, path)
     assert [m["segmentation"] for m in record["masks"]] == [[]] * len(BLOBS)
     assert record["mask_binarize"]["value"] == 1.5
 
@@ -208,7 +222,7 @@ def test_masks_are_cut_at_the_platform_binarize_threshold_the_record_names(tmp_p
 def test_an_untiled_detector_record_carries_no_masks(tmp_path):
     _path, checkpoint = _checkpoint(tmp_path)
 
-    record = _predictor(checkpoint).predict(_png(tmp_path, _frame()))
+    record = _whole(_pass(checkpoint), _png(tmp_path, _frame()))
 
     assert "masks" not in record and record["count"] == len(BLOBS)
 
@@ -220,7 +234,7 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(tmp_pat
     from tcip_mcp.pipelines.raster_source import open_raster
 
     _path, checkpoint = _checkpoint(tmp_path, with_masks=with_masks)
-    pred = _predictor(checkpoint)
+    p = _pass(checkpoint)
     npy = tmp_path / "frame.npy"
     np.save(npy, _frame())
     recorded: list[dict] = []
@@ -233,16 +247,16 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(tmp_pat
         raise Interrupted
 
     with open_raster(str(npy), 3) as reader:
-        uninterrupted = _sliced(pred, reader)
+        uninterrupted = _sliced(p, reader)
         with pytest.raises(Interrupted):
-            _sliced(pred, reader, progress=record_then_stop)
+            _sliced(p, reader, progress=record_then_stop)
         prior = {field: [v for b in recorded for v in b[field]]
                  for field in ("slices", "predictions")}
-        seen_before = len(pred.model.seen_channels)
-        resumed = _sliced(pred, reader, prior=prior)
+        seen_before = len(p.predictor.model.seen_channels)
+        resumed = _sliced(p, reader, prior=prior)
 
     assert len(prior["slices"]) == 2
-    assert len(pred.model.seen_channels) - seen_before == 2
+    assert len(p.predictor.model.seen_channels) - seen_before == 2
     assert resumed == uninterrupted
     if with_masks:
         assert all(m["segmentation"] for m in resumed["masks"])
@@ -266,12 +280,13 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
                               FRAME, FRAME, keep_empty=True)
     ds = dataset_over("detection", str(images), str(labels), subject="bud",
                       stated={"num_channels": 3},
-                      tiling={"enabled": True, "tile_size": TILE, "overlap": OVERLAP})
+                      tiling={"enabled": True, "tile_size": TILE, "overlap": OVERLAP,
+                              "sliver_frac": 0.5})  # stated: one box derives no spread
 
     _path, checkpoint = _checkpoint(tmp_path)
     recorded: list[list[int]] = []
     with open_raster(str(images / "frame.npy"), 3) as reader:
-        _sliced(_predictor(checkpoint), reader, require_masks=False,
+        _sliced(_pass(checkpoint), reader, require_masks=False,
                 progress=lambda _s, _e, batch: recorded.extend(batch["slices"]))
 
     assert [box for _stem, box in ds.tile_entries] == [tuple(s) for s in recorded]
@@ -279,13 +294,11 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
 
 def test_a_postprocess_outside_the_vocabulary_refuses_by_name(tmp_path):
     _path, checkpoint = _checkpoint(tmp_path)
-    pred = _predictor(checkpoint)
-    path = _png(tmp_path, _frame())
 
     with pytest.raises(ValueError, match="greedynmm"):
-        _sliced(pred, path, postprocess="soft-nms")
-    assert pred.model.seen_channels == []
-    assert len(_sliced(pred, path, postprocess="greedynmm")["boxes"]) == len(BLOBS)
+        _pass(checkpoint, postprocess="soft-nms")
+    admitted = _pass(checkpoint, postprocess="greedynmm")
+    assert len(_sliced(admitted, _png(tmp_path, _frame()))["boxes"]) == len(BLOBS)
 
 
 def test_the_merge_leaves_the_process_environment_as_it_found_it(tmp_path, monkeypatch):
@@ -296,52 +309,49 @@ def test_the_merge_leaves_the_process_environment_as_it_found_it(tmp_path, monke
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     _path, checkpoint = _checkpoint(tmp_path)
 
-    _sliced(_predictor(checkpoint), _png(tmp_path, _frame()), require_masks=False)
+    _sliced(_pass(checkpoint), _png(tmp_path, _frame()), require_masks=False)
 
     assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
 
 def test_a_stated_merge_threshold_never_reaches_the_detectors_own_nms(tmp_path):
-    from tcip_mcp.tools.inference_tools import _prepare_pass
-
     _path, checkpoint = _checkpoint(tmp_path)
-    p = _prepare_pass(
-        checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=True,
-        tile_size=TILE, overlap=OVERLAP, cross_tile_nms=0.9, max_dets=None, postprocess="nms",
-        tile_batch_size=2)
 
-    assert not isinstance(p, str), p
-    assert (p.cross_tile_nms.value, p.cross_tile_nms.source) == (0.9, "explicit")
+    p = _pass(checkpoint, postprocess="nms", cross_tile_nms=0.9)
+
+    assert (p.execution.cross_tile_nms, p.execution.sources["cross_tile_nms"]) == (0.9,
+                                                                                   "explicit")
     assert p.predictor.model.nms_thresh == 0.45
 
 
-def test_each_merge_runs_at_the_threshold_its_own_metric_derives():
+def test_each_merge_runs_at_the_threshold_its_own_metric_derives(tmp_path):
     """A box nested in another overlaps it at IoU 0.25 and IoS 1: suppression by IoU derives a
     threshold the pair stays apart under, merging by IoS one it joins under, each merge running at
     its own metric's value and labeled with that metric."""
     from sahi.prediction import ObjectPrediction
 
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
-    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
-    from tcip_mcp.pipelines.slicing import cross_tile_merge, slicing_record
+    from tcip_mcp.pipelines.slicing import cross_tile_merge
 
+    _path, checkpoint = _checkpoint(tmp_path)
     nested = [[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]]
     merged = {}
     for postprocess, metric in (("nms", "IOU"), ("nmm", "IOS")):
-        param = resolve_cross_tile_nms(None, slicing_record(OVERLAP, None, postprocess), nested)
-        assert param.derived_from == CROSS_TILE_NMS_DERIVATIONS[metric]
+        p = _pass(checkpoint, postprocess=postprocess, cross_tile_nms=None)
+        p.derive_merge(nested)
+        assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS[metric]
         predictions = [ObjectPrediction(bbox=[0, 0, 20, 20], category_id=1, score=0.9),
                        ObjectPrediction(bbox=[5, 5, 15, 15], category_id=1, score=0.8)]
-        merged[postprocess] = (param.value,
-                               len(cross_tile_merge(postprocess, param.value)(predictions)))
+        merged[postprocess] = (p.execution.cross_tile_nms,
+                               len(cross_tile_merge(p.execution)(predictions)))
 
     assert merged["nms"] == (pytest.approx(0.30), 2)
     assert merged["nmm"] == (pytest.approx(0.80), 1)
     assert "provisional" in CROSS_TILE_NMS_DERIVATIONS["IOS"]
 
 
-def _dry_and_real(tmp_path, **stated):
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+def test_the_dry_run_reports_the_record_the_bucket_keeps(tmp_path):
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path)
@@ -349,36 +359,34 @@ def _dry_and_real(tmp_path, **stated):
     images.mkdir()
     _png(images, _frame())
     out = tmp_path / "bucket"
-    dry = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out), dry_run=True,
-                        **stated)
-    real = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out), **stated)
+    stated = Stated(tile=True, tile_size=TILE, overlap=OVERLAP, conf=0.2,
+                    cross_tile_nms=0.4, max_dets=50, postprocess="greedynmm")
+
+    dry = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+                        dry_run=True, stated=stated)
+    real = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+                         stated=stated)
+
     assert "error" not in dry and "error" not in real, (dry, real)
-    return dry, read_operating_point_sidecar(out)
+    assert dry["execution"] == read_bucket(out).execution.record()
 
-
-def test_the_dry_run_reports_the_record_the_run_stamps(tmp_path):
-    dry, stamp = _dry_and_real(
-        tmp_path, tile=True, tile_size=TILE, overlap=OVERLAP, conf_threshold=0.2,
-        cross_tile_nms=0.4, max_dets=50, postprocess="greedynmm", allow_unvalidated_staging=True)
-
-    assert dry["operating_point"] == stamp["operating_point"]
-    assert dry["slicing"] == stamp["slicing"]
-
-
-# --- one execution regime from calibration through the sealed claim ---
 
 N_CALIBRATION_IMAGES = 20
 
 
-def _blob_calibration_dataset(root: Path) -> tuple[Path, Path]:
+def _blob_capture(project: Path) -> Path:
     """Frames of 20px blobs in three rows of four, each image shifted a pixel further right so no
     two share ground truth, labeled with 32px boxes that overlap their row neighbors by 10px (a
-    neighbor tail every metric derives a threshold from); columns cross the lattice's seam."""
+    neighbor tail every metric derives a threshold from), ingested as one capture date of the
+    dataset ``ds``; its images directory."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images, labels = root / "images", root / "labels"
-    images.mkdir(parents=True)
+    from tcip_mcp.tools.ingest_tools import ingest_images
+
+    root, raw, date = project / "ds", project / "raw", "2026-01-01"
+    raw.mkdir()
+    labels = root / "annotations" / date
     labels.mkdir(parents=True)
     for i in range(N_CALIBRATION_IMAGES):
         arr = np.zeros((FRAME, FRAME, 3), dtype=np.uint8)
@@ -388,169 +396,82 @@ def _blob_calibration_dataset(root: Path) -> tuple[Path, Path]:
                 x0 = 40 + col * 22 + i
                 arr[y0:y0 + 20, x0:x0 + 20] = 255
                 boxes.append(BBox(x0 - 6, y0 - 6, x0 + 26, y0 + 26))
-        _png(images, arr, f"img{i:02d}.png")
+        _png(raw, arr, f"img{i:02d}.png")
         json_io.write_annotations(str(labels / f"img{i:02d}.json"),
                                   [Annotation(subject="bud", geometry=b) for b in boxes],
                                   FRAME, FRAME, keep_empty=True)
-    return images, labels
+    ingested = ingest_images(root, source=str(raw), date_from=date)
+    assert "error" not in ingested, ingested
+    return root / "images" / date
 
 
-def test_a_calibrated_pass_collects_exports_previews_and_seals_one_regime(
-        tmp_path, monkeypatch, seed_bud_trait_spec):
-    """A tiled calibration through run_inference: the merge threshold is resolved from the
-    calibration GT in the metric its postprocess compares over before any image is predicted,
-    every calibration and export slice is merged at it, the dry run reports the stamp the real
-    call writes, and the record sealed over the bucket answers for the regime it ran."""
+def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypatch):
+    """A tiled assessment resolves its unstated merge threshold from the calibration side's
+    ground truth in the metric its postprocess compares over before any image is predicted; every
+    reference slice and every slice of the bucket published under it is merged at that one value,
+    and the bucket records the assessment's execution."""
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
+    from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests import _trait_fixtures as fx
 
-    dataset = tmp_path / "ds"
-    images, labels = _blob_calibration_dataset(dataset)
+    fx.seed_confirmed_count(tmp_path, measured_subject="bud")
+    images = _blob_capture(tmp_path)
+    selection = tmp_path / "selection"
+    drawn = draw_splits(tmp_path, str(tmp_path / "ds"), output_path=str(selection),
+                        subject="bud", seed=2, train_ratio=0.4, val_ratio=0.2,
+                        calibration_ratio=0.2, holdout_ratio=0.2)
+    assert "error" not in drawn, drawn
     ckpt, _record = _checkpoint(tmp_path)
     merged_at: list[float] = []
     real_predict_sliced = GenericPredictor.predict_sliced
 
     def _capture(self, source, **kwargs):
-        merged_at.append(kwargs["cross_tile_nms"])
+        merged_at.append(kwargs["execution"].cross_tile_nms)
         return real_predict_sliced(self, source, **kwargs)
 
     monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture)
-    out = dataset / "predictions" / "blob" / "2026-01-01"
-    call = dict(images_dir=str(images), output_dir=str(out), device="cpu", tile=True,
-                tile_size=TILE, overlap=OVERLAP, postprocess="nmm", trait="bud_opening",
-                calibration_labels_dir=str(labels), group_by="stem",
-                allow_unvalidated_staging=True)
 
-    dry = run_inference(tmp_path, ckpt, dry_run=True, **call)
-    assert "error" not in dry, dry
-    assert not out.exists()
-    real = run_inference(tmp_path, ckpt, **call)
-    assert "error" not in real, real
+    assessment = assess_checkpoint(
+        tmp_path, checkpoint_path=ckpt, trait=fx.COUNT_TRAIT, delivery_kind="per_image_count",
+        selection_dir=str(selection), device="cpu",
+        stated=Stated(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm"))
+    assert "error" not in assessment, assessment
+    reference_passes = len(merged_at)
+    out = tmp_path / "ds" / "predictions" / "blob" / "2026-01-01"
+    published = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+                              assessment_id=assessment["assessment_id"], device="cpu")
+    assert "error" not in published, published
 
-    stamp = read_operating_point_sidecar(out)
-    merge = stamp["operating_point"]["cross_tile_nms"]
-    assert merge["derived_from"] == CROSS_TILE_NMS_DERIVATIONS["IOS"]
-    assert len(merged_at) > N_CALIBRATION_IMAGES and set(merged_at) == {merge["value"]}
-    assert (dry["operating_point"], dry["slicing"]) == (stamp["operating_point"], stamp["slicing"])
-    assert stamp["validated"] is True
-    assert verify_stamp_binding(stamp, out, document="operating_point", trait="bud_opening",
-                                project=tmp_path).ok
+    execution = assessment["execution"]
+    assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS["IOS"]
+    assert reference_passes > 0 and len(merged_at) > reference_passes
+    assert set(merged_at) == {execution["cross_tile_nms"]}
+    assert read_bucket(out).execution.record() == execution
 
 
-def _earned_result(tmp_path, *, slicing_postprocess: str):
-    """A run whose calibration evidence was collected tiled under ``nms``, its result stating the
-    slicing record a pass under ``slicing_postprocess`` carries."""
-    from tcip_mcp.pipelines.slicing import slicing_record
-    from tests._binding_fixtures import calibrated_run_fields, run_result
-
-    fields = calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
-                                   postprocess="nms", tile_size=TILE, tile_size_source="derived")
-    fields["slicing"] = slicing_record(fields["slicing"]["overlap"], None, slicing_postprocess)
-    return run_result(
-        results=[{"image": "a.png", "width": 100, "height": 100, "boxes": [[10.0, 10.0, 30.0, 30.0]],
-                  "scores": [0.9], "labels": [1], "count": 1}], **fields)
-
-
-def _calibrated_bucket_under(tmp_path, postprocess: str):
-    """A bucket a calibrated tiled run published under ``postprocess``, its record earned by the
-    publisher itself."""
-    from tcip_mcp.dataset_layout import bucket_dataset_root
-    from tcip_mcp.tools.inference_tools import publish_bucket
-
-    out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    pub = publish_bucket(tmp_path, _earned_result(tmp_path, slicing_postprocess=postprocess),
-                         out=out,
-                         trait="bud_opening", dataset_root=bucket_dataset_root(out),
-                         allow_unvalidated_staging=False)
-    assert pub["refusal"] is None and pub["op_stamp"]["validated"], pub
-    return out
-
-
-def test_a_bucket_asserting_a_regime_its_calibration_never_ran_under_refuses_by_name(
-        tmp_path, seed_bud_trait_spec):
-    with pytest.raises(ValueError, match="slicing"):
-        _calibrated_bucket_under(tmp_path, "nmm")
-
-
-def test_a_claim_stating_no_slicing_record_refuses_by_name(tmp_path, seed_bud_trait_spec):
-    from tcip_mcp.dataset_layout import bucket_dataset_root
-    from tcip_mcp.pipelines.resolution import open_validation, seal_validation
-    from tcip_mcp.tools.inference_tools import _calibration_evidence
-    from tests._binding_fixtures import calibrated_run_fields, write_prediction
-
-    fields = calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
-                                   postprocess="nms", tile_size=TILE, tile_size_source="derived")
-    out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    write_prediction(out, "a")
-    root = bucket_dataset_root(out)
-    evidence = _calibration_evidence(tmp_path, fields)
-    draft = open_validation(
-        project=tmp_path, document="operating_point",
-        evidence={"resolver": evidence["resolver"], "inputs": evidence["inputs"]},
-        trait="bud_opening", checkpoint_sha256="deadbeef", producing_experiment_id=None,
-        reference_inputs={**evidence["reference_inputs"], "dataset_root": str(root)})
-    stamp = {"validated": True, "operating_point": fields["operating_point"]}
-
-    with pytest.raises(ValueError, match="slicing"):
-        seal_validation(draft, dataset_root=root, bucket_dirs=[out], stamp_body=stamp)
-
-
-def _delivery(project: Path, out: Path):
-    from tcip_mcp.pipelines.resolution import (
-        check_delivery_gate, reconcile_operating_point_validity,
-    )
-
-    recon = reconcile_operating_point_validity([str(out)], trait="bud_opening", project=project)
-    return recon, check_delivery_gate({"operating_point": recon["validated"]})
-
-
-def test_a_bucket_stamped_under_its_calibrations_slicing_delivers(tmp_path, seed_bud_trait_spec):
-    out = _calibrated_bucket_under(tmp_path, "nms")
-
-    _recon, gate = _delivery(tmp_path, out)
-
-    assert gate.ok, gate.reason
-
-
-def test_a_bucket_restamped_under_another_merge_than_its_calibration_refuses_by_name(
-        tmp_path, seed_bud_trait_spec):
-    from tcip_mcp.pipelines.resolution import update_sidecar
-    from tcip_mcp.pipelines.slicing import slicing_record
-
-    out = _calibrated_bucket_under(tmp_path, "nms")
-    assert update_sidecar(out, lambda s: {**s, "slicing": slicing_record(OVERLAP, None, "nmm")},
-                          project=tmp_path)
-
-    recon, gate = _delivery(tmp_path, out)
-
-    assert not gate.ok
-    assert "slicing disagree" in recon["binding_notes"][str(out)]
-
-
-def test_the_stamp_records_the_slice_geometry_the_operating_point_derived(tmp_path):
+def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     import sahi
 
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
-    ckpt, checkpoint = _checkpoint(tmp_path, tiling={"tile_size": TILE, "overlap": OVERLAP})
+    ckpt, _checkpoint_record = _checkpoint(tmp_path, tiling={"tile_size": TILE,
+                                                             "overlap": OVERLAP})
     images = tmp_path / "images"
     images.mkdir()
     _png(images, _frame())
-
     out = tmp_path / "bucket"
-    response = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
-                             conf_threshold=0.0, postprocess="nmm", allow_unvalidated_staging=True)
-    assert "error" not in response, response
-    stamp = read_operating_point_sidecar(out)
 
-    geometry = resolve_tile_geometry(_predictor(checkpoint), tiled=True, tile_size=None,
-                                     overlap=None)
-    assert stamp["operating_point"]["tile_size"]["value"] == geometry.tile_size == TILE
-    assert stamp["slicing"]["overlap"] == geometry.overlap == OVERLAP
-    assert stamp["slicing"]["postprocess"] == "nmm"
-    assert (stamp["slicing"]["merge_type"], stamp["slicing"]["match_metric"]) == ("NMM", "IOS")
-    assert stamp["slicing"]["sahi_version"] == sahi.__version__
+    response = run_inference(tmp_path, ckpt, images_dir=str(images), output_dir=str(out),
+                             stated=Stated(conf=0.0, postprocess="nmm"))
+
+    assert "error" not in response, response
+    execution = read_bucket(out).execution
+    assert (execution.tile_size, execution.overlap) == (TILE, OVERLAP)
+    assert (execution.postprocess, execution.merge_type, execution.match_metric) == (
+        "nmm", "NMM", "IOS")
+    assert execution.sahi_version == sahi.__version__

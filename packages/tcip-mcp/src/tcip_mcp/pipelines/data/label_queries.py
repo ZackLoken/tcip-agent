@@ -21,18 +21,6 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
 
-def authored_frame(label_path) -> tuple[int, int] | None:
-    """``(width, height)`` one sample's own label document records, or ``None`` when it records
-    none.
-
-    Reads through :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`; a present,
-    unreadable label raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
-    """
-    from tcip_mcp.pipelines.data.splits import label_document_extent
-
-    return label_document_extent(label_path)
-
-
 def resolved_subjects_path(dataset_dir) -> Path | None:
     """The real ``subjects.json`` path for the dataset containing ``dataset_dir``, or ``None`` if
     it doesn't exist.
@@ -276,18 +264,6 @@ def admitted_documents(
     ], counts
 
 
-def admission_date(labels_dir) -> str | None:
-    """The capture date one labeled directory's admission reads confirmations under, or ``None``
-    for a tree that carries no date.
-
-    :func:`~tcip_mcp.dataset_layout.annotation_date`, the declared inverse of the
-    ``annotations/<date>/`` layout: a tree that is not one of those directories answers ``None``.
-    """
-    from tcip_mcp.dataset_layout import annotation_date
-
-    return annotation_date(labels_dir)
-
-
 @dataclass(frozen=True)
 class Admitted:
     """One admitted member, as the producer resolved it.
@@ -462,7 +438,9 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
     """Refuse a recorded sample the platform's own admission would no longer admit, naming which.
 
     ``scope`` is the class space those samples are read under, whole
-    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`).
+    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), held to each sample's shape as
+    :func:`admit` holds it (``ClassScope.admitted_for``), so a document read under a scope naming
+    no subject refuses by name.
 
     Dispatches once on each sample's own shape: the label store and its confirmations for a
     document, the mask's own existence for a mask raster, the row's own presence in its table for a
@@ -484,6 +462,8 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
     reasons: dict[str, int] = {}
     tables: dict[str, dict[str, str]] = {}
     documents: dict[tuple[str, str], dict[str, tuple[str, str | None]]] = {}
+    for shape in {s.shape for s in samples}:
+        scope.admitted_for(shape, "the class space these samples are read under")
     for sample in samples:
         try:
             image_name: str | None = logical_image_name(resolve_source_path(sample.source))
@@ -495,10 +475,10 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
             assert bucket is not None, "a label-document sample always states the bucket it read"
             documents.setdefault(
                 (sample.ground_truth_scope, bucket), {}
-            )[sample.identity] = (sample.ground_truth, image_name)
+            )[sample.location] = (sample.ground_truth, image_name)
         elif sample.shape == MASK:
             if not is_mask(Path(sample.ground_truth)):
-                refused.append(sample.identity)
+                refused.append(sample.location)
                 reasons["ground_truth_gone"] = reasons.get("ground_truth_gone", 0) + 1
         else:
             table = sample.ground_truth
@@ -506,7 +486,7 @@ def refuse_inadmissible_samples(samples: "Sequence[Sample]", scope: "ClassScope"
                 tables[table] = (ground_truth_table(table)
                                  if Path(table).is_file() else {})
             if not holds_row(tables[table], sample.row_key):
-                refused.append(sample.identity)
+                refused.append(sample.location)
                 reasons["row_gone"] = reasons.get("row_gone", 0) + 1
     for (labels_dir, bucket), records in sorted(documents.items()):
         _subject, date = bucket_subject_date(bucket)
@@ -544,25 +524,25 @@ def require_admitted(admitted: "Admission") -> None:
     ground_truth, images_dir = admitted.ground_truth, admitted.images_dir
     if shape == MASK:
         raise ValueError(
-            f"no trainable samples: none of the {counts.get('skipped_unannotated', 0)} image(s) "
+            f"no trainable samples: none of the {counts['skipped_unannotated']} image(s) "
             f"in {images_dir} have a <stem>.png mask in {ground_truth}. An image with no mask "
             f"would train as entirely background, so nothing here admits one. Write the masks, or "
             f"point data.labels_dir at the directory holding them."
         )
     if shape != DOCUMENT:
         raise ValueError(
-            f"no trainable samples in {ground_truth}: {counts.get('skipped_no_image', 0)} row(s) "
+            f"no trainable samples in {ground_truth}: {counts['skipped_no_image']} row(s) "
             f"name an image that is not under {images_dir}. A row naming no image has nothing to "
             f"train. Fix the row keys, or point data.images_dir at the directory holding those "
             f"images."
         )
-    quarantined = counts.get("quarantined_stale_definition", 0)
+    quarantined = counts["quarantined_stale_definition"]
     quarantine_note = (
         f" {quarantined} more were confirmed complete or negative but quarantined because the "
         f"subject's attribute schema changed since, re-confirm them or revert the schema edit."
         if quarantined else ""
     )
-    incomplete = counts.get("skipped_incomplete_attribute", 0)
+    incomplete = counts["skipped_incomplete_attribute"]
     incomplete_note = (
         f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
         f"so their ground truth is incomplete for this scope and the whole image is held out "
@@ -572,8 +552,8 @@ def require_admitted(admitted: "Admission") -> None:
     )
     raise ValueError(
         f"no trainable samples in {ground_truth}: "
-        f"{counts.get('skipped_unannotated', 0)} image(s) "
-        f"have no label record and {counts.get('skipped_unconfirmed_empty', 0)} have an empty one "
+        f"{counts['skipped_unannotated']} image(s) "
+        f"have no label record and {counts['skipped_unconfirmed_empty']} have an empty one "
         f"nobody confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
         f"genuinely-empty ones Complete.{incomplete_note}{quarantine_note}"
@@ -627,11 +607,9 @@ def _stale_finished(
     """Names among ``records`` (one bucket's ``{image_name: record}``, already loaded by the
     caller) whose stored status is finished (:func:`~tcip_mcp.dataset_layout.is_finished_status`,
     ``complete`` or ``negative``) and whose stamped digest positively disagrees with ``subject``'s
-    current attribute-schema digest, over one read each of the digest store and the registry.
-
-    No digest store at all, one whose bytes cannot be decoded, no stamp for an image, no readable
-    or existing registry, or no digest for ``subject`` all admit rather than quarantine; a digest
-    store present but unreadable raises.
+    current attribute-schema digest, over one read each of the digest store and the registry. No
+    digest store, stamp, registry or digest for ``subject`` names none; a digest store or a
+    registry that will not read raises.
     """
     import tcip_store
 
@@ -644,20 +622,14 @@ def _stale_finished(
     finished = {name for name, record in records.items() if is_finished_status(status_of(record))}
     if not finished:
         return set()
-    try:
-        stamps = tcip_store.read(image_status_digest_key(root), default={})
-    except tcip_store.DecodeError:
-        stamps = {}
+    stamps = tcip_store.read(image_status_digest_key(root), default={})
     stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
         return set()
     cp = subjects_path(root)
     if not cp.is_file():
         return set()
-    try:
-        current_digest = attribute_schema_digest(read_registry(cp), subject)
-    except (OSError, ValueError):
-        return set()
+    current_digest = attribute_schema_digest(read_registry(cp), subject)
     if current_digest is None:
         return set()
     return stale_stamped_names(stamped_by_image, current_digest, finished)
@@ -900,7 +872,9 @@ def admit(
     elif shape != DOCUMENT:
         records, counts = admitted_rows(ground_truth, images_dir, members)
     else:
-        date = admission_date(ground_truth)
+        from tcip_mcp.dataset_layout import annotation_date
+
+        date = annotation_date(ground_truth)
         records, counts = admitted_documents(
             ground_truth, images_dir, members, scope=admitted, date=date,
             contradicted_out=contradicted_out,

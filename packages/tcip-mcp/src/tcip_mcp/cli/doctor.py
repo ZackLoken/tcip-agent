@@ -272,18 +272,17 @@ def check_data_quality(root: Path, findings: list, *, census: dict | None) -> No
 
 def check_reserved_names(root: Path, findings: list, *, census: dict | None) -> None:
     """Flag every image and label document whose stem is reserved for a prediction bucket's own
-    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``), as the dataset census names
-    them."""
+    record (``tcip_annotation.json_io.is_bucket_record``), as the dataset census names them."""
     if census is None:
         return
     scan = census
     for p in scan["reserved_name_images"]:
         findings.append(("error", f"{Path(p).relative_to(root)}: image stem is reserved for a "
-                        "prediction bucket's own provenance stamp; its label can never be read "
+                        "prediction bucket's own record; its label can never be read "
                         "through any bucket walk"))
     for p in scan["reserved_name_labels"]:
         findings.append(("error", f"{Path(p).relative_to(root)}: label filename is reserved for "
-                        "a prediction bucket's own provenance stamp; it is excluded from every "
+                        "a prediction bucket's own record; it is excluded from every "
                         "bucket walk and its annotations are unreadable through them"))
 
 
@@ -321,9 +320,7 @@ TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
 
 def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
-    every prediction bucket whose stamp names a checkpoint digest no registry entry carries.
-
-    The bucket walk includes the cleared archive (``include_cleared=True``).
+    every published bucket whose record names a checkpoint digest no registry entry carries.
 
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
@@ -333,9 +330,8 @@ def check_registry(root: Path, findings: list) -> None:
     """
     from tcip_store import StoreError
 
-    from tcip_mcp.dataset_layout import prediction_bucket_dirs
+    from tcip_mcp.buckets import bucket_dirs, read_bucket
     from tcip_mcp.model_registry import RegistryVersionRefused, registered_entries
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.registry_paths import (
         RegistryPathEmpty, RegistryPathTraversal, is_at_or_under, resolved_registry_path,
     )
@@ -365,17 +361,22 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(("error", f"registry entry {m['name']!r} checkpoint missing: {ckpt}"))
 
     registered_shas = {m["sha256"] for m in entries}
-    for bucket in prediction_bucket_dirs(root, include_cleared=True):
-        sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
-        if sha and sha not in registered_shas:
+    for bucket in bucket_dirs(root):
+        try:
+            sha = read_bucket(bucket).producer.get("checkpoint_sha256")
+        except ValueError as exc:
+            findings.append(("error", f"{bucket.relative_to(root)}: bucket record will not "
+                            f"read: {exc}"))
+            continue
+        if sha is not None and sha not in registered_shas:
             findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "
-                            f"stamp names checkpoint {sha}, which no registry entry "
+                            f"record names checkpoint {sha}, which no registry entry "
                             "names; register the checkpoint to make this bucket's "
                             "provenance verifiable going forward."))
 
 
 def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
-    from tcip_mcp.experiments import training_runs
+    from tcip_mcp.experiments import run_observations
 
     unstamped = 0
     for label in map(Path, census["labels"] if census is not None else []):
@@ -389,7 +390,7 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
         findings.append(("info", f"{unstamped} GT annotations carry no created_by"))
 
     # A bespoke run's source snapshot names what it failed to capture in its run.json.
-    for run in training_runs(root):
+    for run in run_observations(root):
         source = run.record["source"]
         if source is not None and (source["missing"] or source["snapshot_errors"]):
             findings.append(("warn", f"{run.directory.relative_to(root)}: source snapshot incomplete: "

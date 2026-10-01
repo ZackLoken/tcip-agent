@@ -1,6 +1,5 @@
-"""``per_image_counts_from_bucket``: a classified bucket delivers the object count its own scope
-says its detections are of, never the value count.
-"""
+"""A classified bucket delivers the object count its own recorded scope says its detections are
+of, never the value count."""
 
 from __future__ import annotations
 
@@ -9,14 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tests import _trait_fixtures as fx
 
-SUBJECT = fx.COUNT_SUBJECT  # "stem": what the confirmed per_image_count says the counts are of
-ATTRIBUTE = "condition"
-ID_MAP = {"upright": 0, "lodged": 1}
+SUBJECT = fx.COUNT_SUBJECT  # what the confirmed per_image_count says the counts are of
+SCOPE = {"subject": SUBJECT, "attribute": "condition", "id_map": {"upright": 0, "lodged": 1}}
 
 
 @pytest.fixture(autouse=True)
@@ -25,37 +20,20 @@ def _recorded_meaning(tmp_path):
     fx.seed_confirmed_count(tmp_path, measured_subject=SUBJECT)
 
 
-def _classified_bucket(tmp_path: Path) -> Path:
-    bucket = tmp_path / "predictions" / "classifier" / "2026-05-20"
-    result = {"width": 100, "height": 100, "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 40.0, 60.0, 60.0]],
-             "scores": [0.9, 0.8], "labels": [1, 2]}
-    scope = ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
-    write_predictions_json(bucket / "img1.json", result, created_by="test-producer", scope=scope)
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[], scope=scope, trait=fx.COUNT_TRAIT,
-        dataset_hash="H", checkpoint="m", checkpoint_sha256="f" * 64, experiment_id=None,
-        images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2026-05-20T00:00:00+00:00", image_filenames={"img1": "img1.png"},
-    )
-    write_sidecar(bucket, stamp, project=tmp_path)
-    return bucket
-
-
 def test_a_classified_bucket_delivers_its_object_count_not_its_value_count(tmp_path: Path) -> None:
-    from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
+    from tests._chain_fixtures import acknowledged, predicted, published
 
-    bucket = _classified_bucket(tmp_path)
+    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "classifier" / "2026-05-20",
+                       [predicted("img1", ["upright", "lodged"], SCOPE["id_map"])],
+                       scope=SCOPE).path
     out = tmp_path / "counts.csv"
 
-    from tcip_mcp.pipelines.resolution import Acknowledgment
+    acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
+        tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
+        door="test_door"), reason="unassessed fixture")
 
-    result = per_image_counts_from_bucket(
-        tmp_path, str(bucket), str(out), revision=fx.count_revision(tmp_path),
-        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="unvalidated fixture"))
-
-    assert "error" not in result
     rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 1
     assert int(rows[0]["detection_count"]) == 2  # both records counted as the object class
-

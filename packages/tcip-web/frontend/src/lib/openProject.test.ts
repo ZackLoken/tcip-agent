@@ -25,9 +25,8 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
     modified: 1,
     dates: [],
     subjects: [],
-    models: [],
     subjects_by_date: {},
-    models_by_date: {},
+    prediction_dirs: {},
     image_count: 0,
     is_open: false,
     label_problem: null,
@@ -66,9 +65,11 @@ describe("openProjectById", () => {
         // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
         dates: ["2026-02-11", "2026-03-24"],
         subjects: ["bush", "subject_a"], // flat list would pick "bush"
-        models: ["baseline"],
         subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
-        models_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
+        prediction_dirs: {
+          "2026-02-11": { baseline: "/ws/hz/predictions/baseline" },
+          "2026-03-24": {},
+        },
       }),
     ]);
 
@@ -78,7 +79,7 @@ describe("openProjectById", () => {
     // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
     expect(arg.date).toBe("2026-02-11");
     expect(arg.subject).toBe("subject_a");
-    expect(arg.model_name).toBe("baseline");
+    expect(arg.predictions_dir).toBe("/ws/hz/predictions/baseline");
   });
 
   it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
@@ -87,7 +88,7 @@ describe("openProjectById", () => {
         id: "fresh",
         dates: ["2026-02-11", "2026-03-24"],
         subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
-        models_by_date: { "2026-02-11": [], "2026-03-24": [] },
+        prediction_dirs: { "2026-02-11": {}, "2026-03-24": {} },
       }),
     ]);
 

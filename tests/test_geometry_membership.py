@@ -101,18 +101,14 @@ def _big_source(root: Path, stem: str, width: int, height: int) -> tuple[Path, P
 def _membership(ds) -> set[str]:
     """What one loader says its own members are, read off the samples it was built from.
 
-    Asserts the loader holds the producer's own per-sample maps at all: a directory-built loader
-    carries none of them, so a route that rediscovered membership fails here rather than passing
-    on a record written beside it. A tiled loader indexes one example per kept tile, so its keys
-    are a subset of the samples it was handed rather than all of them.
+    Every key the loader indexes names one of the samples it was built from, whose source is on
+    disk. A tiled loader indexes one example per kept tile, so its keys are a subset of the samples
+    it was handed rather than all of them.
     """
-    assert ds.sample_sources is not None, "a loader built from samples records their sources"
-    assert ds.sample_ground_truth is not None
     keys = set(ds.stems)
-    assert keys <= set(ds.sample_sources) == set(ds.sample_ground_truth)
     for key in keys:
-        assert Path(ds.sample_sources[key]).is_file()
-    return {ds.member_of(key) for key in keys}
+        assert Path(ds.sample_of(key).source).is_file()
+    return {ds.sample_of(key).member for key in keys}
 
 
 def _recorded(project: Path, task: str, data_cfg: dict) -> dict:

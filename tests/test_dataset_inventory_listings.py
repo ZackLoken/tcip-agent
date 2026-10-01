@@ -1,5 +1,5 @@
-"""What the resolver reports a dataset contains: capture-date buckets, models that actually
-carry predictions on a date, and the difference between the subjects a registry declares and the
+"""What the resolver reports a dataset contains: capture-date buckets, the published prediction
+buckets of each date, and the difference between the subjects a registry declares and the
 subjects a date's labels hold."""
 
 from __future__ import annotations
@@ -15,10 +15,8 @@ from tcip_mcp.dataset_layout import (
     annotation_dir,
     subjects_path,
     list_dates,
-    list_models,
     list_subjects,
-    models_with_predictions,
-    prediction_dir,
+    prediction_root,
     subjects_with_labels,
 )
 
@@ -28,23 +26,31 @@ def _write(path: Path, text: str = "") -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_models_with_predictions_ignores_non_label_artifacts(tmp_path: Path) -> None:
-    """Only a label file counts as a prediction on a date.
+def test_only_published_buckets_are_listed_under_the_date_their_record_states(
+    tmp_path: Path,
+) -> None:
+    """A directory under ``predictions/`` holding artifacts that are not a publication (a
+    rendered overlay, a half-written temp file, a staged document) is no bucket: listing it would
+    offer the breeder a model with nothing published behind it."""
+    pytest.importorskip("torch")
+    from tcip_mcp.buckets import buckets_by_date
+    from tests._chain_fixtures import predicted, published
 
-    A model's date directory can hold artifacts that are not predictions (a rendered overlay, a
-    half-written temp file). Counting those would offer the breeder a model whose overlay for that
-    date is empty and would let a consumer treat the bucket as populated when it holds nothing.
-    """
     root = tmp_path
-    _write(prediction_dir(root, "baseline", "2026-02-11") / "overlay.png", "not a label")
-    _write(prediction_dir(root, "baseline", "2026-02-11") / "IMG_1.json.tmp", "{}")
-    _write(prediction_dir(root, "candidate", "2026-02-11") / "IMG_1.json", '{"annotations": []}')
-    # baseline does carry real predictions on another date: the filter must not hide those.
-    _write(prediction_dir(root, "baseline", "2026-03-02") / "IMG_2.json", '{"annotations": []}')
+    scope = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
+    _write(prediction_root(root) / "baseline" / "2026-02-11" / "overlay.png", "not a label")
+    _write(prediction_root(root) / "baseline" / "2026-02-11" / "IMG_1.json",
+           '{"annotations": []}')
+    for model, date, stem in (("candidate", "2026-02-11", "IMG_1"),
+                              ("baseline", "2026-03-02", "IMG_2")):
+        published(root, prediction_root(root) / model / date,
+                  [{**predicted(stem, ["bud"], scope["id_map"]),
+                    "image": str(root / "images" / date / f"{stem}.png")}], scope=scope)
 
-    assert list_models(root) == ["baseline", "candidate"]
-    assert models_with_predictions(root, "2026-02-11") == ["candidate"]
-    assert models_with_predictions(root, "2026-03-02") == ["baseline"]
+    listed = buckets_by_date(root, ["2026-02-11", "2026-03-02"])
+
+    assert {date: sorted(names) for date, names in listed.items()} == {
+        "2026-02-11": ["candidate/2026-02-11"], "2026-03-02": ["baseline/2026-03-02"]}
 
 
 def test_capture_dates_are_the_bucket_directories_not_loose_images(tmp_path: Path) -> None:

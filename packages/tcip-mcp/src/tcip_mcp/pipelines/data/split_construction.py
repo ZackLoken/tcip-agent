@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
@@ -49,9 +49,10 @@ def dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     return (record["id"] if record is not None else None), dataset_fingerprint(root)
 
 
-def spatial_split_raster_identity(source: str) -> dict:
-    """This mosaic's :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity` over the
-    admitted source. A source that will not probe raises."""
+def raster_identity(source: str) -> dict:
+    """A raster's :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity` over its own
+    probed band count, the one a split records its mosaic by and a bucket its raster by. A source
+    that will not probe raises."""
     import dataclasses
 
     from tcip_mcp.pipelines.derivations import probe_channels
@@ -77,35 +78,25 @@ def spatial_single_source_split(
 
     ``split_cfg["reserve_calibration_fraction"]`` (opt-in, default unset/0) reserves a fourth
     region, ``calibration``, alongside train/val/test, at that fraction of the axis. When set, each
-    of :func:`spatial_strip_split`'s ``None`` reasons (no extent from the label file; the strip
-    layout itself infeasible; an empty train/val/test/calibration side surviving tile filtering)
-    raises ``ValueError`` naming which one fired.
+    of :func:`spatial_strip_split`'s ``None`` reasons (the strip layout itself infeasible; an empty
+    train/val/test/calibration side surviving tile filtering) raises ``ValueError`` naming which
+    one fired.
 
     Returns whether the manifest was recorded: ``False`` when ``reserve_calibration_fraction`` was
-    not requested and the extent is unknown or no strip layout can populate both train and val. A
-    present, unreadable label document raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` either way.
+    not requested and no strip layout can populate both train and val. The label document's frame
+    is read through :func:`~tcip_mcp.pipelines.data.splits.label_document_extent`, whose refusals
+    propagate.
     """
     from tcip_mcp.pipelines.data.datasets import TILE_SIZE
-    from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP
     from tcip_mcp.pipelines.data.splits import (
         DEFAULT_VAL_RATIO, label_document_extent, spatial_strip_split,
     )
+    from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
 
     stem = sample.member
     reserve_cal = float(split_cfg.get("reserve_calibration_fraction") or 0.0)
 
-    extent = label_document_extent(sample.ground_truth)
-    if extent is None:
-        msg = f"its label file carries no width/height for {stem!r}"
-        if reserve_cal:
-            raise ValueError(
-                f"reserve_calibration_fraction={reserve_cal} requires a resolvable extent: {msg}; "
-                "a calibration region cannot be reserved without one.")
-        logger.warning("Spatial train/val split for %r skipped: %s; training without "
-                       "validation.", stem, msg)
-        return False
-    width, height = extent
+    width, height = label_document_extent(sample.ground_truth)
 
     tile_options = _tile_options(tiling)
     # The tiler's own defaults, so the geometry derived here and the views built below resolve
@@ -165,7 +156,7 @@ def spatial_single_source_split(
     def _identities(ds) -> list[str]:
         # Through the dataset's own member stem: a tile is keyed by the sample it was cut from,
         # and a region identity names the bare stem every consumer of this manifest joins on.
-        raw = {spatial.identity_for(ds.member_of(key), box) for key, box in ds.tile_entries}
+        raw = {spatial.identity_for(ds.sample_of(key).member, box) for key, box in ds.tile_entries}
         return sorted(name for name in raw if name is not None)
 
     split_cfg["spatial_manifest"] = {
@@ -186,7 +177,7 @@ def spatial_single_source_split(
         "kept_val_tiles": spatial.kept_tiles.get("val", 0),
         "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
         "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
-        "raster_content_identity": spatial_split_raster_identity(sample.source),
+        "raster_content_identity": raster_identity(sample.source),
     }
     logger.info(
         "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
@@ -224,7 +215,7 @@ def _spatial_views(samples: "Sequence[Sample]", scope: "ClassScope", sizes: "Map
 
 def _redrawn_selection(selection, selection_dir: str, seed: int):
     """``selection`` with train and val redrawn fresh over its own train-plus-val samples at
-    ``seed``, calibration untouched.
+    ``seed``, the reference sides untouched.
 
     The draw is :func:`~tcip_mcp.pipelines.data.splits.draw_train_val` over the samples' own
     recorded group keys, at the val share the selection already delivered, stratified by each
@@ -234,7 +225,7 @@ def _redrawn_selection(selection, selection_dir: str, seed: int):
     (:func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), and a draw that starves a
     side, refuse by name.
     """
-    from tcip_mcp.pipelines.data.selection import with_sides
+    from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES, with_sides
     from tcip_mcp.pipelines.data.splits import (
         draw_train_val, redraw_pool, redraw_starved_issue,
     )
@@ -251,7 +242,7 @@ def _redrawn_selection(selection, selection_dir: str, seed: int):
         raise ValueError(
             f"redrawing train and val inside the selection at {selection_dir!r} at seed {seed} "
             f"starved a side (train={len(train_ids)}, val={len(val_ids)}).")
-    assignment = {s.identity: s.side for s in selection.on("calibration")}
+    assignment = {s.location: s.side for s in selection.samples if s.side in REFERENCE_SIDES}
     assignment.update({i: "train" for i in train_ids})
     assignment.update({i: "val" for i in val_ids})
     return with_sides(selection, assignment)
@@ -266,8 +257,7 @@ def _partition_record(samples: "Sequence[Sample]", *, seed: int | None, group_by
     ground-truth file's digest when this run read it, keyed by its path, and ``selection``, the
     selection a bound run bound (its directory, its digest and whether the run redrew inside it),
     ``None`` for a run that drew its own."""
-    from tcip_mcp.pipelines.data.selection import sample_document
-    from tcip_mcp.pipelines.resolution import ground_truth_digests
+    from tcip_mcp.pipelines.data.selection import ground_truth_digests, sample_document
 
     return {
         "seed": seed,
@@ -285,6 +275,17 @@ def partition_samples(partition: "Mapping[str, Any]") -> list["Sample"]:
 
     return [read_sample(raw, position, "a run's resolved partition")
             for position, raw in enumerate(partition["samples"])]
+
+
+def moved_since_run(samples: Iterable["Sample"], at_run: Mapping[str, str]) -> list[str]:
+    """The members among ``samples`` whose ground truth no longer digests to what ``at_run`` (a
+    run's resolved partition's ``ground_truth_digests``, keyed by path) recorded, sorted
+    (:func:`~tcip_mcp.pipelines.data.selection.moved_ground_truth`)."""
+    from tcip_mcp.pipelines.data.selection import moved_ground_truth
+
+    samples = list(samples)
+    moved = set(moved_ground_truth({s.ground_truth: at_run[s.ground_truth] for s in samples}))
+    return sorted({s.member for s in samples if s.ground_truth in moved})
 
 
 def run_sizes(
@@ -489,8 +490,9 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
             raise ValueError(" ".join(conflicts))
 
         from tcip_mcp.pipelines.data.label_queries import refuse_inadmissible_samples
-        from tcip_mcp.pipelines.data.selection import read_selection
-        from tcip_mcp.pipelines.resolution import selection_digest
+        from tcip_mcp.pipelines.data.selection import (
+            REFERENCE_SIDES, read_selection, selection_digest,
+        )
 
         selection = read_selection(selection_dir, project=project)
         # The bind's own refusals, stated once so the preflight that offered this selection and
@@ -499,7 +501,7 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
         if bind_issues:
             raise ValueError(" ".join(bind_issues))
 
-        # A redraw repartitions the selection's own train-plus-val samples; calibration untouched.
+        # A redraw repartitions the selection's own train-plus-val samples; the reference untouched.
         redraw = bool(split_cfg_raw.get("redraw_within_selection"))
         seed = selection.seed
         if redraw:
@@ -507,13 +509,13 @@ def auto_train_val(project: Path, task: str, data_cfg: dict, transforms, *,
             selection = _redrawn_selection(selection, selection_dir, seed)
 
         train_samples, val_samples = selection.on("train"), selection.on("val")
-        calibration_samples = selection.on("calibration")
+        reference_samples = [s for s in selection.samples if s.side in REFERENCE_SIDES]
 
         # Checked before either loader is built: a selected label that has since emptied with
         # nobody confirming that image negative would otherwise train as background.
         refuse_inadmissible_samples(train_samples + val_samples, selection.scope)
 
-        bound = train_samples + val_samples + calibration_samples
+        bound = train_samples + val_samples + reference_samples
         # The selection's own scope and exact map become this run's, so the checkpoint records
         # the vocabulary it trained in rather than one rediscovered from a live registry.
         data_cfg["scope"] = asdict(selection.scope)

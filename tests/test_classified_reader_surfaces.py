@@ -1,5 +1,5 @@
 """Reader-side surfaces that hold a classified bucket to its own recorded scope: ``count_by_class``
-under a coincidental detector map, ``per_plant_series``'s stamp refusals, the COCO reader's
+under a coincidental detector map, a bucket record that no longer decodes, the COCO reader's
 ``attributes`` handling, and the prediction render's legend.
 """
 
@@ -11,7 +11,6 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 
@@ -35,55 +34,24 @@ def test_count_by_class_a_detector_map_keyed_by_the_positive_value_name_never_co
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
-def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
-    import tcip_store
+def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unclassified(
+    tmp_path: Path,
+) -> None:
+    """A published bucket whose record no longer decodes has no scope to read its documents
+    under: reading it refuses naming the file."""
+    pytest.importorskip("torch")
+    from tcip_annotation.json_io import BUCKET_RECORD
 
-    tcip_store.replace(resolution.sidecar_key(pred_dir, "operating_point"), sidecar,
-                       expect=tcip_store.Version.ABSENT)
+    from tcip_mcp.buckets import read_bucket
+    from tests._chain_fixtures import predicted, published
 
+    scope = {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": {"open": 0, "closed": 1}}
+    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "classifier" / "2026-05-02",
+                       [predicted("s1", ["open"], scope["id_map"])], scope=scope)
+    (bucket.path / BUCKET_RECORD).write_bytes(b"{not json")
 
-def _damage_sidecar(pred_dir: Path) -> None:
-    import os
-
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    key = resolution.sidecar_key(pred_dir, "operating_point")
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(b"{not json")
-        return
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute("update records set value = ? where store = ? and parts = ?",
-                    (b"{not json", key.store, encode_parts(key.parts)))
-    finally:
-        conn.close()
-
-
-class _Assignment:
-    def __init__(self, stem, plot_name):
-        self.stem = stem
-        self.plot_name = plot_name
-        self.accession_name = None
-
-
-def test_per_plant_series_raises_for_an_undecodable_stamp(tmp_path: Path) -> None:
-    pred_dir = tmp_path / "predictions" / "classifier" / "2026-05-02"
-    json_io.write_annotations(
-        pred_dir / "s1.json",
-        [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), attributes={ATTRIBUTE: "open"})],
-        8, 8)
-    _seed_sidecar(pred_dir, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
-                                       "id_map": {"open": 0, "closed": 1}}})
-    _damage_sidecar(pred_dir)
-    mapping = {"2026-05-02": [_Assignment("s1", "P1")]}
-
-    with pytest.raises(Exception):  # the seam's own StoreError subclass
-        phenology.per_plant_series(mapping, {"2026-05-02": str(pred_dir)}, "open", ["P1"])
+    with pytest.raises(ValueError, match=BUCKET_RECORD):
+        read_bucket(bucket.path)
 
 
 def test_the_coco_reader_keeps_a_classified_records_value() -> None:

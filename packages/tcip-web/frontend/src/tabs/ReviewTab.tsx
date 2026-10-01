@@ -111,6 +111,9 @@ export function ReviewTab() {
     () => ({ gt: labelPath(dataset, imgName), pred: predictionPath(dataset, imgName) }),
     [dataset, imgName],
   );
+  // A bucket whose record names no document for this image did not predict it: unknown, never a
+  // negative, so there are no matches to compute.
+  const notPredicted = Boolean(dataset.predictions_dir && imgName && !paths.pred);
 
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
@@ -174,60 +177,16 @@ export function ReviewTab() {
   // Every review route is scoped to the dataset root whose store holds the verdicts.
   const canReview = !!dataset.dataset_root;
   const needsDatasetSelection = !dataset.dataset_root && !!projectRoot;
-  // Result of "use this review as a validation reference" (dataset-level, so it clears on selection).
-  const [validating, setValidating] = useState(false);
-  const [validationResult, setValidationResult] = useState<{
-    validated: boolean;
-    reason: string;
-    bucketsStamped: string[];
-  } | null>(null);
-  useEffect(() => {
-    setValidationResult(null);
-  }, [visKey]);
-  // The trait a validation-reference promotion is computed for, resolved from this project's own
-  // registered traits (mirrors ResultsTab, never assumed from dataset.subject, which names an
-  // object class, not necessarily a registered trait): auto-selected when there is exactly one,
-  // left blank (with an explicit error, not a silent guess) when there are zero, offered as a
-  // choice when there are several.
-  const [availableTraits, setAvailableTraits] = useState<string[]>([]);
-  const [trait, setTrait] = useState("");
-  const [traitError, setTraitError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!projectRoot) return;
-    setTrait("");
-    setTraitError(null);
-    void resultsApi
-      .traits()
-      .then((res) => {
-        const names = res.traits.map((t) => t.trait);
-        setAvailableTraits(names);
-        if (names.length === 0) {
-          setTraitError("No trait is registered for this project yet.");
-        } else if (names.length === 1) {
-          setTrait(names[0]);
-        }
-      })
-      .catch((e) => {
-        setAvailableTraits([]);
-        setTraitError(
-          `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
-  }, [projectRoot]);
-  // The bucket's own generation confidence, fetched once per prediction dir (read-only, no
-  // gate run) so the "Conf ≥" filter can warn live (see the filter shelf below).
+  // The bucket's own generation confidence, fetched once per prediction dir (read-only) so the
+  // "Conf ≥" filter can warn live (see the filter shelf below).
   const [generationConf, setGenerationConf] = useState<number | null>(null);
-  // The bucket's own validated count operating point (admission_rule_of): null with the reason
-  // naming why (no stamp, unvalidated, floored binding, no readable conf).
-  const [admissionRule, setAdmissionRule] = useState<{
-    conf: number;
-    experiment_id: string;
-    record_digest: string;
-  } | null>(null);
+  // The conf the bucket's passing assessment admits a prediction at: null with the reason naming
+  // why none does.
+  const [bucketAdmissionConf, setBucketAdmissionConf] = useState<number | null>(null);
   const [admissionReason, setAdmissionReason] = useState("");
   useEffect(() => {
     setGenerationConf(null);
-    setAdmissionRule(null);
+    setBucketAdmissionConf(null);
     setAdmissionReason("");
     if (!dataset.predictions_dir) return;
     let canceled = false;
@@ -235,12 +194,11 @@ export function ReviewTab() {
       (res) => {
         if (canceled) return;
         setGenerationConf(res.generation_conf);
-        setAdmissionRule(res.admission_rule);
+        setBucketAdmissionConf(res.admission_conf);
         setAdmissionReason(res.admission_reason);
       },
       () => {
-        // Fetch failed: stay null. A missing generation_conf reads as a missing sidecar, and
-        // _conf_censored treats a None staged_conf_floor as always censored, so this warns too.
+        // Fetch failed: the generation conf and admission stay unknown.
       },
     );
     return () => {
@@ -248,28 +206,22 @@ export function ReviewTab() {
     };
   }, [dataset.predictions_dir]);
   // A detector scope only: a classified review judges values, never a count the gate floors.
-  const admissionConf = matches && !matches.attribute && admissionRule ? admissionRule.conf : null;
-  // Raising this filter above the predictions' own generation confidence hides low-confidence
-  // detections from review; any verdict then recorded under it raises review_conf_threshold past
-  // generation_conf, which validate_reference's identical gate reads as conf_censored, the same
-  // signal, surfaced here before a review is even complete. A bucket with no recorded
-  // generation_conf warns too: the backend's own None staged_conf_floor branch is always-censored,
-  // never "no evidence, so nothing to warn about," so going quiet here would be silent in exactly
-  // the case the real gate refuses hardest.
+  const admissionConf = matches && !matches.attribute ? bucketAdmissionConf : null;
+  // A filter above the predictions' own generation confidence hides detections from review; a
+  // directory recording no generation_conf warns too, since nothing states its kept conf.
   const confFilterCensoring =
     !!dataset.predictions_dir &&
     (generationConf === null || filters.conf_threshold > generationConf);
 
   // ── Active-learning priority queue ──────────────────────────────────
-  // prioritize_review_queue's ranking otherwise never reaches the breeder; the only path was the
-  // agent manually steering focus_human_attention() one image at a time. Session-local (like generationConf/
-  // validationResult above): nothing else in the app needs to know the computed order.
+  // prioritize_review_queue's ranking, session-local like generationConf above: nothing else in
+  // the app needs to know the computed order.
   const [pqModels, setPqModels] = useState<RegisteredModel[]>([]);
   const [pqModelPath, setPqModelPath] = useState("");
   const [pqJobId, setPqJobId] = useState<string | null>(null);
   const [pqStatus, setPqStatus] = useState<"idle" | JobStatus>("idle");
   const [pqQueue, setPqQueue] = useState<
-    { image: string; score: number; calibration_member?: boolean }[] | null
+    { image: string; score: number; reference_member?: boolean }[] | null
   >(null);
   const [pqError, setPqError] = useState<string | null>(null);
   // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
@@ -351,13 +303,13 @@ export function ReviewTab() {
       .filter((i): i is number => i !== undefined);
   }, [pqUseOrder, pqQueue, dataset.image_list]);
 
-  // calibration_member, keyed the same way priorityOrder maps queue names onto image_list.
-  const pqCalibrationByImage = useMemo(() => {
+  // reference_member, keyed the same way priorityOrder maps queue names onto image_list.
+  const pqReferenceByImage = useMemo(() => {
     if (!pqQueue) return null;
     const m = new Map<string, boolean>();
     for (const q of pqQueue) {
-      if (q.calibration_member === undefined) continue;
-      m.set(q.image.split(/[/\\]/).pop() ?? q.image, q.calibration_member);
+      if (q.reference_member === undefined) continue;
+      m.set(q.image.split(/[/\\]/).pop() ?? q.image, q.reference_member);
     }
     return m;
   }, [pqQueue]);
@@ -521,6 +473,10 @@ export function ReviewTab() {
 
   async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
     if (!dataset.dataset_root || !imgPath || !imgName) return;
+    if (notPredicted) {
+      setMatches(null);
+      return;
+    }
     setLoading(true);
     try {
       // One unified label file per image holds every subject's box and polygon annotations, so a
@@ -1167,62 +1123,6 @@ export function ReviewTab() {
     }
   }
 
-  // Promote the current dataset's completed review into a validation reference. Runs the platform's
-  // own validation gate server-side; the honest validated / not-yet result is surfaced (never forced).
-  async function promoteReviewToValidationReference() {
-    if (!dataset.dataset_root) {
-      useStore.getState().pushToast("Select a dataset first.");
-      return;
-    }
-    if (!trait) {
-      useStore.getState().pushToast(traitError ?? "Pick a trait before validating.");
-      return;
-    }
-    if (!dataset.predictions_dir) {
-      useStore
-        .getState()
-        .pushToast("No predictions to validate. Select a model with predictions first.");
-      return;
-    }
-    if (!dataset.subject) {
-      useStore.getState().pushToast("Pick a subject before validating.");
-      return;
-    }
-    setValidating(true);
-    try {
-      const res = await api.review.validateReference({
-        dataset_root: dataset.dataset_root,
-        trait,
-        pred_dir: dataset.predictions_dir,
-        subject: dataset.subject,
-      });
-      setValidationResult({
-        validated: res.validated,
-        reason: res.reason,
-        bucketsStamped: res.buckets_stamped,
-      });
-      useStore.getState().pushToast(res.reason);
-    } catch (e) {
-      const committed = committedOf<Awaited<ReturnType<typeof api.review.validateReference>>>(e);
-      if (committed) {
-        setValidationResult({
-          validated: committed.validated,
-          reason: committed.reason,
-          bucketsStamped: committed.buckets_stamped,
-        });
-        useStore
-          .getState()
-          .pushToast(`${committed.reason} ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      useStore
-        .getState()
-        .pushToast(`Could not check the review: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setValidating(false);
-    }
-  }
-
   // ── In-place edit: pick the shape up on this canvas, adjust, save to GT ──
 
   function startEdit() {
@@ -1515,68 +1415,6 @@ export function ReviewTab() {
               {reviewStatus.unreadable.join(", ")}
             </span>
           )}
-          {/* Which registered trait a validation-reference promotion is computed for (see
-              ResultsTab's identical picker): only shown when the project has more than one. */}
-          {availableTraits.length > 1 && (
-            <span className="flex items-center gap-1.5">
-              <label className="tcip-label">Trait</label>
-              <select
-                className="tcip-input w-auto"
-                value={trait}
-                onChange={(e) => setTrait(e.target.value)}
-              >
-                <option value="" disabled>
-                  Choose a trait…
-                </option>
-                {availableTraits.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </span>
-          )}
-          {/* Dataset-level: promote this review into a validation reference the results can trust.
-              The backend runs the same validation check and answers validated / not-yet honestly. */}
-          <button
-            className="tcip-btn"
-            onClick={() => void promoteReviewToValidationReference()}
-            disabled={validating || !!edit || !trait || !canReview || runBlocked}
-            title={
-              traitError ??
-              "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet. A staged bucket is reviewed through the accept path and is never promoted to a validation reference."
-            }
-          >
-            {validating ? "Checking…" : "Use review as validation reference"}
-          </button>
-          {validationResult && (
-            <span className="flex items-center gap-1.5">
-              <span
-                className={`tcip-badge ${
-                  validationResult.validated
-                    ? "bg-tcip-tp/20 text-tcip-tp"
-                    : "bg-tcip-fn/20 text-tcip-fn"
-                }`}
-                title={validationResult.reason}
-              >
-                {validationResult.validated ? "Validated" : "Not yet"}
-              </span>
-              {/* The reason was tooltip-only, with no visible next step: a breeder who hits
-                  "Not yet" needs to see why without hovering, and what to try. */}
-              {!validationResult.validated && (
-                <span className="text-[11px] text-tcip-muted max-w-[360px] whitespace-pre-wrap">
-                  {validationResult.reason}
-                </span>
-              )}
-              {/* What was actually stamped, so "Validated" never implies more than the stamp claims. */}
-              <span className="text-[11px] text-tcip-muted">
-                {validationResult.bucketsStamped.length > 0
-                  ? `Stamped ${validationResult.bucketsStamped.length} bucket(s).`
-                  : "No bucket was stamped."}
-              </span>
-            </span>
-          )}
-
           {/* Attest a missed object on any image, even one with no existing detections to select;
               draws a brand-new box, submitted through the same /api/review/action endpoint as an
               edited FN verdict. */}
@@ -1658,12 +1496,12 @@ export function ReviewTab() {
                 {imgName}
               </span>
             )}
-            {imgName && pqCalibrationByImage?.get(imgName) && (
+            {imgName && pqReferenceByImage?.get(imgName) && (
               <span
                 className="tcip-badge bg-tcip-warn/20 text-tcip-warn"
-                title="This image is on the bound run's calibration side; reviewing it edits a label inside that run's calibration universe, which its validation will disclose as moved"
+                title="This image is on the bound run's reference side; reviewing it edits a label its assessment measured against, which delivery will disclose as moved"
               >
-                Calibration
+                Reference
               </span>
             )}
             <button
@@ -1977,6 +1815,17 @@ export function ReviewTab() {
       {/* Empty-state card: tells the reviewer why there is nothing to step through,
           "no predictions configured" vs "filters exclude everything". Non-opaque and
           pointer-transparent so still-rendered GT overlays stay visible behind it. */}
+      {notPredicted && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="max-w-md rounded-lg border border-tcip-border bg-tcip-panel/90 px-5 py-4 text-center">
+            <p className="text-sm font-semibold text-tcip-fg">Not predicted</p>
+            <p className="mt-1 text-xs text-tcip-muted">
+              The selected prediction bucket holds no document for this image, so nothing here was
+              predicted to review.
+            </p>
+          </div>
+        </div>
+      )}
       {matches && matches.detections.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="max-w-md rounded-lg border border-tcip-border bg-tcip-panel/90 px-5 py-4 text-center">

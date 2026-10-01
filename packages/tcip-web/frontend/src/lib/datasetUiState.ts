@@ -1,5 +1,5 @@
 /**
- * Per-(project, dataset, date, subject/model) UI state in sessionStorage, so switching and
+ * Per-(project, dataset, date, subject/bucket) UI state in sessionStorage, so switching and
  * returning within a session lands where you were: position and review filters in one blob,
  * Review's GT/Pred visibility under its own key. Each project's last tab is in localStorage.
  */
@@ -17,11 +17,11 @@ export interface DatasetUiState {
 const UI_PREFIX = "tcip.dsui.";
 const VIS_PREFIX = "tcip.dsvis.";
 
-/** Stable key for a dataset selection: project + dataset root + date + subject + model, so
+/** Stable key for a dataset selection: project + dataset root + date + subject + bucket, so
  *  distinct views don't share. */
 export function datasetKey(project: OpenProject | null, d: DatasetSelection): string | null {
   if (!project || !d.dataset_root || !d.date) return null;
-  return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.model_name]);
+  return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.predictions_dir]);
 }
 
 export function saveDatasetUi(key: string, state: DatasetUiState): void {

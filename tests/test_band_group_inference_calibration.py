@@ -1,15 +1,11 @@
-"""``pipelines.calibration.calibrate_operating_point`` must handle a grouped image without crashing:
-``label_image_stems``' ``stem_to_image`` can hold a ``BandGroupRef`` (a band-grouped
-capture, see ``pipelines.data.band_groups``), and naively ``str()``-ing it produces its
-dataclass repr instead of a path any reader could decode. This file exercises a real
-``GenericPredictor`` (a tiny real 2-channel detection model, real forward pass) calibrating over
-a directory of grouped captures.
+"""A band-grouped capture decodes through the channel-aware reading layer wherever a pass predicts
+it: the assessment's evaluation records over grouped samples, ``run_inference`` over a grouped
+directory, and a stringified ``BandGroupRef`` refused rather than read as a path. A real
+``GenericPredictor`` (a tiny 2-channel detection model, real forward pass) runs each.
 
-The dataset here is two 2-band grouped captures, not a grouped capture mixed with a plain RGB
-photo: a real trained-for channel count is one property of the whole dataset a single checkpoint's
-``in_chans`` assumes, so a 2-band model has no valid 3-band-photo counterpart in the same
-directory anyway: that mismatch belongs to a different scenario (a truly heterogeneous images/
-folder), not this crash.
+The dataset is two 2-band grouped captures, not a grouped capture beside a plain RGB photo: a
+checkpoint's channel count is one property of the whole dataset, so a 2-band model has no valid
+3-band counterpart in the same directory.
 """
 
 from __future__ import annotations
@@ -22,8 +18,6 @@ import tifffile
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
-
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 TILE = 32
 
@@ -50,7 +44,6 @@ def _detection_checkpoint(tmp_path: Path) -> str:
         },
         "task": "detection",
     }
-    # The run's recorded width and scope, which a calibration reads its reference under.
     config = {"model_source": model_source,
               "data": {"num_channels": 2, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
     model = build_model(config, recorded_model_dims(config))
@@ -63,8 +56,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 
 def _grouped_dataset(root: Path) -> tuple[Path, Path]:
-    """Two 2-band grouped captures, each with a GT label, a labeled dir every stem of which is a
-    ``BandGroupRef``, the shape ``calibrate_operating_point`` hands to ``predict_batch``."""
+    """Two 2-band grouped captures, each with a ground-truth label."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -84,28 +76,24 @@ def _grouped_dataset(root: Path) -> tuple[Path, Path]:
     return images_dir, labels_dir
 
 
-def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path, monkeypatch):
-    """A ``BandGroupRef`` (``stem_to_image[stem]``) must decode through the real channel-aware
-    stacking, not silently stringify to its dataclass repr, which no reader could open. This
-    predictor is 2-channel, so it can only run at all if the grouped captures actually decoded
-    that way (a 3-channel predictor could silently "work" on a bad path by
-    broadcasting/re-normalizing, masking the bug)."""
-    from tcip_mcp.pipelines.calibration import calibrate_operating_point
-    from tcip_mcp.tools.inference_tools import _prepare_pass
-
+def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_path, monkeypatch):
+    """Each grouped sample is opened as a ``BandGroupRef`` through the channel-aware stacking.
+    The predictor is 2-channel, so it runs at all only if the captures decoded that way."""
+    from tcip_mcp.assessment import _records, _reference_dataset
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import source_digests
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tests._producer_fixtures import samples_over
 
     images_dir, labels_dir = _grouped_dataset(tmp_path)
-    ckpt = _detection_checkpoint(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    p = _prepare_pass(
-        checkpoint, images_dir=None, conf_threshold=0.0, device="cpu", tile=False,
-        tile_size=None, overlap=None, cross_tile_nms=None, max_dets=100, postprocess="nms",
-        tile_batch_size=8)
-    assert not isinstance(p, str), p
+    checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
+    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0, max_dets=100, postprocess="nms"),
+                     device="cpu", tile_batch_size=8)
+    samples = samples_over(images_dir, labels_dir, subject="bud")
 
     seen_sources = []
-    from tcip_mcp.pipelines import raster_source
     real_open_raster = raster_source.open_raster
 
     def _spy_open_raster(source, num_channels):
@@ -114,54 +102,40 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
 
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
-    bundle, dataset_hash, n_excluded, _evidence = calibrate_operating_point(
-        p, "bud_opening", str(labels_dir), str(images_dir), project=tmp_path,
-        holdout_ratio=0.0,  # both stems land in calibration -> one predict_batch call sees both
-    )
+    records = _records(p, _reference_dataset(p, samples), source_digests(samples), p.execution)
 
-    assert n_excluded == 0
-    assert bundle is not None
-    assert dataset_hash
-
-    # Both grouped captures really were opened as BandGroupRefs through the channel-aware reading
-    # layer, never a stringified stand-in the predictor's own Path(...) would mis-resolve.
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-
+    assert len(records) == 2
     grouped = [s for s in seen_sources if isinstance(s, BandGroupRef)]
     assert {g.stem for g in grouped} == {"capture_001", "capture_002"}
 
 
-def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch):
-    """run_inference's own images_dir listing fallback (~line 576) must route through
-    list_logical_images rather than a bare image_exts scan, or a grouped capture's sibling band
-    files each enumerate as their own (spurious) image instead of folding into one. Real forward
-    pass, no images_dir mixing (see module docstring)."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified
+def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
+    """A grouped capture's sibling band files fold into one logical image rather than each
+    enumerating as its own."""
+    from tests._verified_checkpoint_fixtures import predicted_over
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
-    result = run_inference_verified(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False)
+    _pass, results = predicted_over(tmp_path, ckpt, str(images_dir), device="cpu", tile=False)
 
-    assert "error" not in result
-    assert len(result["results"]) == 1  # one grouped capture, never 2 raw sibling band files
-    assert result["results"][0]["image"].endswith("capture_001.bandgroup")
+    assert len(results) == 1
+    assert results[0]["image"].endswith("capture_001.bandgroup")
 
 
 def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
-    """Stringifying the ``BandGroupRef`` before calling ``predict_batch``, instead of passing the
-    raw ``Path``/``BandGroupRef``, raises."""
+    """Stringifying a ``BandGroupRef`` before calling ``predict_batch``, instead of passing the
+    raw reference, raises."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.data.splits import label_image_stems
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    images_dir, labels_dir = _grouped_dataset(tmp_path)
-    ckpt = _detection_checkpoint(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
+    images_dir, _labels_dir = _grouped_dataset(tmp_path)
+    checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
+    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
 
-    stems, stem_to_image = label_image_stems(str(labels_dir), str(images_dir))
-    with pytest.raises(Exception):
-        predictor.predict_batch([str(stem_to_image[s]) for s in stems], tile=False)
+    logical = list_logical_images(images_dir)
+    with pytest.raises(ValueError):
+        p.predict([repr(logical[s]) for s in sorted(logical)])

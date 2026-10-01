@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
 
@@ -45,10 +46,21 @@ def _setup(tmp_path: Path):
     return dataset_root, _source_images(tmp_path / "src")
 
 
+def _reviewed(dataset_root: Path) -> str:
+    """Publish the bucket the seeded verdicts were recorded against, a bucket of no documents;
+    its directory."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    return str(published(dataset_root.parent, dataset_root / BUCKET, [],
+                         scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path)
+
+
 def test_materialize_review_dataset_end_to_end(tmp_path):
     dataset_root, src = _setup(tmp_path)
     out = tmp_path / "out"
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(out))
+    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(out),
+                                   predictions_dir=_reviewed(dataset_root))
     assert "error" not in r
     assert r["positive"] == 1 and r["hard_negative"] == 1
     assert (out / "images" / "imgA.png").is_file()
@@ -58,7 +70,8 @@ def test_materialize_review_dataset_end_to_end(tmp_path):
 def test_materialize_reads_the_dataset_s_own_store_when_none_is_stated(tmp_path):
     """The dataset root alone names the store: no second argument, no second location."""
     dataset_root, src = _setup(tmp_path)
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"))
+    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
+                                   predictions_dir=_reviewed(dataset_root))
     assert "error" not in r
     assert r["dataset_root"] == str(dataset_root)
     assert r["review_state_stated"] is False
@@ -70,19 +83,16 @@ def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
     """A review recorded outside the dataset is still curated, and the response says from where.
 
     The dataset here has no store of its own, so the shards can only have come from the stated
-    location, and the caller is told which one it was. The bucket key is stated as an absolute
-    path (a directory outside any dataset root, the shape bucket_key_of gives one): a relative
-    key is only ever meaningful against the root whose own store recorded it, never against a
-    different dataset_root the caller states alongside an external review_state_dir.
+    location, and the caller is told which one it was.
     """
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()
-    bucket_dir = str((tmp_path / "predictions" / "detector" / "2026-03-04").resolve())
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=bucket_dir)
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
     src = _source_images(tmp_path / "src")
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(external))
+        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
+        predictions_dir=_reviewed(dataset_root), review_state_dir=str(external))
     assert "error" not in r
     assert r["positive"] == 1 and r["hard_negative"] == 1
     assert r["dataset_root"] == str(dataset_root)
@@ -114,7 +124,8 @@ def test_materialize_review_dataset_writes_no_run(tmp_path, monkeypatch):
     from tcip_mcp.experiments import run_dirs
 
     dataset_root, src = _setup(tmp_path)
-    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"))
+    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"),
+                                   predictions_dir=_reviewed(dataset_root))
 
     assert "error" not in r, r
     assert "experiment_id" not in r
@@ -140,8 +151,8 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
 
 
 def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_path):
-    """Coverage of the ranking door's own dataset_root/skip_reviewed/bucket forwarding through
-    _prepare_queue_sources: both reviewed images drop out before any scorer runs, the same
+    """Coverage of the ranking door's own dataset_root/skip_reviewed/predictions_dir forwarding
+    through _prepare_queue_sources: both reviewed images drop out before any scorer runs, the same
     plumbing triage_predictions shares."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -150,7 +161,7 @@ def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_pa
 
     r = prioritize_review_queue(
         tmp_path, checkpoint_path=ckpt, images_dir=str(images), dataset_root=str(dataset_root),
-        skip_reviewed=True, bucket=BUCKET)
+        skip_reviewed=True, predictions_dir=_reviewed(dataset_root))
     assert r["reviewed_skipped"] == 2
     assert r["total_candidates"] == 0
     assert r["queue"] == []
@@ -169,7 +180,8 @@ def test_triage_predictions_skips_what_the_dataset_s_own_store_holds(tmp_path):
     ckpt.write_bytes(b"stub")
 
     r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root))
+        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
+        predictions_dir=_reviewed(dataset_root))
     assert r["reviewed_skipped"] == 2
     assert r["total_images"] == 0
 
@@ -187,30 +199,8 @@ def test_triage_predictions_skips_what_a_stated_store_holds(tmp_path):
 
     r = triage_predictions(
         tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        review_state_dir=str(external))
+        predictions_dir=_reviewed(dataset_root), review_state_dir=str(external))
     assert r["reviewed_skipped"] == 2
-
-
-def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch):
-    """Active-learning uncertainty scoring reads model logits, which a non-composed predictor
-    kind (a bespoke tcip model was never built for) doesn't expose, so it must fail with a
-    clear error, not crash on ``.model``.
-    """
-    from types import SimpleNamespace
-
-    import tcip_mcp.pipelines.inference.predictor as predmod
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images"
-    images.mkdir()
-    (images / "a.jpg").write_bytes(b"x")
-    # prioritize_review_queue imports build_predictor from the predictor module at call time.
-    monkeypatch.setattr(predmod, "build_predictor",
-                        lambda *a, **k: SimpleNamespace(kind="foreign_kind"))
-
-    r = prioritize_review_queue(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images))
-    assert "error" in r and "foreign_kind" in r["error"]
 
 
 def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
@@ -220,7 +210,7 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     unscoreable_images so a caller can tell this apart from a genuinely medium-confidence item."""
     from types import SimpleNamespace
 
-    import tcip_mcp.pipelines.inference.predictor as predmod
+    import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -231,8 +221,8 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
 
     predictions = [{"image": "a.jpg", "width": 4, "height": 4, "head0_values": [0.42]}]
     monkeypatch.setattr(
-        predmod, "build_predictor",
-        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
+        predmod, "GenericPredictor",
+        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
     r = triage_predictions(
         tmp_path, checkpoint_path=str(ckpt), images_dir=str(images))
@@ -248,7 +238,7 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
     triage tests share."""
     from types import SimpleNamespace
 
-    import tcip_mcp.pipelines.inference.predictor as predmod
+    import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -258,8 +248,8 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
     for pred in predictions:
         (images / pred["image"]).write_bytes(b"x")
     monkeypatch.setattr(
-        predmod, "build_predictor",
-        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
+        predmod, "GenericPredictor",
+        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
     return triage_predictions(
         tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), **kwargs)
@@ -379,20 +369,25 @@ def _stub_scorer(monkeypatch) -> None:
     monkeypatch.setattr(al_helpers, "build_scorer", lambda method, task: _Scorer())
 
 
-def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, monkeypatch):
+def _reference_samples(drawn) -> list:
+    """The samples a drawn selection holds on its reference sides, calibration and holdout."""
+    return [s for side in REFERENCE_SIDES for s in drawn.on(side)]
+
+
+def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(tmp_path, monkeypatch):
     """A checkpoint whose run was bound to a selection marks each ranked candidate against that
-    selection's own calibration samples under the queue's images directory."""
-    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
+    selection's own calibration and holdout samples under the queue's images directory."""
+    from tests.test_selection_ground_truth_digests import DATES, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
     drawn = _draw(tmp_path, root, manifest_dir)
     date = DATES[0]
-    calibration_stems = {
-        Path(s.source).stem for s in drawn.on("calibration")
+    reference_stems = {
+        Path(s.source).stem for s in _reference_samples(drawn)
         if Path(s.source).parent.name == date
     }
-    assert calibration_stems  # the fixture's own three-way ratio gives this date some
+    assert reference_stems  # the fixture's own three-way ratio gives this date some
 
     _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-pq-marks")
     _stub_scorer(monkeypatch)
@@ -403,7 +398,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
     assert r["queue"], r
     for entry in r["queue"]:
         stem = Path(entry["image"]).stem
-        assert entry["calibration_member"] == (stem in calibration_stems), entry
+        assert entry["reference_member"] == (stem in reference_stems), entry
 
 
 def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selection_changed(
@@ -413,21 +408,21 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     rewritten after the run, its calibration side moved to train, changes none of them."""
     import tcip_store as ts
     from tcip_mcp.pipelines.data.selection import selection_document, selection_key
-    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
+    from tests.test_selection_ground_truth_digests import DATES, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
     drawn = _draw(tmp_path, root, manifest_dir)
     date = DATES[0]
-    calibration_stems = {Path(s.source).stem for s in drawn.on("calibration")
+    reference_stems = {Path(s.source).stem for s in _reference_samples(drawn)
                          if Path(s.source).parent.name == date}
-    assert calibration_stems
+    assert reference_stems
 
     _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-pq-frozen")
 
     document = selection_document(drawn)
     for sample in document["samples"]:
-        if sample["side"] == "calibration":
+        if sample["side"] in REFERENCE_SIDES:
             sample["side"] = "train"
     ts.replace(selection_key(manifest_dir), document)
     _stub_scorer(monkeypatch)
@@ -435,8 +430,8 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     r = prioritize_review_queue(
         tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images" / date))
     assert "error" not in r, r
-    marked = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
-    assert marked == calibration_stems
+    marked = {Path(e["image"]).stem for e in r["queue"] if e["reference_member"]}
+    assert marked == reference_stems
 
 
 def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tmp_path):
@@ -468,7 +463,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(tm
 
 def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypatch):
     """A checkpoint no run of the project produced has nothing bound to check against: no
-    ``calibration_member`` on any entry."""
+    ``reference_member`` on any entry."""
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     ckpt = foreign_checkpoint(tmp_path)
@@ -481,7 +476,7 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(tmp_path, monkeypa
         tmp_path, checkpoint_path=ckpt, images_dir=str(images))
     assert "error" not in r, r
     assert r["queue"], r
-    assert all("calibration_member" not in entry for entry in r["queue"])
+    assert all("reference_member" not in entry for entry in r["queue"])
 
 
 # -- rail: calibration marks are decided by each sample's own recorded source ------------------
@@ -537,7 +532,7 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.tools.data_tools import draw_splits
 
     result = draw_splits(project, str(root), output_path=str(out), subject=_FLAT_SUBJECT, seed=seed,
-                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
+                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -551,11 +546,11 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
     root = _bucketed_labels_flat_images_dataset(tmp_path / "data", date)
     manifest_dir = tmp_path / "manifest"
     drawn = _draw_flat(tmp_path, root, manifest_dir)
-    calibration_stems = {
-        Path(s.source).stem for s in drawn.on("calibration")
+    reference_stems = {
+        Path(s.source).stem for s in _reference_samples(drawn)
         if Path(s.ground_truth).parent.name == date
     }
-    assert calibration_stems  # the fixture's own three-way ratio gives this date some
+    assert reference_stems  # the fixture's own three-way ratio gives this date some
 
     _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-pq-flat")
     _stub_scorer(monkeypatch)
@@ -564,8 +559,8 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
         tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images"))
     assert "error" not in r, r
     assert r["queue"], r
-    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
-    assert marked_true == calibration_stems
+    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["reference_member"]}
+    assert marked_true == reference_stems
 
 
 def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibration_side(
@@ -578,11 +573,12 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     canonical_date, flat_date = "2026-03-01", "2026-03-15"
     root = _mixed_two_date_dataset(tmp_path / "data", canonical_date, flat_date)
     manifest_dir = tmp_path / "manifest"
-    drawn = _draw_flat(tmp_path, root, manifest_dir)
+    # A seed whose draw puts calibration samples under both dates, a stem among them under one only.
+    drawn = _draw_flat(tmp_path, root, manifest_dir, seed=3)
     here = (root / "images").resolve()
-    bound_stems = {Path(s.source).stem for s in drawn.on("calibration")
+    bound_stems = {Path(s.source).stem for s in _reference_samples(drawn)
                    if Path(s.source).parent.resolve() == here}
-    other_stems = {Path(s.source).stem for s in drawn.on("calibration")
+    other_stems = {Path(s.source).stem for s in _reference_samples(drawn)
                    if Path(s.source).parent.resolve() != here}
     assert bound_stems and other_stems
     leaked = other_stems - bound_stems
@@ -595,7 +591,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
         tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images"))
     assert "error" not in r, r
     assert r["queue"], r
-    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
+    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["reference_member"]}
     assert marked_true == bound_stems
     assert not (marked_true & leaked)
 
@@ -658,16 +654,17 @@ def _seed_classified_verdicts(state_dir: Path, *, bucket: str = CLASSIFIED_BUCKE
     return state_dir
 
 
-def _stamp_classified_bucket(project: Path, dataset_root: Path,
-                             bucket_rel: str = CLASSIFIED_BUCKET) -> Path:
-    from tcip_mcp.pipelines.resolution import write_sidecar
+def _published_classified_bucket(project: Path, dataset_root: Path) -> str:
+    """The classified bucket the seeded verdicts were recorded against, published under the scope
+    its checkpoint records; its directory."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-    bucket_dir = dataset_root / bucket_rel
-    write_sidecar(bucket_dir, {"scope": {"subject": CLASSIFIED_SUBJECT,
-                                         "attribute": CLASSIFIED_ATTRIBUTE,
-                                         "id_map": {"healthy": 0, "diseased": 1}}},
-                  project=project)
-    return bucket_dir
+    bucket_dir = dataset_root / CLASSIFIED_BUCKET
+    published(project, bucket_dir, [], scope={
+        "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE,
+        "id_map": {"healthy": 0, "diseased": 1}})
+    return str(bucket_dir)
 
 
 def _source_dataset_with_registry(root: Path) -> Path:
@@ -689,12 +686,12 @@ def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_tru
     never the verdict-name-derived subject a detector review would write."""
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     source = _source_dataset_with_registry(tmp_path)
 
     r = materialize_review_dataset(
         tmp_path, str(dataset_root), str(source / "images"), str(tmp_path / "out"),
-        bucket=CLASSIFIED_BUCKET)
+        predictions_dir=bucket)
 
     assert "error" not in r
     assert r["positive"] == 1
@@ -713,12 +710,12 @@ def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path
     is ever recorded for it, even though its label file is still an empty background."""
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
 
     assert "error" not in r
     assert len(r["unconfirmed_negatives"]) == 1
@@ -731,12 +728,12 @@ def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path
 def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_path):
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
 
     assert "error" not in r
     assert (out / "subjects.json").is_file()
@@ -747,11 +744,11 @@ def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_pat
 def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path):
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     src = _source_images(tmp_path / "src")  # a bare directory, no dataset root to derive from
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
+        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), predictions_dir=bucket)
 
     assert "error" in r
     assert "register_dataset" in r["error"]
@@ -760,14 +757,14 @@ def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path
 def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path):
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     source = _source_dataset_with_registry(tmp_path)
     out = tmp_path / "out"
     out.mkdir(parents=True)
     (out / "subjects.json").write_text('{"other": {}}', encoding="utf-8")
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+        tmp_path, str(dataset_root), str(source / "images"), str(out), predictions_dir=bucket)
 
     assert "error" in r
     assert "already holds a subject registry" in r["error"]
@@ -775,61 +772,37 @@ def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path
 
 
 @pytest.mark.parametrize("subject", [CLASSIFIED_SUBJECT, ""])
-def test_materialize_refuses_a_subject_stated_beside_a_stamped_bucket(tmp_path, subject):
+def test_materialize_refuses_a_subject_stated_beside_a_published_bucket(tmp_path, subject):
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    _stamp_classified_bucket(tmp_path, dataset_root)
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
     source = _source_dataset_with_registry(tmp_path)
 
     r = materialize_review_dataset(
         tmp_path, str(dataset_root), str(source / "images"), str(tmp_path / "out"),
-        bucket=CLASSIFIED_BUCKET, subject=subject)
+        predictions_dir=bucket, subject=subject)
 
     assert "would be a second one" in r.get("error", ""), r
 
 
-def test_materialize_refuses_an_undecodable_stamp(tmp_path):
-    import os
-
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
+def test_materialize_refuses_an_undecodable_bucket_record(tmp_path):
     dataset_root = tmp_path / "dataset"
     _seed_classified_verdicts(project_state_dir(dataset_root))
-    bucket_dir = _stamp_classified_bucket(tmp_path, dataset_root)
-    key = sidecar_key(bucket_dir, "operating_point")
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(b"{not json")
-    else:
-        import sqlite3
-
-        from tcip_store.sqlite_backend import database_path, encode_parts
-
-        conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-        try:
-            conn.execute("update records set value = ? where store = ? and parts = ?",
-                        (b"{not json", key.store, encode_parts(key.parts)))
-        finally:
-            conn.close()
+    bucket = _published_classified_bucket(tmp_path, dataset_root)
+    (Path(bucket) / "bucket.json").write_bytes(b"{not json")
     src = _source_images(tmp_path / "src")
 
     r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
+        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), predictions_dir=bucket)
 
-    assert "error" in r
+    assert "does not decode" in r["error"]
 
 
-def test_materialize_refuses_a_relative_bucket_key_against_a_stated_foreign_store(tmp_path):
-    """A relative bucket key is only ever meaningful against the root whose own store recorded
-    it; a caller stating a different review_state_dir must state an absolute path instead."""
-    dataset_root = tmp_path / "dataset"
-    dataset_root.mkdir()
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=BUCKET)  # relative key
-    src = _source_images(tmp_path / "src")
+def test_materialize_names_the_reviewed_buckets_when_none_is_named(tmp_path):
+    """A store holding a bucket's verdicts, read with no bucket named, refuses naming the bucket
+    rather than guessing which review to curate."""
+    dataset_root, src = _setup(tmp_path)
 
-    r = materialize_review_dataset(
-        tmp_path, str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(external))
+    r = materialize_review_dataset(tmp_path, str(dataset_root), str(src), str(tmp_path / "out"))
 
-    assert "error" in r
-    assert "relative bucket key" in r["error"]
+    assert repr(BUCKET) in r["error"] and "predictions_dir" in r["error"]

@@ -1,11 +1,10 @@
-"""Tests for the general per-plant CSV door: ``aggregate_per_plant``'s own output plus the
-existing writer, over a mapping built by ``build_plant_mapping`` and buckets written by
-``run_inference``, the same producer path the orthomosaic tests use.
+"""Tests for the general per-plant CSV door: ``aggregate_per_plant``'s own output delivered over
+published buckets, its plant identities checked against a mapping built by
+``build_plant_mapping``.
 """
 
 from __future__ import annotations
 
-import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -15,357 +14,156 @@ from tests import _trait_fixtures as fx
 
 torch = pytest.importorskip("torch")
 
+KIND = "per_plant_count_aggregate"
+SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
-    """The delivery below ships under a trait whose meaning is confirmed for the aggregate kind
-    the writer records under an ``operating_point`` measurement document."""
+    """The delivery below ships under a trait whose meaning is confirmed for the aggregate
+    kind."""
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
 
 
-class _FakePredictor:
-    """A deterministic stand-in for a real detector: one box per detection, ``n`` set per image
-    by its stem, so the test's own arithmetic (counts per plant) is known ahead of time rather
-    than depending on a randomly-initialized model's actual output."""
-
-    def __init__(self, checkpoint_path=None, **kwargs):
-        pass
-
-    def predict_batch(self, paths, **kw):
-        counts = {"P1": 2, "P2": 1}
-        results = []
-        for p in paths:
-            n = counts.get(Path(p).stem, 0)
-            results.append({
-                "image": p, "width": 8, "height": 8,
-                "boxes": [[1.0, 1.0, 3.0, 3.0]] * n, "scores": [0.9] * n, "labels": [1] * n,
-                "count": n,
-            })
-        return results
-
-
-def _image_counts(pred_dir: Path, stems: list[str]) -> dict[str, int]:
-    from tcip_annotation import json_io
-
-    return {stem: len(json_io.read_annotations(str(pred_dir / f"{stem}.json"))) for stem in stems}
-
-
-def _write_one_plant_scene(tmp_path: Path) -> tuple[Path, Path, str]:
-    """A registered dataset carrying one geolocated image on one date, plus a matching plant
-    CSV: the minimal scene a mapping-refusal test needs, with no bucket or validation record
-    behind it (each such test refuses before either would matter)."""
+def _scene(tmp_path: Path, plants: dict[str, tuple[float, float]]) -> tuple[Path, Path, str]:
+    """A registered dataset of one geolocated image per plant on one date and a plant CSV
+    naming them; ``(dataset root, plant csv, date)``."""
     from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
-
-    from tests._binding_fixtures import write_geo_image as _write_geo_image
+    from tests._image_fixtures import write_geo_image
 
     assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
-
-    dataset_root = tmp_path / "ds"
-    images_root = dataset_root / "images"
-    date = "2026-02-11"
-    _write_geo_image(images_root / date / "P1.jpg", 43.19670, -90.058000,
-                     datetime(2026, 2, 11, 9, 30))
+    dataset_root, date = tmp_path / "ds", "2026-02-11"
+    for i, (plant, (lat, lon)) in enumerate(plants.items()):
+        write_geo_image(dataset_root / "images" / date / f"{plant}.jpg", lat, lon,
+                        datetime(2026, 2, 11, 9, 30 + 5 * i))
     result = register_dataset(tmp_path, str(dataset_root), crop=sorted(registered_crops())[0])
     assert "error" not in result, result
-
     plant_csv = tmp_path / "plants.csv"
     plant_csv.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-        "P1,acc-1,-90.058000,43.19670\n",
-        encoding="utf-8",
-    )
+        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n" + "".join(
+            f"{plant},acc-{plant},{lon},{lat}\n" for plant, (lat, lon) in plants.items()),
+        encoding="utf-8")
     return dataset_root, plant_csv, date
 
 
-def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
-    tmp_path, monkeypatch,
-):
-    """The whole producer chain: a mapping built by ``build_plant_mapping`` over a registered
-    registry, a bucket written by ``run_inference``, and records from ``aggregate_per_plant``. The
-    door takes no acknowledgment, so a bare unvalidated delivery refuses; the same delivery ships
-    once the bucket earns a real reference, and records the delivery event under this door's own
-    name, once in the dataset's own log and once in the platform's.
-    """
-    from tcip_mcp.tools.project_tools import initialize_project, register_dataset
-    from tcip_mcp.traits import registered_crops
+ONE_PLANT = {"P1": (43.19670, -90.058000)}
+TWO_PLANTS = {**ONE_PLANT, "P2": (43.19680, -90.057000)}
 
-    from tests._binding_fixtures import write_geo_image as _write_geo_image
 
-    assert "error" not in initialize_project(str(tmp_path), "Orchard", site="orchard block")
-
-    dataset_root = tmp_path / "ds"
-    images_root = dataset_root / "images"
-    date = "2026-02-11"
-    _write_geo_image(images_root / date / "P1.jpg", 43.19670, -90.058000,
-                     datetime(2026, 2, 11, 9, 30))
-    _write_geo_image(images_root / date / "P2.jpg", 43.19680, -90.057000,
-                     datetime(2026, 2, 11, 9, 35))
-    register_dataset(tmp_path, str(dataset_root), crop=sorted(registered_crops())[0])
-
-    plant_csv = tmp_path / "plants.csv"
-    plant_csv.write_text(
-        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
-        "P1,acc-1,-90.058000,43.19670\n"
-        "P2,acc-2,-90.057000,43.19680\n",
-        encoding="utf-8",
-    )
-
-    from tests._binding_fixtures import register_plant_registry_for
+def _mapped(tmp_path: Path, plants=ONE_PLANT, **stated) -> tuple[Path, str]:
+    """:func:`_scene` with the mapping ``valley`` built over it; ``(dataset root, date)``."""
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tests._mapping_fixtures import register_plant_registry_for
 
-    registry = register_plant_registry_for(tmp_path, [plant_csv])
-    mapping_name = "valley"
+    dataset_root, plant_csv, date = _scene(tmp_path, plants)
     mapped = build_plant_mapping(
-        tmp_path, name=mapping_name, images_root=str(images_root), plant_registry=registry)
+        tmp_path, name="valley", images_root=str(dataset_root / "images"),
+        plant_registry=register_plant_registry_for(tmp_path, [plant_csv]), **stated)
     assert "error" not in mapped, mapped
-    assert mapped["n_mapped"] == 2
+    return dataset_root, date
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
-    from tcip_mcp.tools.inference_tools import run_inference
 
-    from tests._verified_checkpoint_fixtures import project_checkpoint
+def _bucket(project: Path, dataset_root: Path, date: str, counts: dict[str, int],
+            name: str = "manual") -> str:
+    """A bucket ``predictions/<name>/<date>`` under ``dataset_root`` holding ``counts[stem]``
+    detections on each image ``images/<date>/<stem>.jpg``, published under ``project``."""
+    from tests._chain_fixtures import published
 
-    ckpt = project_checkpoint(tmp_path)
-    pred_dir = dataset_root / "predictions" / "run" / date
-    ran = run_inference(tmp_path, ckpt, str(images_root / date), output_dir=str(pred_dir),
-                        conf_threshold=0.0, tile=False)
-    assert "error" not in ran, ran
+    results = [{"image": str(dataset_root / "images" / date / f"{stem}.jpg"), "width": 8,
+                "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]] * n, "scores": [0.9] * n,
+                "labels": [1] * n} for stem, n in counts.items()]
+    return str(published(project, dataset_root / "predictions" / name / date, results,
+                         scope=SCOPE).path)
 
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
-    mapping_build = load_mapping(tmp_path, mapping_name)
-    rows = mapping_build.rows()[date]
-    counts = _image_counts(pred_dir, [r["stem"] for r in rows])
-    records = [
-        {"plant_id": r["plot_name"], "count": counts[r["stem"]],
-         "measurement_document": "operating_point", "plant_attribution": r["plant_attribution"]}
-        for r in rows
-    ]
-
+def _results(*plant_counts: tuple[str, int | None]) -> list[dict]:
     from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+
+    records = [{"plant_id": plant, "plant_attribution": "image",
+                **({"count": count} if count is not None else {})}
+               for plant, count in plant_counts]
+    return aggregate_per_plant(records, strategy="count", value_key="count")
+
+
+def _deliver(tmp_path: Path, results: list[dict], plants: list[str], buckets: list[str],
+             **kwargs) -> dict:
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
-    results = aggregate_per_plant(records, strategy="count", plant_id_key="plant_id",
-                                  value_key="count")
-    out_csv = tmp_path / "out" / "counts.csv"
-
-    predictions_by_date = {date: str(pred_dir)}
-
-    refused = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping=mapping_name,
-        predictions_by_date=predictions_by_date)
-    assert "error" in refused
-    assert refused["unvalidated_dimensions"] == "operating_point"
-    assert not out_csv.exists()
-
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, read_operating_point_sidecar
-    from tests._binding_fixtures import write_bound_sidecar
-
-    sidecar = read_operating_point_sidecar(pred_dir) or {}
-    op = dict(sidecar.get("operating_point") or {})
-    op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
-    stamp = {**sidecar, "validated": True, "trait": fx.COUNT_TRAIT, "operating_point": op}
-    write_bound_sidecar(tmp_path, pred_dir, stamp, dataset_root=dataset_root, experiment_id="exp-promoted")
-
-    delivered = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping=mapping_name,
-        predictions_by_date=predictions_by_date)
-    assert "error" not in delivered, delivered
-    assert delivered["operating_point_validated"] == VALIDATED_HELD_OUT
-    assert delivered["unvalidated_dimensions"] == ""
-    assert delivered["n_plants"] == 2
-    assert delivered["plant_mapping"] == mapping_name
-    assert delivered["plant_mapping_record_sha256"] == mapping_build.record_sha256
-    assert out_csv.exists()
-
-    rows_out = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
-    assert rows_out["P1"]["value"] == "2"
-    assert rows_out["P2"]["value"] == "1"
-    assert rows_out["P1"]["crop"] == "currant"
-    assert rows_out["P1"]["pipeline_version"] == "v1"
-
-    import tcip_store
-
-    from tcip_mcp.audit import audit_log_key
-
-    from tcip_mcp.pipelines.resolution import read_delivery_events
-
-    events = read_delivery_events(tmp_path)
-    event = next(e for e in events if e["door"] == "deliver_per_plant_csv")
-    bindings = event["document_reconciliations"]["operating_point"]["bindings"]
-    assert bindings[str(pred_dir)]["ok"] is True
-
-    # The delivery's one line, in the dataset's log, names the event: the refusal wrote nothing,
-    # so it left none, and the delivery leaves no second line in the project's log.
-    page = tcip_store.read_log(audit_log_key(dataset_root))
-    door_rows = [r for r in page.records if r["tool"] == "delivery_event"]
-    assert [r["arguments"] for r in door_rows] == [{"event_id": event["event_id"]}]
-    project_page = tcip_store.read_log(audit_log_key(tmp_path))
-    assert [r for r in project_page.records if r["tool"] == "delivery_event"] == []
-
-    assert event["plant_mapping"]["name"] == mapping_name
-    assert event["plant_mapping"]["record_sha256"] == mapping_build.record_sha256
+    return deliver_per_plant_csv(tmp_path, results, str(tmp_path / "o.csv"), "stem_count", KIND,
+                                 plants, buckets, **kwargs)
 
 
-def test_deliver_per_plant_csv_refuses_an_unknown_plant_mapping_by_name(tmp_path):
-    """A stated ``plant_mapping`` is a claim the data must positively carry: naming one with no
-    stored record refuses by name, before the writer ever runs, the way
-    ``deliver_phenology_milestones`` refuses a mapping it cannot load."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "PLANT_A", "count": 3, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="no-such-mapping",
-        predictions_by_date={"2026-02-11": str(tmp_path)})
-    assert "error" in res
-    assert "no-such-mapping" in res["error"]
-    assert "build_plant_mapping" in res["error"]
-    assert not out_csv.exists()
-
-
-def test_deliver_per_plant_csv_refuses_a_named_mapping_with_no_verification_inputs(tmp_path):
-    """A delivery either fully verifies the mapping it names or names none: naming one without
-    ``predictions_by_date`` refuses stating the missing argument, before the name is even
-    resolved, rather than shipping a mapping nothing checked."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "PLANT_A", "count": 3, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley")
-    assert "error" in res
-    assert "predictions_by_date" in res["error"]
-    assert not out_csv.exists()
-
-
-def test_deliver_per_plant_csv_refuses_a_malformed_record_through_the_writer(tmp_path):
-    """The writer's own refusal (a plant with no value at all) reaches the caller unchanged
-    through the door: this door adds no second validation of its own."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"image": "a1", "plant_id": "PLANT_A", "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="")
-    assert "error" in res
-    assert "no" in res["error"] and "observation" in res["error"]
-    assert not out_csv.exists()
-
-
-def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_not_cover(tmp_path):
-    """The shared preamble (``plant_mapping.resolve_delivery_mapping``) refuses a delivered date
-    the mapping was never built to cover, before any bucket or dataset identity is read."""
-    dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
-
-    from tests._binding_fixtures import register_plant_registry_for
-    from tcip_mcp.tools.phenology_tools import build_plant_mapping
-
-    registry = register_plant_registry_for(tmp_path, [plant_csv])
-    mapped = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
-        nn_tolerance_m=10.0)
-    assert "error" not in mapped, mapped
-
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "P1", "count": 1, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    uncovered_date = "2026-03-01"
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley",
-        predictions_by_date={
-            date: str(dataset_root / "predictions" / "run" / date),
-            uncovered_date: str(dataset_root / "predictions" / "run" / uncovered_date),
-        })
-    assert "error" in res
-    assert "does not cover" in res["error"]
-    assert uncovered_date in res["error"]
-    assert not out_csv.exists()
-
-
-def test_deliver_per_plant_csv_refuses_predictions_under_a_different_dataset_than_the_mapping(
+def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refuses_there(
     tmp_path,
 ):
-    """A predictions bucket resolving to a dataset root the mapping was not built over refuses
-    naming both roots, through the shared preamble."""
+    """The whole producer chain: a mapping built over a registered registry, a published bucket
+    and records from ``aggregate_per_plant``. The mapping verifies and every delivered plant is
+    one it assigned, so the delivery reaches the one gate; the bucket was published under no
+    assessment and this door takes no acknowledgment, so it refuses there, writing nothing."""
+    dataset_root, date = _mapped(tmp_path, TWO_PLANTS)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 2, "P2": 1}, name="run")
+
+    refused = _deliver(tmp_path, _results(("P1", 2), ("P2", 1)), ["P1", "P2"], [bucket],
+                       crop="currant", plant_mapping="valley")
+
+    assert "no assessment answers" in refused["error"]
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
+    """A stated ``plant_mapping`` is a claim the data must positively carry: naming one with no
+    stored record refuses by name, before the writer ever runs."""
+    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+
+    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], [bucket],
+                   plant_mapping="no-such-mapping")
+
+    assert "no-such-mapping" in res["error"]
+    assert "build_plant_mapping" in res["error"]
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
+    from tests._image_fixtures import write_geo_image
+
+    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    uncovered = "2026-03-01"
+    write_geo_image(dataset_root / "images" / uncovered / "P1.jpg", *ONE_PLANT["P1"],
+                    datetime(2026, 3, 1, 9, 30))
+
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], [
+        _bucket(tmp_path, dataset_root, date, {"P1": 1}),
+        _bucket(tmp_path, dataset_root, uncovered, {"P1": 1})], plant_mapping="valley")
+
+    assert "does not cover" in res["error"] and uncovered in res["error"]
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tests._image_fixtures import write_geo_image
 
-    dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
+    _dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    other = tmp_path / "ds2"
+    write_geo_image(other / "images" / date / "P1.jpg", *ONE_PLANT["P1"],
+                    datetime(2026, 2, 11, 9, 30))
+    assert "error" not in register_dataset(tmp_path, str(other),
+                                           crop=sorted(registered_crops())[0])
 
-    other_dataset_root = tmp_path / "ds2"
-    other_dataset_root.mkdir()
-    other_reg = register_dataset(
-        tmp_path, str(other_dataset_root), crop=sorted(registered_crops())[0])
-    assert "error" not in other_reg, other_reg
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"],
+                   [_bucket(tmp_path, other, date, {"P1": 1})], plant_mapping="valley")
 
-    from tests._binding_fixtures import register_plant_registry_for
-    from tcip_mcp.tools.phenology_tools import build_plant_mapping
-
-    registry = register_plant_registry_for(tmp_path, [plant_csv])
-    mapped = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
-        nn_tolerance_m=10.0)
-    assert "error" not in mapped, mapped
-
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "P1", "count": 1, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley",
-        predictions_by_date={date: str(other_dataset_root / "predictions" / "run" / date)})
-    assert "error" in res
     assert "different dataset" in res["error"]
-    assert not out_csv.exists()
+    assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_plant_csv_refuses_a_mapping_with_no_capture_at_all_for_a_delivered_date(
-    tmp_path, monkeypatch,
-):
-    """A mapping recorded with no capture at all for a delivered date refuses on the record's
-    own evidence, before ``verify_mapping_inputs`` re-reads anything to disclose about."""
+def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(tmp_path, monkeypatch):
+    """A mapping recorded with no capture at all for a delivered date refuses on the record's own
+    evidence."""
     from tests.test_plant_mapping_binding import PLANTS
     from tests.test_ungeoreferenced_capture_refusal import (
         DATE, _delivery_scene, _persist_synthetic_mapping, _write_plant_csv,
@@ -374,108 +172,42 @@ def test_deliver_per_plant_csv_refuses_a_mapping_with_no_capture_at_all_for_a_de
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     plant_csv = tmp_path / "plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
-    plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
     _persist_synthetic_mapping(
-        tmp_path, dataset_root, "valley", plant_csvs=plant_csvs, assignments={DATE: []})
+        tmp_path, dataset_root, "valley",
+        plant_csvs=[{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}],
+        assignments={DATE: []})
 
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
+    res = _deliver(tmp_path, _results(("P1", 3)), ["P1"], list(preds_by_date.values()),
+                   plant_mapping="valley")
 
-    records = [
-        {"plant_id": "PLANT_A", "count": 3, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley", predictions_by_date=preds_by_date)
-    assert "error" in res
     assert "recorded no capture at all" in res["error"]
-    assert not out_csv.exists()
+    assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(tmp_path):
-    """This door's one added claim over the writer: every delivered ``plant_id`` must appear
-    among a plot the named mapping actually assigned, or the delivery refuses by name."""
-    dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
+def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(tmp_path):
+    """This door's one added claim: every delivered plant must be one the named mapping assigned
+    on the delivered dates."""
+    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
-    from tests._binding_fixtures import register_plant_registry_for
-    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    res = _deliver(tmp_path, _results(("P1", 1), ("GHOST", 2)), ["P1", "GHOST"], [bucket],
+                   plant_mapping="valley")
 
-    registry = register_plant_registry_for(tmp_path, [plant_csv])
-    mapped = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
-        nn_tolerance_m=10.0)
-    assert "error" not in mapped, mapped
-
-    pred_dir = dataset_root / "predictions" / "manual" / date
-    pred_dir.mkdir(parents=True)
-
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "P1", "count": 1, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-        {"plant_id": "GHOST", "count": 2, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley",
-        predictions_by_date={date: str(pred_dir)})
-    assert "error" in res
-    assert "GHOST" in res["error"]
-    assert "P1" not in res["error"]
-    assert not out_csv.exists()
+    assert "GHOST" in res["error"] and "'P1'" not in res["error"]
+    assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_was_built(
-    tmp_path,
-):
-    """A verification refusal from the shared preamble itself, distinct from its three
-    resolution-time refusals: a capture the mapping's own assignments do not name means the
-    mapping does not cover what is on disk now."""
-    dataset_root, plant_csv, date = _write_one_plant_scene(tmp_path)
+def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
+    """A capture the mapping's own assignments do not name means the mapping does not cover what
+    is on disk now."""
+    from tests._image_fixtures import write_geo_image
 
-    from tests._binding_fixtures import register_plant_registry_for
-    from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
+    write_geo_image(dataset_root / "images" / date / "P2.jpg", 43.19680, -90.057000,
+                    datetime(2026, 2, 11, 9, 35))
 
-    registry = register_plant_registry_for(tmp_path, [plant_csv])
-    mapped = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(dataset_root / "images"), plant_registry=registry,
-        nn_tolerance_m=10.0)
-    assert "error" not in mapped, mapped
-    assert mapped["n_mapped"] == 1
+    res = _deliver(tmp_path, _results(("P1", 1)), ["P1"], [bucket], plant_mapping="valley")
 
-    from tests._binding_fixtures import write_geo_image as _write_geo_image
-
-    # Added after the mapping was built: the mapping's own assignments do not name it.
-    _write_geo_image(dataset_root / "images" / date / "P2.jpg", 43.19680, -90.057000,
-                     datetime(2026, 2, 11, 9, 35))
-
-    pred_dir = dataset_root / "predictions" / "manual" / date
-    pred_dir.mkdir(parents=True)
-
-    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
-    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
-
-    records = [
-        {"plant_id": "P1", "count": 1, "plant_attribution": "image",
-         "measurement_document": "operating_point"},
-    ]
-    results = aggregate_per_plant(records, strategy="count", value_key="count")
-    out_csv = tmp_path / "o.csv"
-
-    res = deliver_per_plant_csv(
-        tmp_path, results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
-        pipeline_version="v1", plant_mapping="valley",
-        predictions_by_date={date: str(pred_dir)})
-    assert "error" in res
     assert "does not cover what is on disk now" in res["error"]
-    assert not out_csv.exists()
+    assert not (tmp_path / "o.csv").exists()

@@ -6,33 +6,19 @@ Torch-free.
 from __future__ import annotations
 
 import bisect
-import hashlib
-import logging
 import random
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
-from tcip_store import (
-    RECORD_JSON,
-    BadKey,
-    DecodeError,
-    Key,
-    StoreDescriptor,
-    canonical_path,
-    register_store,
-    store,
-)
+from tcip_store import canonical_path
 
 from tcip_mcp.pipelines.data.selection import SIDES
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
-
-logger = logging.getLogger(__name__)
+    from tcip_mcp.pipelines.data.selection import ClassScope, Selection
 
 # A tiled stem looks like ``<source>_<x>_<y>`` (two trailing integer fields).
 # Strip that suffix so all tiles of one source share a group key. A stem with a
@@ -44,9 +30,6 @@ _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 DEFAULT_GROUP_BY = "tile_prefix"
 DEFAULT_SEED = 42
 DEFAULT_VAL_RATIO = 0.2
-DEFAULT_HOLDOUT_RATIO = 0.5
-DEFAULT_CAL_SEED = 0
-"""The holdout share and seed a first cal/holdout lock draws at when its caller states neither."""
 
 
 def default_group_key(stem: str) -> str:
@@ -89,20 +72,22 @@ def count_label_lines(label_path: str | Path, scope: "ClassScope | None" = None)
                if json_io.assessed_key(a, scope.subject, scope.attribute) is not None)
 
 
-def label_document_extent(label_path: str | Path) -> tuple[int, int] | None:
+def label_document_extent(label_path: str | Path) -> tuple[int, int]:
     """``(width, height)`` one per-image label JSON records (the json_io schema's top-level
-    ``width``/``height``, the frame its boxes were authored against), or ``None`` when the file is
-    missing or carries no positive width/height. A present, unreadable file raises
+    ``width``/``height``, the frame its boxes were authored against). A document that states no
+    positive width and height refuses (``ValueError``) naming it; an unreadable file raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
     """
     from tcip_annotation.json_io import load_label_document
 
-    p = Path(label_path)
-    if not p.is_file():
-        return None
-    data = load_label_document(p)
-    w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
-    return (w, h) if w > 0 and h > 0 else None
+    data = load_label_document(Path(label_path))
+    w, h = data.get("width"), data.get("height")
+    if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
+        raise ValueError(
+            f"{label_path} states no positive width and height ({w!r}, {h!r}): the frame its "
+            "geometry was drawn in is unknown, so nothing can place that geometry on the image. "
+            "Write the label document through the annotation store, which records the frame.")
+    return w, h
 
 
 def group_balanced_split(
@@ -153,7 +138,7 @@ def group_balanced_split(
         group_key_fn = GROUP_KEY_FNS[DEFAULT_GROUP_BY]
     stems = list(stems)
     fracs = dict(zip(SIDES, splits))
-    active = [n for n in SIDES if fracs.get(n, 0.0) > 0]
+    active = [n for n in fracs if fracs[n] > 0]
 
     # Group stems and tally tiles + annotations per group.
     groups: dict[str, list[str]] = defaultdict(list)
@@ -176,7 +161,7 @@ def group_balanced_split(
         fg_groups = list(groups.keys())
         bg_groups = []
 
-    result: dict[str, list[str]] = {n: [] for n in SIDES}
+    result: dict[str, list[str]] = {n: [] for n in fracs}
     if not fg_groups or not active:
         # Nothing to stratify on; dump everything into the first active split.
         target = active[0] if active else "train"
@@ -185,11 +170,11 @@ def group_balanced_split(
 
     total_ann = sum(group_ann[gk] for gk in fg_groups) or 1
     total_fg_tiles = sum(group_tiles[gk] for gk in fg_groups) or 1
-    targets_ann = {n: fracs[n] * total_ann for n in SIDES}
-    targets_tiles = {n: fracs[n] * total_fg_tiles for n in SIDES}
+    targets_ann = {n: fracs[n] * total_ann for n in fracs}
+    targets_tiles = {n: fracs[n] * total_fg_tiles for n in fracs}
 
-    state_ann = {n: 0 for n in SIDES}
-    state_tiles = {n: 0 for n in SIDES}
+    state_ann = {n: 0 for n in fracs}
+    state_tiles = {n: 0 for n in fracs}
     assignment: dict[str, str] = {}
     used: set[str] = set()
 
@@ -245,7 +230,7 @@ def group_balanced_split(
 
     # Background groups -> active split with the largest overall tile deficit.
     total_all_tiles = sum(group_tiles.values()) or 1
-    tile_target_all = {n: fracs[n] * total_all_tiles for n in SIDES}
+    tile_target_all = {n: fracs[n] * total_all_tiles for n in fracs}
     for gk in sorted(bg_groups, key=lambda g: group_tiles[g], reverse=True):
         best_split = max(active, key=lambda n: tile_target_all[n] - state_tiles[n])
         assignment[gk] = best_split
@@ -253,7 +238,7 @@ def group_balanced_split(
 
     for gk, gs in groups.items():
         result[assignment.get(gk, active[0])].extend(gs)
-    return {n: sorted(result[n]) for n in SIDES}
+    return {n: sorted(result[n]) for n in fracs}
 
 
 def foreground_group_count(
@@ -352,12 +337,12 @@ def draw_train_val(
 
 def redraw_pool(selection: "Selection") -> tuple[dict[str, str], dict[str, int]]:
     """A redraw's pool: each train-plus-val sample's recorded group key and foreground count, by
-    sample identity."""
+    sample location."""
     from tcip_mcp.pipelines.data.label_queries import foreground_counts
 
     pool = selection.trainable()
-    return ({s.identity: s.group for s in pool},
-            foreground_counts({s.identity: s for s in pool}, selection.scope))
+    return ({s.location: s.group for s in pool},
+            foreground_counts({s.location: s for s in pool}, selection.scope))
 
 
 def redraw_starved_issue(
@@ -466,12 +451,6 @@ class SpatialStripSplit:
     kept_tiles: dict[str, int]
     realized_fractions: dict[str, float]
     realized_discard_fraction: float
-
-    def split_name_for(self, box: tuple[int, int, int, int]) -> str | None:
-        """Which split (``"train"``/``"val"``/``"test"``/...) the lattice slice ``box`` belongs
-        to, or ``None`` when it falls in a dropped gap."""
-        idx = _region_index(self.region_bounds, self.axis, box)
-        return None if idx is None else self.region_bounds[idx][0]
 
     def identity_for(self, stem: str, box: tuple[int, int, int, int]) -> str | None:
         """The region identity for the lattice slice ``box`` of ``stem``, or ``None`` when it
@@ -680,352 +659,3 @@ def spatial_strip_split(
         kept_tiles=kept, realized_fractions={n: kept[n] / total_kept for n in active_names},
         realized_discard_fraction=dropped_outside / tiles_within_extent,
     )
-
-
-
-
-def cal_holdout_split(
-    stems: Sequence[str],
-    annotation_counts: dict[str, int] | None = None,
-    group_key_fn: Callable[[str], str] | None = None,
-    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
-    seed: int = DEFAULT_CAL_SEED,
-) -> dict[str, list[str]]:
-    """A disjoint, group-coherent, annotation-balanced calibration/holdout split of ``stems``:
-    :func:`group_balanced_split` at ``(1 - holdout_ratio, holdout_ratio, 0)``, its two halves
-    returned as ``{"calibration", "holdout"}``."""
-    parts = group_balanced_split(
-        stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-        splits=(1.0 - holdout_ratio, holdout_ratio, 0.0), seed=seed,
-    )
-    return {"calibration": parts["train"], "holdout": parts["val"]}
-
-
-_LOCK_DIR = (".tcip", "artifacts")
-_LOCK_STEM = "cal_holdout_split_"
-
-
-@dataclass(frozen=True)
-class _CalHoldoutLockLocator:
-    """One locked split per dataset identity, named for the identity it locks."""
-
-    def relative_path(self, scope: str, parts: tuple[str, ...]) -> "PurePosixPath":
-        (identity_hash,) = parts
-        return PurePosixPath(*_LOCK_DIR, f"{_LOCK_STEM}{identity_hash}.json")
-
-    def parts_from(self, relative_path: "PurePosixPath") -> tuple[str, ...] | None:
-        segments = relative_path.parts
-        if segments[:len(_LOCK_DIR)] != _LOCK_DIR or len(segments) != len(_LOCK_DIR) + 1:
-            return None
-        name = segments[-1]
-        if not name.startswith(_LOCK_STEM) or not name.endswith(".json"):
-            return None
-        return (name[len(_LOCK_STEM):-len(".json")],)
-
-
-CAL_HOLDOUT_LOCK_STORE = "cal_holdout_split_lock"
-register_store(
-    StoreDescriptor(
-        name=CAL_HOLDOUT_LOCK_STORE,
-        kind="record",
-        key_fields=("identity_hash",),
-        frozen=True,
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_CalHoldoutLockLocator(),
-        enumerable=True,
-    )
-)
-
-
-def cal_holdout_lock_key(identity_hash: str, *, scope_root: str | Path) -> Key:
-    """A dataset identity's locked calibration/holdout split, under the root it was drawn over.
-
-    ``scope_root`` is required: the lock travels with the dataset whose images it held back.
-    ``last_writer_wins``.
-    """
-    if PureWindowsPath(identity_hash).name != identity_hash or identity_hash == "..":
-        raise BadKey(
-            f"dataset identity {identity_hash!r} is not a single name: an identity carrying a "
-            "path separator would address a lock outside the artifact store"
-        )
-    return Key(CAL_HOLDOUT_LOCK_STORE, str(Path(scope_root).resolve()), (identity_hash,))
-
-
-def cal_holdout_lock_path(identity_hash: str, *, scope_root: str | Path) -> Path:
-    """Where a dataset identity's locked cal/holdout split lives on disk under ``scope_root``,
-    placed by the store's own locator.
-    """
-    key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
-    return Path(key.root, *_CalHoldoutLockLocator().relative_path(key.root, key.parts).parts)
-
-
-def cal_holdout_scope_root(labels_dir: str | Path) -> Path:
-    """The root a labeled directory's locked cal/holdout split is scoped to: the dataset root the
-    labels live under, or, for a directory the dataset layout cannot place, the directory itself.
-    """
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    root = dataset_root_of(labels_dir)
-    return (root if root is not None else Path(labels_dir)).resolve()
-
-
-def label_image_stems(
-    labels_dir: str | Path, images_dir: str | Path | None = None,
-) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
-    """Stems with a readable per-image label file, over a whole labeled directory.
-
-    With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty),
-    the label-only universe. With ``images_dir`` given, only stems that also have a matching
-    logical image (a plain file, or a ``.bandgroup``-grouped capture) survive. ``labels_dir`` may
-    itself be a prediction bucket, so its own provenance sidecars are excluded through
-    :func:`~tcip_annotation.json_io.prediction_documents`. A selection-restricted door reads
-    :func:`selection_calibration_universe` instead.
-    """
-    from tcip_annotation.json_io import prediction_documents
-
-    labels_p = Path(labels_dir)
-    label_stems = {p.stem for p in prediction_documents(labels_p)}
-    if images_dir is None:
-        return sorted(label_stems), {}
-    from tcip_mcp.pipelines.image_utils import list_logical_images
-
-    stem_to_image = {stem: src for stem, src in list_logical_images(images_dir).items()
-                     if stem in label_stems}
-    return sorted(stem_to_image), stem_to_image
-
-
-def selection_calibration_universe(
-    selection: "Selection", labels_dir: str | Path, scope: "ClassScope",
-    *, min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str, dict[str, str], dict[str, list[str]], dict[str, int],
-           dict[str, "Sample"]]:
-    """The calibration universe a selection gives one caller restricting a read to ``labels_dir``:
-    the selection's ``calibration`` samples whose own recorded ground truth lives in
-    ``labels_dir``, whatever shape that ground truth is. Nothing is intersected against a directory
-    listing. The selection supplies membership only: the universe is re-admitted under ``scope``,
-    the class space the measurement reads
-    (:func:`~tcip_mcp.pipelines.data.label_queries.refuse_inadmissible_samples`).
-
-    The floor counts only the groups that carry foreground, through
-    :func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts` under ``scope``.
-    ``min_foreground_groups`` is forwarded to
-    :func:`refuse_insufficient_foreground_groups`; omitted, it defaults to ``{"calibration": 2}``,
-    since a locked cal/holdout draw halves the universe into two non-empty parts.
-
-    Returns ``(stems, group_by, group_key_map, excluded, counts, samples)``: ``stems`` is the calibration
-    side's bare member names under ``labels_dir``; ``group_key_map`` is each one's recorded group
-    key, with ``group_by="explicit_map"``; ``excluded`` names the selection's recorded train
-    members (``excluded_training_stems``) and val members (``excluded_validation_stems``) under
-    this scope; ``counts`` is each member's foreground count, the one the floor read;
-    ``samples`` is each universe member's own recorded sample.
-
-    Refuses a calibration sample naming a pixel rect
-    (:func:`~tcip_mcp.pipelines.data.selection.refuse_unreadable_samples`), and, naming the count,
-    the labels directory and the floor, a universe holding fewer foreground groups than the floor
-    states.
-    """
-    from tcip_mcp.pipelines.data.label_queries import (
-        foreground_counts, refuse_inadmissible_samples,
-    )
-    from tcip_mcp.pipelines.data.selection import refuse_unreadable_samples
-
-    # Through the sample's own recorded scope, never the parent of its ground-truth path: a table
-    # scope is the table itself, which no sample's parent directory equals.
-    in_scope = [s for s in selection.samples if same_directory(s.ground_truth_scope, labels_dir)]
-    by_side: dict[str, dict[str, str]] = {name: {} for name in SIDES}
-    universe_samples: dict[str, "Sample"] = {}
-    for sample in in_scope:
-        by_side[sample.side][sample.member] = sample.group
-        if sample.side == "calibration":
-            universe_samples[sample.member] = sample
-    refuse_unreadable_samples(universe_samples.values())
-
-    stems = sorted(universe_samples)
-    group_key_map = {stem: by_side["calibration"][stem] for stem in stems}
-    excluded = {
-        "excluded_training_stems": sorted(by_side["train"]),
-        "excluded_validation_stems": sorted(by_side["val"]),
-    }
-
-    counts = foreground_counts(universe_samples, scope)
-    n_groups = foreground_group_count(stems, counts, group_key_map.__getitem__)
-    floor = min_foreground_groups if min_foreground_groups is not None else {"calibration": 2}
-    try:
-        refuse_insufficient_foreground_groups(
-            n_groups, floor,
-            remedy="annotate or confirm more foreground groups of this subject.")
-    except ValueError as exc:
-        raise ValueError(
-            f"the selection's calibration side under {labels_dir} gives a calibration universe "
-            f"of {n_groups} foreground group(s) ({len(stems)} member(s) total): {exc} Draw the "
-            "selection again with a larger calibration_ratio or more foreground groups under "
-            "this ground truth."
-        ) from exc
-    refuse_inadmissible_samples(list(universe_samples.values()), scope)
-    return stems, "explicit_map", group_key_map, excluded, counts, universe_samples
-
-
-def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
-    """Content hash over a split's calibration+holdout membership (order-independent per side)."""
-    if not parts:
-        return None
-    h = hashlib.sha256()
-    for key in ("calibration", "holdout"):
-        for s in sorted(parts[key]):
-            h.update(s.encode("utf-8"))
-            h.update(b"\0")
-        h.update(b"\0\0")
-    return h.hexdigest()[:16]
-
-
-def selection_policy_conflict(selection_dir: str | Path | None, group_by: str | None,
-                              group_key_map: dict[str, str] | None) -> str | None:
-    """Why a grouping policy cannot be stated beside ``selection_dir`` for a locked draw, or
-    ``None`` when nothing conflicts."""
-    if selection_dir is None or (group_by is None and group_key_map is None):
-        return None
-    return (f"selection_dir={str(selection_dir)!r} conflicts with group_by/group_key_map: the "
-            "group keys the selection recorded on its own samples govern the locked draw; pass "
-            "neither beside it.")
-
-
-def resolve_locked_cal_holdout_split(
-    stems: Sequence[str] | None,
-    *,
-    identity_hash: str,
-    scope_root: str | Path,
-    annotation_counts: dict[str, int] | None = None,
-    group_by: str | None = None,
-    group_key_map: dict[str, str] | None = None,
-    holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
-    seed: int = DEFAULT_CAL_SEED,
-    force_redraw: bool = False,
-    timestamp: str | None = None,
-    reason: str | None = None,
-) -> dict:
-    """Resolve (and lock) the calibration/holdout split for one dataset identity.
-
-    The split locks on its first draw for a given ``identity_hash``: every later call for the same
-    identity returns the identical split unless the caller passes ``force_redraw=True``. The
-    grouping policy is resolved via
-    :func:`resolve_group_key_fn` first, so a malformed ``group_by``/``group_key_map`` raises; an
-    unstated ``group_by`` is :data:`DEFAULT_GROUP_BY`.
-
-    If a lock already exists and the caller's declared policy
-    (``group_by``/``group_key_map``/``seed``/``holdout_ratio``) differs from what is recorded in
-    it, the divergence is logged as a warning and returned under ``"policy_divergence"``
-    (``{"requested": ..., "locked": ...}``) and the locked split is returned unchanged. Stems the
-    caller has that the lock doesn't cover are returned under ``"unlocked_stems"``. A selection's
-    universe is its own identity (``identity_hash`` is hashed over its stems), so the lock names
-    no selection.
-
-    ``stems`` ``None`` names the existing lock's own members as the universe; with no lock to read
-    them from it raises ``ValueError``.
-
-    A locked stem with no corresponding entry in the caller's current ``stems`` raises
-    ``ValueError``. A lock file that exists but fails to parse raises when ``force_redraw=False``
-    or when ``stems`` is ``None``; ``force_redraw=True`` over stems the caller holds proceeds past
-    it, without the unreadable redraw history.
-
-    ``scope_root`` is required: the root the lock is stored under (:func:`cal_holdout_scope_root`).
-    ``timestamp`` is the caller's, and only meaningful when a new draw happens.
-
-    Every draw that writes a lock, a first draw or a forced redraw, leaves its one audit line,
-    ``calibration_holdout_drawn``, naming the policy, the membership before and after and the
-    caller's ``reason``; returning an existing lock writes nothing and leaves none.
-
-    Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
-    group_key_map, seed, holdout_ratio, redraw_history}``, plus the optional
-    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed, or,
-    on a draw, the ``old_membership`` it replaced (``None`` for a first draw).
-    """
-    lock_key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
-    try:
-        existing = store.read(lock_key, default=None)
-    except DecodeError as exc:
-        if not force_redraw or stems is None:
-            raise ValueError(
-                f"the cal/holdout lock for identity_hash={identity_hash!r} exists but could not "
-                f"be read/parsed ({exc}). Refusing to silently treat a corrupt lock as 'no lock "
-                "exists' and redraw. Investigate the file, or redraw it with "
-                "redraw_calibration_holdout over the labels its stems come from."
-            ) from exc
-        logger.warning(
-            "the cal/holdout lock for identity_hash=%s is corrupt (%s); force_redraw=True "
-            "proceeds to draw a fresh lock. Its prior "
-            "redraw history could not be recovered from the unreadable record.",
-            identity_hash, exc,
-        )
-        existing = None
-    if stems is None:
-        if existing is None:
-            raise ValueError(f"no lock exists for identity_hash={identity_hash!r} to take the "
-                             "redraw's stems from; name the labels its stems come from.")
-        stems = sorted(set(existing["calibration"]) | set(existing["holdout"]))
-    group_by = group_by or DEFAULT_GROUP_BY
-    group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    declared_policy = {
-        "group_by": group_by, "group_key_map": group_key_map,
-        "seed": seed, "holdout_ratio": holdout_ratio,
-    }
-
-    if existing is not None and not force_redraw:
-        locked_stems = set(existing["calibration"]) | set(existing["holdout"])
-        stems_set = set(stems)
-        stale = sorted(locked_stems - stems_set)
-        if stale:
-            preview = stale[:10]
-            more = f" (+{len(stale) - 10} more)" if len(stale) > 10 else ""
-            raise ValueError(
-                f"locked cal/holdout split for identity_hash={identity_hash!r} references "
-                f"{len(stale)} stem(s) no longer present in the current data (image/label "
-                f"deleted or renamed since the split was locked): {preview}{more}. Use "
-                "redraw_calibration_holdout to redraw deliberately, or restore the missing "
-                "file(s)."
-            )
-        result = dict(existing)
-        unlocked_stems = sorted(stems_set - locked_stems)
-        if unlocked_stems:
-            result["unlocked_stems"] = unlocked_stems
-        recorded_policy = {k: existing[k] for k in declared_policy}
-        if recorded_policy != declared_policy:
-            logger.warning(
-                "cal/holdout split for identity_hash=%s is locked with a different policy than "
-                "declared (locked=%s, declared=%s); returning the locked split unchanged. Use "
-                "redraw_calibration_holdout to redraw deliberately.",
-                identity_hash, recorded_policy, declared_policy,
-            )
-            result["policy_divergence"] = {"requested": declared_policy, "locked": recorded_policy}
-        return result
-
-    parts = cal_holdout_split(stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-                              holdout_ratio=holdout_ratio, seed=seed)
-    redraw_history = list(existing["redraw_history"]) if existing else []
-    redraw_history.append({
-        "policy": declared_policy,
-        "seed": seed,
-        "old_content_hash": _split_content_hash(existing),
-        "new_content_hash": _split_content_hash(parts),
-        "timestamp": timestamp,
-    })
-    locked = {
-        "identity_hash": identity_hash,
-        "calibration": parts["calibration"],
-        "holdout": parts["holdout"],
-        **declared_policy,
-        "redraw_history": redraw_history,
-    }
-    store.replace(lock_key, locked)
-    from tcip_mcp.audit import record_event_or_raise
-
-    old_membership = ({"calibration": existing["calibration"], "holdout": existing["holdout"]}
-                      if existing else None)
-    # The draw's one receipt, a first draw and a redraw alike; the lock has already landed.
-    record_event_or_raise(
-        "calibration_holdout_drawn",
-        {"identity_hash": identity_hash, **declared_policy, "reason": reason},
-        scope=scope_root, old_membership=old_membership,
-        new_membership={"calibration": parts["calibration"], "holdout": parts["holdout"]},
-    )
-    return {**locked, "old_membership": old_membership}

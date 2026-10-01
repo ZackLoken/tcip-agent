@@ -107,19 +107,19 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
 ):
     """Every in-project path a record holds is spelled relative to the project, so a project
     whose directory moves resolves its resumed run's checkpoint, its completed run's checkpoint,
-    its registry entry, a run's data locations and partition, and a published bucket's images at
-    their new location, and no run record names the directory it left."""
+    its registry entry, a run's data locations and partition, and a published bucket's documents
+    at their new location, and no run record names the directory it left."""
     import json
 
     from tcip_mcp.experiments import (
         RUN_FILE, SWEEP_FILE, create_run_directory, find_run, observe, sweeps_dir, write_record,
     )
     from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.data.split_construction import partition_samples
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
-    from tcip_mcp.registry_paths import resolved_registry_path
-    from tests._clear_prediction_bucket_fixtures import build_published_bucket
+    from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import detection_config, finished_run, opened_run
 
     ws = tmp_path.parent
@@ -128,7 +128,11 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     checkpoint = Path(observe(first).checkpoint["path"])
     opened_run(project, detection_config(project / "data"),
                experiment_id="exp-resumed", resume_from=str(checkpoint))
-    bucket = build_published_bucket(project, monkeypatch, experiment_id="exp-first")["bucket"]
+    bucket = project / "data" / "predictions" / "live" / "2-11-26"
+    published = run_inference(project, checkpoint_path=str(checkpoint),
+                              images_dir=str(project / "data" / "images"), output_dir=str(bucket),
+                              stated=Stated(tile=False))
+    assert "error" not in published, published
     other_images = str(project / "data" / "other")
     sweep = create_run_directory(sweeps_dir(project) / "study")
     write_record(sweep / SWEEP_FILE, {
@@ -162,9 +166,8 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     (entry,) = [m for m in ModelRegistry(str(moved)).list_models() if m["name"] == "exp-first"]
     assert Path(entry["checkpoint_path"]).resolve() == moved_checkpoint.resolve()
 
-    stamp = read_operating_point_sidecar(moved / bucket.relative_to(project))
-    assert stamp is not None
-    assert resolved_registry_path(moved, stamp["images_dir"]).is_dir()
+    record = read_bucket(moved / bucket.relative_to(project))
+    assert all((record.path / f"{stem}.json").is_file() for stem in record.documents)
 
     moved_other = str(moved.resolve() / "data" / "other")
     swept = observe(sweeps_dir(moved) / "study", SWEEP_FILE).record

@@ -45,17 +45,15 @@ def get_experiment(
 
 @tool()
 def list_experiments(project: Path, launched_only: bool = False) -> dict:
-    """Enumerate every run directory of the project: a training run and a calibration run of a
-    checkpoint no run produced alike. Use this to rediscover the project's runs after a session is
-    lost, before reaching for ``get_experiment`` (one run's full detail).
+    """Enumerate every run directory of the project. Use this to rediscover the project's runs
+    after a session is lost, before reaching for ``get_experiment`` (one run's full detail).
 
     ``launched_only=True`` switches to the other view this door serves: every training run
-    directory, in id order, calibration runs and HPO trials excluded (a trial belongs to its
-    sweep).
+    directory, in id order, HPO trials excluded (a trial belongs to its sweep).
 
     Returns:
         With ``launched_only=False`` (default), ``experiments``: a list of
-        ``{experiment_id, state, created, has_model_source}``, one per run directory
+        ``{experiment_id, state, created}``, one per run directory
         (``experiments.list_experiments``). With ``launched_only=True``, ``runs``: the training
         run rows themselves, see :func:`tcip_mcp.tools.training_tools._all_training_runs`.
     """

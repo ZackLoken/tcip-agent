@@ -16,16 +16,17 @@ function seedDataset(partial: Record<string, unknown>) {
   useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/ws/proj" } });
 }
 
+const BUCKET = "/ws/proj/predictions/baseline/2026-02-11";
+
 const SELECTION = {
   dataset_root: "/ws/proj",
   subject: "subject_a",
   date: "2026-02-11",
-  model_name: "baseline",
   image_list: [],
   current_image_index: 0, // backend resets to 0
   images_dir: null,
   annotations_dir: "/ws/proj/annotations/2026-02-11",
-  predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
+  predictions_dir: BUCKET,
   label_paths: {},
   prediction_paths: {},
 };
@@ -37,7 +38,7 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("applyReviewFocus", () => {
-  it("switches the dataset with the model, then applies filters + index + review tab locally", async () => {
+  it("switches the dataset with the bucket, then applies filters + index + review tab locally", async () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
@@ -49,7 +50,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
+      predictions_dir: BUCKET,
       image_index: 12,
       detection_idx: 3,
       filter_type: "fp",
@@ -62,7 +63,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
+      predictions_dir: BUCKET,
     });
     const g = useStore.getState().gui;
     expect(g.dataset.current_image_index).toBe(12); // local view wins over backend index=0
@@ -74,20 +75,19 @@ describe("applyReviewFocus", () => {
     expect(useStore.getState().review.focusDetectionIdx).toBe(3);
   });
 
-  it("does not re-select when identity and model already match, but still applies filters", async () => {
+  it("does not re-select when identity and bucket already match, but still applies filters", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
-      predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
+      predictions_dir: BUCKET,
     });
 
     await applyReviewFocus({
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
+      predictions_dir: BUCKET,
       image_index: 7,
       filter_type: "fn",
     });
@@ -101,12 +101,11 @@ describe("applyReviewFocus", () => {
     expect(api.dataset.nav).toHaveBeenCalledWith(7);
   });
 
-  it("re-selects when the model differs even though the dataset identity matches", async () => {
+  it("re-selects when the bucket differs even though the dataset identity matches", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "OTHER",
       predictions_dir: "/ws/proj/predictions/OTHER/2026-02-11",
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
@@ -119,7 +118,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline", // different model than the loaded selection's own
+      predictions_dir: BUCKET, // a different bucket than the loaded selection's own
     });
 
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
@@ -145,7 +144,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
+      predictions_dir: BUCKET,
     });
 
     expect(useStore.getState().reviewStatus.byImage).toEqual({});
@@ -165,7 +164,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "subject_a",
       date: "2026-02-11",
-      model_name: "baseline",
+      predictions_dir: BUCKET,
     });
 
     expect(pushToast).toHaveBeenCalledWith(

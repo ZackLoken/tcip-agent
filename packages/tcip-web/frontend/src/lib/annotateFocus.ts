@@ -34,7 +34,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
       date: d.date ?? null,
-      model_name: null,
+      predictions_dir: null,
     });
     useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);

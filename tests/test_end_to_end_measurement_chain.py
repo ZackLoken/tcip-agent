@@ -1,4 +1,4 @@
-"""The measurement chain end to end: ingest, train, publish, assess, confirm, deliver.
+"""The measurement chain end to end: ingest, train, assess, publish, confirm, deliver.
 
 Three detectors over one flow. The first delivers a CSV whose validated column reads true, and
 is the admitting half for the two refusals beside it: the same flow with the reference labels
@@ -22,164 +22,10 @@ pytest.importorskip("pycocotools")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
-IMG = 64
-SUBJECT = "bud"
-DATE = "2-11-26"
-STEMS = tuple(f"s{i:02d}" for i in range(40))
-
-
-def _object_at(index: int) -> tuple[int, int, int]:
-    """Where this frame's single object sits, and how big it is.
-
-    Every frame differs in both, so no two frames are the same pixels: a reference whose
-    calibration and holdout halves shared content would be measuring the model against itself,
-    and the calibration refuses one.
-    """
-    x0 = 4 + (index % 5) * 8
-    y0 = 4 + ((index // 5) % 5) * 8
-    size = 14 + (index % 3) * 4
-    return x0, y0, size
-
-
-def _synthetic_capture(root: Path) -> tuple[Path, Path]:
-    """Ingest one capture date of dim frames, each holding one bright square its label names.
-
-    The frames are written to a raw folder and brought in through ``ingest_images``, the door a
-    breeder's pile of photos actually arrives by, so the chain starts where they start. Exactly
-    one object per frame, so the counted quantity is known without measuring it, while position,
-    size and background all vary frame to frame.
-    """
-    from PIL import Image, ImageDraw
-
-    from tcip_mcp.tools.ingest_tools import ingest_images
-
-    raw = root.parent / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
-    for index, stem in enumerate(STEMS):
-        x0, y0, size = _object_at(index)
-        shade = 28 + (index % 7)
-        frame = Image.new("RGB", (IMG, IMG), color=(shade, shade, shade))
-        ImageDraw.Draw(frame).rectangle([x0, y0, x0 + size - 1, y0 + size - 1],
-                                        fill=(230, 230, 230))
-        frame.save(raw / f"{stem}.png")
-
-    ingested = ingest_images(root, source=str(raw), date_from=DATE)
-    assert "error" not in ingested, ingested
-    assert ingested["copied"] == len(STEMS), ingested
-
-    images_dir, labels_dir = root / "images" / DATE, root / "annotations" / DATE
-    assert images_dir.is_dir(), sorted(p.name for p in root.iterdir())
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    for index, stem in enumerate(STEMS):
-        x0, y0, size = _object_at(index)
-        json_io.write_annotations(
-            str(labels_dir / f"{stem}.json"),
-            [Annotation(subject=SUBJECT, geometry=BBox(x0, y0, x0 + size, y0 + size))], IMG, IMG,
-        )
-    return images_dir, labels_dir
-
-
-def _draw_reference_selection(project: Path, root: Path, out: Path):
-    from tcip_mcp.pipelines.data.selection import read_selection
-    from tcip_mcp.tools.data_tools import draw_splits
-
-    result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=2,
-                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
-    assert "error" not in result, result
-    return read_selection(out, project=project)
-
-
-BUILDER = "tests.bespoke_models:build_bright_region_detector"
-
-
-def _run_config(selection_dir: Path) -> dict:
-    """A run that binds the drawn selection rather than drawing a partition of its own."""
-    return {
-        "model_source": {"builder": BUILDER, "builder_kwargs": {}, "task": "detection"},
-        "data": {"split": {"selection_dir": str(selection_dir)}},
-        "batch_size": 2,
-        "stages": [{"freeze_to": -1, "epochs": 1}],
-        "mixed_precision": False,
-        "device": "cpu",
-        "checkpoint_every_n_epochs": 1,
-        "early_stopping": {"enabled": False},
-        "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-        "scheduler": {"type": "cosine"},
-        "gradient_accumulation_steps": 1,
-    }
-
-
-def _train_on(selection_dir: Path, project_root: Path, experiment_id: str) -> str:
-    """Train the tiny detector over the selection's train side through the child's own entry,
-    whose completion registers the checkpoint; the checkpoint's path.
-
-    Leaves what the rest of the chain binds to: a run whose launch record carries the partition it
-    trained on and the selection it bound, and a completed checkpoint with an identity of its own.
-    """
-    from tcip_mcp.experiments import observe
-    from tests._verified_checkpoint_fixtures import worker_run
-
-    observation = observe(worker_run(project_root, _run_config(selection_dir),
-                                     experiment_id=experiment_id))
-    checkpoint = observation.checkpoint
-    assert checkpoint is not None, observation.final
-    return checkpoint["path"]
-
-
-class Chain:
-    """What one run of the flow leaves behind, for a detector to deliver from or disturb."""
-
-    def __init__(self, root: Path, images_dir: Path, labels_dir: Path, selection_dir: Path,
-                 checkpoint_path: str, bucket: Path, published: dict) -> None:
-        self.root = root
-        self.images_dir = images_dir
-        self.labels_dir = labels_dir
-        self.selection_dir = selection_dir
-        self.checkpoint_path = checkpoint_path
-        self.bucket = bucket
-        self.published = published
-
-
-def _confirm_trait_revision(project_root: Path, **fields):
-    """Propose a revision of the count trait stating its per-image count of ``SUBJECT`` with
-    ``fields`` changed, and confirm it as the breeder would: a changed entry is a new, unconfirmed
-    revision, so the confirmation is of the revision itself."""
-    from tcip_mcp import traits
-
-    from tests import _trait_fixtures as fx
-
-    revision = fx.propose(project_root, fx.with_operationalization(
-        fx.with_fields(fx.COUNT_SPEC, **fields), traits.PER_IMAGE_COUNT, measured_subject=SUBJECT))
-    assert not revision.confirmed, "a proposed revision must land unconfirmed"
-    return fx.confirm(project_root, revision, user="chain-breeder")
-
-
-def _run_the_chain(tmp_path: Path, *, experiment_id: str, bucket_name: str = "chain") -> Chain:
-    """Ingest, train, publish and assess: the flow every detector here varies one step of."""
-    from tests import _trait_fixtures as fx
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    root = tmp_path / "ds"
-    images_dir, labels_dir = _synthetic_capture(root)
-    selection_dir = tmp_path / "selection"
-    _draw_reference_selection(tmp_path, root, selection_dir)
-    checkpoint_path = _train_on(selection_dir, tmp_path, experiment_id)
-
-    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
-
-    bucket = root / "predictions" / bucket_name / DATE
-    published = run_inference(
-        tmp_path, checkpoint_path=checkpoint_path,
-        images_dir=str(images_dir),
-        output_dir=str(bucket),
-        trait=fx.COUNT_TRAIT,
-        calibration_labels_dir=str(labels_dir),
-        selection_dir=str(selection_dir),
-    )
-    assert "error" not in published, published
-    assert published["validated"] is True, published.get("shippable_issues")
-    return Chain(root, images_dir, labels_dir, selection_dir, checkpoint_path, bucket, published)
+from tests._chain_fixtures import (  # noqa: E402
+    IMG, STEMS, SUBJECT, draw_reference_selection, object_at, run_the_chain, synthetic_capture,
+    train_on,
+)
 
 
 def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(tmp_path: Path):
@@ -187,8 +33,8 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(tm
     digest of the ground truth the draw held out, so a reader can say that file moved since
     without re-reading the draw."""
     root = tmp_path / "ds"
-    _synthetic_capture(root)
-    selection = _draw_reference_selection(tmp_path, root, tmp_path / "selection")
+    synthetic_capture(root)
+    selection = draw_reference_selection(tmp_path, root, tmp_path / "selection")
 
     calibration = selection.on("calibration")
     assert calibration, selection.counts()
@@ -205,11 +51,11 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(tmp_
     report every untouched reference as moved, and a guard test on either side alone would stay
     green over it.
     """
-    from tcip_mcp.pipelines.resolution import ground_truth_digest
+    from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
     root = tmp_path / "ds"
-    _synthetic_capture(root)
-    selection = _draw_reference_selection(tmp_path, root, tmp_path / "selection")
+    synthetic_capture(root)
+    selection = draw_reference_selection(tmp_path, root, tmp_path / "selection")
 
     for sample in selection.on("calibration"):
         assert ground_truth_digest(Path(sample.ground_truth)) == sample.ground_truth_digest, (
@@ -220,65 +66,46 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(tmp_path: Path)
     """The model the chain rests on: a real training pass, and predictions stable enough that a
     count measured over them is a fact about the chain rather than about a fit."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
 
     root = tmp_path / "ds"
-    images_dir, _labels_dir = _synthetic_capture(root)
+    images_dir, _labels_dir = synthetic_capture(root)
     selection_dir = tmp_path / "selection"
-    _draw_reference_selection(tmp_path, root, selection_dir)
+    draw_reference_selection(tmp_path, root, selection_dir)
 
-    checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-train")
+    checkpoint_path = train_on(selection_dir, tmp_path, "exp-chain-train")
 
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
-    results = predictor.predict_batch(
-        [str(images_dir / f"{stem}.png") for stem in STEMS[:3]])
+    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.5), device="cpu")
+    results = p.predict([str(images_dir / f"{stem}.png") for stem in STEMS[:3]])
 
     assert [r["count"] for r in results] == [1, 1, 1], results
     for index, result in enumerate(results):
-        x0, y0, size = _object_at(index)
+        x0, y0, size = object_at(index)
         assert result["boxes"][0] == pytest.approx(
             [float(x0), float(y0), float(x0 + size), float(y0 + size)], abs=1.0)
 
 
-def test_the_calibrated_door_publishes_a_bucket_and_earns_a_record_for_it(tmp_path: Path):
-    """Publish and assess: the calibrated export door measures the operating point on the
-    selection's calibration side and seals a record the bucket's stamp then names."""
-    from tests import _trait_fixtures as fx
+def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(tmp_path: Path):
+    """Assess and publish: the assessment fits the operating point on the selection's calibration
+    side, measures the count over its holdout side and passes; the bucket published under it runs
+    its execution record and names it, and no training run is opened for it."""
+    from tcip_mcp.assessment import read_assessment
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.experiments import list_experiments
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    chain = run_the_chain(tmp_path, experiment_id="exp-chain-publish")
 
-    root = tmp_path / "ds"
-    images_dir, labels_dir = _synthetic_capture(root)
-    selection_dir = tmp_path / "selection"
-    _draw_reference_selection(tmp_path, root, selection_dir)
-    checkpoint_path = _train_on(selection_dir, tmp_path, "exp-chain-publish")
-
-    fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC)
-
-    bucket = root / "predictions" / "chain" / DATE
-    published = run_inference(
-        tmp_path, checkpoint_path=checkpoint_path,
-        images_dir=str(images_dir),
-        output_dir=str(bucket),
-        trait=fx.COUNT_TRAIT,
-        calibration_labels_dir=str(labels_dir),
-        selection_dir=str(selection_dir),
-    )
-
-    assert "error" not in published, published
-    assert (published.get("gate_evidence_summary") or {}).get("failures") == []
-    assert published.get("shippable_issues") == []
-    assert published["validated"] is True
-
-    # The record is filed in the run that produced the checkpoint, no other run directory.
-    from tcip_mcp.experiments import find_validation, list_experiments, observe
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    pointer = read_operating_point_sidecar(bucket)["validated_by"]
-    assert pointer["experiment_id"] == "exp-chain-publish"
-    run_dir = Path(checkpoint_path).parent
-    assert find_validation(observe(run_dir), pointer["record_digest"]) is not None
+    record = read_assessment(tmp_path, chain.assessment["assessment_id"])
+    assert record.passed is True and record.failures == []
+    assert record.producer["experiment_id"] == "exp-chain-publish"
+    disjointness = record.disjointness
+    assert disjointness["holdout_shares_calibration"] == [], disjointness
+    for side in ("training", "selection"):
+        assert disjointness[side] == {"groups": [], "source_digests": []}, disjointness
+    bucket = read_bucket(chain.bucket)
+    assert bucket.assessment_id == record.assessment_id
+    assert (bucket.producer, bucket.execution) == (record.producer, record.execution)
     assert [e["experiment_id"] for e in list_experiments(tmp_path)] == ["exp-chain-publish"]
 
 
@@ -290,57 +117,66 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(tmp_path: Pa
 
     Ingest synthetic images, train a tiny model, publish a bucket, assess it against a reference
     selection, confirm a trait revision, deliver a CSV whose validated column reads true. Nothing
-    is edited and nothing is republished, so the delivery stands.
+    is edited and nothing is republished, so the delivery stands; the same predictions published
+    under no assessment refuse.
     """
     import csv
 
     from tests import _trait_fixtures as fx
 
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
-    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts, run_inference
 
-    chain = _run_the_chain(tmp_path, experiment_id="exp-chain-delivers")
-
-    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
+    chain = run_the_chain(tmp_path, experiment_id="exp-chain-delivers")
 
     out_csv = tmp_path / "per_image_counts.csv"
     delivered = deliver_per_image_counts(
         tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "error" not in delivered, delivered
-    assert out_csv.is_file()
-
+    assert delivered["validated"] is True
     with out_csv.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-
     assert len(rows) == len(STEMS), len(rows)
-    assert {row["operating_point_validated"] for row in rows} != {VALIDATED_FALSE}
     for row in rows:
-        assert row["operating_point_validated"] != VALIDATED_FALSE, row
-        assert row["unvalidated_dimensions"] == "", row
-        assert row["validation_record"], row
+        assert row["validated"] == "True", row
+        assert row["delivery_event_id"] == delivered["delivery_event_id"], row
         assert int(row["detection_count"]) == 1, row
+    (event,) = read_delivery_events(tmp_path)
+    assert event.buckets[0].assessment_id == chain.assessment["assessment_id"]
+
+    unassessed = chain.bucket.parent / "unassessed"
+    published = run_inference(tmp_path, checkpoint_path=chain.checkpoint_path,
+                              images_dir=str(chain.images_dir), output_dir=str(unassessed))
+    assert "error" not in published, published
+    refused_csv = tmp_path / "unassessed_counts.csv"
+    refused = deliver_per_image_counts(
+        tmp_path, predictions_dir=str(unassessed), output_path=str(refused_csv),
+        trait=fx.COUNT_TRAIT)
+    assert "no assessment answers" in refused["error"], refused
+    assert not refused_csv.exists()
 
 
-def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(tmp_path: Path):
-    """The same flow with the reference labels edited after the assessment: the delivery refuses.
-
-    The operating point was measured against particular ground truth. Change that ground truth
-    afterwards and the number on file was earned against a reference that no longer exists, so
-    the claim no longer answers for the delivery and the CSV must not be written.
+@pytest.mark.parametrize("edit", ["calibration", "holdout", "retained_copy"])
+def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
+    tmp_path: Path, edit: str,
+):
+    """The same flow with a reference label edited after the assessment, on either side of the
+    reference or in the copy the assessment retained of it: the delivery refuses naming the
+    file and writes no CSV.
     """
     from tests import _trait_fixtures as fx
 
-    from tcip_mcp.pipelines.data.selection import read_selection
+    from tcip_mcp.assessment import assessment_dir, read_assessment
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    chain = _run_the_chain(tmp_path, experiment_id="exp-chain-edited")
-
-    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
-
-    # Move one object on the calibration side: the reference the gate was measured against.
-    selection = read_selection(chain.selection_dir, project=tmp_path)
-    edited = Path(selection.on("calibration")[0].ground_truth)
+    chain = run_the_chain(tmp_path, experiment_id="exp-chain-edited")
+    reference = read_assessment(tmp_path, chain.assessment["assessment_id"]).reference
+    side = "calibration" if edit == "retained_copy" else edit
+    member = next(s for s in reference.samples if s.side == side)
+    retained = next(f for f in reference.ground_truth if f.path == member.ground_truth)
+    edited = (assessment_dir(tmp_path, chain.assessment["assessment_id"]) / retained.copy
+              if edit == "retained_copy" else Path(member.ground_truth))
     json_io.write_annotations(
         str(edited), [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))], IMG, IMG)
 
@@ -349,71 +185,46 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
         tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "error" in delivered, delivered
-    assert edited.name in str(delivered["error"]), delivered["error"]
-    assert not out_csv.exists(), "a refused delivery writes no CSV"
-
-
-def test_a_reference_selection_that_can_no_longer_be_read_refuses_the_delivery(tmp_path: Path):
-    """A claim whose reference nobody can open is a claim whose reference cannot be confirmed.
-
-    The sibling of the edited-labels refusal: deleting the selection leaves the operating point
-    resting on evidence that is no longer there to check, which the delivery refuses rather than
-    treating an unanswerable question as an answer of no.
-    """
-    import tcip_store
-
-    from tests import _trait_fixtures as fx
-
-    from tcip_mcp.pipelines.data.selection import read_selection, selection_key
-    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
-
-    chain = _run_the_chain(tmp_path, experiment_id="exp-chain-unreadable")
-
-    _confirm_trait_revision(tmp_path, count_error_tolerance=0.25)
-
-    # Through the store's own door, so the selection is gone under either storage backend.
-    tcip_store.delete(selection_key(chain.selection_dir))
-    with pytest.raises(ValueError):
-        read_selection(chain.selection_dir, project=tmp_path)
-
-    out_csv = tmp_path / "per_image_counts.csv"
-    delivered = deliver_per_image_counts(
-        tmp_path, predictions_dir=str(chain.bucket), output_path=str(out_csv), trait=fx.COUNT_TRAIT)
-
-    assert "error" in delivered, delivered
-    assert "cannot be read now" in str(delivered["error"]), delivered["error"]
+    assert Path(member.ground_truth).name in str(delivered["error"]), delivered["error"]
     assert not out_csv.exists(), "a refused delivery writes no CSV"
 
 
 def test_publishing_the_same_bucket_twice_refuses_the_second_publish(tmp_path: Path):
-    """The same flow with the bucket published twice: the second refuses.
-
-    A bucket already holding prediction documents is not republished into, whatever overwrite
-    says, so the predictions a delivered number rests on cannot be replaced underneath it.
+    """The same flow with the bucket published twice, through the inference door and through
+    ``publish`` itself: each refuses before consuming a document, and every file of the bucket is
+    byte for byte what the first publication left.
     """
-    from tests import _trait_fixtures as fx
-
+    from tcip_mcp.buckets import BucketExists, Document, publish, read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
-    chain = _run_the_chain(tmp_path, experiment_id="exp-chain-republish")
-    # Every file the bucket holds, the provenance stamp included, which is a loose file under one
-    # storage backend and a record inside the other.
-    before = {path.name: path.read_bytes() for path in sorted(chain.bucket.glob("*.json"))}
-    assert before
+    chain = run_the_chain(tmp_path, experiment_id="exp-chain-republish")
+
+    def files() -> dict[str, bytes]:
+        return {p.relative_to(chain.bucket).as_posix(): p.read_bytes()
+                for p in sorted(chain.bucket.rglob("*")) if p.is_file()}
+
+    before = files()
+    assert "bucket.json" in before and len(before) == len(STEMS) + 1
 
     republished = run_inference(
-        tmp_path, checkpoint_path=chain.checkpoint_path,
-        images_dir=str(chain.images_dir),
-        output_dir=str(chain.bucket),
-        trait=fx.COUNT_TRAIT,
-        calibration_labels_dir=str(chain.labels_dir),
-        selection_dir=str(chain.selection_dir),
-        overwrite=True,
-    )
+        tmp_path, checkpoint_path=chain.checkpoint_path, images_dir=str(chain.images_dir),
+        output_dir=str(chain.bucket), assessment_id=chain.assessment["assessment_id"])
 
-    # document_stem_count is the document guard's own key, so this pins the refusal to the
-    # second publish rather than to any error the call might have raised.
     assert "error" in republished, republished
-    assert republished["document_stem_count"] == len(STEMS), republished
-    after = {path.name: path.read_bytes() for path in sorted(chain.bucket.glob("*.json"))}
-    assert after == before, "the refused publish must leave the bucket exactly as it was"
+    assert "already exists" in republished["error"], republished
+    assert files() == before, "the refused publish must leave the bucket exactly as it was"
+
+    consumed: list[str] = []
+
+    def documents():
+        for stem in STEMS:
+            consumed.append(stem)
+            yield Document(str(chain.images_dir / f"{stem}.png"), b"x")
+
+    first = read_bucket(chain.bucket)
+    with pytest.raises(BucketExists):
+        publish(tmp_path, chain.bucket, documents(), producer=first.producer, scope=first.scope,
+                execution=first.execution, raster_path=None, raster_identity=None,
+                assessment_id=first.assessment_id)
+    assert consumed == []
+    assert files() == before

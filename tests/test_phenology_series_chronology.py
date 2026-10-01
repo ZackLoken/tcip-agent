@@ -12,23 +12,19 @@ agreement between the writer that produces a prediction bucket and the readers h
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 
 import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
-from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import BUD_OPENING
 
 # A registry whose ids are not consecutive: the positive class sits at id 2 with nothing at id 1.
 SPARSE_ID_MAP = {"closed": 0, "open": 2}
-
-from tests._population import mapped_plants
+SPARSE = {"subject": "bud", "attribute": "opening", "id_map": SPARSE_ID_MAP}
 
 
 class _Assignment:
@@ -38,50 +34,8 @@ class _Assignment:
         self.accession_name = accession_name
 
 
-def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
-    dir_path.mkdir(parents=True, exist_ok=True)
-    anns = [Annotation(subject="bud", geometry=BBox(1.0 + i, 2.0, 4.0 + i, 9.0), score=0.9,
-                       attributes={"opening": s})
-            for i, s in enumerate(subjects)]
-    json_io.write_annotations(dir_path / f"{stem}.json", anns, 40, 24)
-
-
 def _states(n_positive: int, n_negative: int) -> list[str]:
     return ["open"] * n_positive + ["closed"] * n_negative
-
-
-def _write_sidecar(project: Path, dir_path: Path, id_map: dict, *, dataset_root: Path,
-                   validated: bool = True, conf: float = 0.37) -> None:
-    dir_path.mkdir(parents=True, exist_ok=True)
-    ref = "held_out_annotations" if validated else "false"
-    stamp = {
-        "validated": validated,
-        "trait": "bud_opening",
-        "operating_point": {"conf": {"value": conf, "validated_against": ref}},
-        "experiment_id": "exp-77",
-        "scope": {"subject": "bud", "attribute": "opening", "id_map": id_map},
-    }
-    if validated:
-        write_bound_sidecar(project, dir_path, stamp, dataset_root=dataset_root,
-                            experiment_id=f"exp-record-{dir_path.name}",
-                            producing_experiment_id="exp-77")
-    else:
-        (dir_path / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
-
-
-def _write_classifier_sidecar(project: Path, dir_path: Path, *, dataset_root: Path,
-                              trait: str) -> None:
-    dir_path.mkdir(parents=True, exist_ok=True)
-    stamp = {
-        "validated": True,
-        "operating_point": {"classifier": {"value": "open",
-                                           "validated_against": "held_out_annotations"}},
-        "trait": trait,
-        "experiment_id": "exp-77",
-    }
-    write_bound_sidecar(project, dir_path, stamp, document="classifier_operating_point",
-                        dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
-                        producing_experiment_id="exp-77", trait=trait)
 
 
 # -- crossings on a curve that rises and falls ----------------------------
@@ -156,6 +110,9 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     rises steadily, get their milestones from their own series in capture order. The mapping's dates
     are supplied out of order, as an assembled mapping file has them, which changes no result.
     """
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import predicted, published
+
     dates = ["2026-03-01", "2026-03-05", "2026-03-09", "2026-03-13"]
     counts = {
         "2026-03-01": {"P1": (1, 9), "P2": (0, 4)},
@@ -163,17 +120,15 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         "2026-03-09": {"P1": (3, 7), "P2": (3, 1)},
         "2026-03-13": {"P1": (9, 1), "P2": (4, 0)},
     }
-    for d in dates:
-        bucket = tmp_path / d
-        _write_sidecar(tmp_path, bucket, SPARSE_ID_MAP, dataset_root=tmp_path)
-        for plant, (pos, neg) in counts[d].items():
-            _write_preds(bucket, f"{plant}_{d}", _states(pos, neg))
+    buckets = {d: published(tmp_path, tmp_path / "ds" / "predictions" / "run" / d, [
+        predicted(f"{plant}_{d}", _states(pos, neg), SPARSE_ID_MAP)
+        for plant, (pos, neg) in counts[d].items()], scope=SPARSE) for d in dates}
     mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
                    _Assignment(f"P2_{d}", "P2", "acc-steady")]
                for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]}
-    preds = {d: str(tmp_path / d) for d in dates}
 
-    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING, plants=["P1", "P2"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1", "P2"],
+                                        require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
 
     rows = {r["plant_id"]: r for r in out["rows"]}
     assert set(rows) == {"P1", "P2"}
@@ -216,93 +171,47 @@ def test_positive_detections_are_the_named_class_not_a_position_in_the_id_map(tm
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
-def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(
-    tmp_path, monkeypatch,
-):
-    """A prediction bucket written by the real export door reads back through the readers here with
-    the classes the run actually decoded through: the sidecar's recorded map and each detection's own
-    decoded name have to line up, or a fully classified bucket counts as unclassified.
+def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(tmp_path):
+    """A bucket published through the real publication reads back through the readers here with
+    the classes the run decoded through: the record's map and each detection's own decoded name
+    have to line up, or a fully classified bucket counts as unclassified.
     """
     pytest.importorskip("torch")
-    from PIL import Image
+    from tests._chain_fixtures import predicted, published
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "run" / "2026-03-05",
+                       [predicted("P1_2026-03-05", ["open", "closed", "open"], SPARSE_ID_MAP)],
+                       scope=SPARSE)
 
-    ckpt = registered_checkpoint(tmp_path, data={
-        "num_channels": 3,
-        "scope": {"id_map": dict(SPARSE_ID_MAP), "subject": "bud", "attribute": "state"}})
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    Image.new("RGB", (120, 80), (110, 130, 90)).save(images_dir / "P1_2026-03-05.png")
-
-    class FakePredictor:
-        def __init__(self, checkpoint_path=None, **kwargs):
-            pass
-
-        def predict_batch(self, paths, **kw):
-            # torchvision labels are 1-indexed over the run's own 0-indexed class ids.
-            return [{"image": str(p), "width": 120, "height": 80,
-                     "boxes": [[4.0, 6.0, 18.0, 40.0], [30.0, 6.0, 44.0, 44.0],
-                               [60.0, 10.0, 74.0, 52.0]],
-                     "scores": [0.91, 0.84, 0.77], "labels": [3, 1, 3], "count": 3}
-                    for p in paths]
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    bucket = tmp_path / "preds"
-    res = run_inference(tmp_path, str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
-    assert "error" not in res, res
-
-    scope = resolution.bucket_scope(bucket)
-    assert scope is not None and scope.id_map == SPARSE_ID_MAP
-    counts = phenology.count_by_class(bucket / "P1_2026-03-05.json", "open", scope=scope)
+    assert bucket.scope.id_map == SPARSE_ID_MAP
+    counts = phenology.count_by_class(bucket.path / "P1_2026-03-05.json", "open",
+                                      scope=bucket.scope)
     assert counts == (3, 2, 0)
 
 
 # -- the delivered CSV ----------------------------------------------------
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization")
-def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path):
+def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path: Path):
     """A plant already at half its buds on the first capture ships that date with its bound, so a
     breeder reading the CSV can tell an upper bound from a date the observations measured. The later
     dip below the target does not move the delivered date to the re-crossing.
     """
+    pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+    from tests._chain_fixtures import classified_series
 
-    root = tmp_path / "ds"
-    counts = {"2026-03-01": (1, 1), "2026-03-05": (1, 4), "2026-03-09": (4, 1)}
-    buckets = {d: root / "predictions" / "run" / d for d in counts}
-    for d, (pos, neg) in counts.items():
-        bucket = buckets[d]
-        # Predictions land before the record is filed, so the covered digest matches what delivery recomputes.
-        _write_preds(bucket, f"P1_{d}", _states(pos, neg))
-        _write_sidecar(tmp_path, bucket, SPARSE_ID_MAP, dataset_root=root)
-    _write_classifier_sidecar(tmp_path, buckets["2026-03-01"], dataset_root=root,
-                              trait="bud_opening")
-    from tests._binding_fixtures import write_plant_mapping
-
-    mapping_name = "valley"
-    write_plant_mapping(tmp_path, mapping_name, {
-        d: [{"stem": f"P1_{d}", "plot_name": "P1", "accession_name": "acc-noisy"}]
-        for d in counts
-    }, dataset_root=root)
+    body = classified_series(tmp_path, fractions=(0.5, 0.25, 1.0)).body()
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={d: str(buckets[d]) for d in counts},
-        output_csv_path=str(out_csv),
-        classifier_pred_dirs=[str(buckets["2026-03-01"])],
-    )
+        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=["PLANT_A"],
+        buckets=body["buckets"], output_csv_path=str(out_csv))
 
     assert "error" not in res, res
     with out_csv.open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 1
-    assert rows[0]["plant_id"] == "P1"
-    assert rows[0]["bud_50per_date"] == "2026-03-01"
+    assert rows[0]["plant_id"] == "PLANT_A"
+    assert rows[0]["bud_50per_date"] == "2026-02-11"
     assert rows[0]["bud_50per_date_bound"] == "left_censored"

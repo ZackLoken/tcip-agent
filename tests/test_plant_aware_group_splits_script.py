@@ -238,8 +238,8 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
 
     out_dir = tmp_path / "splits_out"
     result = draw_splits(
-        tmp_path, folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
-        seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
+        tmp_path, folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125,
+        holdout_ratio=0.125, seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
     )
 
     assert "error" not in result, result
@@ -275,46 +275,47 @@ def test_main_cli_end_to_end(tmp_path: Path, project: Path, four_plant_csv: Path
     out_dir = tmp_path / "cli_splits_out"
     rc = main([
         str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-        "--train-ratio", "0.5", "--val-ratio", "0.25", "--calibration-ratio", "0.25",
-        "--seed", "0", "--output-path", str(out_dir),
+        "--train-ratio", "0.5", "--val-ratio", "0.25", "--calibration-ratio", "0.125",
+        "--holdout-ratio", "0.125", "--seed", "0", "--output-path", str(out_dir),
     ])
 
     assert rc == 0
     assert ts.exists(selection_key(out_dir))
 
 
-def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_selection(
+def test_main_cli_states_all_four_ratios_and_writes_a_four_sided_selection(
     tmp_path: Path, project: Path, four_plant_csv: Path,
 ) -> None:
-    """--train-ratio, --val-ratio and --calibration-ratio have no default and are all stated:
-    the write lands a real three-sided selection."""
+    """The four ratios have no default and are all stated: the write lands a real four-sided
+    selection."""
     from tcip_mcp.pipelines.data.selection import read_selection
 
     dataset_root = _four_plant_dataset(tmp_path)
 
     out_dir = tmp_path / "cli_defaults_out"
     rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-              "--calibration-ratio", "0.2", "--train-ratio", "0.6", "--val-ratio", "0.2",
-              "--output-path", str(out_dir)])
+              "--calibration-ratio", "0.1", "--holdout-ratio", "0.1", "--train-ratio", "0.6",
+              "--val-ratio", "0.2", "--output-path", str(out_dir)])
 
     assert rc == 0
     drawn = read_selection(out_dir, project=project)
     assert drawn.on("train")
     assert drawn.on("val")
     assert drawn.on("calibration")
+    assert drawn.on("holdout")
 
 
 def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, project: Path,
                                                         four_plant_csv: Path) -> None:
-    """--train-ratio, --val-ratio and --calibration-ratio all have no default and are required:
-    omitting --train-ratio refuses via argparse before anything is written, rather than silently
-    falling back to a default."""
+    """The four ratios all have no default and are required: omitting --train-ratio refuses via
+    argparse before anything is written, rather than silently falling back to a default."""
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
 
     with pytest.raises(SystemExit):
         main([str(dataset_root), "--project", str(project), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-             "--val-ratio", "0.2", "--calibration-ratio", "0.2", "--output-path", str(out_dir)])
+             "--val-ratio", "0.2", "--calibration-ratio", "0.1", "--holdout-ratio", "0.1",
+             "--output-path", str(out_dir)])
 
     assert not out_dir.exists()
 
@@ -325,6 +326,7 @@ def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, project: Path
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
     rc = main([str(dataset_root), "--project", str(project), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
-              "--train-ratio", "0.8", "--val-ratio", "0.1", "--calibration-ratio", "0.1"])
+              "--train-ratio", "0.8", "--val-ratio", "0.1", "--calibration-ratio", "0.05",
+              "--holdout-ratio", "0.05"])
 
     assert rc == 1

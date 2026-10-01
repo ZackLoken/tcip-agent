@@ -8,7 +8,6 @@ not send is not an escape and must keep being admitted.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -157,58 +156,37 @@ def test_image_statuses_confines_the_label_directories_it_lists(
                          params={"dataset_root": dataset_root, "pred_dir": str(outside)})
     assert refused.status_code == 403
 
-    bucket = allowed / "predictions" / "baseline" / "2-11-26"
-    bucket.mkdir(parents=True)
-    write_annotations(str(bucket / "IMG_0007.json"),
-                      [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0),
-                                  score=0.71)],
-                      IMG_W, IMG_H)
+    bucket = _baseline_bucket(allowed)
     accepted = client.get("/api/review/image_statuses",
                           params={"dataset_root": dataset_root, "pred_dir": str(bucket)})
     assert accepted.status_code == 200
     assert accepted.json()["detection_stems"] == ["IMG_0007"]
 
 
+def _baseline_bucket(root: Path) -> Path:
+    """A bucket published at ``predictions/baseline/2-11-26`` under ``root`` holding one scored
+    ``bud`` box on ``IMG_0007``; its directory."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    return published(root, root / "predictions" / "baseline" / "2-11-26", [
+        {"image": str(root / "images" / "2-11-26" / "IMG_0007.jpg"), "width": IMG_W,
+         "height": IMG_H, "boxes": [[12.0, 20.0, 52.0, 44.0]], "scores": [0.71], "labels": [1]}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
+
+
 def test_generation_conf_confines_the_bucket_it_reads(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    (outside / "operating_point.json").write_text(
-        json.dumps({"operating_point": {"conf": {"value": 0.44}}}), encoding="utf-8")
-
     refused = client.get("/api/review/generation_conf", params={"pred_dir": str(outside)})
     assert refused.status_code == 403
 
-    bucket = allowed / "predictions" / "baseline" / "2-11-26"
-    bucket.mkdir(parents=True)
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_mcp.buckets import read_bucket
 
-    tcip_store.replace(sidecar_key(bucket, "operating_point"),
-                       {"operating_point": {"conf": {"value": 0.44}}},
-                       expect=tcip_store.Version.ABSENT)
+    bucket = _baseline_bucket(allowed)
     accepted = client.get("/api/review/generation_conf", params={"pred_dir": str(bucket)})
     assert accepted.status_code == 200
-    assert accepted.json()["generation_conf"] == pytest.approx(0.44)
-
-
-def test_validate_reference_confines_the_bucket_it_stamps(
-    client: TestClient, allowed: Path, outside: Path
-) -> None:
-    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "bud_opening", "subject": "bud"}
-
-    refused = client.post("/api/review/validate_reference",
-                          json={**base, "pred_dir": str(outside)})
-    assert refused.status_code == 403
-    assert not (outside / "operating_point.json").exists()
-
-    bucket = allowed / "predictions" / "baseline" / "2-11-26"
-    bucket.mkdir(parents=True)
-    accepted = client.post("/api/review/validate_reference",
-                           json={**base, "pred_dir": str(bucket)})
-    assert accepted.status_code == 200
-    body = accepted.json()
-    assert body["validated"] is False
-    assert body["reviewed_image_count"] == 0
+    assert accepted.json()["generation_conf"] == read_bucket(bucket).execution.conf
 
 
 def test_priority_queue_launch_confines_the_checkpoint_it_loads(

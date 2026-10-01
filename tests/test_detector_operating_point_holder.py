@@ -106,102 +106,57 @@ def _checkpoint(tmp_path, builder: str) -> str:
               "scope": {"subject": "bud", "id_map": {"bud": 0}}})
 
 
-def _labeled_reference(tmp_path):
-    """A handful of images, each its own size, GT at exactly the box
-    ``BareScoreThreshDetector``/``BareNoKnobDetector`` always predict for that size, so every image
-    matches perfectly and no two images collide on content.
-    """
+def _assessed(tmp_path: Path, builder: str) -> dict:
+    """The assessment of ``builder``'s checkpoint over a drawn selection of images, each its own
+    size, labeled at exactly the box ``BareScoreThreshDetector``/``BareNoKnobDetector`` always
+    predict for that size, so every image matches and no two collide on content."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    labels_dir = tmp_path / "labels"
-    images_dir = tmp_path / "images"
-    labels_dir.mkdir()
-    images_dir.mkdir()
-    for i, size in enumerate((32, 40, 48, 56, 64, 72)):
+    from tcip_mcp.tools.data_tools import draw_splits
+    from tests._chain_fixtures import assess, confirm_count_trait
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images" / "2-11-26", root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for i, size in enumerate(range(32, 96, 8)):
         Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="bud", geometry=box)], size, size)
-    return images_dir, labels_dir
+    selection_dir = tmp_path / "selection"
+    drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject="bud", seed=2,
+                        train_ratio=0.25, val_ratio=0.25, calibration_ratio=0.25,
+                        holdout_ratio=0.25)
+    assert "error" not in drawn, drawn
+    confirm_count_trait(tmp_path)
+    record = assess(tmp_path, _checkpoint(tmp_path, builder), selection_dir, device="cpu",
+                    tile=False)
+    assert "error" not in record, record
+    return record
 
 
-def _persisted_gate_evidence(tmp_path, run_inference_result: dict) -> dict:
-    """The full gate-evidence dict a ``run_inference`` calibration persisted under the project
-    ``tmp_path``, read back by the same key the response names (``calibration_evidence_key``):
-    the response's own ``gate_evidence_summary`` is a compact, response-safe subset, this is the
-    whole thing.
-    """
-    from tcip_store import store
+def test_a_bespoke_module_exposing_its_own_knob_is_assessed_at_its_stated_floor(tmp_path):
+    """A hand-rolled, non-torchvision module exposing score_thresh on itself is assessed at the
+    staged floor applied there, and its record names the attribute path it was applied on."""
+    record = _assessed(tmp_path, "build_bare_score_thresh_detector")
 
-    from tcip_mcp.tools.inference_tools import calibration_curve_key
-
-    body = store.read(calibration_curve_key(tmp_path, run_inference_result["calibration_evidence_key"]))
-    return body["gate_evidence"]
+    assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] == "self"
+    assert "conf_floor_unstated" not in record["failures"]
+    assert "conf_censored" not in record["failures"]
 
 
-def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_path, monkeypatch):
-    """Built through build_model, calibrated through run_inference: a hand-rolled, non-torchvision
-    module that exposes score_thresh on itself reaches a validated operating point, with the
-    attribute path it was applied on recorded. Also the admitting half of the curve-identity
-    codec check: an ordinary calibration's evidence carries nothing the codec refuses, so it
-    survives the check test_checkpoint_digest_rails.py's NaN-evidence test drives to a refusal."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    monkeypatch.chdir(tmp_path)
-    ckpt = _checkpoint(tmp_path, "build_bare_score_thresh_detector")
-    images_dir, labels_dir = _labeled_reference(tmp_path)
-
-    r = run_inference(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False,
-                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
-
-    assert "error" not in r, r
-    assert r["validated"] is True
-    gate_evidence = _persisted_gate_evidence(tmp_path, r)
-    assert gate_evidence["failures"] == []
-    assert gate_evidence["staged_conf_floor_attribute_path"] == "self"
-    assert gate_evidence["conf_censored"] is False
-    assert "conf_floor_unstated" not in gate_evidence["failures"]
-
-    # The curve round trip: the response's own digest agrees with the record read back under it.
-    from tcip_store import store
-
-    from tcip_mcp.tools.inference_tools import (
-        _calibration_evidence, calibration_curve_identity, calibration_curve_key,
-    )
-
-    key = r["calibration_evidence_key"]
-    body = store.read(calibration_curve_key(tmp_path, key))
-    assert calibration_curve_identity(body) == key
-    evidence = _calibration_evidence(tmp_path, r)
-    labels = Path(labels_dir).resolve()
-    assert evidence["inputs"]["calibration_labels_dir"] == str(labels)
-    assert body["calibration_evidence"]["inputs"]["calibration_labels_dir"] == (
-        labels.relative_to(tmp_path.resolve()).as_posix())
-    assert evidence["resolver"] == body["calibration_evidence"]["resolver"]
-    assert "schema_version" not in body
-
-
-def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monkeypatch):
+def test_a_module_exposing_no_knob_fails_unstated_not_censored(tmp_path):
     """A module exposing no operating-point knob under any recognized name has no floor the
-    platform can state, and refuses with conf_floor_unstated, never conf_censored."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
+    platform can state, and fails with conf_floor_unstated, never conf_censored."""
+    record = _assessed(tmp_path, "build_bare_no_knob_detector")
 
-    monkeypatch.chdir(tmp_path)
-    ckpt = _checkpoint(tmp_path, "build_bare_no_knob_detector")
-    images_dir, labels_dir = _labeled_reference(tmp_path)
-
-    r = run_inference(tmp_path, ckpt, images_dir=str(images_dir), device="cpu", tile=False,
-                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
-
-    assert "error" not in r, r
-    assert r["validated"] is False
-    gate_evidence = _persisted_gate_evidence(tmp_path, r)
-    assert gate_evidence["staged_conf_floor_attribute_path"] is None
-    assert gate_evidence["conf_censored"] is False
-    assert "conf_floor_unstated" in gate_evidence["failures"]
-    assert "conf_censored" not in gate_evidence["failures"]
+    assert record["passed"] is False
+    assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] is None
+    assert "conf_floor_unstated" in record["failures"]
+    assert "conf_censored" not in record["failures"]
 
 
 def test_model_contract_records_the_holders_own_knobs():

@@ -6,24 +6,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import tcip_store as ts
-from tcip_mcp.pipelines import resolution
+from tcip_mcp.delivery import read_delivery_events
+from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
 from tcip_mcp.pipelines.postprocessing import plant_mapping
-from tcip_mcp.project_paths import project_state_dir
-from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
+from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
-from tests._binding_fixtures import register_plant_registry_for
-from tests.test_plant_mapping_binding import DATES, _dataset, _init, _validate_buckets, _write_scene
+from tests._mapping_fixtures import register_plant_registry_for
+from tests.test_plant_mapping_binding import DATES, PLANTS, _dataset, _init, _write_scene
+from tests.test_plant_mapping_binding import _deliver as _deliver_through
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
-
-from tests._population import mapped_plants
 
 
 def _deliver(project: Path, preds_by_date: dict[str, str], out_csv: Path) -> dict:
-    return deliver_phenology_milestones(
+    return _deliver_through(
         project, trait="currant_bloom", mapping_name="valley",
-        plants=mapped_plants(project, "valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
+        plants=[p["plot"] for p in PLANTS], buckets=preds_by_date.values(),
+        output_csv_path=str(out_csv))
 
 
 def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:
@@ -38,7 +36,6 @@ def _cited_mapping(tmp_path: Path) -> tuple[str, dict[str, str]]:
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    _validate_buckets(tmp_path, preds_by_date, dataset_root)
     res = _deliver(tmp_path, preds_by_date, tmp_path / "out.csv")
     assert "error" not in res, res
     return str(images_root), preds_by_date
@@ -51,11 +48,10 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(tmp_path: Path) -> Non
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
-    scope = project_state_dir(tmp_path)
     citing_ids = [
-        r["event_id"] for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-        for r in [ts.read(k)]
-        if r.get("plant_mapping") and r["plant_mapping"]["record_sha256"] == before.record_sha256
+        r.event_id for r in read_delivery_events(tmp_path)
+        if isinstance(r.plant_mapping, PlantMappingDisclosure)
+        and r.plant_mapping.record_sha256 == before.record_sha256
     ]
     assert citing_ids
 

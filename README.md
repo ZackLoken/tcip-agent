@@ -145,23 +145,22 @@ later run to a partition an earlier run already drew, not for drawing the first 
 | `launch_training(config)` | Launches training in an isolated subprocess from an agent-written `model_source` builder, into a new run directory it writes the launch record of first; the Training tab's config picker drives the same launch from the GUI side. |
 | `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and returns the result, writing nothing. |
 
-Before any number can ship, its confidence operating point needs validating against held-out
-ground truth: `tcip calibrate-operating-point` runs one model pass over a disjoint
-calibration/holdout split, derives a count-unbiased detection
-operating point, and checks its held-out count bias (a trait whose delivery reads a classified
-positive state, such as a phenology milestone, instead calibrates through the
-`calibrate_classifier_operating_point` MCP tool; see the `evaluation` and `phenology` skills).
+Before any number can ship, a checkpoint is assessed against held-out ground truth:
+`assess_checkpoint` fits its operating point on a drawn selection's calibration side and checks
+it on the holdout side against the trait's confirmed criterion, for one delivery kind, and records
+the assessment (`assess_reserved_regions` does the same over a mosaic's reserved regions; see the
+`evaluation` skill). Predictions published under that assessment are what a delivery reads.
 
 | Tool | Purpose |
 |------|---------|
 | `propose_trait(project_root, entry, rationale)` | Proposes a trait's complete entry, its spec fields and what its delivered number means per delivery kind, in the breeder's own terms, as a new unconfirmed revision. The breeder confirms a revision in the Setup tab; only a confirmed revision lets a delivery door proceed, and the delivery event names it. |
-| `deliver_per_image_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the trait's confirmed revision and the validated operating point. |
-| `run_inference` | Runs a checkpoint and persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
+| `run_inference` | Runs a checkpoint and publishes its predictions as a new bucket, once, under the assessment it names. |
+| `deliver_per_image_counts` | Delivers a per-image detection-count CSV from one published bucket, gated on the trait's confirmed revision and the assessment behind the bucket. |
 
-Read the `delivery` skill before choosing between `deliver_per_image_counts` and `run_inference`
-(and the per-plant aggregation tools built on top of a prediction bucket): they answer different
-questions and carry different CSV schemas, and no MCP tool ships a bare unvalidated phenotype;
-only a Results tab delivering route can, through the breeder's own acknowledged act.
+Read the `delivery` skill before choosing a delivery door (and the per-plant aggregation tools
+built on top of a published bucket): they answer different questions and carry different CSV
+schemas, and no MCP tool ships an unvalidated phenotype; only a Results tab delivering route can,
+through the breeder's own acknowledged act.
 
 ## Conventions
 
@@ -171,12 +170,12 @@ only a Results tab delivering route can, through the breeder's own acknowledged 
 - Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
 - Crop traits: controlled vocabulary defined in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
-  threshold, tile geometry, mask-binarize threshold, physical pixel-to-real-world scale) carries
-  its own validation state and a record of what cleared it, never a bare number. A
-  delivery door refuses to write a bare unvalidated result; only that result's own delivering
+  threshold, tile geometry, merge, physical pixel-to-real-world scale) is stated by the execution
+  record or the scale assessment an assessment measured, never a bare number. A delivery door
+  refuses to write a result no passing assessment answers for; only that result's own delivering
   route in the Results tab can ship a flagged unvalidated one, through the breeder's own
-  acknowledged act, never a caller of any door in general. The same shared gate
-  (`check_delivery_gate` in `pipelines/resolution.py`) backs every delivery path.
+  acknowledged act, never a caller of any door in general. One gate (`gate` in `delivery.py`)
+  backs every delivery path.
 
 ## Roadmap
 
@@ -191,16 +190,16 @@ Working now:
   threads to the backbone's `in_chans`, and an `in_chans != 3` detector takes per-band
   `image_mean`/`image_std` from `derivations.band_normalization_stats`).
 - Training that loads the native per-image JSON labels directly, experiment tracking,
-  annotation/review, SAM-assisted labeling, calibration of a trait's positive-class operating
-  point (`calibrate_classifier_operating_point`), and per-plant CSV export, including a
+  annotation/review, SAM-assisted labeling, assessment of a trait's positive-state classifier
+  (`assess_checkpoint` for a state-crossing delivery), and per-plant CSV export, including a
   percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the
   dates a plant's classified positive-state fraction of detected objects crosses 5/50/95%; the
   positive state is a validated per-object classifier call, never a geometric proxy). Phase 1's
   own shipped example is hazelnut catkin bloom phenology (`catkin_05/50/95per_date`, elongation
   as the positive state).
 - Ordinal and regression, trainable and evaluable through the same model/training machinery and
-  their own heads, losses, and metrics, calibrating through their own door
-  (`calibrate_scalar_operating_point`). Neither has an annotation/review surface built for it:
+  their own heads, losses, and metrics, assessed through the same door (`assess_checkpoint` for
+  an ordinal or regression aggregate). Neither has an annotation/review surface built for it:
   both read labels from a hand-authored external CSV of image stem plus rank or value, and both
   are excluded from the platform's automatic train/val split.
 - The agent composes the working slice end to end via `build_plant_mapping` → tiled inference →

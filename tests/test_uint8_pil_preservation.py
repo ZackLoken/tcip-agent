@@ -20,6 +20,9 @@ from PIL import Image
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
+TILING = {"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": 0.5}
+"""The tiling every windowed case states; its sliver cutoff stated, since one box derives none."""
+
 
 def _grid(height: int, width: int, channels: int, dtype=np.uint8) -> np.ndarray:
     arr = np.zeros((height, width, channels), dtype=dtype)
@@ -200,7 +203,7 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     try:
         arr = _grid(96, 96, 3)
         images_dir, labels_dir = _detection_project(tmp_path, arr)
-        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform(), tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+        ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", transforms=_flip_transform(), tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -224,7 +227,7 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
         ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                           stated={"num_channels": 4}, transforms=_flip_transform(),
-                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                          tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -248,7 +251,7 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
         ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                           stated={"num_channels": 4}, transforms=_flip_transform(),
-                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                          tiling=TILING)
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
         unflipped = torch.from_numpy(tile.astype(np.float32) / 255.0).permute(2, 0, 1)

@@ -1,35 +1,18 @@
-"""``record_delivery_binding_event`` stamps a delivered file's own digest.
-
-Exercised directly against a hand-written file, so the only module this test reaches into is
-``resolution.py``.
-"""
+"""``deliver_csv`` records a delivered file's own digest."""
 
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
 
-import tcip_store as ts
-
-from tcip_mcp.pipelines import resolution
-from tcip_mcp.project_paths import project_state_dir
+from tcip_mcp import delivery
 from tests._trait_fixtures import seed_confirmed_count
+from tests.test_delivery_events import _record
 
 
 def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> None:
-    """A guard: record_delivery_binding_event stamps output_sha256 from the file it names."""
-    out_csv = tmp_path / "out.csv"
-    out_csv.write_text("plant_id,count\nP1,3\n", encoding="utf-8")
+    _record(tmp_path, seed_confirmed_count(tmp_path))
 
-    resolution.record_delivery_binding_event(
-        "test_door", str(out_csv), [], document_reconciliations={}, dimension_reconciliations={},
-        acknowledgment=None, revision=seed_confirmed_count(tmp_path),
-        delivery_kind="per_image_count",
-        project=tmp_path, plant_mapping=None,
-    )
-
-    scope = project_state_dir(tmp_path)
-    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "test_door"]
-    assert len(events) == 1, events
-    assert events[0].get("output_sha256") == hashlib.sha256(out_csv.read_bytes()).hexdigest()
+    (event,) = delivery.read_delivery_events(tmp_path)
+    delivered = Path(event.output_path).read_bytes()
+    assert delivered and event.output_sha256 == hashlib.sha256(delivered).hexdigest()

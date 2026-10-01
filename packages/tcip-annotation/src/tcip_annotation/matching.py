@@ -1,13 +1,6 @@
-"""Geometry helpers and GT-vs-prediction matching engine.
-
-All functions are pure (no GUI dependencies). Ground truth and predictions are both
-:class:`~tcip_annotation.state.Annotation` lists: a prediction is an annotation whose ``score`` is
-set. :func:`compute_matches` groups by *class name* (an annotation's ``subject``); an integer class
-id never appears. :func:`compute_classified_trait_matches` reviews a classified trait's predictions
-(an object's confirmed/predicted *value*, not its existence) through the same engine, then pairs
-each remaining false positive/negative to its geometry partner by one more geometry-only pass, so a
-correctly localized object with a wrong value carries both halves of that disagreement.
-"""
+"""Geometry helpers and the GT-vs-prediction matching engine, over
+:class:`~tcip_annotation.state.Annotation` lists (a prediction is an annotation whose ``score`` is
+set)."""
 
 from __future__ import annotations
 
@@ -15,34 +8,44 @@ import logging
 from collections import defaultdict
 from dataclasses import replace
 
+import numpy as np
+from shapely.errors import ShapelyError
 from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import Point as ShapelyPoint
 from shapely.validation import make_valid
 
-try:
-    from shapely.errors import ShapelyError
-except ImportError:  # pragma: no cover - older shapely
-    ShapelyError = Exception
-
 from tcip_annotation.state import (
     Annotation, BBox, Polygon, instances, is_detection, polygonal, prediction_score,
 )
 
+REVIEW_CONF_FLOOR = 0.25
+"""The confidence below which a prediction is neither matched nor drawn when a review, a
+visualization or a scoring call states none: a viewing filter a person moves, never an execution
+record's operating point."""
+
 logger = logging.getLogger(__name__)
 
 
+def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The pairwise IoU of the corner boxes ``a`` (``m x 4``) against ``b`` (``k x 4``), as an
+    ``m x k`` float64 array; a pair whose union has no area is ``0``."""
+    a = np.asarray(a, dtype=np.float64).reshape(-1, 4)
+    b = np.asarray(b, dtype=np.float64).reshape(-1, 4)
+    iw = np.maximum(0.0, np.minimum(a[:, 2:3], b[None, :, 2]) - np.maximum(a[:, 0:1], b[None, :, 0]))
+    ih = np.maximum(0.0, np.minimum(a[:, 3:4], b[None, :, 3]) - np.maximum(a[:, 1:2], b[None, :, 1]))
+    inter = iw * ih
+    union = ((a[:, 2] - a[:, 0]) * (a[:, 3] - a[:, 1]))[:, None] + (
+        (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1]))[None, :] - inter
+    iou = np.zeros_like(union)
+    np.divide(inter, union, out=iou, where=union > 0)
+    return iou
+
+
 def box_iou(b1: BBox, b2: BBox) -> float:
-    """Compute IoU between two axis-aligned bounding boxes."""
-    x1 = max(b1.x1, b2.x1)
-    y1 = max(b1.y1, b2.y1)
-    x2 = min(b1.x2, b2.x2)
-    y2 = min(b1.y2, b2.y2)
-    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-    area1 = (b1.x2 - b1.x1) * (b1.y2 - b1.y1)
-    area2 = (b2.x2 - b2.x1) * (b2.y2 - b2.y1)
-    union = area1 + area2 - inter
-    return inter / union if union > 0 else 0.0
+    """The IoU of two axis-aligned bounding boxes (:func:`iou_matrix`)."""
+    return float(iou_matrix(np.array([b1.x1, b1.y1, b1.x2, b1.y2]),
+                            np.array([b2.x1, b2.y1, b2.x2, b2.y2]))[0, 0])
 
 
 def polygon_iou(geom1: ShapelyPolygon, area1: float, geom2: ShapelyPolygon, area2: float) -> float:
@@ -63,35 +66,16 @@ def polygon_iou(geom1: ShapelyPolygon, area1: float, geom2: ShapelyPolygon, area
 _IOU_MATRIX_BUDGET = 25_000_000
 
 
-def _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs) -> None:
-    """Vectorized box IoU → append ``(iou, gt_idx, pred_idx)`` in row-major order.
-
-    Numeric ops mirror ``box_iou`` (same float64 operation order) so values and the
-    ``>= iou_threshold`` boundary are bitwise-identical to the scalar path.
-    """
+def _append_box_iou_pairs(gt_arr, pred_arr, gis, pis, iou_threshold, pairs) -> None:
+    """Append ``(iou, gt_idx, pred_idx)`` for every box pair at or above ``iou_threshold``
+    (:func:`iou_matrix`), in row-major order, the ground-truth axis chunked."""
     m = gt_arr.shape[0]
     k = pred_arr.shape[0]
     if m == 0 or k == 0:
         return
-    px1 = pred_arr[:, 0]
-    py1 = pred_arr[:, 1]
-    px2 = pred_arr[:, 2]
-    py2 = pred_arr[:, 3]
-    areas_pred = (px2 - px1) * (py2 - py1)
     chunk = max(1, _IOU_MATRIX_BUDGET // k)
     for r0 in range(0, m, chunk):
-        g = gt_arr[r0 : r0 + chunk]
-        gx1 = g[:, 0][:, None]
-        gy1 = g[:, 1][:, None]
-        gx2 = g[:, 2][:, None]
-        gy2 = g[:, 3][:, None]
-        iw = np.maximum(0.0, np.minimum(gx2, px2[None, :]) - np.maximum(gx1, px1[None, :]))
-        ih = np.maximum(0.0, np.minimum(gy2, py2[None, :]) - np.maximum(gy1, py1[None, :]))
-        inter = iw * ih
-        areas_g = ((g[:, 2] - g[:, 0]) * (g[:, 3] - g[:, 1]))[:, None]
-        union = areas_g + areas_pred[None, :] - inter
-        iou = np.zeros_like(union)
-        np.divide(inter, union, out=iou, where=union > 0)
+        iou = iou_matrix(gt_arr[r0 : r0 + chunk], pred_arr)
         rows, cols = np.nonzero(iou >= iou_threshold)
         for rr, cc in zip(rows.tolist(), cols.tolist()):
             pairs.append((float(iou[rr, cc]), gis[r0 + rr], pis[cc]))
@@ -139,7 +123,7 @@ def compute_matches(
     gt: list[Annotation],
     preds: list[Annotation],
     iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
     """Match predictions to GT; classify as TP / FP / FN.
 
@@ -197,11 +181,8 @@ def compute_matches(
             pred_geom_cache[li] = _to_shapely(pred_items[li][3])
         return pred_geom_cache[li]
 
-    # Compute all same-class IoU pairs. Pure-box classes (the common detection case) use a
-    # vectorized numpy IoU matrix; any class involving a polygon falls back to the exact per-pair
-    # loop so emit order and IoU values stay byte-identical.
-    import numpy as np
-
+    # Compute all same-class IoU pairs. Pure-box classes (the common detection case) use the IoU
+    # matrix; any class involving a polygon takes the per-pair loop.
     pairs: list[tuple[float, int, int]] = []
     for cname in gt_by_class:
         if cname not in pred_by_class:
@@ -221,7 +202,7 @@ def compute_matches(
                  for b in (_as_box(pred_items[li][3]) for li in pis)],
                 dtype=np.float64,
             )
-            _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
+            _append_box_iou_pairs(gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
             continue
         for gi in gis:
             for pi in pis:
@@ -276,13 +257,10 @@ def _project_for_classification(
     annotations: list[Annotation], *, subject: str, attribute: str,
 ) -> list[Annotation]:
     """A same-length, same-order view of ``annotations`` whose class identity is the confirmed
-    ``attribute`` value rather than the object type, for ground truth's side of
-    :func:`compute_classified_trait_matches`.
-
-    Position ``i`` of the result corresponds to position ``i`` of ``annotations``. A record outside
-    ``subject``'s scope, or carrying no value under ``attribute``, reads through
-    :func:`~tcip_annotation.json_io.classified_value_of` as ``None`` and is stripped to a
-    geometry-less placeholder that can neither match nor be scored.
+    ``attribute`` value rather than the object type. A record outside ``subject``'s scope, or
+    carrying no value under ``attribute``
+    (:func:`~tcip_annotation.json_io.classified_value_of` ``None``), becomes a geometry-less
+    placeholder that can neither match nor be scored.
     """
     from tcip_annotation.json_io import classified_value_of
 
@@ -301,7 +279,7 @@ def compute_classified_trait_matches(
     attribute: str,
     vocabulary,
     iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
     """Match predictions to GT for a classified trait: an object already isolated by ``subject``
     whose confirmed/predicted value along ``attribute`` is under review.

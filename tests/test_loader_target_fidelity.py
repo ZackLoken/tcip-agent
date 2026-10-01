@@ -82,7 +82,6 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     base = dataset_over('detection', str(images), str(labels), subject=BUD)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac)
 
-    assert ds.min_box_size > 0
     per_tile = {e["slice"][:2]: len(e["boxes"]) for e in ds._index}
     assert len(per_tile) == 20, "five slice columns by four rows over the 320x256 frame"
     assert per_tile[(64, 0)] == 1, "the stub beside the neighboring box was indexed as an object"

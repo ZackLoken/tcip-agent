@@ -21,8 +21,6 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     pred.device = torch.device("cpu")
     pred.in_chans = 3
     pred.task = "detection"
-    pred.score_threshold = 0.0
-    pred.max_dets = None
 
     calls = {"n": 0, "sizes": []}
 
@@ -35,7 +33,13 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
 
     pred.model = FakeDet()
 
-    results = pred.predict_batch(paths, batch_size=2)
+    from types import SimpleNamespace
+
+    from tcip_mcp.pipelines.execution import untiled_execution
+
+    detector = SimpleNamespace(task="detection", path="detector.pt")
+    results = pred.predict_batch(paths, untiled_execution(detector, conf=0.0, max_dets=None),
+                                 batch_size=2)
     assert [r["count"] for r in results] == [0] * 5  # one result per image
     assert calls["n"] == 3              # ceil(5/2) forwards, not 5
     assert calls["sizes"] == [2, 2, 1]

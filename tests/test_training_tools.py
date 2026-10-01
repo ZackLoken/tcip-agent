@@ -591,7 +591,8 @@ def test_preflight_reserve_calibration_fraction_multi_member_flags_issue(tmp_pat
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "scope": {"subject": "bud"},
-                 "tiling": {"enabled": True, "tile_size": 32},
+                 # sliver_frac stated: two boxes derive no size spread.
+                 "tiling": {"enabled": True, "tile_size": 32, "sliver_frac": 0.5},
                  "split": {"reserve_calibration_fraction": 0.15}},
         "batch_size": 2,
     }
@@ -1221,26 +1222,24 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.vision_tools import get_worst_predictions
+    from tests._chain_fixtures import published
 
-    preds = tmp_path / "preds"
     gts = tmp_path / "labels"
-    preds.mkdir()
     gts.mkdir()
-
-    def write_image(stem: str, scores: list[float]) -> None:
-        # Confidence lives in the JSON `score`; box geometry is irrelevant to this
-        # count + confidence heuristic (no IoU matching), so the boxes can be anything.
-        pred_anns = [Annotation(subject="bud", geometry=BBox(10.0, 10.0, 40.0, 22.0), score=s)
-                     for s in scores]
-        json_io.write_annotations(str(preds / f"{stem}.json"), pred_anns, 100, 100)
+    scored = {"confident": [0.9, 0.9], "shaky": [0.1, 0.1]}
+    for stem, scores in scored.items():
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
         gt_anns = [Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
         json_io.write_annotations(str(gts / f"{stem}.json"), gt_anns, 100, 100)
+    # Confidence lives in the JSON `score`; box geometry is irrelevant to this count + confidence
+    # heuristic (no IoU matching), so the boxes can be anything.
+    bucket = published(tmp_path, tmp_path / "preds", [
+        {"image": f"{stem}.png", "width": 100, "height": 100,
+         "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores), "scores": scores,
+         "labels": [1] * len(scores)} for stem, scores in scored.items()],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
 
-    write_image("confident", [0.9, 0.9])
-    write_image("shaky", [0.1, 0.1])
-
-    out = get_worst_predictions(str(preds), str(gts), top_k=2)
+    out = get_worst_predictions(bucket, str(gts), top_k=2)
     by_stem = {w["stem"]: w["error_score"] for w in out["worst_images"]}
     assert by_stem["confident"] == pytest.approx(0.1, abs=1e-3)
     assert by_stem["shaky"] == pytest.approx(0.9, abs=1e-3)

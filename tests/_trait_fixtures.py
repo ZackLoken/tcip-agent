@@ -25,7 +25,7 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
         "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
         "count_error_tolerance": None, "classifier_agreement_floor": None,
         "ordinal_agreement_floor": None, "regression_skill_floor": None,
-        "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "",
+        "regression_criterion": "", "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "",
         "operationalizations": {}, **fields,
     })
 
@@ -55,20 +55,32 @@ COUNT_TRAIT = "stem"
 COUNT_SUBJECT = "stem"
 """What a count operationalization made from :data:`COUNT_SPEC` says the counts are counts of."""
 
-CROSSING_SPEC = entry(
+_FLOORS: dict[str, Any] = {
+    "count_objective": COUNT_UNBIASED, "localization": CENTER_MATCH,
+    "count_bias_tolerance_frac": 0.1, "count_error_tolerance": 1.0,
+    "classifier_agreement_floor": 0.6, "ordinal_agreement_floor": 0.6,
+    "regression_skill_floor": 0.5, "regression_criterion": "r_squared",
+    "holdout_match_quality_floor": 0.5,
+    "scale_tolerance_frac": 0.1,
+}
+"""Every floor filled with a fixture value, so one entry serves whichever delivery kind a test
+exercises."""
+
+COUNT_SPEC = entry(COUNT_TRAIT, ("stem_count",), **_FLOORS)
+
+
+def with_floors(base: TraitEntry) -> TraitEntry:
+    """``base`` with each criterion field it leaves unauthored filled from :data:`_FLOORS`, so an
+    operationalization proposed on it states every field its kind rests on."""
+    return with_fields(base, **{k: v for k, v in _FLOORS.items()
+                                if getattr(base, k) in (None, "", ())})
+
+
+CROSSING_SPEC = with_floors(entry(
     CROSSING_TRAIT, ("bloom_05per_date", "bloom_50per_date"),
     positive_value="open", milestone_fractions=(0.05, 0.50), milestone_on="positive_fraction",
     phenology_prefix="bloom",
-)
-
-_FLOORS: dict[str, Any] = {
-    "count_objective": COUNT_UNBIASED, "localization": CENTER_MATCH,
-    "ordinal_agreement_floor": 0.6, "regression_skill_floor": 0.5,
-    "holdout_match_quality_floor": 0.5,
-}
-"""Every floor filled, so one entry serves whichever delivery kind a test exercises."""
-
-COUNT_SPEC = entry(COUNT_TRAIT, ("stem_count",), **_FLOORS)
+))
 
 DELIVERY_SPECS = (
     COUNT_SPEC,
@@ -166,7 +178,7 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **fields: Any) -> Tr
     operationalization, declaring its positive class for the measured subject in the project's
     own subject registry first. ``fields`` override the operationalization's defaults: the
     measured subject is the trait's own name and the phenotypes are everything it delivers."""
-    base = latest(trait, project_root)
+    base = with_floors(latest(trait, project_root))
     stated = {"statement": f"the date each plant reached the state {trait} scores in the field",
               "mechanism": f"the calibrated {base.positive_value} classifier over one plant's objects",
               "measured_subject": trait, "delivered_phenotypes": base.delivers, **fields}
@@ -197,18 +209,15 @@ def seed_confirmed_aggregate(
     delivered_phenotype: str,
     *,
     value_keys: Sequence[str],
-    measurement_document: str = "operating_point",
+    delivery_kind: str = traits.PER_PLANT_COUNT_AGGREGATE,
     **fields: Any,
 ) -> TraitRevision:
     """Confirm a revision of the trait delivering ``delivered_phenotype`` stating the aggregate
-    operationalization ``measurement_document`` selects, covering that phenotype and
-    ``value_keys``."""
-    from tcip_mcp.operationalization import aggregate_delivery_kind
-
+    operationalization ``delivery_kind``, covering that phenotype and ``value_keys``."""
     (trait,) = [name for name in traits.trait_names(project_root)
                 if delivered_phenotype in latest(name, project_root).delivers]
     return propose_and_confirm(project_root, with_operationalization(
-        latest(trait, project_root), aggregate_delivery_kind(measurement_document),
+        with_floors(latest(trait, project_root)), delivery_kind,
         statement=f"the {delivered_phenotype} the breeder records for one plant",
         delivered_phenotypes=(delivered_phenotype,), delivered_value_keys=tuple(value_keys),
         **fields))

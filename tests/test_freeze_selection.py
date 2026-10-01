@@ -73,10 +73,10 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     assert "error" not in result, result
     selection_dir = result["selection_dir"]
     assert selection_dir == str(root / "splits" / "frozen-exp-src")
-    assert "calibration" in result["note"] and "refuse" in result["note"]
+    assert "reference sides are empty" in result["note"] and "refuse" in result["note"]
 
     frozen = read_selection(selection_dir, project=tmp_path)
-    assert frozen.counts()["calibration"] == 0
+    assert frozen.counts()["calibration"] == frozen.counts()["holdout"] == 0
     assert frozen.counts()["train"] and frozen.counts()["val"]
     assert {Path(s.ground_truth).stem for s in frozen.samples} <= set("abcdef")
     for sample in frozen.samples:
@@ -235,7 +235,7 @@ def _bound_run(root: Path, tmp_path: Path, experiment_id: str, **split_extra) ->
 
     selection_dir = tmp_path / f"src-{experiment_id}"
     drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                        seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                        seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in drawn, drawn
 
     resolved_run(tmp_path, {"split": {"selection_dir": str(selection_dir), **split_extra}},

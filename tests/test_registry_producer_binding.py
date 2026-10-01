@@ -7,49 +7,29 @@ digest, a foreign registration naming a run's name or bytes).
 
 from __future__ import annotations
 
-def test_corroborated_producer_reports_unknown_when_a_digest_disagrees_with_the_completion(
-    tmp_path,
-):
-    """A stamp naming a real run with a digest that is not the one the run's final status names
-    is reported producer-unknown."""
+
+def test_two_runs_each_produce_only_their_own_weights(tmp_path):
+    """A run resumed into a new run directory completes with its own weights; each checkpoint
+    loads naming the run whose final status names its digest, never the other."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.model_registry import _sha256_of_bytes
-    from tcip_mcp.pipelines.resolution import corroborated_producer
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import finished_run
 
-    recorded = observe(finished_run(tmp_path, experiment_id="exp-rail6")).checkpoint["sha256"]
+    first = observe(finished_run(tmp_path, experiment_id="exp-rail11-base")).checkpoint
+    second = observe(finished_run(tmp_path, experiment_id="exp-rail11-next")).checkpoint
 
-    forged_digest = _sha256_of_bytes(b"a different checkpoint entirely, not what this run wrote")
-    assert forged_digest != recorded
-    assert corroborated_producer(forged_digest, "exp-rail6", project=tmp_path) == (None, None)
-    assert corroborated_producer(recorded, "exp-rail6", project=tmp_path) == (
-        recorded, "exp-rail6")
-
-
-def test_two_runs_each_bind_only_their_own_weights(tmp_path):
-    """A run resumed into a new run directory completes with its own weights; each run's
-    binding names its own digest and never the other's."""
-    from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.resolution import corroborated_producer
-    from tests._verified_checkpoint_fixtures import finished_run
-
-    first = observe(finished_run(tmp_path, experiment_id="exp-rail11-base")).checkpoint["sha256"]
-    second = observe(finished_run(tmp_path, experiment_id="exp-rail11-next")).checkpoint["sha256"]
-
-    assert first != second
-    assert corroborated_producer(second, "exp-rail11-next", project=tmp_path) == (
-        second, "exp-rail11-next")
-    assert corroborated_producer(first, "exp-rail11-base", project=tmp_path) == (
-        first, "exp-rail11-base")
-    assert corroborated_producer(first, "exp-rail11-next", project=tmp_path) == (None, None)
+    assert first["sha256"] != second["sha256"]
+    assert load_registered_checkpoint(first["path"], project=tmp_path).experiment_id == (
+        "exp-rail11-base")
+    assert load_registered_checkpoint(second["path"], project=tmp_path).experiment_id == (
+        "exp-rail11-next")
 
 
 def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
     """A foreign checkpoint registered with an ``experiment:<id>`` tag, for a run that never
-    completed with it, never makes ``corroborated_producer`` name that run: the tag is caller
-    metadata no producer resolver reads."""
-    from tcip_mcp.model_registry import _sha256_of_bytes
-    from tcip_mcp.pipelines.resolution import corroborated_producer
+    completed with it, loads naming no producing run: the tag is caller metadata no producer
+    resolver reads."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
     from tests._verified_checkpoint_fixtures import checkpoint_file, detection_config, opened_run
 
@@ -59,9 +39,7 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
                                 project=tmp_path, tags=["experiment:exp-rail1"])
     assert "error" not in registered, registered
 
-    assert corroborated_producer(_sha256_of_bytes(forged.read_bytes()), "exp-rail1",
-                                 project=tmp_path) == (
-        None, None)
+    assert load_registered_checkpoint(forged, project=tmp_path).experiment_id is None
 
 
 def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
@@ -92,3 +70,25 @@ def test_caller_tag_still_round_trips_and_filters(tmp_path):
 
     assert [m["name"] for m in reg.list_models(tag="current")] == ["m"]
     assert reg.list_models(tag="nonexistent") == []
+
+
+def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_field(tmp_path):
+    """A checkpoint is admitted for the weights it loads: a payload carrying none refuses at
+    registration, naming the field, and registers nothing; one carrying weights registers."""
+    import pytest
+
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+    from tests._verified_checkpoint_fixtures import checkpoint_file
+
+    weightless = tmp_path / "weightless.pt"
+    torch.save({"config": {}}, weightless)
+    registry = ModelRegistry(str(tmp_path))
+
+    with pytest.raises(ValueError, match=STATE_DICT_KEY):
+        registry.register_model("weightless", str(weightless), {})
+
+    assert registry.list_models() == []
+    registry.register_model("weighted", str(checkpoint_file(tmp_path / "w.pt", "weights")), {})
+    assert [m["name"] for m in registry.list_models()] == ["weighted"]

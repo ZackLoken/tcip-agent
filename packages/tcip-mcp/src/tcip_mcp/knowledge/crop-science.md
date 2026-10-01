@@ -109,7 +109,7 @@ The modality for small structures, fine morphology, and visible disease: hazelnu
 `burrs_density`), and lesions/damage scored close-range (`efb_canker_length`,
 `efb_presence`, `efb_damage`, `big_bud_mite_damage`, `weevil_damage`, `borer_damage`).
 Enables tiled sliding-window detection of many small objects (compose
-`run_inference(tile=True)`; see `phenology`). Constraints: occlusion, variable field
+`run_inference(stated={"tile": True})`; see `phenology`). Constraints: occlusion, variable field
 lighting, low area throughput, no chemistry. Frame order is not plant identity:
 hedgerow frames span multiple or partial plants, so per-plant attribution needs the spatial
 plant mapping (see `phenology`), never an every-Nth-frame rule.

@@ -2,20 +2,20 @@
 via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing rather than
 scoring at an ungrounded scale when nothing is resolvable), honors ``max_dets`` verbatim on both
 regimes with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and
-resolves its own operating point through the same raw resolution (``resolution.raw_operating_point``)
-``run_inference`` resolves through. See ``test_detection_measurement_integrity.py`` for the geometry-resolution and
-calibrated-bundle integration tests; this file covers the ``evaluate_model`` wrapper's
-passthrough + refusal handling and the runner's own recorded merge and operating point.
+runs under the execution record ``prepare_pass`` resolves, the one ``run_inference`` runs under.
+See ``test_detection_measurement_integrity.py`` for the geometry-resolution tests; this file covers
+the ``evaluate_model`` wrapper's passthrough + refusal handling and the runner's own recorded
+execution record.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from tests._regime_fixtures import tiled_regime
-
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
+
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 # seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
 # trait/subject="bud" call sites resolve.
@@ -63,8 +63,8 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
-                   use_tiled_inference=True, max_dets=50)
-    assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
+                   use_tiled_inference=True, stated=Stated(max_dets=50))
+    assert captured["stated"].max_dets == 50  # honored verbatim, not bumped to 1000
 
 
 def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
@@ -72,7 +72,7 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     None, and the runner itself, not the door, resolves it to the delivery-grade default. Proven
     on the runner's own result rather than a fake's captured kwarg, since the door no longer
     resolves this value itself."""
-    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
 
     images_dir, labels_dir = _det_dataset(tmp_path)
@@ -81,23 +81,23 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
     ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
-                       use_tiled_inference=True, tiling={"tile_size": 128, "overlap": 0.0})
+                       use_tiled_inference=True, stated=Stated(tile_size=128, overlap=0.0))
     assert "error" not in r, r
-    assert r["max_dets"] == DEFAULT_MAX_DETS == 1000
-    assert r["operating_point"]["max_dets"]["source"] == "default"
+    assert r["execution"]["max_dets"] == DEFAULT_MAX_DETS == 1000
+    assert r["execution"]["sources"]["max_dets"] == "default"
 
 
-def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
-    """The COCOeval maxDets convention default for the other (tile-level/diagnostic) regime,
-    distinct from the gating regime's 1000, resolved without the two colliding via a shared
-    sentinel value."""
+def test_diagnostic_path_hands_an_unset_cap_on_unstated(tmp_path, monkeypatch):
+    """The diagnostic regime resolves no cap of its own: an unset one reaches the runner as the
+    pass the one execution resolver prepared, defaulted and recorded as a default."""
     import tcip_mcp.pipelines.training.eval_runners as runners
+    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, **kw):
-        captured.update(kw)
+    def _fake(pass_, loader, device, **kw):
+        captured["execution"] = pass_.execution
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
@@ -107,7 +107,8 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
     ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir))
-    assert captured["max_dets"] == 100
+    assert captured["execution"].max_dets == DEFAULT_MAX_DETS
+    assert captured["execution"].sources["max_dets"] == "default"
 
 
 def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
@@ -116,8 +117,8 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, **kw):
-        captured.update(kw)
+    def _fake(pass_, loader, device, **kw):
+        captured["execution"] = pass_.execution
         return {"eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
@@ -127,8 +128,9 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
-                   max_dets=7)
-    assert captured["max_dets"] == 7
+                   stated=Stated(max_dets=7))
+    assert captured["execution"].max_dets == 7
+    assert captured["execution"].sources["max_dets"] == "explicit"
 
 
 def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path, monkeypatch):
@@ -148,14 +150,20 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     from tests._verified_checkpoint_fixtures import SCOPED_DATA, registered_checkpoint
 
     ckpt = registered_checkpoint(
-        tmp_path, data={**SCOPED_DATA, "tiling": {"tile_size": 384, "overlap": 0.15}})
+        tmp_path, data={**SCOPED_DATA, "tiling": {"tile_size": 384, "overlap": 0.15,
+                                                  "sliver_frac": 0.5}})
 
     evaluate_model(tmp_path, str(ckpt), str(images_dir), str(labels_dir),
                    use_tiled_inference=True)
-    # The measurement is handed the checkpoint whose own record states its class space.
+    # The measurement is handed the checkpoint whose own record states its class space and its
+    # tiling, and the door states no geometry of its own beside it.
     assert captured["checkpoint"].data_config["scope"]["subject"] == "bud"
-    assert captured["tile_size"] == 384
-    assert captured["overlap"] == 0.15
+    assert captured["stated"].tile_size is None and captured["stated"].overlap is None
+
+    from tcip_mcp.pipelines.execution import prepare_pass
+
+    record = prepare_pass(captured["checkpoint"], Stated(tile=True)).execution
+    assert (record.tile_size, record.overlap) == (384, 0.15)
 
 
 def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
@@ -206,7 +214,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
     detectable. A caller-explicit cap that actually binds on real detections must be visible in
     the result, not silently assumed safe."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
@@ -239,13 +247,14 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.build_predictor
+    build_predictor_orig = predictor_mod.GenericPredictor
     try:
-        predictor_mod.build_predictor = lambda *a, **kw: _ManyDetectionsStub()
-        r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir), max_dets=2)
+        predictor_mod.GenericPredictor = lambda *a, **kw: _ManyDetectionsStub()
+        r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                      stated=Stated(max_dets=2))
     finally:
-        predictor_mod.build_predictor = build_predictor_orig
-    assert r["max_dets"] == 2  # honored verbatim
+        predictor_mod.GenericPredictor = build_predictor_orig
+    assert r["execution"]["max_dets"] == 2  # honored verbatim
     assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
 
@@ -258,7 +267,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -278,25 +287,24 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path):
             return {"image": path, "width": 128, "height": 128, "boxes": [[10, 10, 40, 40]],
                     "scores": [0.9], "labels": [1], "count": 1, "cap_hit": False}
 
-    build_predictor_orig = predictor_mod.build_predictor
+    build_predictor_orig = predictor_mod.GenericPredictor
     try:
-        predictor_mod.build_predictor = lambda *a, **kw: _OneBandStub()
+        predictor_mod.GenericPredictor = lambda *a, **kw: _OneBandStub()
         r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
-                                      str(labels_dir))
+                                      str(labels_dir), stated=Stated())
     finally:
-        predictor_mod.build_predictor = build_predictor_orig
+        predictor_mod.GenericPredictor = build_predictor_orig
 
     assert r["scored_images"] == 4
     assert r["tp"] == 4
 
 
-def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
-    """The raw regime through the runner: the record carries postprocess and an operating_point
-    mapping whose conf/max_dets/cross_tile_nms read source "explicit" when stated (a stated value
-    equal to the default included) and "default" when not, conf's validated_against false, and
-    cross_tile_nms.value the merge threshold the pass ran at; a direct call stating max_dets=2
-    records 2 as explicit."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path):
+    """The runner's record carries the execution record whose conf/max_dets/cross_tile_nms read
+    source "explicit" when stated (a stated value equal to the default included) and "default"
+    when not, and cross_tile_nms the merge threshold the pass ran at; a direct call stating
+    max_dets=2 records 2 as explicit."""
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
@@ -310,7 +318,7 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
         in_chans = 3
 
         def predict_sliced(self, path, **kw):
-            merges.append(kw["cross_tile_nms"])
+            merges.append(kw["execution"].cross_tile_nms)
             return {"image": path, "width": 128, "height": 128, "boxes": [], "scores": [],
                     "labels": [], "cap_hit": False}
 
@@ -326,36 +334,34 @@ def test_run_full_frame_evaluation_records_merge_and_operating_point(tmp_path):
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.build_predictor
+    build_predictor_orig = predictor_mod.GenericPredictor
     try:
-        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
-        r_default = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
+        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
+        r_default = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                              stated=Stated())
         r_stated = run_full_frame_evaluation(
             checkpoint, str(images_dir), str(labels_dir),
-            conf_threshold=0.5, cross_tile_nms=0.3, max_dets=2)
+            stated=Stated(conf=0.5, cross_tile_nms=0.3, max_dets=2))
     finally:
-        predictor_mod.build_predictor = build_predictor_orig
+        predictor_mod.GenericPredictor = build_predictor_orig
 
     assert merges == [0.3, 0.3]
     for r in (r_default, r_stated):
-        assert "global_nms_iou" not in r
-        assert r["postprocess"] == "nms"
-        op = r["operating_point"]
-        assert op["conf"]["validated_against"] == "false"
-        assert op["cross_tile_nms"]["value"] == 0.3
+        assert r["execution"]["postprocess"] == "nms"
+        assert r["execution"]["cross_tile_nms"] == 0.3
 
     for name in ("conf", "max_dets", "cross_tile_nms"):
-        assert r_default["operating_point"][name]["source"] == "default"
+        assert r_default["execution"]["sources"][name] == "default"
         # A stated value equal to the platform default is still recorded as explicit.
-        assert r_stated["operating_point"][name]["source"] == "explicit"
-    assert r_stated["max_dets"] == 2
+        assert r_stated["execution"]["sources"][name] == "explicit"
+    assert r_stated["execution"]["max_dets"] == 2
 
 
 def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path):
     """The delivery gate measures over the loader a run would build, so ground truth carrying
     the subject only as points refuses in that loader's own words rather than scoring every
     image against an empty reference and reporting the number as a delivery metric."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
@@ -384,20 +390,22 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.build_predictor
+    build_predictor_orig = predictor_mod.GenericPredictor
     try:
-        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
+        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
         with pytest.raises(ValueError, match="only in geometries a detection loader"):
-            run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                      stated=Stated())
 
         # Admits valid work: the same eight images, their documents carrying boxes, score.
         for index in range(8):
             json_io.write_annotations(
                 str(labels_dir / f"p{index}.json"),
                 [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 128, 128)
-        scored = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir))
+        scored = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
+                                           stated=Stated())
     finally:
-        predictor_mod.build_predictor = build_predictor_orig
+        predictor_mod.GenericPredictor = build_predictor_orig
     assert scored["n_images"] == 8
 
 
@@ -405,7 +413,7 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
     """A measurement is against a reference: with no label store there is nothing to score
     against, so the gate refuses by name rather than scoring every image against empty ground
     truth and reporting a perfect-looking miss rate."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
@@ -427,34 +435,11 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(tmp_path):
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
-    build_predictor_orig = predictor_mod.build_predictor
+    build_predictor_orig = predictor_mod.GenericPredictor
     try:
-        predictor_mod.build_predictor = lambda *a, **kw: _EmptyStub()
+        predictor_mod.GenericPredictor = lambda *a, **kw: _EmptyStub()
         with pytest.raises(ValueError, match="neither a .csv table nor a directory"):
-            run_full_frame_evaluation(checkpoint, str(images_dir), str(tmp_path / "labels"))
+            run_full_frame_evaluation(checkpoint, str(images_dir), str(tmp_path / "labels"),
+                                      stated=Stated())
     finally:
-        predictor_mod.build_predictor = build_predictor_orig
-
-
-def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness(tmp_path):
-    """`tile_size`'s source is never inferred from truthiness: a truthy value alone, even a
-    fabricated fallback the caller never actually derived, must not be stamped "derived". The
-    caller's own resolved source travels through explicitly."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    # A truthy tile_size with no source claim defaults to "default", not silently "derived".
-    b_default = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                        dataset_hash=None, tile_size=640)
-    assert b_default.get("tile_size").source == "default"
-
-    b_derived = resolve_operating_point(
-        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=224,
-        tile_size_source="derived")
-    assert b_derived.get("tile_size").source == "derived"
-    assert b_derived.get("tile_size")._raw == 224
-
-    b_explicit = resolve_operating_point(
-        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash=None, tile_size=512,
-        tile_size_source="explicit",
-        tile_size_derived_from="stated on a checkpoint that records no tile geometry")
-    assert b_explicit.get("tile_size").source == "explicit"
+        predictor_mod.GenericPredictor = build_predictor_orig

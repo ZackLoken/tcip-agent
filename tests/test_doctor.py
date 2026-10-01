@@ -601,22 +601,22 @@ def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
 
 
 def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
-    """A stem reserved for a prediction bucket's own provenance stamp is excluded from every
-    bucket walk, so it is invisible to those readers; the doctor's own ``rglob`` walk still sees
-    it and reports it, since data not brought in through ingest can still carry one."""
+    """A stem reserved for a prediction bucket's own record is excluded from every bucket walk,
+    so it is invisible to those readers; the doctor's own ``rglob`` walk still sees it and reports
+    it, since data not brought in through ingest can still carry one."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
-    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "operating_point.jpg")
-    json_io.write_annotations(
-        annotation_path(root, date, "operating_point"),
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32,
-    )
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "bucket.jpg")
+    # Written by hand: the platform's own encoder refuses a document under a reserved stem.
+    reserved = annotation_path(root, date, "bucket")
+    reserved.parent.mkdir(parents=True, exist_ok=True)
+    reserved.write_text('{"annotations": []}', encoding="utf-8")
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
     findings = _lines(res.stdout, "reserved for a prediction bucket")
-    assert any("operating_point.jpg" in ln for ln in findings), res.stdout
-    assert any("operating_point.json" in ln for ln in findings), res.stdout
+    assert any("bucket.jpg" in ln for ln in findings), res.stdout
+    assert any("bucket.json" in ln for ln in findings), res.stdout
 
 
 def test_review_baselines_are_not_counted_as_label_records(tmp_path):

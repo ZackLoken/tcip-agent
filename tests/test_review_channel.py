@@ -14,8 +14,8 @@ import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.dataset_layout import image_dir, prediction_dir
+from tcip_annotation.state import BBox, Polygon
+from tcip_mcp.dataset_layout import image_dir, prediction_root
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -47,14 +47,28 @@ def _images(root: Path, date: str, names: list[str]) -> None:
         (idir / name).write_bytes(b"x")
 
 
-def _pred(root: Path, model: str, date: str, stem: str, preds: list[tuple[str, float]]) -> None:
-    # Write the one per-image JSON prediction file (all subjects, name-based). An empty `preds` writes
-    # a present {"annotations": []} (a prediction file with no detections); a non-empty list writes one
-    # scored box per (subject, score), the confidence carried as the annotation's score.
-    d = Path(prediction_dir(root, model, date))
-    anns = [Annotation(subject=subject, geometry=BBox(10.0, 10.0, 20.0, 20.0), score=score)
-            for subject, score in preds]
-    json_io.write_annotations(str(d / f"{stem}.json"), anns, 100, 100, keep_empty=True)
+def _bucket(root: Path, producer: str, date: str) -> Path:
+    """The directory ``producer``'s documents for ``date`` sit in under ``root``'s predictions."""
+    return prediction_root(root) / producer / date
+
+
+def _staged(root: Path, producer: str, date: str, stem: str) -> Path:
+    """The document ``stage_proposals`` publishes for ``stem`` under ``producer``: its own
+    bucket, one per staged image."""
+    return _bucket(root, producer, date) / stem / f"{stem}.json"
+
+
+def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> Path:
+    """The model bucket ``baseline`` for ``date`` under ``root``: one document per image name of
+    ``preds``, a scored ``bud`` box per score (none for an empty list); its directory."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    return published(root.parent, _bucket(root, "baseline", date), [
+        {"image": str(Path(image_dir(root, date)) / name), "width": 100, "height": 100,
+         "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores), "scores": scores,
+         "labels": [1] * len(scores)} for name, scores in preds.items()],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
 
 
 def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)) -> None:
@@ -75,10 +89,9 @@ def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> N
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
     _images(root, date, imgs)
-    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
-    _pred(root, "baseline", date, "IMG_0003", [("bud", 0.8)])
+    bucket = _publish(root, date, {"IMG_0002.JPG": [0.9], "IMG_0003.JPG": [0.8]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name="baseline")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
     assert "error" not in res
     assert res["image_index"] == 2  # first frame with predictions for this model
     assert res["image"] == "IMG_0002.JPG"
@@ -91,10 +104,10 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections), skip
-    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
+    # IMG_0000's document holds no detections, so it is no target.
+    bucket = _publish(root, date, {"IMG_0000.JPG": [], "IMG_0002.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name="baseline")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
     assert res["image_index"] == 2
     assert res["n_with_predictions"] == 1
 
@@ -105,11 +118,11 @@ def test_focus_review_navigates_past_an_unreadable_prediction_on_another_frame(t
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
-    bad = Path(prediction_dir(root, "baseline", date)) / "IMG_0000.json"
+    bucket = _publish(root, date, {"IMG_0000.JPG": [0.7], "IMG_0002.JPG": [0.9]})
+    bad = bucket / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name="baseline")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, predictions_dir=str(bucket))
 
     assert "error" not in res
     assert res["image"] == "IMG_0002.JPG"
@@ -120,12 +133,11 @@ def test_focus_review_refuses_an_explicitly_named_unreadable_frame(tmp_path: Pat
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    bad = Path(prediction_dir(root, "baseline", date)) / "IMG_0000.json"
-    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad = _publish(root, date, {"IMG_0000.JPG": [0.7]}) / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name="baseline",
-               image_index=0)
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date,
+                                predictions_dir=str(bad.parent), image_index=0)
 
     assert "error" in res
     assert str(bad) in res["error"]
@@ -135,10 +147,12 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
-    _pred(root, "baseline", date, "IMG_0000", [("bud", 0.9)])
+    bucket = _publish(root, date, {"IMG_0000.JPG": [0.9]})
 
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name="baseline",
-                       image_index=3, detection_idx=2, filter_type="fp")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date,
+                                predictions_dir=str(bucket),
+                                image_index=3, detection_idx=2,
+                                filter_type="fp")
     assert res["image_index"] == 3
     assert res["detection_idx"] == 2
     assert res["filter_type"] == "fp"
@@ -147,7 +161,7 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
 def test_focus_review_rejects_bad_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "2026-02-11", model_name="baseline", filter_type="bogus")
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "2026-02-11", predictions_dir=str(_bucket(root, "baseline", "2026-02-11")), filter_type="bogus")
     assert "error" in res
 
 
@@ -163,7 +177,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=boxes)
     assert res["staged"] == 2
 
-    out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
+    out = _staged(root, "claude", date, "IMG_0001")
     assert out.is_file()
     assert res["path"] == str(out)
     preds = json_io.read_annotations(out)
@@ -217,12 +231,10 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, ["IMG_0000.JPG"])
-    # focus_human_attention(tab='review') is read-only, but a traversal model_name/date must still be rejected (it becomes
-    # a path segment in prediction_dir/image_dir), the guard mirrors stage_proposals.
-    for bad_model in ("../../annotations", "a\\b", ".."):
-        res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", date, model_name=bad_model)
-        assert "error" in res
-    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "../evil", model_name="baseline")
+    # The review focus is read-only, but a traversal date still refuses: it becomes a path segment
+    # under images/, the guard stage_proposals applies.
+    res = focus_human_attention(_project_root(tmp_path), tmp_path.parent, "review", str(root), "bud", "../evil",
+                                predictions_dir=str(_bucket(root, "baseline", date)))
     assert "error" in res
 
 
@@ -254,7 +266,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
                           **{shape: [good, bad]})
     assert res["error"].startswith(f"{'box' if shape == 'boxes' else 'polygon'} 1: ")
     assert "subject" in res["error"]
-    assert not (Path(prediction_dir(root, "agent_proposals", date)) / "IMG_0001.json").exists()
+    assert not _staged(root, "agent_proposals", date, "IMG_0001").exists()
 
 
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
@@ -268,7 +280,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     res = stage_proposals(tmp_path, _img_path(root, date, "IMG_0132"), model_name="sam", polygons=polygons)
     assert res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
 
-    out = Path(prediction_dir(root, "sam", date)) / "IMG_0132.json"
+    out = _staged(root, "sam", date, "IMG_0132")
     assert out.is_file()
     assert res["path"] == str(out)
     polys = json_io.read_annotations(out)
@@ -303,7 +315,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
                           boxes=boxes, polygons=polygons)
     assert res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
     # Boxes and polygons alike land in the one per-image prediction file now.
-    out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
+    out = _staged(root, "claude", date, "IMG_0001")
     assert out.is_file()
     assert res["path"] == str(out)
     objs = json.loads(out.read_text())["annotations"]
@@ -469,7 +481,7 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp
                           polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}])
 
     assert res["staged"] == 1 and "error" not in res
-    out = Path(prediction_dir(root, "sam", date)) / "IMG_0200.json"
+    out = _staged(root, "sam", date, "IMG_0200")
     polys = json_io.read_annotations(out)
     assert len(polys) == 1
     assert isinstance(polys[0].geometry, Polygon)
@@ -501,7 +513,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
                           polygons=[{"subject": "leaf", "conf": 0.85, "rings": prompted["rings"]}])
     assert res["staged"] == 1 and "error" not in res
 
-    out = Path(prediction_dir(root, "sam", date)) / "IMG_0201.json"
+    out = _staged(root, "sam", date, "IMG_0201")
     staged_poly = json_io.read_annotations(out)[0]
     assert [len(r) for r in staged_poly.geometry.rings] == [4, 3]
 
@@ -522,7 +534,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     accepted = stage_proposals(tmp_path, accept_image_path, assignments=[{"candidate_id": 1, "subject": "leaf"}])
     assert "error" not in accepted
 
-    read_back = read_annotations(accept_image_path)
+    read_back = read_annotations(accept_image_path, str(Path(accepted["path"]).parent))
     accepted_preds = read_back["predictions"]["annotations"]
     assert sorted(len(ring) for pred in accepted_preds for ring in pred["rings"]) == [3, 4]
 
@@ -613,151 +625,32 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(tmp_path: 
     assert not (root / "predictions").exists()
 
 
-# ── Prediction-bucket immutability ──────────────────────────────────────────
-
-
-def _record_verdict(root: Path, model: str, date: str, img_name: str) -> None:
-    """Record one human verdict against ``img_name`` in the dataset's review state, so the
-    prediction bucket holding its predictions counts as reviewed."""
-    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
-
-    from tcip_mcp.prediction_buckets import bucket_key_of
-
-    engine = ReviewEngine(root / ".tcip" / "state")
-    ctx = ReviewContext(
-        img_name=img_name, img_width=640, img_height=480,
-        preds=[Annotation(subject="bud", geometry=BBox(288.0, 216.0, 352.0, 264.0), score=0.8)],
-    )
-    det = ReviewDetection(
-        det_type="fp", class_name="bud", conf=0.8, iou=None, gt_idx=None,
-        pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
-    )
-    engine.record_detection_action(
-        bucket_key_of(prediction_dir(root, model, date)), det, ctx, action="accepted")
-
-
-def _bulk_accept(root: Path, model: str, date: str, img_name: str) -> None:
-    """Mark ``img_name`` reviewed under ``model``'s bucket with zero detection entries (a bulk
-    accept / confirmed negative), the state ``POST /api/review/mark_complete`` writes."""
-    from tcip_annotation.review_engine import ReviewEngine
-
-    from tcip_mcp.prediction_buckets import bucket_key_of
-
-    engine = ReviewEngine(root / ".tcip" / "state")
-    engine.mark_image_reviewed(bucket_key_of(prediction_dir(root, model, date)), img_name)
-
-
-def _unmark_reviewed(root: Path, model: str, date: str, img_name: str) -> None:
-    """Reverse a bulk accept back to a not_started shard, the state an unreviewed image carries."""
-    from tcip_annotation.review_engine import ReviewEngine
-
-    from tcip_mcp.prediction_buckets import bucket_key_of
-
-    engine = ReviewEngine(root / ".tcip" / "state")
-    engine.unmark_image_reviewed(bucket_key_of(prediction_dir(root, model, date)), img_name)
-
+# ── Staged documents are written once ──────────────────────────────────────
 
 _BOX = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
 
 
-def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> None:
+def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(tmp_path: Path) -> None:
+    """A staged document a reviewer may already have judged is never rewritten: the second stage
+    answers an error naming the document, and the first document's bytes are unchanged."""
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
-
     image_path = _img_path(root, date, "IMG_0001")
     first = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
+    written = Path(first["path"]).read_bytes()
 
-    _record_verdict(root, "claude", date, "IMG_0001.jpg")  # a human reviews claude's prediction
+    res = stage_proposals(tmp_path, image_path, model_name="claude",
+                          boxes=[{**_BOX[0], "conf": 0.3}])
 
-    # The reviewed bucket is now immutable: a re-stage lands in a fresh @r2 bucket and says so.
-    second = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    assert second["bucket"] == "claude@r2"
-    assert second["bucket_redirected"] is True
-    assert second["path"] == str(
-        Path(prediction_dir(root, "claude@r2", date)) / "IMG_0001.json"
-    )
-    assert "verdict" in second["note"].lower()
-    # The original reviewed bucket's file is untouched.
-    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
-    assert not (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").samefile(
-        Path(prediction_dir(root, "claude@r2", date)) / "IMG_0001.json"
-    )
+    assert "already exists" in res["error"]
+    assert str(Path(first["path"]).parent) in res["error"]
+    assert Path(first["path"]).read_bytes() == written
 
 
-def test_stage_proposals_overwrite_refused_when_bucket_has_verdicts(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0001")
-    stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    _record_verdict(root, "claude", date, "IMG_0001.jpg")
-
-    res = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX, overwrite=True)
-    assert "error" in res
-    assert res["verdict_count"] == 1
-    assert res["suggested_bucket"] == "claude@r2"
-
-
-def test_stage_proposals_redirects_when_bucket_has_a_bulk_accept(tmp_path: Path) -> None:
-    """The staging door's guard reads review state, not detection verdicts alone: a bucket a
-    reviewer bulk-accepted with no detection entry at all is exactly as immutable to it as one
-    carrying a verdict. GUARDS against aa8acc21: today the second call writes into ``claude`` in
-    place (the resolver's own reading there counts a detection verdict alone), so
-    ``second["bucket"] == "claude@r2"`` fails at the baseline on the assertion this test names."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-
-    image_path = _img_path(root, date, "IMG_0001")
-    first = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
-
-    _bulk_accept(root, "claude", date, "IMG_0001.jpg")  # a human completes the image, no verdict
-
-    second = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    assert second["bucket"] == "claude@r2"
-    assert second["bucket_redirected"] is True
-    # The original bucket's file is untouched.
-    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
-
-
-def test_stage_proposals_overwrite_refused_when_bucket_has_a_bulk_accept(tmp_path: Path) -> None:
-    """GUARDS against aa8acc21: today ``overwrite=True`` writes ``claude`` in place over a
-    bulk-accepted bucket (no verdict recorded, so the baseline's guard reads it as free), so
-    ``"error" in res`` fails at the baseline on the assertion this test names."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0001")
-    stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
-
-    res = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX, overwrite=True)
-    assert "error" in res
-    assert res["verdict_count"] == 1
-    assert res["suggested_bucket"] == "claude@r2"
-    assert "reviewed image(s)" in res["error"]
-
-
-def test_stage_proposals_overwrite_in_place_when_no_review_state(tmp_path: Path) -> None:
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0001")
-    stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-
-    # No review state recorded (no verdict, no bulk accept) -> overwrite writes in place, no redirect.
-    res = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX, overwrite=True)
-    assert "error" not in res
-    assert res["bucket"] == "claude" and res["bucket_redirected"] is False
-
-
-def test_stage_proposals_admits_two_unreviewed_stems_staged_in_turn(tmp_path: Path) -> None:
-    """A rail must admit valid work: two stems staged in turn into the same bucket, neither
-    reviewed, both land in place, since staging accumulates one stem per call by contract.
-    Admits-valid-work, through the tool."""
+def test_stage_proposals_admits_two_stems_staged_in_turn(tmp_path: Path) -> None:
+    """Each staged image is its own bucket, so two stems staged in turn under one model name
+    both land."""
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
@@ -766,62 +659,19 @@ def test_stage_proposals_admits_two_unreviewed_stems_staged_in_turn(tmp_path: Pa
     first = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
     second = stage_proposals(tmp_path, _img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
 
-    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
-    assert second["bucket"] == "claude" and second["bucket_redirected"] is False
-    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
-    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0002.json").is_file()
-
-
-def test_stage_proposals_interleaved_with_completing_images_fragments_across_variants(
-    tmp_path: Path,
-) -> None:
-    """Coverage pinning the consequence decision 4 states: a session that interleaves staging
-    with completing images on the Review canvas spreads one engine's proposals over several
-    bucket variants, each frozen by the review state it acquires before the next stage."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    for stem in ("IMG_0001", "IMG_0002", "IMG_0003"):
-        _image(root, date, stem, size=(640, 480))
-
-    first = stage_proposals(tmp_path, _img_path(root, date, "IMG_0001"), model_name="claude", boxes=_BOX)
-    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
-    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
-
-    second = stage_proposals(tmp_path, _img_path(root, date, "IMG_0002"), model_name="claude", boxes=_BOX)
-    assert second["bucket"] == "claude@r2" and second["bucket_redirected"] is True
-    _bulk_accept(root, "claude@r2", date, "IMG_0002.jpg")
-
-    third = stage_proposals(tmp_path, _img_path(root, date, "IMG_0003"), model_name="claude", boxes=_BOX)
-    assert third["bucket"] == "claude@r3" and third["bucket_redirected"] is True
-
-
-def test_stage_proposals_reland_after_unmark_is_admitted_in_place(tmp_path: Path) -> None:
-    """A bucket a bulk accept froze, once unmarked back to a not_started shard (no review
-    decision recorded), is free again: a rail must admit valid work. Admits-valid-work."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0001")
-
-    stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    _bulk_accept(root, "claude", date, "IMG_0001.jpg")
-    _unmark_reviewed(root, "claude", date, "IMG_0001.jpg")
-
-    res = stage_proposals(tmp_path, image_path, model_name="claude", boxes=_BOX)
-    assert "error" not in res
-    assert res["bucket"] == "claude" and res["bucket_redirected"] is False
+    assert "error" not in first and "error" not in second
+    assert first["path"] == str(_staged(root, "claude", date, "IMG_0001"))
+    assert second["path"] == str(_staged(root, "claude", date, "IMG_0002"))
 
 
 def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Path) -> None:
-    """An image whose stem is one of a bucket's own stamp names can never become a per-image
-    prediction document, and the audited door says so in its answer rather than raising."""
+    """An image whose stem names a bucket's own record can never become a per-image prediction
+    document, and the audited door says so in its answer rather than raising."""
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "operating_point", size=(640, 480))
-    boxes = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    res = stage_proposals(tmp_path, _img_path(root, date, "operating_point"), model_name="claude", boxes=boxes)
-    assert "error" in res
-    assert "operating_point" in res["error"]
-    assert not (Path(prediction_dir(root, "claude", date)) / "operating_point.json").exists()
+    _image(root, date, "bucket", size=(640, 480))
+    res = stage_proposals(tmp_path, _img_path(root, date, "bucket"), model_name="claude", boxes=_BOX)
+    assert "a prediction bucket's own record" in res["error"]
+    assert not any((_bucket(root, "claude", date) / "bucket").glob("*.json"))
 
 

@@ -21,7 +21,7 @@ from tcip_annotation import (
 from tcip_annotation.review_engine import bucket_dirname, capture_label_baseline
 
 # The prediction bucket these verdicts are recorded against, spelled the way
-# prediction_buckets.bucket_key_of spells one: relative to the dataset root.
+# buckets.bucket_key_of spells one: relative to the dataset root.
 BUCKET = "predictions/baseline/2026-02-11"
 
 

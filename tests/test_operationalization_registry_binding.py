@@ -18,7 +18,6 @@ from tcip_mcp.operationalization import OperationalizationRefused, confirmed_rev
 from tcip_mcp.tools.trait_tools import propose_trait
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES
 from tests import _trait_fixtures as fx
-from tests._population import mapped_plants
 
 _CROSSING = fx.with_operationalization(
     fx.CROSSING_SPEC, STATE_CROSSING_DATES, measured_subject="flower",
@@ -189,41 +188,28 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     """deliver_phenology_milestones resolves its registry from the buckets it delivers, not from
     the project root: a registry written where the buckets resolve to is what a crossing
     delivery's positive-class check reads."""
+    pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._binding_fixtures import write_plant_mapping
-    from tests.test_phenology_tools import _bucket, _ds_root, _write_op_sidecar, _write_preds
+    from tests._chain_fixtures import ATTRIBUTE, PLANTS, SUBJECT, classified_series
 
-    fx.seed_positive_class(tmp_path, "flower", "open")
-    fx.propose_and_confirm(tmp_path, _CROSSING)
-    ds_root = _ds_root(tmp_path)
-    bucket = _bucket(tmp_path, "2026-02-11")
-    _write_preds(bucket, "PLANT_A_2026-02-11", ["open"])
-    _write_op_sidecar(bucket, dataset_root=ds_root, validated=False,
-                      id_map={"closed": 0, "open": 1}, trait=fx.CROSSING_TRAIT)
-    cr.write_registry(subjects_path(ds_root), cr.SubjectRegistry(subjects=(
-        cr.Subject(name="flower", attributes=(
-            cr.Attribute(name="state", type="categorical", values=("closed", "open")),
-        )),
-    )))
-    write_plant_mapping(tmp_path, "valley", {
-        "2026-02-11": [{"stem": "PLANT_A_2026-02-11", "plot_name": "P1", "accession_name": "acc-9"}],
-    }, dataset_root=ds_root)
+    series = classified_series(tmp_path, assessed=False)
 
     def deliver(out: str) -> dict:
         return deliver_phenology_milestones(
-            tmp_path, trait=fx.CROSSING_TRAIT, mapping_name="valley",
-            plants=mapped_plants(tmp_path, "valley"),
-            predictions_by_date={"2026-02-11": str(bucket)}, output_csv_path=str(tmp_path / out))
+            tmp_path, trait=series.trait, mapping_name=series.mapping_name, plants=list(PLANTS),
+            buckets=list(series.buckets.values()), output_csv_path=str(tmp_path / out))
 
     res = deliver("out.csv")
 
-    # Reached the unvalidated-evidence gate, past the meaning and registry check.
-    assert "validated" in res["error"]
+    # Reached the delivery gate, past the meaning and registry check.
+    assert "no assessment answers" in res["error"]
     assert "no subject registry" not in res["error"]
     assert not (tmp_path / "out.csv").exists()
 
-    cr.write_registry(subjects_path(ds_root), _WITHOUT_OPEN)
+    cr.write_registry(subjects_path(series.root), cr.SubjectRegistry(subjects=(
+        cr.Subject(name=SUBJECT, attributes=(
+            cr.Attribute(name=ATTRIBUTE, type="categorical", values=("closed",)),)),)))
     refused = deliver("out2.csv")
 
     assert "no longer declares" in refused["error"]

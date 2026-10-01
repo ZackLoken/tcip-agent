@@ -25,9 +25,9 @@ interface OverlayProps {
   /** While editing, the picked-up shape is hidden here; it renders live in the edit overlay. */
   suppressFocusedGt?: boolean;
   suppressFocusedPred?: boolean;
-  /** The bucket's own validated count operating point (admission_rule_of), or null: a detection
-   *  at or above it draws a corner mark on its prediction's geometry. Null under a classified
-   *  scope or an unvalidated bucket, so no mark is ever drawn there. */
+  /** The conf of the assessment the bucket was published under, or null: a detection at or
+   *  above it draws a corner mark on its prediction's geometry. Null under a classified scope or
+   *  an unassessed bucket, so no mark is ever drawn there. */
   admissionConf?: number | null;
 }
 

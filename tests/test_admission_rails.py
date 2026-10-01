@@ -93,13 +93,13 @@ def test_ground_truth_shape_reads_an_empty_directory_as_documents(tmp_path):
     assert ground_truth_shape(d) == "document"
 
 
-def test_ground_truth_shape_ignores_a_bucket_sidecar(tmp_path):
-    """A directory holding only a bucket's own provenance stamp has no label document in it."""
+def test_ground_truth_shape_ignores_a_bucket_record(tmp_path):
+    """A directory holding only a bucket's own record has no label document in it."""
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
     d = tmp_path / "detect"
     d.mkdir()
-    (d / "operating_point.json").write_text("{}")
+    (d / "bucket.json").write_text("{}")
     assert ground_truth_shape(d) == "document"
 
 
@@ -148,17 +148,17 @@ def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_p
                                      "scope": {"subject": BUD}}, None)
 
 
-def test_a_same_stem_provenance_sidecar_is_never_read_as_that_images_label(tmp_path):
-    """A bucket's own provenance stamp shares a stem with an image of that name. Admission pairs
-    each candidate with the document its directory actually holds for it, so the sidecar is never
+def test_a_same_stem_bucket_record_is_never_read_as_that_images_label(tmp_path):
+    """A bucket's own record shares a stem with an image of that name. Admission pairs each
+    candidate with the document its directory actually holds for it, so the record is never
     opened as a label: that image is unannotated, and the rest of the directory still trains."""
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
-    _make_images(images, ["img0", "img1", "operating_point"])
+    _make_images(images, ["img0", "img1", "bucket"])
     for stem in ("img0", "img1"):
         json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 50, 50)], 100, 100)
-    (labels / "operating_point.json").write_text("{}", encoding="utf-8")
+    (labels / "bucket.json").write_text("{}", encoding="utf-8")
 
     admitted = admit_over(images, labels, subject=BUD)
     assert sorted(r.member for r in admitted.records) == ["img0", "img1"]
@@ -433,7 +433,7 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
                               keep_empty=True)
 
     ds = dataset_over("instance_seg", images, labels, subject=BUD)
-    assert ds.record_stems == ["ann"]
+    assert [ds.sample_of(k).member for k in ds.stems] == ["ann"]
 
 
 def test_instance_seg_excludes_a_partially_labeled_stem_from_training(tmp_path):
@@ -513,7 +513,7 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
     _Image.fromarray(np.zeros((32, 32), dtype=np.uint8)).save(masks / "all_background.png")
 
     ds = dataset_over("semantic_seg", images, masks)
-    assert sorted(ds.record_stems) == ["all_background", "has_mask"]
+    assert sorted(ds.sample_of(k).member for k in ds.stems) == ["all_background", "has_mask"]
 
 
 def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
@@ -866,7 +866,8 @@ def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_
     ], 100, 100)
 
     tiled = dataset_over("detection", images_dir, labels_dir, subject=BUD, attribute="opening",
-                         tiling={"enabled": True, "tile_size": 64, "overlap": 0.0})
+                         tiling={"enabled": True, "tile_size": 64, "overlap": 0.0,
+                                 "sliver_frac": 0.5})  # stated: one box derives no spread
 
-    assert set(tiled.record_stems) == {"complete"}  # tiles are per-index, so this is every tile
+    assert {tiled.sample_of(k).member for k in tiled.stems} == {"complete"}  # tiles are per-index, so this is every tile
     assert len(tiled) > 0  # the rail admits the fully-attributed image's tiles

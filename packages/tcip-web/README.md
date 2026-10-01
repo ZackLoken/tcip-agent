@@ -31,7 +31,6 @@ packages/tcip-web/
       terminal.py       # in-app agent terminal endpoints
       training.py       # validate / launch / list / metrics / WS stream
       tuning.py         # HPO launch + sweep listing
-      validation.py     # validate_reference: a review's verdicts into COCO evaluation records
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
   static/               # vite build output (served at /)
 ```

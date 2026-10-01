@@ -72,12 +72,12 @@ def declared_models() -> list[type[BaseModel]]:
         AcknowledgmentPayload, ConfirmRevisionPayload, ExportCountCsvPayload, ExportCsvPayload,
         OrthomosaicPlantCountsDelivery, PerImageCountDelivery, PhenologyPayload,
     )
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.traits import Operationalization, TraitEntry, TraitRevision
     from tcip_mcp.pipelines.delivery_events_schema import (
-        CanopySegmentDisclosure, CanopySegmentsDocument, DeliveryEventRecord,
-        DeliverySupersessionRecord, DocumentBinding, MatchTolerance, PlantMappingDisclosure,
-        PlantRegistryDisclosure, PlantRegistryReference, ReconciledDimension, ReconciledDocument,
-        SegmentTieDisclosure, UnattributedDetectionsBySource,
+        Acknowledgment, BucketFinding, CanopySegmentDisclosure, CanopySegmentsDocument,
+        DeliveryEventRecord, MatchTolerance, PlantMappingDisclosure, PlantRegistryDisclosure,
+        PlantRegistryReference, Producer, SegmentTieDisclosure, UnattributedDetectionsBySource,
     )
     from tcip_web.routes.review import ActionPayload
     from tcip_web.routes.terminal import (
@@ -96,9 +96,9 @@ def declared_models() -> list[type[BaseModel]]:
             OrthomosaicPlantCountsDelivery, ExportCountCsvPayload, MatchTolerance,
             PlantRegistryReference, PlantMappingDisclosure, PlantRegistryDisclosure,
             CanopySegmentsDocument, SegmentTieDisclosure, UnattributedDetectionsBySource,
-            CanopySegmentDisclosure, DocumentBinding, ReconciledDocument, ReconciledDimension,
-            DeliveryEventRecord, DeliverySupersessionRecord, Operationalization, TraitEntry,
-            TraitRevision, ConfirmRevisionPayload]
+            CanopySegmentDisclosure, Producer, BucketFinding, Acknowledgment,
+            DeliveryEventRecord, Operationalization, TraitEntry, TraitRevision,
+            ConfirmRevisionPayload, Stated]
 
 
 TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState", "ReviewFilters")

@@ -1,10 +1,5 @@
-"""Per-image JSON: the canonical on-disk label format (ground truth + predictions).
-
-One JSON file per image, holding every subject's annotations by name. Each annotation carries its
-``subject``, an optional geometry (``bbox`` xywh, ``segmentation`` polygon, ``point`` [x,y], or
-none for an image/plant-level label), its attribute values by name, an optional ``score``
-(predictions), and provenance (``created_by/at``, ``accepted_by/at``, ``accepted_by_rule``), so a
-prediction's origin travels with it into ground truth on accept, with no sidecar.
+"""Per-image JSON: the on-disk label format of ground truth and predictions alike, one document
+per image holding every subject's annotations by name.
 
 Schema::
 
@@ -19,17 +14,13 @@ Schema::
           "iscrowd": true,                      # a region of unseparated objects (optional)
           "created_by": "sam", "created_at": "...",
           "accepted_by": "user:breeder", "accepted_at": "...",
-          "accepted_by_rule": "<experiment_id>:<record_digest>" } ] }
+          "accepted_by_rule": "<assessment_id>" } ] }
 
-Integer class ids never appear on disk; a name->id assignment is a per-training-run artifact
-(:mod:`tcip_mcp.subject_registry`). An annotation with a subject but no geometry (an image-level
-label) is a real annotation.
-
-A missing file reads as unannotated (``[]``), and so does the platform's own empty document
+A missing file reads as unannotated (``[]``), and so does an empty document
 (``{"annotations": []}``). A present document this format cannot make sense of (undecodable text, a
 non-dict document, an ``annotations`` that is not a list, or a record :func:`annotation_of_record`
-refuses, a supplied value that does not parse among them) raises :class:`UnreadableLabelDocument`.
-Writers and readers are symmetric: a record the writer stores is one the reader accepts.
+refuses) raises :class:`UnreadableLabelDocument`. A record the writer stores is one the reader
+accepts.
 """
 
 from __future__ import annotations
@@ -37,7 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -181,8 +172,7 @@ def read_document_bytes(path: str | Path) -> bytes:
     """A present document's bytes, the one file read every document loader shares.
 
     Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
-    permission error, a directory where a file was expected). Callers check for a missing path
-    themselves: this is only ever called once a document is known to be present.
+    missing file, a permission error, a directory where a file was expected).
     """
     p = Path(path)
     try:
@@ -212,39 +202,31 @@ def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
                                                 source=source))
 
 
-SIDECAR_FILENAMES = frozenset({
-    "operating_point.json",
-    "classifier_operating_point.json",
-    "ordinal_operating_point.json",
-    "regression_operating_point.json",
-    "resolve_scale.json",
-})
-"""Every provenance stamp a prediction bucket carries beside its per-image documents.
-
-A stamp is not a per-image label: a reader enumerating a bucket's prediction files excludes
-these, or it invents an image stem no image has and reads a stamp as if it were detections.
-Stated once here, so a stamp added for a new measurement dimension is excluded on every path
-that enumerates a bucket, in this package and in any package that imports this set rather than
-declaring its own copy.
-"""
+BUCKET_RECORD = "bucket.json"
+"""The one file a prediction bucket holds beside its per-image documents: the record of who
+produced them and how. It is never a per-image document."""
 
 
-def is_sidecar_name(filename: str) -> bool:
-    """Whether ``filename`` names one of a bucket's own provenance stamps, compared
-    case-insensitively.
-    """
-    return filename.lower() in SIDECAR_FILENAMES
+def is_bucket_record(filename: str) -> bool:
+    """Whether ``filename`` names a bucket's own record, compared case-insensitively."""
+    return filename.lower() == BUCKET_RECORD
+
+
+def is_reserved_stem(stem: str) -> bool:
+    """Whether an image of stem ``stem`` would name its per-image document after a bucket's own
+    record, so that no such document can ever be written."""
+    return is_bucket_record(f"{stem}{LABEL_SUFFIX}")
 
 
 def prediction_documents(bucket: str | Path) -> list[Path]:
-    """Every per-image document in a prediction bucket, sorted, its own sidecar stamps excluded. A
-    missing or non-directory ``bucket`` yields nothing.
+    """Every per-image document in a prediction bucket, sorted, its record excluded. A missing or
+    non-directory ``bucket`` yields nothing.
     """
     d = Path(bucket)
     if not d.is_dir():
         return []
     return sorted(f for f in d.glob(f"*{LABEL_SUFFIX}")
-                  if f.is_file() and not is_sidecar_name(f.name))
+                  if f.is_file() and not is_bucket_record(f.name))
 
 
 def _load(path: str) -> dict | None:
@@ -257,9 +239,13 @@ def _load(path: str) -> dict | None:
 
 
 def safe_score(x) -> float:
-    """A JSON-safe confidence: finite, rounded; non-finite (NaN/inf) collapses to 0.0."""
+    """A confidence as it is stored: rounded to four places. A non-finite one (NaN or infinity)
+    refuses (``ValueError``) naming it: no stored number stands in for a score the model did not
+    give."""
     v = float(x)
-    return round(v, 4) if math.isfinite(v) else 0.0
+    if not math.isfinite(v):
+        raise ValueError(f"confidence {x!r} is not a finite number, so it cannot be stored as one.")
+    return round(v, 4)
 
 
 def _numbers(value, key: str, count: int | None = None) -> list[float]:
@@ -593,21 +579,19 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
     )
 
 
-def require_reference_ground_truth(directory: str | Path) -> None:
-    """Refuse ``directory`` as a measurement reference when only the model stands behind it.
+def require_reference_ground_truth(documents: Iterable[str | Path]) -> None:
+    """Refuse the label ``documents`` as a measurement reference when only the model stands behind
+    them.
 
     Refuses on a record carrying a prediction ``score``; on a record an agent authored as ground
     truth with no reviewer's ``accepted_by``; and on a record carrying ``accepted_by_rule`` with no
-    person's sign-off. Refuses on the whole directory, never by dropping the offending records. An
-    absent or empty directory raises nothing here. Walks the directory through
-    :func:`prediction_documents`.
+    person's sign-off. Refuses the whole reference, never by dropping the offending records.
     """
-    directory = Path(directory)
     annotations: list[Annotation] = []
     # (path, index within that document): the third arm's own walk, so its refusal can name a
     # file to open rather than an index into the concatenation nothing else reconstructs.
     sources: list[tuple[Path, int]] = []
-    for path in prediction_documents(directory):
+    for path in map(Path, documents):
         doc = read_annotations(path)
         annotations.extend(doc)
         sources.extend((path, i) for i in range(len(doc)))
@@ -615,7 +599,7 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
         raise ValueError(
-            f"{scored} of {total} annotations in {directory} carry a prediction score, so they are "
+            f"{scored} of {total} annotations in the reference carry a prediction score, so they are "
             "the model's own output that no human has ruled on, and a reference built from them "
             "measures the model against itself rather than against a measurement. Annotate this "
             "reference, accept the model's proposals through review so each record is a reviewer's "
@@ -625,7 +609,7 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     if agent_authored:
         producers = ", ".join(sorted(set(agent_authored)))
         raise ValueError(
-            f"{len(agent_authored)} of {total} annotations in {directory} are authored by "
+            f"{len(agent_authored)} of {total} annotations in the reference are authored by "
             f"{producers}, which names no person under this platform's {PERSON_IDENTITY_PREFIX}"
             "<name> convention, and carry no accepted_by. Ground truth an agent wrote and no "
             "human has adjudicated is not a calibration or holdout reference. The lighter path "
@@ -636,7 +620,7 @@ def require_reference_ground_truth(directory: str | Path) -> None:
         indices = facts.rule_admitted_unsigned
         named = ", ".join(f"{sources[i][0]} record {sources[i][1]}" for i in indices)
         raise ValueError(
-            f"{len(indices)} of {total} annotations in {directory} ({named}) carry "
+            f"{len(indices)} of {total} annotations in the reference ({named}) carry "
             "accepted_by_rule with no person's accepted_by: a rule-based admission was verified "
             "for these records, but nobody has signed off on them, so no person stands behind "
             "them yet. Confirm each one through Review so it carries the person's sign-off, or "
@@ -748,11 +732,15 @@ def encode_annotations(target, annotations, img_w: int, img_h: int, *,
 
     The writer's one encoder, apart from the write so a caller placing several documents can
     encode every one of them, and refuse on the first geometry the stored grid collapses
-    (``ValueError``), before any lands. ``None`` for the bytes when no record survives encoding
-    and ``keep_empty`` is not set: such a document is removed rather than written.
+    (``ValueError``), before any lands; a document of a reserved stem (:func:`is_reserved_stem`)
+    refuses the same way. ``None`` for the bytes when no record survives encoding and
+    ``keep_empty`` is not set: such a document is removed rather than written.
     """
-    records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
     key = _record_key(target)
+    if is_reserved_stem(key.parts[-1]):
+        raise ValueError(f"{key.parts[-1]} would name its document after a prediction bucket's "
+                         "own record, so it can never have a per-image document.")
+    records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
     if not records and not keep_empty:
         return key, None
     payload = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),

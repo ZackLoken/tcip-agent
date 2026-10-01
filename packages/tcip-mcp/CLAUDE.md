@@ -12,9 +12,9 @@ src/tcip_mcp/
                   # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
                   # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
                   # generated block, and the serve_domain_knowledge tool
-  tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
-                  # gui, inference, ingest, knowledge, meta, model, orthomosaic, phenology,
-                  # project, proposal, trait, training, vision
+  tools/          # domain tools, one module per area: annotation, calibration (the assessment
+                  # doors), data, experiment, feedback, gui, inference, ingest, knowledge, meta,
+                  # model, orthomosaic, phenology, project, proposal, trait, training, vision
   pipelines/      # composable ML: active_learning, components, data, feedback, inference,
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
@@ -25,10 +25,10 @@ src/tcip_mcp/
     model_contract.py        # the measurement boundary a bespoke model must pass
                               # (check_model_contract, overfit_check)
     proposal.py               # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
-    resolution.py              # ResolvedParam: the derive-don't-pin currency and the
-                                # unvalidated-value firewall
-    operating_point.py          # five resolvers, resolve_operating_point (the calibrated
-                                 # conf/NMS/max_dets/tile path) among them, plus resolve_classifier_operating_point, _resolve_scalar_operating_point, resolve_ordinal_operating_point and resolve_regression_operating_point; resolution.py's raw and block-calibrated-export paths are the other two regimes, the latter carrying conf and cross_tile_nms straight from the calibrated bundle and sharing resolve_tile_size_param with the others for tile scale
+    execution.py               # one pass's execution record (conf, cap, tile geometry, merge)
+                                # and prepare_pass, the one place a pass is built
+    operating_point.py          # the criteria an assessment judges against: count, classifier,
+                                 # scalar, and the spatial held-out check
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
                           # labels/predictions live on disk. The frontend cannot import it: the label suffix reaches it through the generated types, and subjects.ts's ImageStatus union restates the status vocabulary, held equal by tests/test_frontend_dataset_vocabulary.py
@@ -36,7 +36,9 @@ src/tcip_mcp/
   traits.py               # one record per trait: its entry (spec fields and what each delivered
                             # number means) as appended revisions the breeder confirms
   operationalization.py    # the check every delivery door runs on the latest confirmed revision
-  prediction_buckets.py    # prediction-bucket immutability: never overwrite predictions a human reviewed
+  buckets.py               # a published bucket and its bucket.json, written once
+  assessment.py            # the assessment a delivered number rests on, written once
+  delivery.py              # the one delivery gate and the delivery event
   project_record.py       # a project's own record: its id, display name and site
   workspace.py            # the workspace root, its project directories and last-opened pointer
   project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root

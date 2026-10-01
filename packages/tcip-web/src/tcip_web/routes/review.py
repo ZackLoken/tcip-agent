@@ -38,12 +38,14 @@ from tcip_annotation.json_io import (
     UnreadableLabelDocument, annotation_from_payload, check_box_extent,
     prediction_documents, read_annotations, read_predictions,
 )
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_annotation.review_engine import capture_label_baseline
 from tcip_annotation.state import Annotation, prediction_score
 from tcip_annotation.verdicts import (
     ACCEPTED_ACTION, EDITED_ACTION, REJECTED_ACTION, SWEPT_ACTION, VerdictAction, decode_verdict,
 )
-from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status, label_filename
+from tcip_mcp.buckets import Bucket
+from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.image_utils import (
     AmbiguousImageStem, image_dimensions, resolve_image_source,
@@ -90,49 +92,25 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
     record_committed(tool, arguments, scope=str(allowed_path(scope)))
 
 
-def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str]:
-    """The content identity of ``image_name``'s prediction document in ``pred_dir``, as it is now.
+def _published(pred_dir: Optional[str]) -> Optional[Bucket]:
+    """The published bucket at ``pred_dir`` (:func:`~tcip_mcp.buckets.read_bucket`), or ``None``
+    for no directory."""
+    from tcip_mcp.buckets import read_bucket
 
-    :func:`~tcip_mcp.pipelines.resolution.dataset_hash` over that one stem. ``None`` when the image
-    has no prediction document, or the review names no bucket at all.
-    """
-    if not pred_dir:
-        return None
-    from tcip_mcp.pipelines.resolution import dataset_hash
-
-    stem = Path(image_name).stem
-    if not (Path(pred_dir) / label_filename(stem)).is_file():
-        return None
-    return dataset_hash(pred_dir, [stem])
+    return read_bucket(pred_dir) if pred_dir else None
 
 
-def _resolve_producer_identity_for_dir(pred_dir: Optional[str], image_name: str) -> Optional[dict]:
-    """The producing model's identity for ``image_name`` in prediction bucket ``pred_dir``.
-
-    Resolved from the bucket's own ``operating_point.json`` sidecar: ``checkpoint_sha256`` and
-    ``experiment_id``, alongside the content identity of the one prediction document this review is
-    being recorded against. ``None`` when there is no dir or no sidecar to read.
-    """
-    if not pred_dir:
-        return None
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    sidecar = read_operating_point_sidecar(pred_dir)
-    if sidecar is None:
-        return None
-    return {
-        "checkpoint_sha256": sidecar["checkpoint_sha256"],
-        "experiment_id": sidecar["experiment_id"],
-        "bucket_dir": str(Path(pred_dir)),
-        "prediction_digest": _prediction_digest(pred_dir, image_name),
-    }
+def _producer_identity(bucket: Optional[Bucket]) -> Optional[dict]:
+    """The producing model's identity a verdict records: the bucket's ``checkpoint_sha256`` and
+    ``experiment_id``, beside its directory. ``None`` for no published bucket."""
+    return None if bucket is None else {**bucket.producer, "bucket_dir": str(bucket.path)}
 
 
 def _bucket_of_dir(pred_dir: Optional[str]) -> str:
     """The verdict store's key for the prediction bucket dir this request names. No dir is a review
     with no bucket at all.
     """
-    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.buckets import bucket_key_of
 
     return bucket_key_of(pred_dir)
 
@@ -140,15 +118,6 @@ def _bucket_of_dir(pred_dir: Optional[str]) -> str:
 def _bucket_of_file(pred_path: Optional[str]) -> str:
     """Same, from a per-image prediction file path: the bucket dir is its parent."""
     return _bucket_of_dir(str(Path(pred_path).parent) if pred_path else None)
-
-
-def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
-    """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image prediction file path
-    (``ActionPayload.pred_path``), whose parent is the bucket dir.
-    """
-    if not pred_path:
-        return None
-    return _resolve_producer_identity_for_dir(str(Path(pred_path).parent), Path(pred_path).name)
 
 
 def _verdict_class_id(scope: ClassScope, class_name: str) -> Optional[int]:
@@ -186,28 +155,22 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
 
 
 def _review_scope(
-    pred_path: Optional[str], stated_subject: Optional[str], stated_attribute: Optional[str],
+    bucket: Optional[Bucket], stated_subject: Optional[str], stated_attribute: Optional[str],
 ) -> ClassScope:
-    """The class space this review reads under: the stamped bucket the prediction file lies in
-    records its own, whole; a file with no stamped bucket reads under the caller's statement.
-
-    The scope comes from ``resolution.input_scope``; each of its refusals answers 400, as do a
-    stated attribute with no subject and a stamp that will not decode. A bucket with no stamp and
-    a stated attribute refuses (400): a classified review reads a bucket's own map.
+    """The class space this review reads under (:func:`~tcip_mcp.buckets.input_scope` over the
+    prediction file's bucket); each of its refusals answers 400.
     """
-    from tcip_mcp.pipelines.resolution import input_scope
-    from tcip_store import StoreError
+    from tcip_mcp.buckets import input_scope
 
     try:
-        scope, stamped = input_scope(str(Path(pred_path).parent) if pred_path else None,
-                                     stated_subject, stated_attribute)
-    except (ValueError, StoreError) as exc:
+        return input_scope(bucket, stated_subject, stated_attribute)
+    except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not stamped and scope.classified:
-        raise HTTPException(
-            400, "this directory carries no stamp and no scope; a classified review reads "
-                 "the bucket's own")
-    return scope
+
+
+def _bucket_of_prediction(pred_path: Optional[str]) -> Optional[Bucket]:
+    """The published bucket a per-image prediction file sits in (:func:`_published`)."""
+    return _published(str(Path(pred_path).parent) if pred_path else None)
 
 
 def _compute_matches(
@@ -259,7 +222,7 @@ class MatchesRequest(BaseModel):
     gt_path: Optional[str] = None      # the per-image ground-truth label file
     pred_path: Optional[str] = None    # the per-image prediction file
     iou_threshold: float = 0.5
-    conf_threshold: float = 0.25
+    conf_threshold: float = REVIEW_CONF_FLOOR
     filter_type: str = "all"
     filter_class: str = "all"          # a class name (an annotation's subject) or "all"
     # A fallback only: a classified bucket's own scope (`_review_scope`) always governs pred_path,
@@ -361,7 +324,7 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
     ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
     engine = _get_engine(req.dataset_root)
-    scope = _review_scope(req.pred_path, req.subject, req.attribute)
+    scope = _review_scope(_bucket_of_prediction(req.pred_path), req.subject, req.attribute)
     matches = _compute_matches(
         ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
         scope=scope)
@@ -399,7 +362,7 @@ class ActionPayload(BaseModel):
     # Review thresholds so the route can decide (at the same op point as the GUI) whether
     # this verdict was the last one and the image should flip to 'completed'.
     iou_threshold: float = 0.5
-    conf_threshold: float = 0.25
+    conf_threshold: float = REVIEW_CONF_FLOOR
     # Active review filters, so the fresh matches this route returns are scoped identically to
     # what /matches would have returned (the client installs them without a second fetch).
     filter_type: str = "all"
@@ -408,8 +371,7 @@ class ActionPayload(BaseModel):
     # classified trait rather than plain detection.
     subject: Optional[str] = None
     attribute: Optional[str] = None
-    # A claim, not a fact: the route verifies it (admission_rule_of) and refuses by name rather
-    # than trusting it; the identity it writes is the binding's own, never one this payload names.
+    # A claim, not a fact: the route verifies it against the bucket's assessment and refuses by name.
     rule_admitted: bool = False
 
 
@@ -569,19 +531,17 @@ def _apply_gt_mutation(
 
 
 def _verify_rule_admitted_claim(
-    payload: "ActionPayload", ctx: ReviewContext, pred_path: Optional[str], scope: ClassScope,
+    payload: "ActionPayload", ctx: ReviewContext, bucket: Optional[Bucket], scope: ClassScope,
 ) -> str:
-    """Verify a client's ``rule_admitted`` claim and answer the validation record's identity it
-    names (``<experiment_id>:<record_digest>``), or refuse by name.
+    """Verify a client's ``rule_admitted`` claim against the prediction's own ``bucket`` and answer
+    the id of the assessment whose conf admitted it (:func:`_admission`), or refuse by name.
 
     Refuses 400 for a condition the claim itself fails (wrong action or det_type, no named
-    prediction, a classified scope, a below-conf prediction, no admission rule), and
+    prediction, a classified scope, a below-conf prediction, no admitting assessment), and
     409 when a fresh recompute over the pristine, unmutated ``ctx`` no longer holds the submitted
-    detection. The claim is the client's; the identity is the binding's own, never one the client
-    supplied.
+    detection. The claim is the client's; the identity is the bucket record's own, never one the
+    client supplied.
     """
-    from tcip_mcp.pipelines.resolution import admission_rule_of, read_operating_point_sidecar
-
     if payload.action != ACCEPTED_ACTION:
         raise HTTPException(
             400, f"rule_admitted refuses action {payload.action!r}: only an accept can be rule-admitted")
@@ -597,17 +557,14 @@ def _verify_rule_admitted_claim(
                  "detections of the object class, and a classified review judges values")
     assert payload.pred_idx is not None  # _names_prediction's own guard
     pred = ctx.preds[payload.pred_idx]
-    if not pred_path:
-        raise HTTPException(400, "rule_admitted needs a prediction bucket to read the rule from")
-    bucket_dir = str(Path(pred_path).parent)
-    stamp = read_operating_point_sidecar(bucket_dir, strict=True)
-    resolution = admission_rule_of(stamp, bucket_dir, project=store.open_root())
-    if resolution.rule is None:
-        raise HTTPException(400, resolution.reason)
-    if prediction_score(pred) < resolution.rule.conf:
+    conf, reason = _admission(bucket)
+    if conf is None:
+        raise HTTPException(400, reason)
+    assert bucket is not None and bucket.assessment_id is not None, "an admitting bucket"
+    if prediction_score(pred) < conf:
         raise HTTPException(
             400, f"rule_admitted refuses a prediction scored {pred.score}, below the rule's own "
-                 f"conf {resolution.rule.conf}")
+                 f"conf {conf}")
     pristine_matches = _compute_matches(
         ctx.gt, ctx.preds, iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
         scope=scope,
@@ -615,7 +572,7 @@ def _verify_rule_admitted_claim(
     if not any(d.get("pred_idx") == payload.pred_idx for d in pristine_matches[payload.det_type]):
         raise HTTPException(
             409, "this image's matches changed since they were loaded; reload before confirming")
-    return f"{resolution.rule.experiment_id}:{resolution.rule.record_digest}"
+    return bucket.assessment_id
 
 
 @router.post("/action")
@@ -633,7 +590,8 @@ def record_action(payload: ActionPayload) -> dict:
         )
     gt_path = allowed_optional(payload.gt_path)
     pred_path = allowed_optional(payload.pred_path)
-    scope = _review_scope(pred_path, payload.subject, payload.attribute)
+    published = _bucket_of_prediction(pred_path)
+    scope = _review_scope(published, payload.subject, payload.attribute)
     ctx = _load_ctx(payload.image_name, payload.image_path, gt_path=gt_path, pred_path=pred_path)
     engine = _get_engine(payload.dataset_root)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
@@ -655,7 +613,7 @@ def record_action(payload: ActionPayload) -> dict:
     # A verified claim before any mutation: a false one never reaches _apply_gt_mutation.
     accepted_by_rule: Optional[str] = None
     if payload.rule_admitted:
-        accepted_by_rule = _verify_rule_admitted_claim(payload, ctx, pred_path, scope)
+        accepted_by_rule = _verify_rule_admitted_claim(payload, ctx, published, scope)
 
     # Author GT on a copy so the guard can 400 before anything is recorded, and so the verdict
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
@@ -683,7 +641,7 @@ def record_action(payload: ActionPayload) -> dict:
     if payload.action == EDITED_ACTION and changed and landed_idx is not None:
         norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
-    producer_identity = _resolve_producer_identity(pred_path)
+    producer_identity = _producer_identity(published)
     class_id = _verdict_class_id(scope, payload.class_name)
     engine.record_detection_action(
         bucket, det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
@@ -753,35 +711,24 @@ class MarkCompletePayload(BaseModel):
 
 
 def _is_negative_for_subject(
-    pred_dir: Optional[str], image_name: str, subject: Optional[str]
+    image_name: str, subject: Optional[str], bucket: Optional[Bucket],
 ) -> Optional[bool]:
-    """Whether ``pred_dir``'s predictions for ``image_name`` hold nothing for ``subject``; ``None``
+    """Whether ``bucket``'s predictions for ``image_name`` hold nothing for ``subject``; ``None``
     when the bucket cannot answer for ``subject`` at all.
 
-    No prediction bucket at all is unconditionally negative. A subject-less Complete checks the
-    whole file. A named subject reads the bucket's own recorded scope (``resolution.bucket_scope``)
-    first: a classified stamp admits exactly its own object class and answers ``None`` for any
-    other name. A detector stamp admits a subject its recorded map carries, compared by decoded
-    name (``cached_label_annotations``' own ``subject`` field). A bare directory, a stamp with no
-    map, or an undecodable stamp answers ``None``.
+    No bucket at all is unconditionally negative. The document read is the one the bucket's record
+    names for the image; an image it names none for was not predicted, so the bucket answers
+    ``None``. A subject-less Complete checks the whole document. A named subject is answered only
+    by a bucket whose scope names it among the object classes it detects
+    (:attr:`~tcip_mcp.pipelines.data.selection.ClassScope.subjects`), compared by decoded name.
     """
-    if not pred_dir:
+    if bucket is None:
         return True
-    pred_file = Path(pred_dir) / label_filename(Path(image_name).stem)
+    pred_file = bucket.document(image_name)
+    if pred_file is None or (subject is not None and subject not in bucket.scope.subjects):
+        return None
     if subject is None:
         return not _has_objects(pred_file)
-    from tcip_mcp.pipelines.resolution import bucket_scope
-    from tcip_store import StoreError
-
-    try:
-        scope = bucket_scope(Path(pred_dir))
-    except StoreError:
-        return None
-    if scope is None:
-        return None
-    admits = subject == scope.subject if scope.classified else subject in (scope.id_map or {})
-    if not admits:
-        return None
     return not any(a.subject == subject for a in cached_label_annotations(pred_file))
 
 
@@ -793,7 +740,8 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     subject-less Complete, a claim about every subject) to whether that zero-verdict completion was
     a genuine negative for it, so a later Complete under another subject on the same image adds its
     own entry. A subject the bucket's own recorded class map cannot resolve writes no entry at all;
-    the Complete and its status write still proceed.
+    the Complete and its status write still proceed. A bucket record that will not read refuses
+    400 before anything is written.
     """
     if not payload.dataset_root:
         raise HTTPException(
@@ -805,12 +753,13 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     pred_dir = allowed_optional(payload.pred_dir)
     engine = _get_engine(payload.dataset_root)
     bucket = _bucket_of_dir(pred_dir)
+    published = _published(pred_dir)
     is_negative: Optional[bool] = None
     if payload.completed:
         # Adjudication-covered only for a genuine negative: a bulk-accept with no individual
         # verdicts on an image the bucket did predict on is not covered.
         try:
-            is_negative = _is_negative_for_subject(pred_dir, payload.image_name, payload.subject)
+            is_negative = _is_negative_for_subject(payload.image_name, payload.subject, published)
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from None
     # The annotation status is derived from the GT file, scoped to the confirmed subject; the
@@ -819,7 +768,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     if payload.subject and gt_path:
         annotations = _read_annotations_or_400(read_annotations, gt_path)
     if payload.completed:
-        producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
+        producer_identity = _producer_identity(published)
         # An unresolvable subject omits the entry rather than refusing the Complete; the reader
         # fails closed on the missing entry at validation time.
         adjudication_covered = (
@@ -887,24 +836,19 @@ def _has_objects(path: Path) -> bool:
     return bool(cached_label_annotations(path))
 
 
-def _stems_with_objects(*dirs: Optional[str]) -> tuple[set[str], set[str]]:
-    """Stems with >=1 annotation record across ``dirs``, and the absolute paths of documents that
-    would not read (per file). A stem can appear in both sets at once. Every directory's own
-    document for a stem is opened.
-    """
+def _stems_with_objects(documents: list[Path]) -> tuple[set[str], set[str]]:
+    """Stems of ``documents`` holding >=1 annotation record, and the absolute paths of documents
+    that would not read (per file). A stem can appear in both sets at once."""
     stems: set[str] = set()
     unreadable: set[str] = set()
-    for d in dirs:
-        if not d:
+    for f in documents:
+        try:
+            has_objects = _has_objects(f)
+        except UnreadableLabelDocument:
+            unreadable.add(str(f))
             continue
-        for f in prediction_documents(d):
-            try:
-                has_objects = _has_objects(f)
-            except UnreadableLabelDocument:
-                unreadable.add(str(f))
-                continue
-            if has_objects:
-                stems.add(f.stem)
+        if has_objects:
+            stems.add(f.stem)
     return stems, unreadable
 
 
@@ -914,13 +858,15 @@ def image_statuses(
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
-    """Batch review status + detection presence for a whole (date). ``gt_dir``/``pred_dir`` are the
-    per-image label dirs (annotations / a model's predictions on the date).
+    """Batch review status + detection presence for a whole (date): ``gt_dir`` is the date's
+    annotations directory, ``pred_dir`` the published bucket whose recorded documents are read.
     """
     gt_dir = allowed_optional(gt_dir)
-    pred_dir = allowed_optional(pred_dir)
+    bucket = _published(allowed_optional(pred_dir))
     engine = _get_engine(dataset_root)
-    stems, unreadable = _stems_with_objects(gt_dir, pred_dir)
+    stems, unreadable = _stems_with_objects(
+        [*(prediction_documents(gt_dir) if gt_dir else []),
+         *(bucket.document_paths if bucket is not None else [])])
     return ImageStatusesResponse(
         statuses=engine.get_all_image_statuses(),
         detection_stems=sorted(stems),
@@ -928,60 +874,36 @@ def image_statuses(
     )
 
 
-class AdmissionRuleBody(BaseModel):
-    conf: float
-    experiment_id: str
-    record_digest: str
-
-
 class GenerationConfResponse(BaseModel):
-    # The bucket's own recorded generation confidence (the Conf floor predictions were exported
-    # at), or None with no sidecar / no recorded value; read-only, for the filter-warning check.
+    # The confidence the bucket's predictions were published at, or None for no published bucket
+    # or a head with no confidence; read-only, for the filter-warning check.
     generation_conf: Optional[float]
-    # The bucket's own validated count operating point (admission_rule_of): null unless the
-    # stamp's claim verifies and its conf is a finite number; admission_reason names why not.
-    admission_rule: Optional[AdmissionRuleBody]
+    # The conf at or above which the bucket's own assessment admits a prediction without a
+    # person's judgment: null with admission_reason naming why none applies.
+    admission_conf: Optional[float]
     admission_reason: str
+
+
+def _admission(bucket: Optional[Bucket]) -> tuple[Optional[float], str]:
+    """The conf a review may accept ``bucket``'s predictions at on its assessment's authority
+    (:func:`~tcip_mcp.delivery.admitted_conf`), or ``None`` and the sentence naming why; no
+    published bucket admits none."""
+    from tcip_mcp.delivery import admitted_conf
+
+    if bucket is None:
+        return None, "no published bucket holds these predictions, so no assessment admits any."
+    return admitted_conf(store.open_root(), bucket)
 
 
 @router.get("/generation_conf")
 def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
-    """The prediction bucket's own generation confidence and admission rule.
-
-    Answers the generation confidence, the bucket's own validated count operating point through
-    ``admission_rule_of``, and the binding's own diagnosis when no rule applies
-    (``admission_reason``): a stamp that will not decode answers its own decode error as the
-    reason, an absent stamp and a stamp claiming nothing each read as what they are.
-    """
-    from tcip_mcp.pipelines.resolution import (
-        AdmissionResolution, admission_rule_of, read_operating_point_sidecar,
-    )
-    from tcip_store import StoreError
-
-    guarded_dir = allowed_path(pred_dir)
-    try:
-        sidecar = read_operating_point_sidecar(guarded_dir, strict=True)
-    except StoreError as exc:
-        sidecar = None
-        resolution = AdmissionResolution(rule=None, reason=str(exc))
-    else:
-        resolution = admission_rule_of(sidecar, guarded_dir, project=store.open_root())
-    conf_field = ((sidecar or {}).get("operating_point") or {}).get("conf") or {}
-    conf = conf_field.get("value")
-    rule_body = (
-        AdmissionRuleBody(
-            conf=resolution.rule.conf,
-            experiment_id=resolution.rule.experiment_id,
-            record_digest=resolution.rule.record_digest,
-        )
-        if resolution.rule is not None
-        else None
-    )
+    """The prediction bucket's generation confidence and admission conf (:func:`_admission`)."""
+    bucket = _published(str(allowed_path(pred_dir)))
+    conf, reason = _admission(bucket)
+    execution = bucket.execution if bucket is not None else None
     return GenerationConfResponse(
-        generation_conf=float(conf) if isinstance(conf, (int, float)) else None,
-        admission_rule=rule_body,
-        admission_reason=resolution.reason,
-    )
+        generation_conf=execution.conf if execution is not None else None,
+        admission_conf=conf, admission_reason=reason)
 
 
 # ── Active-learning priority queue for review ───────────────────────────────
@@ -1004,7 +926,7 @@ class PriorityQueueJob:
     budget: int = 50
     status: str = "pending"  # pending | running | completed | failed
     error: Optional[str] = None
-    # [{image, score, calibration_member?}], highest first; calibration_member is present only
+    # [{image, score, reference_member?}], highest first; reference_member is present only
     # when the checkpoint's run was bound to a selection.
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
@@ -1035,11 +957,7 @@ def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
 def _pq_worker(job: PriorityQueueJob) -> None:
     try:
         job.status = "running"
-        # The same MCP tool the agent calls: its scoring/filtering (build_predictor ->
-        # require_composed_detector -> build_scorer -> score -> budget slice -> response shape) is
-        # not re-derived here. It returns soft {"error": ...} dicts rather than raising, for every
-        # failure mode (missing checkpoint, unknown scorer, non-composed detector, torch
-        # unavailable), mapped onto this job's own status/error below rather than reimplemented.
+        # The same MCP tool the agent calls, whose soft {"error": ...} answers map onto this job.
         from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
         result = prioritize_review_queue(

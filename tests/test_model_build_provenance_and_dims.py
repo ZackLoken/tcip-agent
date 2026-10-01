@@ -17,13 +17,11 @@ from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.dataset_layout import subjects_path  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
-from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, detect_kind  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
     recorded_model_dims,
     resolve_contract_dims,
     snapshot_model_source,
-    stamp_model_ref,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
@@ -201,17 +199,6 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(tmp_p
     assert manifest["snapshot_errors"] == []
 
 
-def test_the_stamp_reads_the_model_source_off_the_payloads_own_config():
-    """The checkpoint's config is the one place its model source lives: the stamp names the kind
-    from it and writes no second copy beside it."""
-    config = {"model_source": {"builder": "agent_code.nets:build_detector", "task": "detection"}}
-
-    payload = stamp_model_ref({"model_state_dict": {}, "config": config})
-
-    assert payload["kind"] == KIND_TCIP_MODULE
-    assert "model_source" not in payload
-
-
 def test_a_missing_or_empty_builder_refuses_through_the_one_callee_message():
     """``builder`` of ``None`` and of ``""`` both reach ``build_model`` -> ``_import_dotted``,
     the one refusal site for a non-string or empty builder, and refuse with its one message
@@ -321,7 +308,7 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(tmp_path
     path = ctx.save_checkpoint({"model_state_dict": trained.state_dict()}, "model_best")
 
     loaded = torch.load(path, map_location="cpu", weights_only=False)
-    assert detect_kind(path) == KIND_TCIP_MODULE
+    assert "model_source" not in loaded  # the config is the one place the model source lives
     rebuilt = build_model(loaded["config"], recorded_model_dims(loaded["config"]))
     assert _param_shapes(rebuilt) == _param_shapes(trained)
 

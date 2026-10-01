@@ -1,9 +1,7 @@
-"""Center-match count-unbiased operating-point sweep (count-trait calibration)."""
+"""Center-match count-unbiased operating-point sweep, the in-model operating-point seam, the
+detection cap, and the cross-tile merge threshold a tiled pass derives."""
 
 from __future__ import annotations
-
-import inspect
-from pathlib import Path
 
 import pytest
 
@@ -12,35 +10,19 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 from tests._dense_op_fixtures import _box, dense_records, good_cal_holdout  # noqa: E402
 from tests._dense_op_fixtures import ann as _ann  # noqa: E402
 from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
-from tests._regime_fixtures import tiled_regime  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
+    gt_facts,
     pick_count_unbiased,
     pick_f1_max,
     derive_operating_point_curve,
 )
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
-# test's pinned platform state root so resolve_operating_point("bud_opening", project=tmp_path,...) keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
-_DENSE_RECORDS_DEFAULTS = inspect.signature(dense_records).parameters
-N_IMAGES = _DENSE_RECORDS_DEFAULTS["n_images"].default
-OBJECTS_PER_IMAGE = _DENSE_RECORDS_DEFAULTS["objects_per_image"].default
-
-
-
-
-def test_good_cal_holdout_hashes_are_disjoint_and_detection_counts_differ():
-    from tcip_mcp.pipelines.operating_point import _record_content_hash
-
+def test_good_cal_holdout_sides_share_no_ground_truth_and_differ_in_counts():
     cal, hold = good_cal_holdout()
-    cal_hashes = {_record_content_hash(r) for r in cal}
-    hold_hashes = {_record_content_hash(r) for r in hold}
-    assert cal_hashes.isdisjoint(hold_hashes)
-    cal_counts = {len(r["gt"]) for r in cal}
-    hold_counts = {len(r["gt"]) for r in hold}
-    assert cal_counts != hold_counts
+    assert not {repr(gt_facts(r)) for r in cal} & {repr(gt_facts(r)) for r in hold}
+    assert {len(r["gt"]) for r in cal} != {len(r["gt"]) for r in hold}
 
 
 def test_gt_class_avg_size_derived_from_data():
@@ -50,7 +32,7 @@ def test_gt_class_avg_size_derived_from_data():
 def test_count_unbiased_differs_from_f1_max():
     recs = _records()
     tol = 0.5 * gt_class_avg_size(recs)  # derived tolerance = half class avg size
-    sweep = derive_operating_point_curve(recs, tolerance=tol)
+    sweep = derive_operating_point_curve(recs, criterion={"kind": "center_match", "tolerance": tol})
 
     cu = pick_count_unbiased(sweep)
     f1m = pick_f1_max(sweep)
@@ -69,18 +51,20 @@ def test_center_match_respects_tolerance():
     # a correct detection just outside tolerance must not count as a hit
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100 + 100, 100, score=0.9)]}]  # 100px off, tolerance ~10
-    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, criterion={
+        "kind": "center_match", "tolerance": 0.5 * gt_class_avg_size(recs)})
     at0 = sweep["curve"][0]  # conf=0.0 is always the first (lowest) grid point
     assert at0["conf"] == pytest.approx(0.0)
     assert at0["tp"] == 0 and at0["fp"] == 1 and at0["fn"] == 1  # miss + false positive
 
 
 def test_sweep_curve_carries_dispersion_and_reference_size_fields():
-    # Every curve entry now also carries count_error_p90 / count_bias_std / n_images, computed
-    # from the same per-image biases list, not a second pass over the data.
+    # Every curve entry also carries count_error_p90 / count_bias_std / n_images, computed from
+    # the same per-image biases list, not a second pass over the data.
     recs = dense_records(n_images=4, objects_per_image=10,
                          miss_pattern=[0, 1, 0, 2], fp_pattern=[0, 0, 1, 0])
-    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, criterion={
+        "kind": "center_match", "tolerance": 0.5 * gt_class_avg_size(recs)})
     at09 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.9))
     # biases = fp - fn per image = [0, -1, 1, -2]
     assert at09["n_images"] == 4
@@ -89,7 +73,7 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields():
     assert at09["count_error_p90"] == pytest.approx(1.7, abs=1e-6)
 
 
-# --- resolve_operating_point + the in-model seam ---
+# --- the in-model seam ---
 
 def _two_stage():
     from types import SimpleNamespace
@@ -121,581 +105,19 @@ def test_set_detector_operating_point_one_stage():
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
 
 
-def test_max_dets_from_density_scales_above_floor():
-    # 1.5x the p99 GT-per-image count exceeds the 100 floor, so max_dets scales with
-    # density instead of pinning to the floor (a dense scene must not be truncated).
-    from tcip_mcp.pipelines.operating_point import _max_dets_from_density
-    records = [{"gt": [_ann(0, 0)] * 80} for _ in range(20)]
-    assert _max_dets_from_density(records) == 120  # ceil(1.5 * 80)
+def test_the_detection_cap_scales_above_its_floor_and_floors_sparse_scenes():
+    # 1.5x the p99 GT-per-image count exceeds the 100 floor, so the cap scales with density
+    # instead of pinning to the floor (a dense scene must not be truncated).
+    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
 
-
-def test_max_dets_from_density_floors_sparse_scenes():
-    from tcip_mcp.pipelines.operating_point import _max_dets_from_density
-    records = [{"gt": [_ann(0, 0)] * 2} for _ in range(20)]
-    assert _max_dets_from_density(records) == 100  # floor, not ceil(1.5 * 2)
-
-
-def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to():
-    # tcip calibrate-operating-point derives its collection-pass cap from raw label counts
-    # (known before any model pass), not from already-collected records: this is the same ~1.5x
-    # p99 formula _max_dets_from_density applies over per-record GT counts, exposed directly so the
-    # two callers share one implementation.
-    from tcip_mcp.pipelines.operating_point import _max_dets_from_density, derive_max_dets_from_counts
-    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
-    counts = [80] * 20
-    assert derive_max_dets_from_counts(counts) == 120  # ceil(1.5 * 80)
+    assert derive_max_dets_from_counts([80] * 20) == 120  # ceil(1.5 * 80)
     assert derive_max_dets_from_counts([2] * 20) == 100  # floor, not ceil(1.5 * 2)
-    assert derive_max_dets_from_counts([]) == DEFAULT_MAX_DETS  # no counts to derive from
-    # Same result either through the counts directly or through records carrying the same counts.
-    records = [{"gt": [_ann(0, 0)] * 80} for _ in range(20)]
-    assert derive_max_dets_from_counts(counts) == _max_dets_from_density(records)
 
 
-def test_resolve_operating_point_validated_with_holdout(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    cal, hold = good_cal_holdout()
-    # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
-    # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
-                                slicing=None, staged_conf_floor=0.01)
-    conf = b.get("conf")
-    assert conf.requires_validation is True and conf.validation_kind == "annotations"
-    assert conf.validated_against == "held_out_annotations"
-    assert b.is_shippable
-    assert conf.value == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
-    assert b.get("max_dets").value >= 100  # derived from GT density
-    sweep = conf.gate_evidence
-    assert sweep["failures"] == []
-    assert sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout content
-    assert sweep["train_disjointness"] == {"checked": False, "unresolvable": False,
-                                           "leaked_groups": [], "leaked_stems": [],
-                                           "group_check": None}
-    assert set(sweep["calibration_image_ids"]) == {f"c_{i}" for i in range(N_IMAGES)}
-    assert set(sweep["holdout_image_ids"]) == {f"h_{i}" for i in range(N_IMAGES)}
-
-
-def test_resolve_operating_point_overlapping_holdout_not_validated(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    # same image ids in calibration and holdout -> not a real held-out split -> not validated
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                calibration_records=_records("c"), holdout_records=_records("c"))
-    assert b.get("conf").validated_against == "false"
-    assert not b.is_shippable
-
-
-def test_resolve_operating_point_missing_image_ids_fails_closed(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    # Records with no image_id: identity is unverifiable, so a held-out claim can't be proven, and
-    # the same records used as cal+holdout must not be stamped validated (the firewall fails
-    # closed) merely because empty id-sets make `disjoint` trivially True.
-    recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
-             "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                calibration_records=recs, holdout_records=recs)
-    assert b.get("conf").validated_against == "false"
-    assert not b.is_shippable
-
-
-def test_resolve_operating_point_biased_holdout_is_unshippable(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    cal, _ = good_cal_holdout()
-    # a dense holdout with a real, consistent per-image miss (not just a sparse fixture's one-off
-    # spread), count bias -3/image, well beyond tolerance regardless of dispersion/SE.
-    biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
-                                shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
-                                score=0.9)
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                calibration_records=cal, holdout_records=biased_hold,
-                                staged_conf_floor=0.01)
-    # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
-    assert b.get("conf").validated_against == "false"
-    assert not b.is_shippable
-    assert "count_bias_exceeds_tolerance" in b.get("conf").gate_evidence["failures"]
-
-
-def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=_records())
-    assert b.get("conf").validated_against == "false"
-    assert not b.is_shippable
-
-
-# --- Content-overlap and train-disjointness gates ---
-
-def test_resolve_operating_point_content_shared_holdout_is_false(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
-    # the holdout can't function as an independent check; the content-overlap gate must refuse it.
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                calibration_records=_records("c"), holdout_records=_records("h"))
-    conf = b.get("conf")
-    assert conf.validated_against == "false"
-    assert not b.is_shippable
-    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(1.0)
-    assert "content_shared_with_calibration" in conf.gate_evidence["failures"]
-
-
-def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    labels_dir = str(tmp_path / "labels")
-    _persist_run_split("exp1", tmp_path, date=None, train=["a_0_0", "a_0_1"], val=[],
-                       group_by="tile_prefix", labels_dir=labels_dir)
-
-    # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
-    cal = [{"width": 400, "height": 400, "image_id": "a_0_2", "gt": [_ann(100, 100)],
-            "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}]
-    hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
-             "dt": [_ann(100, 100, score=0.9)]}]
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, experiment_id="exp1",
-                                calibration_labels_dir=labels_dir)
-    conf = b.get("conf")
-    assert conf.validated_against == "false"
-    assert conf.gate_evidence["train_disjointness"]["leaked_groups"] == ["a"]
-
-
-def test_resolve_operating_point_refuses_an_experiment_id_naming_no_run(tmp_path, monkeypatch):
-    """A stated experiment_id naming no run directory refuses by name, unlike the
-    experiment_id=None case (a foreign checkpoint), which no run's partition answers for."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    cal, hold = good_cal_holdout()
-    with pytest.raises(ValueError, match="does-not-exist"):
-        resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
-                                staged_conf_floor=0.01, experiment_id="does-not-exist")
-
-
-def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    labels_dir = str(tmp_path / "labels")
-    _persist_run_split("exp2", tmp_path, date=None, train=["z_0_0", "z_0_1"], val=[],
-                       group_by="tile_prefix", labels_dir=labels_dir)
-
-    # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
-    cal, hold = good_cal_holdout()
-    # slicing=None: this test is about conf-calibration shippability, not tiling (tile_size
-    # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold, slicing=None,
-                                staged_conf_floor=0.01, experiment_id="exp2",
-                                calibration_labels_dir=labels_dir)
-    conf = b.get("conf")
-    assert conf.validated_against == "held_out_annotations"
-    assert b.is_shippable
-    assert conf.gate_evidence["train_disjointness"] == {"checked": True, "unresolvable": False,
-                                                 "leaked_groups": [], "leaked_stems": [],
-                                                 "group_check": "performed"}
-
-
-def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monkeypatch):
-    """cal_rects/hold_rects default to None: a caller that passes neither gets the lexical
-    spatial_strip check, never the geometric one."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    _persist_run_split("exp_rects_noop", tmp_path, date=None, train=["mosaic::strip_x_1"],
-                       val=[], group_by="spatial_strip")
-    cal, hold = good_cal_holdout()
-
-    omitted = resolve_operating_point("bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-                                      calibration_records=cal, holdout_records=hold,
-                                      staged_conf_floor=0.01, experiment_id="exp_rects_noop")
-    explicit_none = resolve_operating_point("bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-                                            calibration_records=cal, holdout_records=hold,
-                                            staged_conf_floor=0.01, experiment_id="exp_rects_noop",
-                                            cal_rects=None, hold_rects=None)
-    assert (omitted.get("conf").gate_evidence["train_disjointness"]
-           == explicit_none.get("conf").gate_evidence["train_disjointness"]
-           == {"checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
-               "group_check": "spatial_strip"})
-
-
-def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path, monkeypatch):
-    """Given cal_rects/hold_rects against a spatial_strip split, resolve_operating_point threads
-    them into the geometric containment check instead of the lexical same-source one, catching a
-    leak the lexical check alone would miss (a rect whose own source name isn't a training stem
-    at all, but whose geometry spills into the persisted train region)."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    _persist_run_split("exp_rects_geo", tmp_path, date=None, train=["mosaic::strip_x_1"],
-                       val=[], group_by="spatial_strip", spatial={
-                           "train_region": [[0, 0, 500, 1000]],
-                           "val_region": [[500, 0, 750, 1000]],
-                           "test_region": [[750, 0, 1000, 1000]]})
-    cal, hold = good_cal_holdout()
-    cal_id = cal[0]["image_id"]
-
-    leaked = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_rects_geo",
-        cal_rects={cal_id: (400, 100, 600, 300)},  # straddles train/val: not fully contained
-    )
-    td = leaked.get("conf").gate_evidence["train_disjointness"]
-    assert td["group_check"] == "spatial_strip_geometric"
-    assert td["leaked_groups"] == [cal_id]
-
-
-# --- Selection-disjointness: a checkpoint's own held-out (val) side, not its train side -----
-
-def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
-                       group_by=None, selection_dir=None, labels_dir=None, spatial=None):
-    """One producing run whose resolution names a chosen partition: a real run the launcher's
-    own producer and writer opened, what its launch record says it resolved then set past that
-    writer to a partition built by the platform's own ``_partition_record``: ``train``/``val``
-    are bare stems under ``date``, ``group_by`` an already-resolved policy
-    (``"spatial_strip"``/``"stem"``/a named strategy), and ``selection_dir`` (when given) records
-    the run as bound to that selection.
-
-    A ``spatial_strip`` run records its own region identities (plus any ``spatial`` regions) in
-    its resolved data section's ``spatial_manifest``, the way the within-image route does.
-    """
-    from tcip_store import RECORD_JSON
-
-    from tcip_mcp.dataset_layout import status_bucket
-    from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.data.selection import Sample
-    from tcip_mcp.pipelines.data.split_construction import _partition_record
-    from tcip_mcp.pipelines.data.splits import member_identity, recorded_group_key_fn
-    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
-
-    run_dir = opened_run(tmp_path, detection_config(fixture_data_dir(tmp_path, experiment_id)),
-                         experiment_id=experiment_id)
-    split_cfg: dict = {}
-    if group_by == "spatial_strip":
-        split_cfg["spatial_manifest"] = {"train_identities": list(train),
-                                         "val_identities": list(val), **(spatial or {})}
-    selection = (None if selection_dir is None else
-                 {"selection_dir": selection_dir, "selection_sha256": None, "redraw": False})
-    annotations = tmp_path / "annotations" / date if date is not None else tmp_path / "annotations"
-    here = Path(labels_dir) if labels_dir is not None else annotations
-    group_of = (recorded_group_key_fn(group_by, date=date)
-                if group_by in ("tile_prefix", "stem")
-                else (lambda stem: member_identity(date, stem)))
-
-    images = tmp_path / "images" / date if date is not None else tmp_path / "images"
-
-    def _sample(stem: str, side: str) -> Sample:
-        return Sample(member=stem, source=str(images / f"{stem}.png"),
-                      ground_truth=str(here / f"{stem}.json"), group=group_of(stem),
-                      side=side, confirmation_bucket=status_bucket("bud", date))
-
-    samples = [_sample(stem, "train") for stem in train] + [_sample(stem, "val") for stem in val]
-    record = read_record(run_dir / RUN_FILE)
-    record["resolved"]["data"].update(labels_dir=str(here), split=split_cfg)
-    record["resolved"]["partition"] = _partition_record(
-        samples, seed=0, group_by=group_by or "stem", selection=selection)
-    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
-
-
-def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(
-    tmp_path, monkeypatch,
-):
-    """A checkpoint bound to a manifest, calibrated over the whole labeled directory on its own
-    date (no selection_dir stated for this particular calibration), still sweeps its own
-    selection members and floors with the token: the check runs whenever the record carries a
-    selection_binding, whether or not this calibration itself names one."""
-    date = "2-11-26"
-    _persist_run_split(
-        "exp_sel_leak_whole", tmp_path, date=date, train=["z"], val=["c_0"],
-        group_by="tile_prefix", selection_dir="some/selection",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole",
-        calibration_labels_dir=str(tmp_path / "annotations" / date),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is True
-    # The leaked group carries the capture date its one recorded labels directory scopes it by,
-    # the key every producer of a recorded group key writes.
-    assert sd["leaked_groups"] == [f"{date}/c_0"]
-    assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
-    assert b.get("conf").validated_against == "false"
-
-
-def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_checkpoint(
-    tmp_path, monkeypatch,
-):
-    """A checkpoint that drew its own split, calibrated under a stated manifest on its own date,
-    is checked against its own val the same way: the universe a manifest names may be exactly
-    the side this checkpoint was chosen on."""
-    date = "2-11-26"
-    _persist_run_split(
-        "exp_sel_leak_manifest", tmp_path, date=date, train=["z"], val=["c_0"],
-        group_by="tile_prefix",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_leak_manifest",
-        selection_dir="some/selection",
-        calibration_labels_dir=str(tmp_path / "annotations" / date),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is True
-    assert sd["leaked_groups"] == [f"{date}/c_0"]
-    assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
-
-
-def test_selection_disjointness_not_applicable_under_another_labels_directory(
-    tmp_path, monkeypatch,
-):
-    """A bare stem names one image only within one label directory, so a calibration reading
-    another directory than the run's own members live under is not-applicable with that reason,
-    never a leak reported off two same-named files."""
-    _persist_run_split(
-        "exp_sel_other_dir", tmp_path, date="2-11-26", train=["z"], val=["c_0", "h_0"],
-        selection_dir="some/selection",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_other_dir",
-        selection_dir="some/selection",
-        calibration_labels_dir=str(tmp_path / "annotations" / "2-12-01"),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is False and sd["reason"]
-    assert b.get("conf").validated_against == "held_out_annotations"
-
-
-def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path):
-    date = "2-11-26"
-    _persist_run_split(
-        "exp_sel_spatial", tmp_path, date=date, train=["mosaic::strip_x_0"],
-        val=["mosaic::strip_x_1"], group_by="spatial_strip", selection_dir="some/selection",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_spatial",
-        selection_dir="some/selection",
-        calibration_labels_dir=str(tmp_path / "annotations" / date),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is False and sd["reason"]
-    assert b.get("conf").validated_against == "held_out_annotations"
-
-
-def test_selection_disjointness_checks_a_caller_named_validation_side(tmp_path, monkeypatch):
-    """A run whose validation side came from a directory the caller named is checked like any
-    other: the record names those members and the scope they live under, so a calibration reading
-    that same directory over the same images is the overlap this check exists to catch, not a case
-    to skip."""
-    date = "2-11-26"
-    # What the explicit-validation route records: each member its own group, the "stem" policy.
-    _persist_run_split(
-        "exp_sel_named_val_dir", tmp_path, date=date, train=["z"], val=["c_0", "h_0"],
-        group_by="stem", selection_dir="some/selection",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_named_val_dir",
-        selection_dir="some/selection",
-        calibration_labels_dir=str(tmp_path / "annotations" / date),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is True
-    assert sd["leaked_groups"] == [f"{date}/c_0", f"{date}/h_0"]
-    assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
-    assert b.get("conf").validated_against == "false"
-
-
-def test_selection_disjointness_admits_a_disjoint_caller_named_validation_side(
-    tmp_path, monkeypatch,
-):
-    """The same route's record with no overlap validates: the check that now runs for it admits
-    valid work rather than refusing every run whose validation directory the caller named."""
-    date = "2-11-26"
-    _persist_run_split(
-        "exp_sel_named_val_clean", tmp_path, date=date, train=["z"], val=["v_0", "v_1"],
-        group_by="stem", selection_dir="some/selection",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_named_val_clean",
-        selection_dir="some/selection",
-        calibration_labels_dir=str(tmp_path / "annotations" / date),
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is True
-    assert sd["leaked_groups"] == [] and sd["leaked_stems"] == []
-    assert b.get("conf").validated_against == "held_out_annotations"
-
-
-def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(tmp_path, monkeypatch):
-    """A checkpoint that drew its own split, calibrated with no selection named: the selection
-    check is not-applicable and never blocks validation."""
-    date = "2-11-26"
-    _persist_run_split(
-        "exp_sel_no_manifest", tmp_path, date=date, train=["z"], val=["v_0"],
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id="exp_sel_no_manifest",
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is False and sd["reason"]
-    assert b.get("conf").validated_against == "held_out_annotations"
-
-
-def test_selection_disjointness_not_applicable_when_the_caller_names_no_labels_directory(
-    tmp_path, monkeypatch,
-):
-    """A bare stem means the same image only within one label directory, so a caller naming no
-    calibration labels directory leaves nothing to compare the run's own val members against:
-    the check says not applicable rather than matching stems across directories and passing."""
-    _persist_run_split(
-        "exp_sel_flat_no_date", tmp_path, date=None, train=["z"], val=["c_0"],
-        group_by="tile_prefix", selection_dir="some/selection",
-        labels_dir=tmp_path / "annotations",
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
-
-    cal_items = [{"image_id": "c_0", "is_true_positive": True, "is_pred_positive": True,
-                 "bbox": [0.0, 0.0, 10.0, 10.0]}]
-    hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
-                  "bbox": [0.0, 0.0, 10.0, 10.0]}]
-    result = resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal_items, holdout_items=hold_items,
-        experiment_id="exp_sel_flat_no_date", project=tmp_path,
-    )
-    sd = result["gate_evidence"]["selection_disjointness"]
-    assert sd["applicable"] is False and sd["reason"]
-    assert "selection_disjointness_leaked" not in result["failures"]
-
-
-def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_flat_run(
-    tmp_path, monkeypatch,
-):
-    """A calibration reading a flat, undated labels directory matches a flat run's own record the
-    same way a dated one matches a dated record, running the check for real."""
-    labels_dir = tmp_path / "annotations"
-    _persist_run_split(
-        "exp_sel_flat_match", tmp_path, date=None, train=["z"], val=["c_0"],
-        group_by="tile_prefix", selection_dir="some/selection", labels_dir=labels_dir,
-    )
-
-    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
-
-    cal_items = [{"image_id": "c_0", "is_true_positive": True, "is_pred_positive": True,
-                 "bbox": [0.0, 0.0, 10.0, 10.0]}]
-    hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
-                  "bbox": [0.0, 0.0, 10.0, 10.0]}]
-    result = resolve_classifier_operating_point(
-        "bud_opening", calibration_items=cal_items, holdout_items=hold_items,
-        experiment_id="exp_sel_flat_match", calibration_labels_dir=str(labels_dir), project=tmp_path,
-    )
-    sd = result["gate_evidence"]["selection_disjointness"]
-    assert sd["applicable"] is True and sd["checked"] is True
-    assert sd["leaked_groups"] == ["c_0"]  # c_0 is on this run's own val
-
-
-def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stated_selection(
-        tmp_path):
-    """A calibration that names a selection but carries no experiment record to check the
-    selection side against is unresolvable, not merely not-applicable: the shape a foreign
-    checkpoint's train check allows through cannot be extended to a stated selection, since a
-    number whose provenance cannot be checked is exactly what this refusal exists for."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point(
-        "bud_opening", project=tmp_path, slicing=None, dataset_hash="h1",
-        calibration_records=cal, holdout_records=hold,
-        staged_conf_floor=0.01, experiment_id=None,
-        selection_dir="some/selection", calibration_labels_dir="annotations/2-11-26",
-    )
-    sd = b.get("conf").gate_evidence["selection_disjointness"]
-    assert sd["applicable"] is True and sd["unresolvable"] is True
-    assert "selection_disjointness_unresolvable" in b.get("conf").gate_evidence["failures"]
-    assert b.get("conf").validated_against == "false"
-
-
-# --- tile_size gates the calibrated path too, not just raw_operating_point -----------------
-
-def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_with_valid_conf(
-        tmp_path):
-    """The calibrated door (operating_point.py) shares resolve_tile_size_param with the raw door
-    (resolution.py), not a second, divergent implementation, so a tiled run with no persisted
-    training geometry and no explicit override is caught here too, not only on the uncalibrated
-    path. A cleanly-validated conf must not paper over a fabricated tile scale."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, **tiled_regime(), tile_size=640,
-                                staged_conf_floor=0.01)
-    conf = b.get("conf")
-    assert conf.validated_against == "held_out_annotations"  # conf itself validates cleanly...
-    tile = b.get("tile_size")
-    assert tile.requires_validation is True and tile.validation_kind == "geometry"
-    assert tile.validated_against == VALIDATED_FALSE          # ...but the fabricated scale doesn't
-    assert b.is_shippable is False                            # so the bundle as a whole refuses
-    assert any(i.startswith("tile_size:") for i in b.shippable_issues())
-
-
-def test_resolve_operating_point_derived_tile_size_is_shippable(tmp_path):
-    """The mirror case: a tile_size genuinely derived from the checkpoint's persisted training
-    geometry has a real basis and must not be penalized alongside the fabricated-default case: the
-    rail must admit this legitimate call, not only reject the fabricated one."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
-
-    cal, hold = good_cal_holdout()
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, **tiled_regime(), tile_size=224,
-                                tile_size_source="derived", staged_conf_floor=0.01)
-    tile = b.get("tile_size")
-    assert tile.validated_against == VALIDATED_PERSISTED_GEOMETRY
-    assert tile.is_shippable is True
-    assert b.is_shippable is True
-
-
-def test_resolve_operating_point_no_gt_placeholder_unshippable(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="hX")
-    with pytest.raises(UnvalidatedOperatingPointError):
-        _ = b.value("conf")  # firewall
-    assert b.get("conf").unvalidated_value(acknowledge_unvalidated=True) == 0.5
-
+# --- the cross-tile merge threshold ---
 
 def _overlap_records(idp="d"):
-    """Calibration records whose GT boxes overlap (20px, offset 8px), so cross_tile_nms is derivable."""
+    """Records whose GT boxes overlap (20px, offset 8px), so the merge threshold is derivable."""
     boxes = [_box(100, 100), _box(108, 100), _box(116, 100)]  # neighbor IoU ~0.43
     return [{"width": 400, "height": 400, "image_id": f"{idp}_{i}",
              "gt": [{"category_id": 1, "bbox": bx, "iscrowd": 0} for bx in boxes],
@@ -707,86 +129,54 @@ def _gt_boxes(records):
     return [[a["bbox"] for a in rec["gt"]] for rec in records]
 
 
-def test_resolve_cross_tile_nms_derives_from_gt():
-    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
-    from tcip_mcp.pipelines.slicing import slicing_record
+def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tail():
+    from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
-    p = resolve_cross_tile_nms(None, slicing_record(0.2, None, "nms"), _gt_boxes(_overlap_records()))
-    assert p.source == "derived"
-    assert p.requires_validation is False  # a statistic from this dataset's own spread needs no validation
-    assert "neighbor-IoU" in p.derived_from
-    assert 0.2 <= p.value <= 0.8
-    assert p.value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
+    value = derive_cross_tile_nms(_gt_boxes(_overlap_records()), metric="IOU")
+    assert value is not None and 0.2 <= value <= 0.8
+    assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
 
 
-def test_resolve_cross_tile_nms_explicit_not_labeled_derived():
-    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
-    from tcip_mcp.pipelines.slicing import slicing_record
+def test_no_overlapping_ground_truth_derives_no_merge_threshold():
+    from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
-    # An explicit override is honest even when overlapping GT was present to derive from.
-    p = resolve_cross_tile_nms(0.55, slicing_record(0.2, None, "nmm"),
-                               _gt_boxes(_overlap_records()))
-    assert p.source == "explicit"
-    assert p.value == pytest.approx(0.55)
-    assert p.derived_from == "caller override"  # not a derivation costume on a caller-supplied number
+    assert derive_cross_tile_nms([], metric="IOU") is None
+    assert derive_cross_tile_nms(_gt_boxes(_records("c")), metric="IOU") is None
 
 
-def test_resolve_cross_tile_nms_honest_default_when_underivable():
-    from tcip_mcp.pipelines.resolution import resolve_cross_tile_nms
-    from tcip_mcp.pipelines.slicing import slicing_record
+def _tiled_pass(tmp_path, **stated):
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    slicing = slicing_record(0.2, None, "nms")
-    # No GT at all -> honest default, never a derivation label on an underived number.
-    p_no_gt = resolve_cross_tile_nms(None, slicing)
-    assert p_no_gt.source == "default"
-    assert "neighbor" not in p_no_gt.derived_from
-    # Sparse, non-overlapping GT is likewise underivable -> still an honest default.
-    assert resolve_cross_tile_nms(None, slicing, _gt_boxes(_records("c"))).source == "default"
-    # An untiled pass merges nothing.
-    assert resolve_cross_tile_nms(0.4, None).value is None
+    return prepare_pass(verified_checkpoint(tmp_path), Stated(tile=True, tile_size=64, **stated))
 
 
-def test_resolve_operating_point_carries_the_passs_own_threshold_and_slicing(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_name(tmp_path):
+    from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATIONS
 
-    regime = tiled_regime(0.55, postprocess="nmm")
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                calibration_records=_overlap_records(), **regime)
-    assert b.get("cross_tile_nms").to_provenance() == regime["cross_tile_nms"]
-    assert b.slicing == regime["slicing"]
+    p = _tiled_pass(tmp_path)
+    p.derive_merge(_gt_boxes(_overlap_records()))
 
-
-def test_resolve_operating_point_refuses_a_tiled_pass_with_no_threshold_by_name(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    with pytest.raises(ValueError, match="cross_tile_nms"):
-        resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                slicing=tiled_regime()["slicing"])
+    assert p.execution.cross_tile_nms == pytest.approx(0.4786, abs=1e-2)
+    assert p.execution.sources["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATIONS["IOU"]
 
 
-def test_resolve_operating_point_tile_size_derived(tmp_path):
-    """A bare truthy tile_size with no source claim must not be inferred as "derived"
-    unconditionally (`if tile_size: derived(...)`): a caller-passed number with no real basis
-    (``tile_size_source`` not "explicit"/"derived") is discarded entirely, never carried forward as
-    if it meant something. The caller must say which it was via ``tile_size_source``; omitting it
-    means there is no basis to trust, not "a default value of 640"."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
+def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):
+    p = _tiled_pass(tmp_path, cross_tile_nms=0.55)
+    p.derive_merge(_gt_boxes(_overlap_records()))
 
-    b_no_claim = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", tile_size=640)
-    assert b_no_claim.get("tile_size").source == "default"
-    # A "default"-sourced tile_size, when tiled, is a firewalled unvalidated dimension: the
-    # caller's raw 640 is discarded, never fabricated into a trustworthy value.
-    assert b_no_claim.get("tile_size")._raw is None
-    assert b_no_claim.get("tile_size").is_shippable is False
-    with pytest.raises(UnvalidatedOperatingPointError):
-        _ = b_no_claim.get("tile_size").value
+    assert p.execution.cross_tile_nms == pytest.approx(0.55)
+    assert p.execution.sources["cross_tile_nms"] == "explicit"
 
-    b_derived = resolve_operating_point(
-        "bud_opening", project=tmp_path, **tiled_regime(), dataset_hash="h1", tile_size=640,
-        tile_size_source="derived")
-    assert b_derived.get("tile_size").source == "derived"
-    assert b_derived.get("tile_size").value == 640
+
+def test_an_underivable_merge_threshold_keeps_the_documented_default(tmp_path):
+    from tcip_mcp.pipelines.execution import DEFAULT_NMS_IOU
+
+    p = _tiled_pass(tmp_path)
+    p.derive_merge(_gt_boxes(_records("c")))
+
+    assert p.execution.cross_tile_nms == DEFAULT_NMS_IOU
+    assert p.execution.sources["cross_tile_nms"] == "default"
 
 
 def test_classification_metrics_per_class_and_bias():

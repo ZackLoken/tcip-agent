@@ -69,16 +69,18 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
     hz = _listed(client)["currant_bud_valley-farm"]
     assert hz["dates"] == ["2026-02-11"]
     assert hz["subjects"] == ["bud", "bush"]  # sorted
-    assert hz["models"] == ["baseline"]
+    assert hz["prediction_dirs"] == {"2026-02-11": {}}  # predictions/baseline publishes nothing
     assert hz["image_count"] == 1
 
 
 def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
-    # bud labeled on 02-11 (+ baseline predictions there); bush labeled on 03-02;
+    # bud labeled on 02-11 (+ a bucket published over it); bush labeled on 03-02;
     # 03-24 has images but nothing labeled. One name-based label file per image.
+    pytest.importorskip("torch")
     from tcip_annotation.json_io import write_annotations
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
+    from tcip_mcp.dataset_layout import annotation_dir, prediction_root
+    from tests._chain_fixtures import published
 
     proj = _make_project(
         workspace_dir,
@@ -95,10 +97,10 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     ad2.mkdir(parents=True, exist_ok=True)
     write_annotations(str(ad2 / "img.json"), [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))],
                       8, 8)
-    pd = prediction_dir(proj, "baseline", "2026-02-11")
-    pd.mkdir(parents=True, exist_ok=True)
-    write_annotations(str(pd / "img.json"),
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7), score=0.9)], 8, 8)
+    pd = prediction_root(proj) / "baseline" / "2026-02-11"
+    published(proj, pd, [{"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8,
+                          "height": 8, "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9],
+                          "labels": [1]}], scope={"subject": "bud", "id_map": {"bud": 0}})
 
     hz = _listed(client)["currant_bud_valley-farm"]
     # Flat lists still list everything present anywhere.
@@ -107,9 +109,9 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     assert hz["subjects_by_date"]["2026-02-11"] == ["bud"]
     assert hz["subjects_by_date"]["2026-03-02"] == ["bush"]
     assert hz["subjects_by_date"]["2026-03-24"] == []  # images but no labels
-    assert hz["models_by_date"]["2026-02-11"] == ["baseline"]
-    assert hz["models_by_date"]["2026-03-02"] == []
-    assert hz["models_by_date"]["2026-03-24"] == []
+    assert hz["prediction_dirs"]["2026-02-11"] == {"baseline/2026-02-11": str(pd)}
+    assert hz["prediction_dirs"]["2026-03-02"] == {}
+    assert hz["prediction_dirs"]["2026-03-24"] == {}
     assert hz["label_problem"] is None
 
 

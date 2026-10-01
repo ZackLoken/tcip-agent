@@ -14,7 +14,7 @@ import contextlib
 import io
 import logging
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -235,15 +235,15 @@ def coco_detection_metrics(
     # Objects each image's ground truth holds: a crowd region is none, it is COCOeval's ignore.
     n_objects = [len(gt_objects(rec)) for rec in per_image]
     for img_id, rec in enumerate(per_image, start=1):
-        images.append({"id": img_id, "width": int(rec.get("width", 0)), "height": int(rec.get("height", 0))})
-        for ann in rec.get("gt", []):
+        images.append({"id": img_id, "width": int(rec["width"]), "height": int(rec["height"])})
+        for ann in rec["gt"]:
             a = dict(ann)
             a["id"] = ann_id
             a["image_id"] = img_id
             annotations.append(a)
             cat_ids.add(int(a["category_id"]))
             ann_id += 1
-        for res in rec.get("dt", []):
+        for res in rec["dt"]:
             r = dict(res)
             r["image_id"] = img_id
             results.append(r)
@@ -318,7 +318,7 @@ def gt_objects(rec: dict, *, crowd: bool = False) -> list[dict]:
     COCO's ignore region and never one object in a count, a size or a spacing; with ``crowd``, the
     crowd regions instead.
     """
-    return [a for a in rec.get("gt", []) if bool(a["iscrowd"]) is crowd]
+    return [a for a in rec["gt"] if bool(a["iscrowd"]) is crowd]
 
 
 def gt_facts(rec: dict) -> list:
@@ -374,63 +374,71 @@ def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -
     return mean_of_present_counts(counts)
 
 
-def center_match_pairs(gt_centers: list[tuple[float, float]], dt_centers: list[tuple[float, float]],
-                       tolerance: float, *, policy: str) -> list[tuple[int, int]]:
-    """A greedy nearest-center 1:1 matcher under one of two stated policies.
+def _match_cost(criterion: dict) -> tuple[Callable[[list[float], list[float]], float], float]:
+    """How far one xywh box is from another under ``criterion``, and the farthest a match may be:
+    the distance between centers within ``tolerance`` for a center match, one minus the IoU within
+    one minus ``iou_threshold`` for an IoU match."""
+    if criterion["kind"] == "center_match":
+        def center_distance(g: list[float], d: list[float]) -> float:
+            return (((g[0] + g[2] / 2) - (d[0] + d[2] / 2)) ** 2
+                    + ((g[1] + g[3] / 2) - (d[1] + d[3] / 2)) ** 2) ** 0.5
 
-    Inputs are plain ``(x, y)`` centers. Distance is Euclidean, the tolerance inclusive (``d <=
-    tolerance`` matches). Returns ``(gt_index, dt_index)`` pairs, indices into the two input lists.
+        return center_distance, float(criterion["tolerance"])
 
-    ``policy="score_first"`` walks ``dt_centers`` in the order given, each claiming its nearest
-    unused ground truth; among equidistant unused ground truths the last index wins.
+    def iou_distance(g: list[float], d: list[float]) -> float:
+        iw = max(0.0, min(g[0] + g[2], d[0] + d[2]) - max(g[0], d[0]))
+        ih = max(0.0, min(g[1] + g[3], d[1] + d[3]) - max(g[1], d[1]))
+        union = g[2] * g[3] + d[2] * d[3] - iw * ih
+        return 1.0 - (iw * ih / union if union > 0 else 0.0)
 
-    ``policy="distance_first"`` sorts every (gt, dt) pair within tolerance by distance ascending
+    return iou_distance, 1.0 - float(criterion["iou_threshold"])
+
+
+def match_pairs(gt_boxes: list[list[float]], dt_boxes: list[list[float]], criterion: dict, *,
+                policy: str) -> list[tuple[int, int]]:
+    """A greedy 1:1 matcher of xywh boxes under ``criterion`` (:func:`resolve_match_criterion`),
+    the limit inclusive, under one of two stated policies. Returns ``(gt_index, dt_index)`` pairs.
+
+    ``policy="score_first"`` walks ``dt_boxes`` in the order given, each claiming its nearest
+    unused ground truth; among equally near unused ground truths the last index wins.
+
+    ``policy="distance_first"`` sorts every (gt, dt) pair within the limit by distance ascending
     and claims the closest first, ties broken by ``(gt index, dt index)`` ascending.
 
-    Neither policy deduplicates the false-positive count: ``fp = len(dt_centers) - len(pairs)``
+    Neither policy deduplicates the false-positive count: ``fp = len(dt_boxes) - len(pairs)``
     counts every detection that never claimed a ground truth, duplicates included.
     """
+    cost, limit = _match_cost(criterion)
+    pairs: list[tuple[int, int]] = []
     if policy == "score_first":
-        used = [False] * len(gt_centers)
-        pairs: list[tuple[int, int]] = []
-        for di, (dx, dy) in enumerate(dt_centers):
-            best_gi, best_d = -1, tolerance
-            for gi, (gx, gy) in enumerate(gt_centers):
-                if used[gi]:
-                    continue
-                d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
-                if d <= best_d:
-                    best_d, best_gi = d, gi
+        used = [False] * len(gt_boxes)
+        for di, d in enumerate(dt_boxes):
+            best_gi, best = -1, limit
+            for gi, g in enumerate(gt_boxes):
+                if not used[gi] and cost(g, d) <= best:
+                    best, best_gi = cost(g, d), gi
             if best_gi >= 0:
                 used[best_gi] = True
                 pairs.append((best_gi, di))
         return pairs
-
-    if policy == "distance_first":
-        candidates: list[tuple[float, int, int]] = []
-        for gi, (gx, gy) in enumerate(gt_centers):
-            for di, (dx, dy) in enumerate(dt_centers):
-                d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
-                if d <= tolerance:
-                    candidates.append((d, gi, di))
-        candidates.sort()
-        matched_gt: set[int] = set()
-        matched_dt: set[int] = set()
-        pairs = []
-        for _, gi, di in candidates:
-            if gi in matched_gt or di in matched_dt:
-                continue
+    if policy != "distance_first":
+        raise ValueError(f"match_pairs: unknown policy {policy!r}, expected 'score_first' or "
+                         "'distance_first'")
+    candidates = sorted((cost(g, d), gi, di) for gi, g in enumerate(gt_boxes)
+                        for di, d in enumerate(dt_boxes) if cost(g, d) <= limit)
+    matched_gt: set[int] = set()
+    matched_dt: set[int] = set()
+    for _, gi, di in candidates:
+        if gi not in matched_gt and di not in matched_dt:
             matched_gt.add(gi)
             matched_dt.add(di)
             pairs.append((gi, di))
-        return pairs
-
-    raise ValueError(f"center_match_pairs: unknown policy {policy!r}, expected "
-                     "'score_first' or 'distance_first'")
+    return pairs
 
 
-def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
-    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending).
+def _match_image(gt: list[dict], dt: list[dict], criterion: dict) -> tuple[int, int, int]:
+    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending),
+    matched under ``criterion``.
 
     COCO's crowd semantics: a crowd region is no object to miss, and a detection matching no
     object whose center lies inside a crowd region's box is neither a true nor a false positive.
@@ -440,110 +448,72 @@ def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tup
     dt_centers = _centers_xywh(dt)
     # The count's identity question: a duplicate claim on one ground truth is resolved by keeping
     # the higher-confidence detection, never by geometry alone.
-    matched = {di for _, di in center_match_pairs(
-        _centers_xywh(objects), dt_centers, tolerance, policy="score_first")}
+    matched = {di for _, di in match_pairs(
+        [a["bbox"] for a in objects], [d["bbox"] for d in dt], criterion, policy="score_first")}
     ignored = sum(1 for di, (cx, cy) in enumerate(dt_centers) if di not in matched and any(
         x <= cx <= x + w and y <= cy <= y + h for x, y, w, h in crowds))
     return len(matched), len(dt) - len(matched) - ignored, len(objects) - len(matched)
 
 
+def localization_frac(trait: TraitEntry, boxes_per_image: list[list[list[float]]]
+                      ) -> tuple[float, str]:
+    """The center-match tolerance, as a fraction of the average object size, and its source: the
+    ground truth's own nearest-neighbor spacing (``boxes_per_image`` one list of xywh boxes per
+    image), else, when no two same-class objects sit close enough to derive it, the trait
+    revision's stated ``localization_tolerance_frac``."""
+    from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
+
+    frac = derive_localization_tolerance_frac(boxes_per_image)
+    if frac is not None:
+        return frac, "GT nearest-neighbor spacing (p10 + margin)"
+    return trait.localization_tolerance_frac, (
+        f"the trait's stated localization_tolerance_frac ({trait.localization_tolerance}); no "
+        "same-class neighbor in this ground truth to derive one from")
+
+
 def resolve_match_criterion(trait: TraitEntry | None, per_image: list[dict], *,
                             class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
-    """The localization criterion that governs a trait's phenotype count + model selection.
+    """The localization criterion that governs a trait's phenotype count and model selection, as
+    ``{kind, tolerance_frac and tolerance | iou_threshold, derived_from, trait}``, resolved once
+    over the reference ``per_image`` and carried whole to every count and match over it.
 
-    Reads the ``localization`` kind of ``trait``, the entry of the trait's latest confirmed
-    revision, and derives its per-dataset tolerance from the GT in hand. Returns ``{kind,
-    tolerance | iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait), it is
-    IoU
-    matching at ``iou_threshold``, the labeled comparability convention (AP@0.5), which governs
-    nothing on its own; a count trait's derived center-match tolerance is what the phenotype and
-    checkpoint selection rest on.
-
-    A trait whose entry states no ``localization`` has it derived from this call's GT
-    (``derivations.derive_localization_kind``) and stamped as derived at runtime; the entry changes
-    only through a proposed revision. A stated kind is re-checked against what the current data
-    would derive on every call; divergence surfaces a warning (``kind_diverged`` in the returned
-    dict).
+    With no trait it is IoU matching at ``iou_threshold``, the labeled comparability convention
+    (AP@0.5), which governs nothing on its own. With one, its stated ``localization`` governs, an
+    unauthored one refusing (:class:`~tcip_mcp.traits.UnauthoredField`): a center match's tolerance
+    is a fraction of the average object size (:func:`localization_frac`), scaled to ``per_image``
+    here and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the
+    ground truth's own box sizes derive, and a reference with no box to derive it from refuses.
     """
     if trait is None:
         return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
                 "derived_from": "comparability convention (AP@0.5)", "trait": None}
-    from tcip_mcp.pipelines.derivations import (
-        derive_iou_match_threshold, derive_localization_kind, derive_localization_tolerance_frac,
-    )
-    from tcip_mcp.traits import CENTER_MATCH
+    from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION, derive_iou_match_threshold
+    from tcip_mcp.traits import CENTER_MATCH, authored
 
+    authored(trait, ("localization",))
     boxes_per_image = [[a["bbox"] for a in gt_objects(rec)
                         if class_id is None or a["category_id"] == class_id]
                        for rec in per_image]
-
-    kind = trait.localization
-    kind_source = "recorded"
-    kind_diverged = False
-    live_derived_kind = derive_localization_kind(boxes_per_image)
-    if kind:
-        if live_derived_kind is not None and live_derived_kind != kind:
-            kind_diverged = True
-            logger.warning(
-                "trait %r: recorded localization kind %r diverges from what this call's own GT "
-                "would derive (%r), not switched (observation, not permission); propose a "
-                "revision with propose_trait if this data is now representative.",
-                trait.name, kind, live_derived_kind)
-    elif live_derived_kind is not None:
-        kind = live_derived_kind
-        kind_source = "data_derived_at_runtime"
-        # Stamp via resolution.derived(), not aliased on import, so test_provenance_honesty.py's
-        # AST scanner (which matches the literal call name "derived") actually sees this label.
-        from tcip_mcp.pipelines.resolution import derived
-        derived("localization_kind", kind,
-               derived_from="achievable IoU under annotation jitter (GT characteristic size)")
-    else:
+    if trait.localization == CENTER_MATCH:
+        frac, frac_source = localization_frac(trait, boxes_per_image)
+        return scaled_to({"kind": "center_match", "tolerance_frac": frac,
+                          "derived_from": frac_source, "trait": trait.name}, per_image, class_id)
+    threshold = derive_iou_match_threshold(boxes_per_image)
+    if threshold is None:
         raise ValueError(
-            f"trait {trait.name!r} states no localization kind and no GT in this call derives "
-            "one, so no match criterion resolves. Evaluate against a labeled reference, or "
-            "propose the kind in a trait revision with propose_trait.")
+            f"trait {trait.name!r} matches by IoU, and this reference holds no ground-truth box "
+            "to derive the IoU a match must reach from; evaluate against a labeled reference.")
+    return {"kind": "iou_match", "iou_threshold": float(threshold),
+            "derived_from": IOU_MATCH_DERIVATION, "trait": trait.name}
 
-    # Stamp via resolution.derived()/default(), not aliased on import, and with the derived_from
-    # literal inlined directly into the call: passing it as a variable, even unaliased, is also
-    # invisible to the AST scanner, it only reads a literal string or an
-    # f-string's leading constant written directly at the call site, never a name reference.
-    # derived() for a real per-dataset computation, default() for the honest "underivable, fell
-    # back" case (never claimed as a derivation, and not scanned by test_provenance_honesty.py at
-    # all, correctly, since it makes no derivation claim to check). The label text lives once, in
-    # the call itself; `.derived_from` reads it back rather than a second, separately-typed copy.
-    from tcip_mcp.pipelines.resolution import default, derived
 
-    if kind == CENTER_MATCH:
-        frac = derive_localization_tolerance_frac(boxes_per_image)
-        if frac is not None:
-            frac_source = derived("localization_tolerance_frac", frac,
-                                  derived_from="GT nearest-neighbor spacing (p10 + margin)").derived_from
-        else:
-            frac = trait.localization_tolerance_frac
-            frac_source = default(
-                "localization_tolerance_frac", frac,
-                derived_from=f"trait default (underivable: no same-class neighbor in this GT), "
-                             f"{trait.localization_tolerance}",
-            ).derived_from
-        result = {"kind": "center_match",
-                  "tolerance": float(frac * gt_class_avg_size(per_image, class_id=class_id)),
-                  "derived_from": frac_source, "trait": trait.name,
-                  "kind_source": kind_source, "kind_diverged": kind_diverged}
-        return result
-    derived_threshold = derive_iou_match_threshold(boxes_per_image)
-    if derived_threshold is not None:
-        threshold_source = derived(
-            "iou_threshold", derived_threshold,
-            derived_from="achievable IoU under annotation jitter, minus margin (GT characteristic size)",
-        ).derived_from
-    else:
-        derived_threshold = iou_threshold
-        threshold_source = f"caller/default (underivable: no valid GT boxes), trait localization={kind}"
-        default("iou_threshold", derived_threshold, derived_from=threshold_source)
-    result = {"kind": "iou_match", "iou_threshold": float(derived_threshold),
-              "derived_from": threshold_source, "trait": trait.name,
-              "kind_source": kind_source, "kind_diverged": kind_diverged}
-    return result
+def scaled_to(criterion: dict, per_image: list[dict], class_id: int | None = None) -> dict:
+    """``criterion`` as it applies to ``per_image``: a center match's tolerance scaled to that
+    reference's own average object size; an IoU match unchanged."""
+    if criterion["kind"] != "center_match":
+        return criterion
+    return {**criterion, "tolerance": float(
+        criterion["tolerance_frac"] * gt_class_avg_size(per_image, class_id=class_id))}
 
 
 def _dt_score(d: dict) -> float:
@@ -558,30 +528,22 @@ def _dt_score(d: dict) -> float:
 
 
 def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
-                     class_id: int | None = None, max_dets: int = 1000) -> dict:
-    """tp/fp/fn/precision/recall/f1 at the criterion that governs the phenotype count.
-
-    ``center_match`` uses greedy nearest-center matching at the derived tolerance; ``iou_match`` reuses
-    the COCO IoU matcher. This count is what a count-trait phenotype and model selection rest on,
-    distinct from AP@0.5, which stays a labeled comparability metric that governs nothing.
+                     class_id: int | None = None) -> dict:
+    """tp/fp/fn/precision/recall/f1 at the criterion that governs the phenotype count, every
+    conf-surviving detection matched under ``criterion`` (:func:`match_pairs`). This count is what a
+    count-trait phenotype and model selection rest on, distinct from AP@0.5, which stays a labeled
+    comparability metric that governs nothing.
     """
-    if criterion["kind"] == "center_match":
-        # Deliberately uncapped by max_dets, unlike the iou_match branch below: a count
-        # trait's total is every conf-surviving detection, not the COCOeval detection-cap
-        # convention that AP@0.5 comparability uses.
-        m = _count_stats_at_conf(per_image, tolerance=float(criterion["tolerance"]),
-                                 conf=conf_threshold, class_id=class_id)
-    else:
-        m = coco_detection_metrics(per_image, iou_threshold=criterion["iou_threshold"],
-                                   conf_threshold=conf_threshold, max_dets=max_dets)
+    m = _count_stats_at_conf(per_image, criterion=criterion, conf=conf_threshold,
+                             class_id=class_id)
     return {"tp": int(m["tp"]), "fp": int(m["fp"]), "fn": int(m["fn"]),
             **{k: round(m[k], 6) for k in ("precision", "recall", "f1")}, "criterion": criterion}
 
 
-def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float,
+def _count_stats_at_conf(per_image: list[dict], *, criterion: dict, conf: float,
                          class_id: int | None) -> dict:
-    """Center-match counting statistics over ``per_image`` at one conf, optionally for one class:
-    the class-pooled curve entry and every per-class entry beside it.
+    """Counting statistics under ``criterion`` over ``per_image`` at one conf, optionally for one
+    class: the class-pooled curve entry and every per-class entry beside it.
 
     Two scopes of the same per-image bias travel side by side. The whole-reference statistics
     (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares
@@ -596,13 +558,13 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
     biases: list[int] = []
     present_biases: list[int] = []
     for rec in per_image:
-        gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
+        gt = [a for a in rec["gt"] if class_id is None or a["category_id"] == class_id]
         dt = sorted(
-            (d for d in rec.get("dt", [])
+            (d for d in rec["dt"]
              if _dt_score(d) >= conf and (class_id is None or d["category_id"] == class_id)),
             key=lambda d: -_dt_score(d),
         )
-        t, f, n = _center_match_image(gt, dt, tolerance)
+        t, f, n = _match_image(gt, dt, criterion)
         tp += t
         fp += f
         fn += n
@@ -637,32 +599,32 @@ def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> li
     annotation or detection with no ``category_id`` raises ``KeyError``."""
     if class_id is not None:
         return [class_id]
-    ids = {a["category_id"] for rec in per_image for a in rec.get("gt", [])}
-    ids |= {d["category_id"] for rec in per_image for d in rec.get("dt", [])}
+    ids = {a["category_id"] for rec in per_image for a in rec["gt"]}
+    ids |= {d["category_id"] for rec in per_image for d in rec["dt"]}
     return sorted(ids)
 
 
-def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
+def derive_operating_point_curve(per_image: list[dict], *, criterion: dict,
                                  class_id: int | None = None,
                                  conf_grid: list[float] | None = None,
                                  max_thresholds: int = 80) -> dict:
-    """Sweep the confidence threshold over ``per_image`` records via center-matching.
+    """Sweep the confidence threshold over ``per_image`` records, matched under ``criterion``.
 
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf in Python,
     no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN). An
     explicit ``conf_grid`` (e.g. a single-element ``[conf]``) evaluates exactly those points.
-    Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
+    Returns ``{criterion, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
     count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
     count_bias_mean_present, count_bias_std_present, per_class}]}``. See
     :func:`_count_stats_at_conf` for the two bias scopes.
 
     ``per_class`` carries the same statistics measured within each class the records carry, keyed
-    by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through the
-    JSON sidecar have the same shape): matching is class-blind in the pooled entry, so a detector
-    that calls every class-A object class B reports zero pooled bias while both per-class counts
+    by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through a
+    stored JSON record have the same shape): matching is class-blind in the pooled entry, so a
+    detector that calls every class-A object class B reports zero pooled bias while both per-class counts
     are wrong. Class ids come from the records themselves.
     """
-    scores = sorted({_dt_score(d) for rec in per_image for d in rec.get("dt", [])})
+    scores = sorted({_dt_score(d) for rec in per_image for d in rec["dt"]})
     if conf_grid is None:
         if len(scores) > max_thresholds:
             conf_grid = list(np.linspace(scores[0], scores[-1], max_thresholds))
@@ -672,18 +634,18 @@ def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
     class_ids = _class_ids_present(per_image, class_id)
     curve: list[dict] = []
     for conf in conf_grid:
-        pooled = _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf, class_id=class_id)
+        pooled = _count_stats_at_conf(per_image, criterion=criterion, conf=conf, class_id=class_id)
         if len(class_ids) == 1:
             # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
             # is that class's entry, reused rather than recomputed, which keeps the single-class
             # sweep (every reference the platform builds) at one pass's cost.
             per_class = {str(class_ids[0]): pooled}
         else:
-            per_class = {str(cid): _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf,
+            per_class = {str(cid): _count_stats_at_conf(per_image, criterion=criterion, conf=conf,
                                                         class_id=cid)
                          for cid in class_ids}
         curve.append({"conf": float(conf), **pooled, "per_class": per_class})
-    return {"tolerance": float(tolerance), "class_id": class_id, "curve": curve}
+    return {"criterion": criterion, "class_id": class_id, "curve": curve}
 
 
 def worst_class_count_bias(entry: dict) -> float:
@@ -768,10 +730,22 @@ def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
     return dt_record(xywh(*box), label, score)
 
 
+def prediction_record(result: Mapping[str, Any], gt: list[dict], *, image_id: str) -> dict:
+    """One per-image evaluation record from a detection result (its ``width``, ``height``,
+    corner ``boxes``, ``scores``, ``labels`` and ``cap_hit``) and the image's ground-truth records
+    ``gt``, named ``image_id``. Boxes, scores and labels differing in length refuse
+    (``ValueError``)."""
+    dt = [detection_record(box, label, score) for box, score, label
+          in zip(result["boxes"], result["scores"], result["labels"], strict=True)]
+    return {**build_coco_image_record(int(result["width"]), int(result["height"]), gt, dt,
+                                      image_id=image_id),
+            "cap_hit": result["cap_hit"]}
+
+
 def gt_records(target: Mapping[str, Any]) -> list[dict]:
     """A target's rows, corner ``boxes`` beside ``labels`` and the crowd flag, as evaluation
     ground-truth records on the stored grid (:func:`~tcip_annotation.json_io.xywh`), from a tensor,
-    array or list target alike. A bespoke target that states no crowd flag reads through
+    array or list target alike, its crowd flags read through
     :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
     """
     from tcip_mcp.pipelines.data.datasets import crowd_of
@@ -1206,9 +1180,9 @@ def evaluate(
         })
         # A count trait's derived criterion governs the reported count + the selection f1;
         # map50 stays a labeled comparability metric. Without a trait the IoU convention governs.
-        criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
-        if criterion["kind"] == "center_match":
-            gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold, max_dets=max_dets)
+        if trait is not None:
+            criterion = resolve_match_criterion(trait, per_image)
+            gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold)
             result.update({
                 "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
                 "governing_criterion": criterion, "map50_role": "comparability_only",

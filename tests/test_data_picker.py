@@ -179,7 +179,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
     images_dir, csv_path = _table_dataset(root)
     drawn = draw_splits(tmp_path, str(root), output_path=str(root / "splits" / "rows"),
                         ground_truth=str(csv_path), seed=4, train_ratio=0.5, val_ratio=0.25,
-                        calibration_ratio=0.25, group_by="stem")
+                        calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
     assert "error" not in drawn, drawn
 
     opened_run(tmp_path, {
@@ -363,13 +363,13 @@ def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
     _rebind()  # the autouse fixture already bound before this env var was set
     from tcip_mcp.tools.training_tools import list_split_choices
 
-    from tcip_mcp.pipelines.data.selection import selection_document, selection_path
+    from tcip_mcp.pipelines.data.selection import selection_document
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
     drawn = _draw(tmp_path, root, selection_dir)
     opened_run(tmp_path, _bound_config(root, selection_dir), experiment_id="exp-version-refused")
-    selection_path(selection_dir).write_text(
+    (selection_dir / "selection.json").write_text(
         json.dumps({**selection_document(drawn), "schema_version": 99}), encoding="utf-8")
 
     result = list_split_choices(tmp_path, "exp-version-refused")

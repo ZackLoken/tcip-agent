@@ -14,55 +14,33 @@ within it.
 
 from __future__ import annotations
 
-import sys
-
-import pytest
 from pathlib import Path
 
-_MCP_SRC = Path(__file__).resolve().parents[1] / "packages" / "tcip-mcp" / "src"
-if str(_MCP_SRC) not in sys.path:
-    sys.path.insert(0, str(_MCP_SRC))
+import pytest
 
-from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines import resolution  # noqa: E402
-from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
-from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
-from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
-from tcip_mcp.pipelines.resolution import Acknowledgment  # noqa: E402
-from tcip_mcp.project_paths import project_state_dir  # noqa: E402
-from tcip_mcp.traits import TraitRevision  # noqa: E402
-from tests._trait_fixtures import BUD_OPENING, entry, propose_and_confirm  # noqa: E402
-from tests.test_phenology_tools import _write_preds  # noqa: E402
+from tcip_annotation import json_io
+from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.pipelines.postprocessing import phenology
+from tests._trait_fixtures import BUD_OPENING, entry
+
+CLASSIFIED = {"subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
+COMPLETE = phenology.REQUIRE_ALL_DATES_COMPLETE
+DETECTOR ={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
 
 
-def _revision(project_root: Path) -> TraitRevision:
-    """BUD_OPENING as a confirmed revision at ``project_root``, the way a delivery door holds it."""
-    return propose_and_confirm(project_root, BUD_OPENING)
+def _bucket(project: Path, date: str, documents: dict[str, list[str]], scope: dict = CLASSIFIED):
+    """A bucket published for ``date`` holding one document per stem of ``documents``, each
+    detection named by its class under ``scope``'s map (``_chain_fixtures.published``)."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import predicted, published
 
-# A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
-# so it carries every key the writer's cells read even as that shape grows.
-_NO_MAPPING = MappingBuild(
-    name="none", dataset_root="", dataset_id="", built_by="test", built_at="",
-    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "stated"},
-    plant_registry={"name": "unregistered", "digest": "0" * 64},
-    capture_identity={}, capture_digests={}, unreadable={}, assignments={},
-    record_sha256="0" * 16,
-).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
+    out = project / "ds" / "predictions" / f"m-{scope['attribute'] or 'bare'}" / date
+    return published(project, out, [predicted(stem, names, scope["id_map"])
+                                    for stem, names in documents.items()], scope=scope)
 
 
-def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "bud",
-            attribute: str | None = None) -> None:
-    """Write a bucket's operating_point.json, filed under the project holding ``dir_path``,
-    exactly the way run_inference does: the only fact count_by_class reads to decide whether/how
-    a bucket was classified."""
-    from tcip_mcp.pipelines.resolution import write_sidecar
-
-    write_sidecar(dir_path, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}},
-                  project=dir_path.parent)
-
-
-# ── date helpers (unchanged) ──────────────────────────────────────────────
+# ── date helpers ──────────────────────────────────────────────
 
 
 def test_date_key_orders_chronologically():
@@ -127,9 +105,8 @@ def test_crossing_exact_match_is_not_censored():
 
 
 def test_crossing_never_reached_is_right_censored():
-    # The last observed point still hasn't met the target -> the true
-    # crossing, if it happens at all, is after this date. Distinguishable from "no observations at
-    # all" (which stays None, see below).
+    # The last observed point never meets the target: right-censored there, unlike no
+    # observations at all, which stays None.
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.3)]
     c = phenology.crossing_date(series, 0.95)
     assert c.date == "2024-05-05"
@@ -162,18 +139,29 @@ def test_plant_milestones_returns_four_dates_and_bounds():
 
 def test_plant_milestones_requires_spec_no_bud_opening_fallback():
     # No silent default: a caller that forgets to pass spec must fail loudly.
-    import pytest
-
     with pytest.raises(TypeError, match="'spec'"):
         phenology.plant_milestones([("2024-05-01", 0.5)])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to spec
 
 
 def test_milestone_date_columns_is_proper_subset_of_full_columns():
     cols = phenology.phenology_csv_columns(BUD_OPENING)
-    milestone_cols = phenology.milestone_date_columns(BUD_OPENING)
-    assert set(milestone_cols) <= set(cols)
+    milestone_cols = {c[k] for c in phenology.milestone_date_columns(BUD_OPENING)
+                      for k in ("date", "bound")}
+    assert milestone_cols <= set(cols)
     assert "plant_id" not in milestone_cols
-    assert "positive_state_classifier_validated" not in milestone_cols
+    assert "validated" not in milestone_cols
+
+
+def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns():
+    """``plant_milestones`` emits a bound beside each milestone date and each row carries
+    ``n_observed_dates``; the writer's ``extrasaction="ignore"`` would drop any the schema did not
+    name, and a left-censored crossing would then ship indistinguishable from a measured one."""
+    cols = phenology.phenology_csv_columns(BUD_OPENING)
+    ms = phenology.plant_milestones([("2024-05-01", 0.0), ("2024-05-09", 1.0)], BUD_OPENING)
+    for col in phenology.milestone_date_columns(BUD_OPENING):
+        assert col["date"] in cols and col["bound"] in cols, col
+        assert col["date"] in ms and col["bound"] in ms, col
+    assert "n_observed_dates" in cols
 
 
 # ── count_by_class: the coverage mechanism ─────────────────────
@@ -251,14 +239,6 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
         phenology.count_by_class(p, "open", scope=scope)
 
 
-def test_count_by_class_missing_file_reads_as_empty():
-    # count_by_class degrades gracefully on a missing path (json_io.read_annotations answers []);
-    # per_plant_series never calls it on one, checking is_file() and tracking n_missing itself.
-    total, positive, unclassified = phenology.count_by_class(
-        Path("does-not-exist.json"), "open", scope=None)
-    assert (total, positive, unclassified) == (0, 0, 0)
-
-
 # ── per_plant_series / per_plant_phenology: bucket-level + expected-coverage ────────────────────
 
 
@@ -270,20 +250,15 @@ class _Assignment:
 
 
 def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
-    d1 = tmp_path / "2024-05-01"
-    d2 = tmp_path / "2024-05-15"
-    _write_preds(d1, "P1_a", ["closed", "closed"], attribute="opening")
-    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    _write_preds(d2, "P1_b", ["open", "open"], attribute="opening")
-    _sidecar(d2, {"closed": 0, "open": 1}, attribute="opening")
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["closed", "closed"]}),
+               "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["open", "open"]})}
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
     }
-    preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
-                                        plants=["P1"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                        require_all_dates_complete=COMPLETE)
 
     assert out["positive_class_assessed"] is True
     row = out["rows"][0]
@@ -297,14 +272,11 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
 
 
 def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_path):
-    d1 = tmp_path / "2024-05-01"
-    _write_preds(d1, "P1_a", ["bud"], attribute=None)
-    _sidecar(d1, {"bud": 0})
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["bud"]}, DETECTOR)}
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
-    preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
-                                        plants=["P1"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                        require_all_dates_complete=COMPLETE)
 
     assert out["positive_class_assessed"] is False
     row = out["rows"][0]
@@ -313,17 +285,13 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_pat
 
 
 def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
-    # A stem the mapping names with no prediction file must not read as an
-    # observed zero (which would count as "classified, 0/0" and silently pass coverage).
-    d1 = tmp_path / "2024-05-01"
-    d1.mkdir(parents=True, exist_ok=True)
-    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    # no P1_a.json written: the mapping names it but nothing was ever inferred for it
+    # A stem the mapping names with no prediction document must not read as an observed zero
+    # (which would count as "classified, 0/0" and silently pass coverage).
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {})}
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
-    preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
-                                        plants=["P1"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                        require_all_dates_complete=COMPLETE)
 
     row = out["rows"][0]
     assert row["series"][0]["n_missing"] == 1
@@ -334,393 +302,70 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
 
 
 def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp_path):
-    # A plant's milestones require every date to be classified; one
-    # unclassified or missing date excludes the whole plant's milestones, disclosed, not silently
-    # computed from the subset that happened to be usable.
-    d1 = tmp_path / "2024-05-01"
-    d2 = tmp_path / "2024-05-15"
-    _write_preds(d1, "P1_a", ["open"], attribute="opening")
-    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    _write_preds(d2, "P1_b", ["bud"], attribute=None)  # bare-detector date, unclassified
-    _sidecar(d2, {"bud": 0})
+    # One unclassified date excludes the whole plant's milestones, disclosed, rather than
+    # computing them from the dates that happened to be usable.
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]}),
+               "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["bud"]}, DETECTOR)}
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
     }
-    preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, spec=BUD_OPENING,
-                                        plants=["P1"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                        require_all_dates_complete=COMPLETE)
 
     row = out["rows"][0]
     assert row["n_dates"] == 2
     assert row["n_dates_unclassified"] == 1
-    # The whole plant's milestones are None: one bad date excludes it, not a partial computation.
     assert row["bud_05per_date"] is None
     assert row["bud_95per_date"] is None
-    # But at least one date elsewhere was classified, so the delivery-level flag is still True,
+    # At least one date elsewhere was classified, so the delivery-level flag is still True,
     # distinguishing "wired, some gaps" from "never wired at all".
     assert out["positive_class_assessed"] is True
 
 
+def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(tmp_path):
+    """Every plant has a point on every mapped date: a plant captured on the first date only
+    carries an imageless second date, counted against its completeness, so under the rule its
+    milestones are withheld rather than computed from the date it happened to be seen on."""
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01",
+                                     {"P1_a": ["open"], "P2_a": ["open"]}),
+               "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["open"]})}
+    mapping = {
+        "2024-05-01": [_Assignment("P1_a", "P1", "acc-9"), _Assignment("P2_a", "P2", "acc-7")],
+        "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
+    }
+
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1", "P2"],
+                                        require_all_dates_complete=COMPLETE)
+
+    p1, p2 = out["rows"]
+    assert (p1["complete"], p1["n_dates_missing_images"]) == (True, 0)
+    assert [(s["date"], s["n_images"]) for s in p2["series"]] == [
+        ("2024-05-01", 1), ("2024-05-15", 0)]
+    assert (p2["complete"], p2["n_dates_missing_images"], p2["n_dates"]) == (False, 1, 2)
+    assert p2["bud_05per_date"] is None
+
+
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
-    d1 = tmp_path / "2024-05-01"
-    _write_preds(d1, "P1_a", ["open"], attribute="opening")
-    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]})}
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
-    preds = {"2024-05-01": str(d1)}
-    per_plant = phenology.per_plant_series(mapping, preds, positive_value="open", plants=["P1"])
-    assert "P1" in per_plant
+    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
 
 
-# ── resolve_positive_class_id ─────────────────────────────────────────────
+# ── the positive class id ─────────────────────────────────────────
 
 
-def test_resolve_positive_class_id_from_bucket_id_map(tmp_path):
-    d1 = tmp_path / "2024-05-01"
-    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
-    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2024-05-01": str(d1)})
-    assert cid == 1
-    assert "resolved" in msg
+def test_the_positive_class_id_reads_the_bucket_records_map(tmp_path):
+    bucket = _bucket(tmp_path, "2024-05-01", {})
+    assert bucket.scope.positive_id(BUD_OPENING.positive_value) == 1
 
 
-def test_resolve_positive_class_id_no_bucket_has_it_refuses(tmp_path):
-    d1 = tmp_path / "2024-05-01"
-    _sidecar(d1, {"bud": 0})
-    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2024-05-01": str(d1)})
-    assert cid is None
-    assert "never assessed" in msg
-
-
-# ── write_phenology_csv: the gate it runs, the cells it composes, the event it records ────
-
-
-def _real_delivery_flags(tmp_path: Path):
-    """Two validated buckets, plus the flags and reconciliations a real reconciliation produces
-    over them, the way both phenology delivery doors build their own before calling this writer."""
-    from tcip_mcp.pipelines.resolution import (
-        bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
-        reconcile_tile_size_validity,
-    )
-    from tests.test_phenology_tools import _delivery_setup
-
-    _mapping_name, d1, d2 = _delivery_setup(
-        tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
-    predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
-    pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
-    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
-    classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
-    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
-    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
-    document_reconciliations = {
-        "operating_point": recon,
-        "classifier_operating_point": {
-            **classifier_recon, "bound_validated": classifier_state, "delivery_note": note,
-        },
-    }
-    dimension_reconciliations = {"tile_size": tile_recon}
-    return flags, document_reconciliations, dimension_reconciliations, predictions_by_date
-
-
-def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unvalidated(tmp_path):
-    """The writer runs its own delivery gate before opening the file, the way its sibling writers
-    (``export_aggregated_csv``, ``export_detection_csv``) do; a call whose flags do not clear
-    refuses rather than delivering a silent bare number."""
-    with pytest.raises(ValueError, match="unvalidated dimension"):
-        phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", _revision(tmp_path),
-            flags={"classifier": None, "operating_point": None}, acknowledgment=None,
-            document_reconciliations={}, producer={},
-            dimension_reconciliations={}, predictions_by_date={},
-            project=tmp_path, plant_mapping=_NO_MAPPING)
-    assert not (tmp_path / "out.csv").exists()
-
-
-def test_write_phenology_csv_refuses_a_count_only_reconciliation_with_nothing_on_disk(tmp_path):
-    """A phenology delivery declares both operating_point and classifier_operating_point to the
-    event writer; a caller reconciling the count alone is refused here, before the gate runs and
-    before anything is written, rather than reaching the event writer after the file exists."""
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    count_only = {"operating_point": document_reconciliations["operating_point"]}
-
-    with pytest.raises(ValueError, match="classifier_operating_point"):
-        phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-            document_reconciliations=count_only, producer={},
-            dimension_reconciliations=dimension_reconciliations,
-            predictions_by_date=predictions_by_date, project=tmp_path,
-            plant_mapping=_NO_MAPPING)
-    assert not (tmp_path / "out.csv").exists()
-
-
-def test_write_phenology_csv_needs_no_declared_document_when_predictions_by_date_is_empty(
-    tmp_path,
-):
-    """The rail must admit valid work: with nothing to reconcile, the new missing-entry check
-    does not fire, so a legitimate acknowledged, bucket-less call still writes rather than being
-    refused for a document it never had a chance to reconcile."""
-    phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", _revision(tmp_path),
-        flags={"classifier": None, "operating_point": None},
-        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="nothing to reconcile"),
-        document_reconciliations={}, producer={},
-        dimension_reconciliations={}, predictions_by_date={},
-        project=tmp_path, plant_mapping=_NO_MAPPING)
-    assert (tmp_path / "out.csv").exists()
-    assert [r["door"] for r in resolution.read_delivery_events(tmp_path)] == ["test"]
-
-
-def test_write_phenology_csv_records_a_none_conf_for_a_bucket_with_no_operating_point_sidecar(
-    tmp_path,
-):
-    """confs maps every bucket in pred_dirs to its own stamp's numeric conf, or None for a bucket
-    whose operating_point.json is missing entirely, whatever the delivery's own validated state:
-    a fact about what the predictions were produced at, not about whether that value cleared."""
-    from tcip_mcp.pipelines.resolution import (
-        bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
-        reconcile_tile_size_validity,
-    )
-    from tests.test_phenology_tools import (
-        ID_MAP, _bucket, _ds_root, _write_classifier_sidecar, _write_op_sidecar, _write_preds,
-    )
-
-    root = _ds_root(tmp_path)
-    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["closed"])
-    _write_preds(d2, "P1_b", ["open"])
-    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.7)
-    # d2 carries predictions but no operating_point.json at all: a missing stamp.
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
-    predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
-    pred_dirs = list(predictions_by_date.values())
-
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
-    assert recon["missing_sidecars"] == [str(d2)]
-    assert recon["confs"] == {str(d1): 0.7, str(d2): None}
-
-    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
-    classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
-    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
-    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
-
-    phenology.write_phenology_csv(
-        "test.missing_stamp", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags,
-        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="missing sidecar"),
-        document_reconciliations={
-            "operating_point": recon,
-            "classifier_operating_point": {
-                **classifier_recon, "bound_validated": classifier_state, "delivery_note": note,
-            },
-        },
-        producer={}, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    records = [
-        r for r in resolution.read_delivery_events(tmp_path) if r["door"] == "test.missing_stamp"
-    ]
-    assert len(records) == 1, records
-    assert records[0]["document_reconciliations"]["operating_point"]["confs"] == {
-        str(d1): 0.7, str(d2): None}
-
-
-def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tmp_path):
-    """``gate.stamp['classifier']`` is a public entry point's own index into the caller's flags: a
-    caller composing them some other way, one that leaves the key out, refuses naming what's
-    missing rather than raising a bare ``KeyError``. The same flags, classifier included, still
-    deliver, so the guard costs nothing on the call it was built to admit."""
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    incomplete = {k: v for k, v in flags.items() if k != "classifier"}
-
-    with pytest.raises(ValueError, match="classifier"):
-        phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=incomplete, acknowledgment=None,
-            document_reconciliations=document_reconciliations, producer={},
-            dimension_reconciliations=dimension_reconciliations,
-            predictions_by_date=predictions_by_date, project=tmp_path,
-            plant_mapping=_NO_MAPPING)
-    assert not (tmp_path / "out.csv").exists()
-
-    cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-    assert cells["positive_state_classifier_validated"]
-
-
-def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_and_unvalidated(
-    tmp_path,
-):
-    """A tiled bucket with no persisted training geometry floors the delivery's whole
-    operating-point column even though the count operating point itself cleared:
-    ``column_stamp`` floors any gated dimension outside its own column, and the tile dimension has
-    no column of its own. Built from a real reconciliation over real sidecars, through
-    ``phenology_delivery_flags``, the way both delivery doors build their own flags."""
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, bind_classifier_validity, reconcile_classifier_validity,
-        reconcile_operating_point_validity, reconcile_tile_size_validity,
-    )
-    from tests.test_phenology_tools import (
-        ID_MAP, _bucket, _ds_root, _tiled, _write_classifier_sidecar, _write_op_sidecar, _write_preds,
-    )
-
-    root = _ds_root(tmp_path)
-    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["closed"])
-    _write_preds(d2, "P1_b", ["open"])
-    for d in (d1, d2):
-        _write_op_sidecar(d, dataset_root=root, validated=True, id_map=ID_MAP,
-                          tile_size_prov=_tiled(VALIDATED_FALSE))
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
-    predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
-    pred_dirs = list(predictions_by_date.values())
-
-    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening", project=tmp_path)
-    classifier_recon = reconcile_classifier_validity([str(d1)], project=tmp_path)
-    classifier_state, note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening", project=tmp_path)
-    tile_recon = reconcile_tile_size_validity(pred_dirs, project=tmp_path)
-    assert tile_recon["operative"] and tile_recon["validated"] == VALIDATED_FALSE
-    assert recon["validated"] != VALIDATED_FALSE  # the count operating point itself cleared
-
-    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
-
-    cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags,
-        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="test acknowledgment"),
-        document_reconciliations={
-            "operating_point": recon,
-            "classifier_operating_point": {
-                **classifier_recon, "bound_validated": classifier_state, "delivery_note": note,
-            },
-        },
-        producer={}, dimension_reconciliations={"tile_size": tile_recon},
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    assert cells["operating_point_validated"] == VALIDATED_FALSE
-
-
-def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_it(tmp_path):
-    """The delivery event is recorded inside the writer itself: a caller that calls the writer
-    directly, never through ``deliver_phenology_milestones``, still leaves the record behind."""
-    from tcip_mcp.pipelines import resolution
-
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-
-    phenology.write_phenology_csv(
-        "test.direct_writer_call", [], out_csv, _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    records = [r for r in resolution.read_delivery_events(tmp_path)
-               if r["door"] == "test.direct_writer_call"]
-    assert len(records) == 1, records
-    assert records[0]["output_path"] == str(out_csv)
-    assert records[0]["trait"] == "bud_opening"
-
-
-def test_write_phenology_csv_fully_validated_acknowledgment_leaves_the_tail_and_event_agreeing(
-    tmp_path,
-):
-    """A caller that passes an ``Acknowledgment`` on a delivery every dimension actually clears
-    gets a gate that discards it (nothing needed acknowledging); the writer records that discarded
-    outcome on the event too, rather than the caller's original object verbatim, so the CSV tail's
-    blank ``acknowledged_by``/``acknowledgment_reason`` and the event's own fields can never
-    disagree about whether this delivery rested on one."""
-    import tcip_store as ts
-    from tcip_mcp.pipelines import resolution
-
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-
-    cells = phenology.write_phenology_csv(
-        "test.fully_validated_ack", [], out_csv, _revision(tmp_path), flags=flags,
-        acknowledgment=Acknowledgment(acknowledged_by="user:tester", reason="just in case"),
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    assert cells["acknowledged_by"] is None
-    assert cells["acknowledgment_reason"] is None
-
-    scope = project_state_dir(tmp_path)
-    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.fully_validated_ack"]
-    assert len(records) == 1, records
-    assert records[0]["acknowledged_by"] is None
-    assert records[0]["acknowledgment_reason"] is None
-
-
-def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
-    """There is no ``stamp`` parameter: the writer composes its own provenance cells and
-    returns them, so this pins that the set it returns is exactly the schema's provenance columns."""
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-
-    cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    assert set(cells) == set(phenology.PROVENANCE_COLUMNS)
-
-
-def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
-    """The curve table gets its own writer, sharing the same gate/cells/event machinery as the
-    milestone table."""
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    row = {"plant_id": "P1", "accession": "acc-9", "date": "2026-02-11", "n_images": 1,
-          "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
-
-    phenology.write_phenology_curve_csv(
-        "test", [row], tmp_path / "curve.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-
-    header = (tmp_path / "curve.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
-    assert header == phenology.curve_csv_columns()
-
-
-def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
-    """plant_milestones emits a `_bound` beside each milestone date
-    (exact / interpolated / left_censored); those must be in phenology_csv_columns, or the writer's
-    extrasaction="ignore" drops them all. A left-censored crossing (the first observation already
-    met the target, so the date is only an upper bound) must not ship indistinguishable from a
-    measured one, which would be a precision claim the data does not support."""
-    # First observed point already at 100% -> every crossing is left-censored.
-    series = [("2026-02-11", 1.0), ("2026-02-20", 1.0)]
-    milestones = phenology.plant_milestones(series, BUD_OPENING)
-    assert milestones["bud_05per_date_bound"] == "left_censored"
-
-    row = {"plant_id": "P1", "n_dates": 2, "n_observed_dates": 2, **milestones}
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-    written = (tmp_path / "out.csv").read_text(encoding="utf-8")
-    header = written.splitlines()[0].split(",")
-    values = written.splitlines()[1].split(",")
-
-    for col in phenology.milestone_date_columns(BUD_OPENING):
-        assert f"{col}_bound" in header, col
-        assert values[header.index(f"{col}_bound")] == "left_censored", col
+def test_the_positive_class_id_is_none_for_a_bucket_that_classifies_nothing(tmp_path):
+    bucket = _bucket(tmp_path, "2024-05-01", {}, DETECTOR)
+    assert bucket.scope.positive_id(BUD_OPENING.positive_value) is None
 
 
 _SPEC_SHAPES = [
@@ -760,21 +405,18 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     including each milestone date's ``*_date_bound`` companion, not just ``milestone_date_columns``'s
     bare dates.
     """
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    id_map = {"closed": 0, "open": 1}
-    for d in (d1, d2):
-        _sidecar(d, id_map, attribute="opening")
-    _write_preds(d1, "GOOD", ["open", "closed"], attribute="opening")
-    _write_preds(d2, "GOOD", ["open", "open"], attribute="opening")
-    _write_preds(d1, "BAD", ["open", "open"], attribute="opening")
-    # BAD's second date is never predicted on: the missing image excludes its milestones.
+    buckets = {
+        "2026-02-11": _bucket(tmp_path, "2026-02-11",
+                              {"GOOD": ["open", "closed"], "BAD": ["open", "open"]}),
+        # BAD's second date is never predicted on: the missing image excludes its milestones.
+        "2026-03-09": _bucket(tmp_path, "2026-03-09", {"GOOD": ["open", "open"]}),
+    }
     mapping = {
         "2026-02-11": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
         "2026-03-09": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
     }
-    res = phenology.per_plant_phenology(
-        mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        spec=BUD_OPENING, plants=["GOOD", "BAD"])
+    res = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["GOOD", "BAD"],
+                                        require_all_dates_complete=COMPLETE)
     by_plant = {r["plant_id"]: r for r in res["rows"]}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
     assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
@@ -786,35 +428,28 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     by a consumer, so a breeder auditing coverage can tell a well-sampled plant from a single-photo
     one.
     """
-    d = tmp_path / "2026-02-11"
-    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
-    for i in range(3):
-        _write_preds(d, f"IMG{i}", ["open", "closed"], attribute="opening")
+    buckets = {"2026-02-11": _bucket(tmp_path, "2026-02-11",
+                                     {f"IMG{i}": ["open", "closed"] for i in range(3)})}
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
-               + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
-    per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
-                                            positive_value="open", plants=["P1"])
-    series = per_plant["P1"]["series"]
-    (_date, total, positive, unclassified, missing, n_images) = series[0]
+               + [_Assignment("GONE", "P1", "a")]}  # named, no prediction document
+    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
+    (_date, total, positive, unclassified, missing, n_images) = per_plant["P1"]["series"][0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
-    # 4 images named for this (plant, date), the coverage the entry summarizes, of which one is
-    # missing, not 3 (the files that happened to exist).
+    # 4 images named for this (plant, date), of which one is missing, not the 3 documents that
+    # happened to exist.
     assert n_images == 4
 
 
 def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_path):
     """An assignment with no ``plot_name`` (an image the plant-mapping step could not assign) is
-    silently dropped from every plant's coverage; how often that happens is disclosed once, at
-    delivery scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
-    d = tmp_path / "2026-02-11"
-    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
-    _write_preds(d, "P1_a", ["open"], attribute="opening")
+    dropped from every plant's coverage; how often that happens is disclosed once, at delivery
+    scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
+    buckets = {"2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})}
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
     ]}
-    per_plant = phenology.per_plant_series(
-        mapping, {"2026-02-11": str(d)}, positive_value="open", plants=["P1"])
+    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
     assert list(per_plant) == ["P1"]
 
 
@@ -822,34 +457,13 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_pat
     """``per_plant_phenology`` never emits a row for an unattributed assignment, and carries no
     unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
     at delivery scope, not a per-call return value."""
-    d = tmp_path / "2026-02-11"
-    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
-    _write_preds(d, "P1_a", ["open"], attribute="opening")
+    buckets = {"2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})}
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY1", None, None),
         _Assignment("STRAY2", "", None),
     ]}
-    out = phenology.per_plant_phenology(
-        mapping, {"2026-02-11": str(d)}, spec=BUD_OPENING, plants=["P1"])
+    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                        require_all_dates_complete=COMPLETE)
     assert [r["plant_id"] for r in out["rows"]] == ["P1"]
     assert "n_images_unmapped" not in out
-
-
-def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
-    # A plant fully classified/observed but with zero real detections on every date must be
-    # distinguishable from one with real detection data, so this column must reach the CSV.
-    row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 1,
-          "n_dates_unclassified": 0, "n_dates_missing_images": 0}
-    flags, document_reconciliations, dimension_reconciliations, predictions_by_date = (
-        _real_delivery_flags(tmp_path))
-    phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", _revision(tmp_path), flags=flags, acknowledgment=None,
-        document_reconciliations=document_reconciliations, producer={},
-        dimension_reconciliations=dimension_reconciliations,
-        predictions_by_date=predictions_by_date, project=tmp_path, plant_mapping=_NO_MAPPING)
-    written = (tmp_path / "out.csv").read_text(encoding="utf-8")
-    header = written.splitlines()[0].split(",")
-    assert "n_observed_dates" in header
-    data_row = written.splitlines()[1].split(",")
-    assert data_row[header.index("n_observed_dates")] == "1"

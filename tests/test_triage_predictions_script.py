@@ -35,7 +35,7 @@ def test_refuses_a_run_naming_no_project_and_plants_no_store(tmp_path):
 
 def test_triages_with_the_checkpoint_registered_in_the_named_project(
         project, monkeypatch, capsys):
-    import tcip_mcp.pipelines.inference.predictor as predmod
+    import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.cli.triage_predictions import main
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -46,8 +46,8 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 
     predictions = [{"image": "a.jpg", "scores": [0.9]}]
     monkeypatch.setattr(
-        predmod, "build_predictor",
-        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
+        predmod, "GenericPredictor",
+        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
     rc = main(["--checkpoint", str(ckpt), "--images-dir", str(images), "--project", str(project)])
 

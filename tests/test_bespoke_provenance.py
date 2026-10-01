@@ -1,9 +1,8 @@
 """Code provenance for a bespoke (model_source) run.
 
-Locks: snapshot_model_source (copy source files + sha256), KIND_TCIP_MODULE stamping, the
-_kind_from_ckpt structural fallback, build_predictor rebuilding a bespoke model from its importable
-builder (no exec) + predicting, and a completed run's registry entry round-tripping the bespoke
-kind.
+Locks: snapshot_model_source (copy source files + sha256), a pass rebuilding a bespoke model from
+its importable builder (no exec) and predicting, and a completed run's registry entry carrying
+its metrics and digest.
 """
 
 from __future__ import annotations
@@ -16,17 +15,8 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.inference.predictor import (  # noqa: E402
-    KIND_TCIP_MODULE,
-    _kind_from_ckpt,
-    build_predictor,
-    detect_kind,
-)
-from tcip_mcp.pipelines.model_build import (  # noqa: E402
-    build_model,
-    snapshot_model_source,
-    stamp_model_ref,
-)
+from tcip_mcp.pipelines.execution import Stated, prepare_pass  # noqa: E402
+from tcip_mcp.pipelines.model_build import build_model, snapshot_model_source  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
 
@@ -142,32 +132,9 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
         assert hashlib.sha256(dst.read_bytes()).hexdigest() == e["sha256"]  # not clobbered
 
 
-# --------------------------------------------------------------------------
-# KIND_TCIP_MODULE stamping + structural fallback
-# --------------------------------------------------------------------------
+# A pass rebuilds the bespoke model from its builder (no exec) and predicts.
 
-def test_stamp_names_the_kind_from_the_config_and_the_sniff_reads_it():
-    payload = stamp_model_ref({"model_state_dict": {},
-                               "config": {"model_source": _model_source()}})
-    assert payload["kind"] == KIND_TCIP_MODULE
-    assert _kind_from_ckpt(payload, "x.pt") == KIND_TCIP_MODULE
-
-
-def test_stamp_model_ref_refuses_a_payload_with_no_weights():
-    """A payload sniffed as a loadable tcip module (model_source present) must carry its weights,
-    or the predictor fails at inference with a bare KeyError naming no contract."""
-    import pytest
-
-    with pytest.raises(ValueError, match="model_state_dict"):
-        stamp_model_ref({"metrics": {"val_loss": 0.2},
-                         "config": {"model_source": _model_source()}})
-
-
-# --------------------------------------------------------------------------
-# build_predictor rebuilds the bespoke model from its builder (no exec) + predicts
-# --------------------------------------------------------------------------
-
-def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
+def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     from PIL import Image
 
     src = _model_source()
@@ -175,12 +142,8 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
 
     ckpt = tmp_path / "model_best.pt"
-    payload = stamp_model_ref(
-        {"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
-         "config": {"model_source": src, "data": _DATA}})
-    torch.save(payload, ckpt)
-
-    assert detect_kind(str(ckpt)) == KIND_TCIP_MODULE  # kind sniffed from disk
+    torch.save({"model_state_dict": model.state_dict(), "metrics": {"val_loss": 0.3, "epoch": 1},
+                "config": {"model_source": src, "data": _DATA}}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -190,14 +153,13 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
-    predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
-    assert predictor.kind == KIND_TCIP_MODULE
-    assert predictor.task == "detection"
-    assert predictor.in_chans == 3
+    p = prepare_pass(checkpoint, Stated(tile=False, conf=0.0), device="cpu")
+    assert p.predictor.task == "detection"
+    assert p.predictor.in_chans == 3
 
     img = tmp_path / "a.png"
     Image.new("RGB", (64, 64), (120, 120, 120)).save(img)
-    out = predictor.predict(str(img))
+    (out,) = p.predict([str(img)])
     assert {"boxes", "scores", "labels", "count"} <= set(out)  # measurable detection output
 
 
@@ -207,15 +169,13 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     silent default of 3."""
     import numpy as np
 
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.model_build import recorded_model_dims
 
     src = {"builder": "tests.bespoke_models:build_bespoke_classifier", "task": "classification"}
     config = {"model_source": src, "data": {"num_channels": 2, "num_classes": 2, "scope": {}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
-    payload = stamp_model_ref({"model_state_dict": model.state_dict(), "config": config})
-    torch.save(payload, ckpt)
+    torch.save({"model_state_dict": model.state_dict(), "config": config}, ckpt)
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -225,21 +185,19 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     assert "error" not in reg_result, reg_result
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
 
-    predictor = GenericPredictor(checkpoint, device="cpu")
-    assert predictor.in_chans == 2
+    p = prepare_pass(checkpoint, Stated(tile=False), device="cpu")
+    assert p.predictor.in_chans == 2
 
     arr = (np.random.rand(16, 16, 2) * 255).astype(np.uint8)
     img = tmp_path / "two_band.npy"
     np.save(img, arr)
-    out = predictor.predict(str(img))
+    (out,) = p.predict([str(img)])
     assert out  # decoded and forwarded at 2 channels with no shape-mismatch error
 
 
-# --------------------------------------------------------------------------
-# a completed run's registry entry round-trips the bespoke kind
-# --------------------------------------------------------------------------
+# A completed run's registry entry.
 
-def test_register_round_trips_bespoke_kind(tmp_path):
+def test_a_completed_bespoke_runs_entry_carries_its_metrics_and_digest(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -249,6 +207,5 @@ def test_register_round_trips_bespoke_kind(tmp_path):
     [entry] = [m for m in ModelRegistry(str(tmp_path)).list_models()
                if m["experiment_id"] == "expB"]
     assert entry["metrics"]["val_loss"] == pytest.approx(0.3)
-    assert entry["kind"] == KIND_TCIP_MODULE   # read from the stamped checkpoint's payload
     assert entry["sha256"] and len(entry["sha256"]) == 64
     assert entry["experiment_id"] == "expB"

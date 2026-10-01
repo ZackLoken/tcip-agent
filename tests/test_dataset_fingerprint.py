@@ -1,9 +1,10 @@
 """The whole-dataset content fingerprint (dataset identity).
 
-Pins: the fingerprint reuses ``dataset_hash`` for its label term (no second label-hasher); it is
-pixel-aware (a re-encode under the same filename changes it, a gap ``dataset_hash`` alone leaves
-open); registry order matters but whitespace doesn't; it is content-addressed (enumeration-order- and
-path-independent, so a moved dataset keeps its identity); and it is ``None`` for a bespoke dataset.
+Pins: the fingerprint reuses ``ground_truth_digest`` for its label term (no second
+label-hasher); it is pixel-aware (a re-encode under the same filename changes it, a gap a
+labels-only digest leaves open); registry order matters but whitespace doesn't; it is
+content-addressed (enumeration-order- and path-independent, so a moved dataset keeps its
+identity); and it is ``None`` for a bespoke dataset.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
-from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.data import dataset_fingerprint as fingerprint_mod
+from tcip_mcp.pipelines.data import selection
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
 
@@ -37,19 +38,19 @@ def _make_dataset(root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40)
         SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
 
-def test_fingerprint_reuses_dataset_hash_for_labels(tmp_path, monkeypatch):
+def test_fingerprint_reuses_ground_truth_digest_for_labels(tmp_path, monkeypatch):
     _make_dataset(tmp_path)
     calls = []
-    real = resolution.dataset_hash
+    real = selection.ground_truth_digest
 
-    def recording_dataset_hash(*a, **k):
+    def recording_digest(*a, **k):
         calls.append(a)
         return real(*a, **k)
 
-    monkeypatch.setattr(resolution, "dataset_hash", recording_dataset_hash)
+    monkeypatch.setattr(selection, "ground_truth_digest", recording_digest)
     fp = dataset_fingerprint(tmp_path)
     assert fp is not None
-    assert calls, "dataset_fingerprint must call dataset_hash for its label term, not re-implement it"
+    assert calls, "dataset_fingerprint must digest each label document through ground_truth_digest"
 
 
 def test_a_label_edit_changes_the_fingerprint(tmp_path):
@@ -63,8 +64,8 @@ def test_a_label_edit_changes_the_fingerprint(tmp_path):
 
 
 def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
-    """dataset_hash (labels-only) is unchanged, but the fingerprint must change when the pixels
-    change under an untouched filename + labels.
+    """The labels term is unchanged, but the fingerprint must change when the pixels change under
+    an untouched filename + labels.
 
     Uses BMP (uncompressed) rather than JPEG so the re-encode is guaranteed to preserve the file's
     byte size regardless of color: a JPEG re-encode's size varies with content too, so a test built
@@ -74,13 +75,13 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
     """
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before_fp = dataset_fingerprint(tmp_path)
-    before_labels = resolution.dataset_hash(tmp_path / "annotations" / "2026-02-11")
+    before_labels = fingerprint_mod._labels_term(tmp_path / "annotations")
     img_path = tmp_path / "images" / "2026-02-11" / "IMG_1.bmp"
     size_before = img_path.stat().st_size
     # re-encode the image with different pixels, same filename, labels untouched
     Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
     assert img_path.stat().st_size == size_before  # confirms the size channel is closed, not just JPEG luck
-    assert resolution.dataset_hash(tmp_path / "annotations" / "2026-02-11") == before_labels  # labels-only: blind
+    assert fingerprint_mod._labels_term(tmp_path / "annotations") == before_labels  # labels-only: blind
     assert dataset_fingerprint(tmp_path) != before_fp  # fingerprint: pixel-aware, catches it even though size didn't
 
 
@@ -134,22 +135,22 @@ def test_flat_layout_does_not_collide_with_a_subdir_literally_named_annotations(
             != fingerprint_mod._labels_term(nested / "annotations"))
 
 
-def test_labels_term_excludes_a_bucket_sidecar(tmp_path):
-    """A bucket's own provenance stamp beside a real label does not change the dir's labels
-    term, and a dir holding only one has no labels term at all."""
+def test_labels_term_excludes_a_bucket_record(tmp_path):
+    """A bucket's own record beside a real label does not change the dir's labels term, and a
+    dir holding only one has no labels term at all."""
     d = tmp_path / "annotations"
     d.mkdir(parents=True)
     json_io.write_annotations(
         d / "A.json", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    without_sidecar = fingerprint_mod._labels_term(d)
+    without_record = fingerprint_mod._labels_term(d)
 
-    (d / "operating_point.json").write_text("{}", encoding="utf-8")
-    assert fingerprint_mod._labels_term(d) == without_sidecar
+    (d / "bucket.json").write_text("{}", encoding="utf-8")
+    assert fingerprint_mod._labels_term(d) == without_record
 
-    sidecar_only = tmp_path / "sidecar_only"
-    sidecar_only.mkdir()
-    (sidecar_only / "operating_point.json").write_text("{}", encoding="utf-8")
-    assert fingerprint_mod._labels_term(sidecar_only) is None
+    record_only = tmp_path / "record_only"
+    record_only.mkdir()
+    (record_only / "bucket.json").write_text("{}", encoding="utf-8")
+    assert fingerprint_mod._labels_term(record_only) is None
 
 
 def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_own_determinism(
@@ -178,7 +179,7 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
         tmp_path / "subjects.json",
         SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
-    assert dataset_fingerprint(tmp_path) == "2b72f04cd064379a"
+    assert dataset_fingerprint(tmp_path) == "c9a045ab4545c95f"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):

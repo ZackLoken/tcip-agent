@@ -252,39 +252,35 @@ def verified_checkpoint(project_root: str | Path, **kwargs: Any):
                                       project=Path(project_root))
 
 
-def run_inference_verified(project: Path, checkpoint_path: str, **overrides: Any):
-    """``_run_inference_verified`` for ``project`` over the checkpoint registered at
-    ``checkpoint_path``, with no bucket persisted: ``overrides`` sets any of its keyword
-    arguments, the rest take ``run_inference``'s unstated defaults, and ``results`` comes back as
-    a list. A checkpoint the registry refuses returns ``{"error": ...}``."""
-    import inspect
+def tiled_record(*, tile_size: int, overlap: float, conf: float,
+                 tile_resize: tuple[int, int] | None = None, cross_tile_nms: float = 0.3):
+    """A detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``
+    (each stated), merging by NMS at ``cross_tile_nms``, built by the producers a pass builds its
+    own with (``untiled_execution`` then ``tiled_execution``)."""
+    from types import SimpleNamespace
 
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-    from tcip_mcp.tools.inference_tools import _run_inference_verified, run_inference
+    from tcip_mcp.pipelines.execution import tiled_execution, untiled_execution
+    from tcip_mcp.pipelines.inference.predictor import TileGeometry
 
-    try:
-        checkpoint = load_registered_checkpoint(checkpoint_path, project=Path(project))
-    except UnregisteredCheckpoint as exc:
-        return {"error": str(exc)}
-    # Read off run_inference's own defaults rather than restate them, so this stand-in for its
-    # private pass cannot drift from the door it stands in for.
-    door_defaults = inspect.signature(run_inference).parameters
-    kwargs: dict[str, Any] = {
-        "images_dir": None, "conf_threshold": None, "device": None,
-        "tile": None, "tile_size": None, "overlap": None,
-        "tile_batch_size": door_defaults["tile_batch_size"].default,
-        "cross_tile_nms": None, "max_dets": None, "postprocess": "nms", "trait": None,
-        "calibration_labels_dir": None, "calibration_images_dir": None,
-        "group_by": None, "group_key_map": None,
-        "split_seed": door_defaults["split_seed"].default,
-        "split_holdout_ratio": door_defaults["split_holdout_ratio"].default,
-        "selection_dir": None,
-    }
-    kwargs.update(overrides)
-    result = _run_inference_verified(Path(project), checkpoint, **kwargs)
-    if "results" in result:
-        result["results"] = list(result["results"])
-    return result
+    detector = SimpleNamespace(task="detection", path="detector.pt")
+    geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit",
+                            tile_size_derived_from=None, overlap=overlap,
+                            overlap_source="explicit", tile_resize=tile_resize)
+    return tiled_execution(untiled_execution(detector, conf=conf, max_dets=None), geometry,
+                           postprocess="nms", cross_tile_nms=cross_tile_nms)
+
+
+def predicted_over(project: Path, checkpoint_path: str, images_dir: str, *,
+                   device: str | None = None, **stated: Any):
+    """The pass ``run_inference`` prepares for the checkpoint registered at ``checkpoint_path``
+    over ``images_dir`` (``execution.prepare_pass`` under the ``stated`` execution values), run
+    without publishing: ``(pass, results)``."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+
+    p = prepare_pass(load_registered_checkpoint(checkpoint_path, project=Path(project)),
+                     Stated(**stated), images_dir=images_dir, device=device)
+    return p, [r for path in p.paths for r in p.predict([path])]
 
 
 def completed_checkpoint(run_dir: Path) -> dict | None:
@@ -299,9 +295,13 @@ def completed_checkpoint(run_dir: Path) -> dict | None:
 
 
 def checkpoint_file(path: Path, content: str) -> Path:
-    """A checkpoint file at ``path`` the verified reader admits, holding ``content`` alone, in
-    torch's pickle format so that one content always writes the same bytes. Returns ``path``."""
-    torch.save({"content": content}, path, _use_new_zipfile_serialization=False)
+    """A checkpoint file at ``path`` the verified reader admits, holding ``content`` beside an
+    empty set of weights, in torch's pickle format so that one content always writes the same
+    bytes. Returns ``path``."""
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+
+    torch.save({"content": content, STATE_DICT_KEY: {}}, path,
+               _use_new_zipfile_serialization=False)
     return path
 
 

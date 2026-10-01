@@ -14,7 +14,7 @@ from pathlib import Path
 
 from tcip_store import store
 
-from tcip_annotation.json_io import is_sidecar_name
+from tcip_annotation.json_io import is_reserved_stem
 from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
@@ -244,7 +244,7 @@ def ingest_images(
     skipped_collisions, reserved_name_skips, errors, unreadable_dates, move, band_groups}``,
     where ``unreadable_dates`` names each ingested file whose capture date could
     not be read and the reason, and ``reserved_name_skips`` names each source file not ingested
-    because its own stem is reserved for a prediction bucket's own provenance stamp.
+    because its own stem is reserved for a prediction bucket's own record.
     ``skipped_collisions`` names only an exact re-ingest. A band group whose formed stem (the
     siblings' common prefix) is reserved the same way is not written as a manifest either;
     ``band_groups.reserved_name_skips`` names each one, in the shape of ``band_groups.formed``.
@@ -261,9 +261,8 @@ def ingest_images(
     reserved_name_skips: list[dict] = []
     resolved_sources: list[tuple[Path, str, str | None]] = []
     for src_path in sources:
-        if is_sidecar_name(dataset_layout.label_filename(src_path.stem)):
-            # This stem is a bucket's own provenance stamp (json_io.SIDECAR_FILENAMES), reserved
-            # so no bucket walk can mistake one for a label.
+        if is_reserved_stem(src_path.stem):
+            # A bucket's own record name is reserved so no bucket walk can mistake it for a label.
             reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
             continue
         bucket, date_unreadable = _bucket_for(src_path, date_from)

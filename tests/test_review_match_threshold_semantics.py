@@ -59,22 +59,27 @@ def _write_gt(path: Path, boxes) -> None:
                       IMG_W, IMG_H, keep_empty=True)
 
 
-def _write_pred(path: Path, preds) -> None:
-    write_annotations(
-        str(path),
-        [Annotation(subject="bud", geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
-         for p in preds],
-        IMG_W, IMG_H,
-    )
+def _publish_pred(tmp_path: Path, img: Path, preds) -> Path:
+    """``preds`` over ``img`` published as a bucket; the image's document."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
+        {"image": str(img), "width": IMG_W, "height": IMG_H,
+         "boxes": [list(p[:4]) for p in preds], "scores": [p[4] for p in preds],
+         "labels": [1] * len(preds)}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    document = bucket.document(img)
+    assert document is not None
+    return document
 
 
 def _scene(tmp_path: Path):
-    """The three-object scene, its prediction file, and an empty project root."""
+    """The three-object scene, its published predictions, and an empty project root."""
     img = _image(tmp_path)
     gt = tmp_path / "gt.json"
-    pred = tmp_path / "pred.json"
     _write_gt(gt, GT_BOXES)
-    _write_pred(pred, PRED_BOXES)
+    pred = _publish_pred(tmp_path, img, PRED_BOXES)
     dataset_root = tmp_path / "proj"
     (dataset_root / ".tcip" / "state").mkdir(parents=True)
     return img, gt, pred, dataset_root
@@ -142,9 +147,8 @@ def test_completion_check_counts_detections_at_the_requested_operating_point(
     that one verdict flip the image to completed."""
     img = _image(tmp_path)
     gt = tmp_path / "gt.json"
-    pred = tmp_path / "pred.json"
     _write_gt(gt, [GT_BOXES[0]])
-    _write_pred(pred, [PRED_BOXES[0]])
+    pred = _publish_pred(tmp_path, img, [PRED_BOXES[0]])
     dataset_root = tmp_path / "proj"
     (dataset_root / ".tcip" / "state").mkdir(parents=True)
 

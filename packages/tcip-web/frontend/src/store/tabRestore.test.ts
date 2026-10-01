@@ -15,7 +15,6 @@ function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
     dataset_root: ROOT,
     subject: "subject_a",
     date: "2026-01-01",
-    model_name: null,
     image_list: ["a.jpg"],
     current_image_index: 0,
     images_dir: null,

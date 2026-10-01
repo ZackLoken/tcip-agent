@@ -18,7 +18,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     read_plant_csvs,
 )
 
-from tests._binding_fixtures import write_geo_image as _write_geo_image
+from tests._image_fixtures import write_geo_image as _write_geo_image
 
 PLANTS = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},

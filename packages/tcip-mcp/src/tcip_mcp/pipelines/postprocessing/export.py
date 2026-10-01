@@ -1,8 +1,8 @@
-"""CSV export for per-plant phenotyping results."""
+"""Encoding a pass's predictions as per-image documents, and delivering a bucket's per-image
+counts."""
 
 from __future__ import annotations
 
-import csv
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.resolution import Acknowledgment
-    from tcip_mcp.traits import TraitRevision
 
 logger = logging.getLogger(__name__)
 
@@ -45,49 +43,31 @@ def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
     return kept
 
 
-def positive_detections(image_result: dict) -> tuple[int, list[float]]:
-    """One image's raw predictor result narrowed to real detections (:func:`stored_geometries`):
-    the kept count and the kept confidence scores, as :func:`write_predictions_json` persists them.
-
-    Falls back to ``image_result["count"]`` when no ``boxes`` are present at all.
-    """
-    scores = image_result.get("scores", [])
-    if not image_result.get("boxes"):
-        return image_result.get("count", 0), scores
-    kept = stored_geometries(image_result)
-    return len(kept), [s for i, s in enumerate(scores) if i in kept]
-
-
 def _run_class_id(label: int) -> int:
     """The 0-indexed run class id a 1-indexed torchvision label (background 0) stands for."""
     return max(int(label) - 1, 0)
 
 
-def write_predictions_json(
-    json_path: str | Path, result: dict, created_by: str | None = None, *, scope: "ClassScope",
-) -> int:
-    """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
+def encode_predictions(
+    result: dict, created_by: str | None = None, *, scope: "ClassScope",
+) -> tuple[bytes, int]:
+    """A detection result encoded as its name-based per-image prediction document
+    (:func:`~tcip_annotation.json_io.encode_annotations`), and the number of detections dropped.
 
-    ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
-    image ``width``/``height``. Each detection's numeric label is decoded via ``scope``'s map, the
-    run's own admitted class space, as its checkpoint records it.
+    ``result`` carries its source ``image``, pixel-xyxy ``boxes``, 1-indexed ``labels``
+    (background=0), ``scores``, and image ``width``/``height``; a result missing one of them, or
+    whose boxes, scores and labels differ in length, refuses (``ValueError``) naming it, and so
+    does an image of a reserved stem. Each label is decoded via ``scope``'s map; the first it
+    cannot decode refuses naming the id and the map's ids. Under a classified scope the decoded
+    name lands in ``attributes[attribute]`` and ``subject`` carries the object class, otherwise
+    ``subject`` carries the name. An image with no detection encodes ``{"annotations": []}``.
+    ``created_by`` stamps every prediction.
 
-    Under a classified scope every decoded name lands in ``attributes[attribute]`` and ``subject``
-    carries the object class itself; otherwise ``subject`` carries the decoded name and
-    ``attributes`` stays empty. The first label the map cannot decode refuses (``ValueError``,
-    naming the id and the map's own ids). ``keep_empty=True`` so a processed image with zero detections
-    still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model on every
-    prediction.
-
-    When ``result`` carries ``masks`` (``instance_seg``), each is a ``{"segmentation"}`` dict of
-    flat polygons in full-image pixels, binarized by the predictor at the threshold the result's
-    own ``mask_binarize`` records, and becomes a ``Polygon`` with one ring per polygon. A mask
-    that binarized to nothing falls back to the detection's ``BBox`` (a warning is logged). The
-    threshold is recorded once in the run's ``operating_point.json``, not on each annotation.
-
-    A detection whose box or mask-derived box has no extent is dropped. Returns the number dropped.
-    Mutates ``result`` in place to drop the same entries from its
-    ``boxes``/``scores``/``labels``/``masks``/``count``.
+    ``masks`` (``instance_seg``), one ``{"segmentation"}`` of flat full-image polygons per
+    detection, become one ``Polygon`` ring per polygon; a mask that binarized to nothing stores the
+    detection's ``BBox`` (logged). A detection whose stored geometry has no extent is dropped, and
+    the same entries are dropped from ``result``'s ``boxes``/``scores``/``labels``/``masks``/
+    ``count`` in place.
     """
     from datetime import datetime, timezone
 
@@ -95,26 +75,27 @@ def write_predictions_json(
     from tcip_annotation.state import Annotation
     from tcip_mcp.subject_registry import decode_class_ids
 
-    p = Path(json_path)
-    if json_io.is_sidecar_name(p.name):
-        raise ValueError(
-            f"{p.name} names one of a prediction bucket's own provenance stamps; an image whose "
-            "stem is reserved this way can never be written as a bucket's per-image prediction "
-            "document, since the stamp write would then destroy or refuse over it."
-        )
+    missing = [k for k in ("image", "width", "height", "boxes", "scores", "labels")
+               if k not in result]
+    if missing:
+        raise ValueError(f"the result for {result.get('image')!r} carries no {missing}: a "
+                         "prediction document holds a detection head's boxes, scores and "
+                         "labels for one source image, so nothing here is publishable.")
+    p = Path(result["image"])
+    boxes, scores, labels = result["boxes"], result["scores"], result["labels"]
+    if not len(boxes) == len(scores) == len(labels):
+        raise ValueError(f"{p.name}: the result carries {len(boxes)} boxes, {len(scores)} scores "
+                         f"and {len(labels)} labels, which name no one set of detections.")
     attribute = scope.attribute
     w, h = result["width"], result["height"]
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
     id_to_name = decode_class_ids(scope.id_map or {})
     masks = result.get("masks")
-    boxes = result.get("boxes", [])
-    scores = result.get("scores", [])
-    labels = result.get("labels", [])
     stored = stored_geometries(result)
     preds: list[Annotation] = []
     kept_indices: list[int] = []
     dropped = 0
-    for i, (score, label) in enumerate(zip(scores, labels)):
+    for i, (score, label) in enumerate(zip(scores, labels, strict=True)):
         cid = _run_class_id(label)
         if cid not in id_to_name:
             raise ValueError(
@@ -134,7 +115,8 @@ def write_predictions_json(
                                 attributes=pred_attributes,
                                 created_by=created_by, created_at=created_at))
         kept_indices.append(i)
-    json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
+    _key, data = json_io.encode_annotations(p, preds, int(w), int(h), keep_empty=True)
+    assert data is not None, "keep_empty encodes every document"
     if dropped:
         kept = set(kept_indices)
         result["boxes"] = [b for i, b in enumerate(boxes) if i in kept]
@@ -143,7 +125,28 @@ def write_predictions_json(
         result["count"] = len(kept_indices)
         if masks is not None:
             result["masks"] = [m for i, m in enumerate(masks) if i in kept]
-    return dropped
+    return data, dropped
+
+
+def encode_head_output(result: dict, *, task: str) -> tuple[bytes, int]:
+    """A classification, ordinal, regression or semantic segmentation result encoded as its
+    document: the source image's stem, its ``width`` and ``height``, the head's ``task`` and every
+    output the head returned under ``outputs``, as returned; no detection is ever dropped. A
+    result carrying no output, and an image of a reserved stem, refuse (``ValueError``)."""
+    from tcip_annotation.json_io import is_reserved_stem
+    from tcip_store import RECORD_JSON
+
+    stem = Path(result["image"]).stem
+    outputs = {k: v for k, v in result.items() if k not in ("image", "width", "height")}
+    if not outputs:
+        raise ValueError(f"the {task} result for {result['image']!r} carries no output, so "
+                         "nothing here is publishable.")
+    if is_reserved_stem(stem):
+        raise ValueError(f"{stem} would name its document after a prediction bucket's own "
+                         "record, so it can never have a per-image document.")
+    return RECORD_JSON.encode({"image": stem, "width": int(result["width"]),
+                               "height": int(result["height"]), "task": task,
+                               "outputs": outputs}), 0
 
 
 def _mask_geometry_for_export(
@@ -170,168 +173,43 @@ def _mask_geometry_for_export(
     return BBox(x1, y1, x2, y2)
 
 
-_PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "operating_point_conf",
-                       "produced_at", "operating_point_validated", "unvalidated_dimensions",
-                       "validation_record", "acknowledged_by", "acknowledgment_reason"]
+def deliver_per_image_counts_csv(
+    project: Path, bucket_path: Path, output_path: str, *, trait: str,
+    acknowledgment_id: str | None, door: str,
+) -> dict:
+    """Deliver the per-image counts of the published bucket at ``bucket_path`` as the CSV at
+    ``output_path``, under ``trait``'s latest confirmed revision stating a ``per_image_count``
+    operationalization.
 
-_MEASUREMENT_DOCUMENT = "operating_point"
-"""The sidecar document every per-image count rests on: the count operating point."""
-
-
-def export_detection_csv(
-    image_results: list[dict],
-    output_path: str,
-    provenance: dict | None = None,
-    *,
-    revision: TraitRevision,
-    operating_point_validated: str | None = None,
-    pred_dirs: list[str] | None = None,
-    acknowledgment: Acknowledgment | None = None,
-    project: Path,
-) -> tuple[str, dict, dict]:
-    """Export per-image detection counts to CSV.
-
-    A delivery door: it refuses a bare write (an unvalidated count with no acknowledgment) via
-    ``check_delivery_gate`` and stamps the reconciled validity into every row. ``pred_dirs`` (the
-    prediction buckets the counts came from) has the count operating point's validity read from
-    each ``operating_point.json`` sidecar and floored against ``operating_point_validated``. A
-    bucket produced by a tiled run gates on its ``tile_size`` too; untiled buckets never do. The
-    physical-scale dimension is never operative here. Without ``pred_dirs`` the operating_point
-    dimension floors to unvalidated. ``acknowledgment`` is the breeder's own act of shipping this
-    delivery unvalidated, or ``None``.
-
-    The ``provenance`` cells are built by ``delivered_tail`` from the verification the gate ran: a
-    producer this delivery cannot corroborate reads unknown, ``produced_at`` is the write's own
-    timestamp, and ``validation_record`` names the record the claim was earned against.
-    ``acknowledged_by``/``acknowledgment_reason`` carry the gate's own effective acknowledgment
-    (blank together on a fully validated delivery, since the gate discards an acknowledgment that
-    cleared nothing).
-
-    Every row also carries ``measurement_document``, always ``"operating_point"``.
-
-    Before composing the gate's flags, every bucket in ``pred_dirs`` is bound to ``revision``
-    (``operationalization.bind``): its stamp must record ``revision``'s trait or none, and the
-    object classes it counted (its scope's subject, else its recorded ``id_map`` keys; nothing for
-    a bucket with no stamp) must include the ``per_image_count``
-    operationalization's measured subject. The delivery event names ``revision``.
-
-    Args:
-        image_results: List of dicts with 'image', 'count', 'boxes', etc.
-        output_path: Path for the output CSV file.
-        provenance: Optional producing-model / operating-point stamp added as trailing columns.
-        revision: The confirmed trait revision stating the ``per_image_count`` operationalization
-            this delivery ships under (``operationalization.confirmed_revision``).
-        operating_point_validated: The count operating point's reconciled validity reference.
-            Floored against each bucket's on-disk sidecar when ``pred_dirs`` is given; floored to
-            unvalidated otherwise.
-        pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
-            tile-geometry) validity from.
-        acknowledgment: The breeder's own act of shipping this delivery unvalidated, or ``None``.
-        project: The project this delivery belongs to, whose runs verify its buckets and
-            whose log records its event.
-
-    Returns:
-        ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
-        ``delivered_tail`` composed and wrote into every row, and the gate's own evaluation summary
-        (``stamp``, ``unvalidated``, ``tile_size_operative``, ``tile_size_validated``,
-        ``binding_notes``).
-
-    Raises:
-        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgment that
-            clears it); carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
-        OperationalizationRefused (``tcip_mcp.operationalization``): a bucket ``revision`` does
-            not bind.
-        AuditEntryNotWritten (``tcip_mcp.audit``): the delivery-event audit line could not be
-            appended, raised by ``record_delivery_binding_event`` after the CSV and the
-            ``delivery_events`` record were written.
+    The population is the bucket's own documents, as its record names them, and a raster bucket
+    refuses. It clears the one gate (:func:`~tcip_mcp.delivery.gate`), the recorded
+    acknowledgment ``acknowledgment_id`` shipping it unvalidated when the gate does not validate
+    it. Each row is one document in stem
+    order: ``image`` (its source file name), ``detection_count``, ``avg_confidence`` and the
+    delivery's own cells, written with the delivery's one event under ``door``
+    (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
-    from tcip_mcp.operationalization import bind
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.buckets import detection_rows, read_bucket
+    from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate
+    from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.traits import PER_IMAGE_COUNT
-    from tcip_annotation.json_io import safe_score
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
-        DeliveryRefused,
-        binding_notes_text,
-        check_delivery_gate,
-        delivered_tail,
-        read_operating_point_sidecar,
-        record_delivery_binding_event,
-        reconcile_operating_point_validity,
-        reconcile_tile_size_validity,
-    )
 
-    buckets: dict[str, tuple[str | None, set[str]]] = {}
-    for d in (pred_dirs or []):
-        stamp = read_operating_point_sidecar(Path(d))
-        scope = ClassScope.of(stamp) if stamp is not None else ClassScope()
-        buckets[d] = (stamp["trait"] if stamp is not None else None,
-                      set(scope.id_map) if scope.id_map and not scope.classified
-                      else {scope.subject} if scope.subject else set())
-    bind(revision, PER_IMAGE_COUNT, buckets=buckets)
-    trait = revision.entry.name
-
-    # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
-    # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
-    flags: dict[str, str | None] = {"operating_point": VALIDATED_FALSE}
-    operating_point_recon: dict | None = None
-    tile_recon: dict | None = None
-    if pred_dirs:
-        # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
-        # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
-        operating_point_recon = reconcile_operating_point_validity(
-            pred_dirs, project=project, trait=trait, asserted=operating_point_validated)
-        flags["operating_point"] = operating_point_recon["validated"]
-        tile_recon = reconcile_tile_size_validity(pred_dirs, project=project)
-        if tile_recon["operative"]:
-            flags["tile_size"] = tile_recon["validated"]
-
-    notes = binding_notes_text({
-        **(operating_point_recon or {}).get("binding_notes", {}),
-        **(tile_recon or {}).get("binding_notes", {}),
-    })
-    gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
-    if not gate.ok:
-        raise DeliveryRefused(gate, notes)
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-    stamp = delivered_tail(provenance, (operating_point_recon or {}).get("bindings", {}), gate,
-                           columns=_PROVENANCE_COLUMNS, project=project)
-    fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
-                 + _PROVENANCE_COLUMNS)
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
-        for r in image_results:
-            detection_count, scores = positive_detections(r)
-            # Quantized at the persisted precision before averaging, never a re-spelled round(x, 4).
-            safe_scores = [safe_score(s) for s in scores]
-            avg_conf = sum(safe_scores) / len(safe_scores) if safe_scores else 0.0
-            writer.writerow({
-                "image": Path(r.get("image", "")).name,
-                "detection_count": detection_count,
-                "avg_confidence": round(avg_conf, 4),
-                "measurement_document": _MEASUREMENT_DOCUMENT,
-                **stamp,
-            })
-
-    record_delivery_binding_event(
-        "export_detection_csv", output_path, pred_dirs,
-        document_reconciliations=(
-            {_MEASUREMENT_DOCUMENT: operating_point_recon} if operating_point_recon is not None
-            else {}
-        ),
-        dimension_reconciliations={"tile_size": tile_recon} if tile_recon is not None else {},
-        acknowledgment=gate.effective_acknowledgment(), revision=revision,
-        delivery_kind=PER_IMAGE_COUNT, project=project)
-    summary = {
-        "stamp": gate.stamp,
-        "unvalidated": gate.unvalidated,
-        "tile_size_operative": (tile_recon or {}).get("operative", False),
-        "tile_size_validated": (tile_recon or {}).get("validated"),
-        "binding_notes": notes,
-    }
-    return output_path, stamp, summary
+    revision = confirmed_revision(PER_IMAGE_COUNT, project=project, trait=trait)
+    bucket = read_bucket(bucket_path)
+    if bucket.raster_path is not None:
+        raise ValueError(f"{bucket_path} holds one whole-raster prediction: a mosaic total is not "
+                         "a per-image count. Deliver per-plant counts from it through "
+                         "deliver_orthomosaic_plant_counts.")
+    rows = detection_rows(bucket)
+    result = Result(
+        ["image", "detection_count", "avg_confidence", *DELIVERY_COLUMNS],
+        [{"image": r["image"], "detection_count": r["count"],
+          "avg_confidence": round(sum(r["scores"]) / len(r["scores"]), 4) if r["scores"] else ""}
+         for r in rows],
+        population=sorted(bucket.documents))
+    clearance = gate(project, [bucket], delivery_kind=PER_IMAGE_COUNT, revision=revision,
+                     result=result, acknowledgment_id=acknowledgment_id)
+    delivered = deliver_csv(project, output_path, result, clearance=clearance, revision=revision,
+                            door=door, delivery_kind=PER_IMAGE_COUNT)
+    return {**delivered, "image_count": len(rows),
+            "total_detections": sum(r["count"] for r in rows), "predictions_dir": str(bucket_path)}

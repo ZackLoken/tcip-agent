@@ -25,7 +25,6 @@ from tcip_web.routes import (
     terminal,
     training,
     tuning,
-    validation,
 )
 
 
@@ -37,7 +36,6 @@ def register_all(app: FastAPI) -> None:
     app.include_router(images.router)
     app.include_router(annotate.router)
     app.include_router(review.router)
-    app.include_router(validation.router)
     app.include_router(training.router)
     app.include_router(inference.router)
     app.include_router(results.router)

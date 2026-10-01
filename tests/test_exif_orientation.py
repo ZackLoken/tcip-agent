@@ -125,7 +125,9 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
-    tiled = TiledDetectionDataset(base, tile_size=64, overlap=0.25, skip_empty=True)
+    # sliver_frac stated: one marker box derives no size spread.
+    tiled = TiledDetectionDataset(base, tile_size=64, overlap=0.25, skip_empty=True,
+                                  sliver_frac=0.5)
     assert tiled.num_samples > 0
 
     # The marker (20,30,55,60) lies fully inside the origin tile [0:64, 0:64] in the upright

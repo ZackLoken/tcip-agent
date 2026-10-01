@@ -270,10 +270,30 @@ def test_pixel_to_native_returns_plain_floats(tmp_path: Path) -> None:
 TILE = 32
 
 
-def _sliced(predictor, source, **kwargs) -> dict:
-    """``predict_sliced`` at this module's lattice: ``TILE`` edge, 0.2 overlap, NMS at 0.3."""
-    call = dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
-                tile_batch_size=8, tile_resize=None, require_masks=True)
+def _pass(tmp_path: Path, ckpt: str):
+    """The pass the registered ``ckpt`` runs at this module's lattice: ``TILE`` edge, 0.2
+    overlap, NMS at 0.3, every detection kept."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
+
+    return prepare_pass(
+        load_registered_checkpoint(ckpt, project=tmp_path),
+        Stated(tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
+               conf=0.0), device="cpu", tile_batch_size=8)
+
+
+def _bare_execution():
+    """A tiled record at this module's lattice for a bare predictor that refuses or fails before
+    any forward pass, so no checkpoint stands behind it."""
+    from tests._verified_checkpoint_fixtures import tiled_record
+
+    return tiled_record(tile_size=TILE, overlap=0.2, conf=0.0)
+
+
+def _sliced(predictor, execution, source, **kwargs) -> dict:
+    """``predict_sliced`` under ``execution``, eight tiles a batch, masks collected unless
+    ``kwargs`` says otherwise."""
+    call: dict = dict(execution=execution, tile_batch_size=8, require_masks=True)
     call.update(kwargs)
     return predictor.predict_sliced(source, **call)
 
@@ -341,22 +361,19 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
     ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
     _register_checkpoint(tmp_path, ckpt, name="ortho-detection")
 
-    full = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
-                            device="cpu", score_threshold=0.0)
-    full_result = _sliced(full, str(path))
+    full = _pass(tmp_path, ckpt)
+    full_result = _sliced(full.predictor, full.execution, str(path))
 
-    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
-                                device="cpu", score_threshold=0.0)
+    windowed = _pass(tmp_path, ckpt)
     with open_raster(path, arr.shape[-1]) as reader:
-        win_result = _sliced(windowed, reader, source_label=str(path))
+        win_result = _sliced(windowed.predictor, windowed.execution, reader,
+                             source_label=str(path))
 
     assert win_result["width"] == full_result["width"] == arr.shape[1]
     assert win_result["height"] == full_result["height"] == arr.shape[0]
@@ -392,22 +409,19 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(t
     detection-for-detection, masks included."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    full = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
-                            device="cpu", score_threshold=0.0)
-    full_result = _sliced(full, str(path))
+    full = _pass(tmp_path, ckpt)
+    full_result = _sliced(full.predictor, full.execution, str(path))
 
-    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project=tmp_path),
-                                device="cpu", score_threshold=0.0)
+    windowed = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
-        win_result = _sliced(windowed, reader, source_label=str(path))
+        win_result = _sliced(windowed.predictor, windowed.execution, reader,
+                             source_label=str(path))
 
     assert "masks" in full_result and "masks" in win_result
     assert len(full_result["masks"]) == len(win_result["masks"]) == full_result["count"]
@@ -425,52 +439,46 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
+    p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
-        result = _sliced(predictor, reader, require_masks=False)
+        result = _sliced(p.predictor, p.execution, reader, require_masks=False)
     assert "masks" not in result
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
 
 
 def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_path: Path) -> None:
     """A sliced instance_seg detection's merged polygon round-trips through
-    ``write_predictions_json`` to a polygon at the same full-mosaic pixels."""
+    ``encode_predictions`` to a polygon at the same full-mosaic pixels."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
-    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
     _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
+    p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
-        result = _sliced(predictor, reader, source_label=str(path))
+        result = _sliced(p.predictor, p.execution, reader, source_label=str(path))
     assert result["count"] > 0, "fixture assumes at least one surviving detection"
 
     # A clean polygon past the first slice replaces whatever the untrained model predicted: the
     # point is where export places it, not the from-scratch-weights mask content.
     result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
 
-    out = tmp_path / "pred.json"
-    write_predictions_json(out, result, scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
-    anns = json_io.read_annotations(str(out))
+    data, _dropped = encode_predictions(result,
+                                        scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
+    anns = json_io.annotations_from_bytes(data, source=str(path))
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
     ys = [y for ring in anns[0].geometry.rings for _, y in ring]
@@ -495,12 +503,10 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "detection"
-    p.score_threshold = 0.0
-    p.max_dets = None
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="channel"):
-        _sliced(p, _FakeReader())
+        _sliced(p, _bare_execution(), _FakeReader())
 
 
 def test_predict_sliced_windowed_source_reaches_real_slicing_for_instance_seg_with_and_without_masks() -> None:
@@ -520,18 +526,16 @@ def test_predict_sliced_windowed_source_reaches_real_slicing_for_instance_seg_wi
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "instance_seg"
-    p.score_threshold = 0.0
-    p.max_dets = None
     p.in_chans = 3
     p.model_source = None
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")
 
     with pytest.raises(AssertionError):
-        _sliced(p, _FakeReader())
+        _sliced(p, _bare_execution(), _FakeReader())
 
     with pytest.raises(AssertionError):
-        _sliced(p, _FakeReader(), require_masks=False)
+        _sliced(p, _bare_execution(), _FakeReader(), require_masks=False)
 
 
 def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
@@ -549,12 +553,10 @@ def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "classification"
-    p.score_threshold = 0.0
-    p.max_dets = None
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="detection"):
-        _sliced(p, _FakeReader())
+        _sliced(p, _bare_execution(), _FakeReader())
 
 
 # ── Per-detection plant assignment ───────────────────────────────────────

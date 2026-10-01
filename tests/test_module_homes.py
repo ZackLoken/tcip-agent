@@ -73,20 +73,20 @@ def _def_name_counts(
 
 
 def _assert_one_home(
-    names: set[str], old_path: Path, new_path: Path,
+    names: set[str], old_path: "Path | None", new_path: Path,
     node_types: tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef),
     extra_roots: tuple[Path, ...] = (),
     roots: "tuple[Path, ...] | None" = None,
 ) -> None:
     """``roots`` scopes the "defined nowhere else" scan; defaults to :func:`_package_roots`
     (tcip_mcp + tcip_annotation), which covers a move within the training layer. A move confined
-    to tcip_web passes ``roots=(_web_src_root(),)``."""
-    assert old_path.is_file(), f"{old_path} does not exist"
+    to tcip_web passes ``roots=(_web_src_root(),)``. ``old_path`` is ``None`` for a module that no
+    longer exists, whose absence the elsewhere-scan covers."""
     assert new_path.is_file(), f"{new_path} does not exist"
-
-    old_counts = _def_name_counts(old_path, node_types)
-    stray = names & set(old_counts)
-    assert not stray, f"{old_path.name} still defines {sorted(stray)}"
+    if old_path is not None:
+        assert old_path.is_file(), f"{old_path} does not exist"
+        stray = names & set(_def_name_counts(old_path, node_types))
+        assert not stray, f"{old_path.name} still defines {sorted(stray)}"
 
     new_counts = _def_name_counts(new_path, node_types)
     missing = names - set(new_counts)
@@ -108,11 +108,10 @@ def _assert_one_home(
 
 def test_split_construction_functions_have_one_home():
     """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity`` and
-    ``spatial_split_raster_identity`` moved out of ``training_tools.py`` into
+    ``raster_identity`` moved out of ``training_tools.py`` into
     ``pipelines/data/split_construction.py`` (beside ``splits.py``), public and unaliased."""
     _assert_one_home(
-        {"auto_train_val", "spatial_single_source_split", "dataset_identity",
-         "spatial_split_raster_identity"},
+        {"auto_train_val", "spatial_single_source_split", "dataset_identity", "raster_identity"},
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),
     )
@@ -150,12 +149,10 @@ def test_collation_functions_have_one_home():
 
 
 def test_eval_runner_functions_have_one_home():
-    """``run_test_evaluation``, ``run_full_frame_evaluation``, ``evaluation_result`` and
-    ``_producer_identity`` live in ``pipelines/training/eval_runners.py`` as one unit, never in
-    ``evaluation.py``."""
+    """``run_test_evaluation``, ``run_full_frame_evaluation`` and ``evaluation_result`` live in
+    ``pipelines/training/eval_runners.py`` as one unit, never in ``evaluation.py``."""
     _assert_one_home(
-        {"run_test_evaluation", "run_full_frame_evaluation", "evaluation_result",
-         "_producer_identity"},
+        {"run_test_evaluation", "run_full_frame_evaluation", "evaluation_result"},
         _module_path("pipelines/training/evaluation.py"),
         _module_path("pipelines/training/eval_runners.py"),
     )
@@ -179,7 +176,7 @@ def test_label_query_functions_have_one_home():
     lost its underscore; a helper only ``label_queries.py`` calls internally kept its private
     name."""
     _assert_one_home(
-        {"authored_frame", "resolved_subjects_path", "resolve_registry_id_map",
+        {"resolved_subjects_path", "resolve_registry_id_map",
          "json_det_targets", "ground_truth_shape", "admit", "samples_over",
          "admitted_documents", "require_admitted", "_label_record_state", "_raw_status_store",
          "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records"},
@@ -208,11 +205,11 @@ def _assign_name_counts(path: Path) -> Counter:
 
 def test_dataset_fingerprint_functions_have_one_home():
     """The fingerprint block (``dataset_fingerprint`` and its four term helpers) lives in
-    ``pipelines/data/dataset_fingerprint.py``, not ``resolution.py``."""
+    ``pipelines/data/dataset_fingerprint.py`` and nowhere else."""
     _assert_one_home(
         {"dataset_fingerprint", "_labels_term", "_images_term", "_registry_term",
          "_confirmations_term"},
-        _module_path("pipelines/resolution.py"),
+        None,
         _module_path("pipelines/data/dataset_fingerprint.py"),
     )
 
@@ -305,14 +302,12 @@ def test_checkpoint_marker_keys_have_one_home():
             "tools/training_tools.py": _module_path("tools/training_tools.py"),
             "pipelines/inference/generic_predictor.py":
                 _module_path("pipelines/inference/generic_predictor.py"),
-            "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),
         }),
         "model_state_dict": ("STATE_DICT_KEY", {
             "pipelines/training/generic_trainer.py":
                 _module_path("pipelines/training/generic_trainer.py"),
             "pipelines/inference/generic_predictor.py":
                 _module_path("pipelines/inference/generic_predictor.py"),
-            "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),
         }),
     }
 
@@ -336,65 +331,12 @@ def test_checkpoint_marker_keys_have_one_home():
             assert imported, f"{name} reads {const_name} without importing it from model_build"
 
 
-def test_calibration_sweep_functions_have_one_home():
-    """``calibrate_operating_point`` (de-underscored from ``_calibrate_operating_point``) and
-    ``gate_evidence_summary`` (de-underscored from ``_sweep_summary``, then renamed off the
-    calibration sense of "sweep") moved out of ``tools/inference_tools.py`` into
-    ``pipelines/calibration.py``, their consumers being cross-module (``_run_inference_verified``
-    and a dozen-plus test files)."""
-    _assert_one_home(
-        {"calibrate_operating_point", "gate_evidence_summary"},
-        _module_path("tools/inference_tools.py"),
-        _module_path("pipelines/calibration.py"),
-    )
-
-
-def test_redraw_calibration_holdout_has_one_home():
-    """``redraw_calibration_holdout`` moved out of ``tools/inference_tools.py`` into
-    ``tools/calibration_tools.py``, name unchanged. Decorators are not this test's concern:
-    ``_assert_one_home`` reads def names only, never a decorator list."""
-    _assert_one_home(
-        {"redraw_calibration_holdout"},
-        _module_path("tools/inference_tools.py"),
-        _module_path("tools/calibration_tools.py"),
-    )
-
-
-def test_applied_operating_point_has_one_home():
-    """``applied_operating_point`` (de-underscored from ``_applied_operating_point``) moved out of
-    ``tools/inference_tools.py`` into ``pipelines/resolution.py``, its callers widening from
-    ``run_inference``'s three internal resolutions (the dry-run preview, the verified body, the
-    raster branch) to every direct resolver of a stated-or-default conf/NMS/max_dets, the
-    full-frame evaluation runner included."""
-    _assert_one_home(
-        {"applied_operating_point"},
-        _module_path("tools/inference_tools.py"),
-        _module_path("pipelines/resolution.py"),
-    )
-
-
-def test_ordinal_regression_calibration_functions_have_one_home():
-    """``calibrate_scalar_operating_point`` moved out of
-    ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, name unchanged;
-    ``_scalar_predictions`` (its sole helper, no other consumer) travels with it. Decorators
-    are not this test's concern (see ``_assert_one_home``)."""
-    _assert_one_home(
-        {"calibrate_scalar_operating_point", "_scalar_predictions"},
-        _module_path("tools/phenology_tools.py"),
-        _module_path("tools/calibration_tools.py"),
-    )
-
-
-def test_ordinal_regression_tasks_constant_has_one_home():
-    old_path = _module_path("tools/phenology_tools.py")
-    new_path = _module_path("tools/calibration_tools.py")
-    assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(old_path)
-    assert _assign_name_counts(new_path)["_ORDINAL_REGRESSION_TASKS"] == 1
-    for root in _package_roots():
-        for py_file in root.rglob("*.py"):
-            if py_file in (old_path, new_path):
-                continue
-            assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(py_file), py_file
+def test_execution_preparation_has_one_home():
+    """``prepare_pass`` and the ``Execution`` record it prepares live in
+    ``pipelines/execution.py`` and nowhere else, the one preparation every pass shares."""
+    _assert_one_home({"prepare_pass"}, None, _module_path("pipelines/execution.py"))
+    _assert_one_home({"Execution", "Pass"}, None, _module_path("pipelines/execution.py"),
+                     node_types=(ast.ClassDef,))
 
 
 def test_accept_proposals_is_absent_from_package_source():
@@ -461,32 +403,6 @@ def test_inference_and_tuning_bind_no_dict_aliases_of_their_own():
     assert not stray_tuning, f"tuning.py still defines {sorted(stray_tuning)}"
     assert "_lock" in _assign_name_counts(tuning_path), (
         "tuning.py's _workers guard still needs its own _lock alias")
-
-
-def test_validate_reference_and_its_exclusive_helpers_moved_to_validation_module():
-    """validate_reference and the helper only it uses (``_recorded_prediction_digests``) moved out
-    of review.py into routes/validation.py, public and
-    unaliased; the route path is unchanged (checked live in test_review_path_confinement.py and
-    test_review_validation_affordance.py, which still call POST /api/review/validate_reference).
-    ``_prediction_digest``, ``_get_engine``, ``_bucket_of_dir`` and ``_audit`` stay in review.py:
-    each is also used by a route that stayed (mark_complete, /action, /matches), so validation.py
-    imports them rather than restating them."""
-    _assert_one_home(
-        {"validate_reference", "_recorded_prediction_digests"},
-        _web_module_path("routes/review.py"),
-        _web_module_path("routes/validation.py"),
-        roots=(_web_src_root(),),
-    )
-
-
-def test_validate_reference_request_and_response_models_moved_to_validation_module():
-    _assert_one_home(
-        {"ValidateReferenceRequest", "ValidateReferenceResponse"},
-        _web_module_path("routes/review.py"),
-        _web_module_path("routes/validation.py"),
-        node_types=(ast.ClassDef,),
-        roots=(_web_src_root(),),
-    )
 
 
 def test_the_retired_sweep_vocabulary_is_absent_from_package_source():
