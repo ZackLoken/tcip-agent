@@ -1,0 +1,146 @@
+"""A reference has to be a measurement, not the model's own output.
+
+Point an assessment's reference at the model's own predictions and every numeric criterion
+clears, because the model agrees with itself. The provenance the records carry is the only thing
+that can catch it, so the reference's label documents are refused whole
+(:func:`~tcip_annotation.json_io.require_reference_ground_truth`) when a record carries a
+prediction score, when an agent authored it and no reviewer accepted it, or when it carries a
+rule-based admission nobody signed off. Ordinary ground truth, ground truth a person authored, a
+prediction a reviewer accepted and a signed rule-based admission all remain a reference.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tcip_annotation import json_io
+from tcip_annotation.state import Annotation, BBox
+
+IMG = 32
+PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on every prediction
+
+
+def _documents(root: Path, stems, annotations) -> list[Path]:
+    """One label document per stem holding ``annotations(stem)``."""
+    root.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for s in stems:
+        path = root / f"{s}.json"
+        json_io.write_annotations(str(path), annotations(s), IMG, IMG, keep_empty=True)
+        paths.append(path)
+    return paths
+
+
+def _prediction(box=(2, 2, 10, 10)):
+    return Annotation(subject="bud", geometry=BBox(*box), score=0.87, created_by=PRODUCER,
+                      created_at="2026-01-01T00:00:00+00:00")
+
+
+def _hand(box=(2, 2, 10, 10), **kw):
+    return Annotation(subject="bud", geometry=BBox(*box), **kw)
+
+
+STEMS = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+
+
+def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
+    documents = _documents(tmp_path, STEMS,
+                           lambda s: [_prediction(), _prediction(box=(15, 15, 25, 25))])
+
+    with pytest.raises(ValueError) as exc:
+        json_io.require_reference_ground_truth(documents)
+
+    assert "16 of 16 annotations" in str(exc.value)
+    assert "accept the model's proposals through review" in str(exc.value)
+
+
+def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(tmp_path):
+    documents = _documents(tmp_path, STEMS, lambda s: [_hand()] + (
+        [_prediction()] if s == "src0_0_0" else []))
+
+    with pytest.raises(ValueError, match="1 of 9 annotations"):
+        json_io.require_reference_ground_truth(documents)
+
+
+def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
+    """The same output with its score dropped: no reviewer took responsibility for any of it."""
+    documents = _documents(tmp_path, STEMS, lambda s: [
+        _hand(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00")])
+
+    with pytest.raises(ValueError) as exc:
+        json_io.require_reference_ground_truth(documents)
+
+    message = str(exc.value)
+    assert "8 of 8 annotations" in message
+    assert PRODUCER in message
+    assert "review-confirmation loop" in message
+
+
+def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
+    documents = _documents(tmp_path, ["a"], lambda s: [_hand(created_by="sam")])
+
+    with pytest.raises(ValueError, match="authored by sam"):
+        json_io.require_reference_ground_truth(documents)
+
+
+def test_a_person_created_record_carrying_the_rule_with_no_sign_off_refuses_naming_it(tmp_path):
+    documents = _documents(tmp_path, ["a"], lambda s: [
+        _hand(created_by="user:breeder", accepted_by_rule="assessment-1")])
+
+    with pytest.raises(ValueError) as exc:
+        json_io.require_reference_ground_truth(documents)
+
+    assert "accepted_by_rule with no person's accepted_by" in str(exc.value)
+    assert "a.json record 0" in str(exc.value)
+
+
+def test_a_tool_record_with_a_non_person_sign_off_and_the_rule_refuses(tmp_path):
+    documents = _documents(tmp_path, ["a"], lambda s: [
+        _hand(created_by=PRODUCER, accepted_by="model:other", accepted_by_rule="assessment-1")])
+
+    with pytest.raises(ValueError, match="accepted_by_rule with no person's accepted_by"):
+        json_io.require_reference_ground_truth(documents)
+
+
+def test_provenance_facts_reports_rule_admitted_unsigned_indices():
+    records = [
+        _hand(created_by="user:breeder", accepted_by_rule="assessment-1"),
+        _hand(created_by="user:breeder", accepted_by="user:breeder",
+              accepted_by_rule="assessment-1"),
+        _hand(created_by="user:breeder", accepted_by_rule=""),
+        _hand(created_by="user:breeder"),
+    ]
+    assert json_io.provenance_facts(records).rule_admitted_unsigned == [0, 2]
+
+
+@pytest.mark.parametrize("record", [
+    _hand(),
+    _hand(created_by="user:breeder", created_at="2026-01-01T00:00:00+00:00"),
+    _hand(created_by=PRODUCER, accepted_by="user:breeder",
+          accepted_at="2026-01-02T00:00:00+00:00"),
+    _hand(created_by=PRODUCER, accepted_by="user:breeder", accepted_by_rule="assessment-1"),
+], ids=["unattributed", "a-persons", "reviewer-accepted", "signed-rule-admission"])
+def test_ground_truth_a_person_stands_behind_is_a_reference(tmp_path, record):
+    json_io.require_reference_ground_truth(_documents(tmp_path, STEMS, lambda s: [record]))
+
+
+def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(tmp_path):
+    """The rail runs inside the assessment, before any inference over the reference."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import (
+        assess, confirm_count_trait, draw_reference_selection, synthetic_capture, train_on,
+    )
+
+    root = tmp_path / "ds"
+    _images, labels_dir = synthetic_capture(root)
+    selection = draw_reference_selection(tmp_path, root, tmp_path / "selection")
+    checkpoint = train_on(tmp_path / "selection", tmp_path, "exp-self-reference")
+    confirm_count_trait(tmp_path)
+    held = selection.on("holdout")[0]
+    json_io.write_annotations(held.ground_truth, [_prediction()], 64, 64)
+
+    record = assess(tmp_path, checkpoint, tmp_path / "selection")
+
+    assert "carry a prediction score" in record.get("error", ""), record

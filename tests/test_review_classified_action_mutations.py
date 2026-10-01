@@ -1,10 +1,9 @@
 """``/action`` under a classified bucket's own scope: the mutation branches that judge the
 *value* of an object a person already placed, rather than the object's presence.
 
-Built over a real staged bucket (``stage_prediction_shapes``) and a hand-authored ground-truth
-file in the classified shape (the object class in ``subject``, the confirmed value under
-``attributes[attribute]``), the bucket's own stamp seeded through the platform's own writers,
-``operating_point_stamp`` and ``write_sidecar``, the same construction
+Built over a real published classified bucket (``_chain_fixtures.published``) and a
+hand-authored ground-truth file in the classified shape (the object class in ``subject``, the
+confirmed value under ``attributes[attribute]``), the same construction
 ``test_review_classified_scope.py`` uses.
 """
 
@@ -18,11 +17,10 @@ from PIL import Image
 
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import prediction_dir
-from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-from tcip_mcp.prediction_buckets import stage_prediction_shapes
+from tcip_mcp.dataset_layout import prediction_root
 from tcip_web.app import app
+
+from tests._web_fixtures import open_new_project
 
 DATE = "2026-04-01"
 STEM = "IMG_0200"
@@ -46,25 +44,18 @@ def _image(dataset_root: Path) -> Path:
     return path
 
 
-def _stage(dataset_root: Path, *, value: str) -> dict:
-    return stage_prediction_shapes(
-        str(dataset_root), "classifier", DATE, STEM,
-        annotations=[Annotation(subject=SUBJECT, geometry=BBox(*BOX), score=0.9,
-                               attributes={ATTRIBUTE: value})],
-        img_w=IMG_W, img_h=IMG_H,
-    )
+def _publish(project: Path, dataset_root: Path, *, value: str) -> Path:
+    """One prediction of ``value`` over ``BOX`` on ``STEM``, published as the classified bucket
+    ``predictions/classifier/<DATE>``; the bucket."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-
-def _stamp_bucket(project: Path, bucket: Path) -> None:
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.25}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None, shippable_issues=[],
-        scope=ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP),
-        trait=ATTRIBUTE, dataset_hash="H",
-        checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
-        images_dir=None, raster_path=None, produced_at="2026-04-01T00:00:00+00:00",
-    )
-    write_sidecar(bucket, stamp, project=project)
+    bucket = prediction_root(dataset_root) / "classifier" / DATE
+    published(project, bucket, [{"image": f"{STEM}.jpg", "width": IMG_W, "height": IMG_H,
+                                 "boxes": [list(BOX)], "scores": [0.9],
+                                 "labels": [ID_MAP[value] + 1]}],
+              scope={"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": ID_MAP})
+    return bucket
 
 
 def _write_gt(dataset_root: Path, *, value: str) -> Path:
@@ -79,15 +70,16 @@ def _write_gt(dataset_root: Path, *, value: str) -> Path:
 
 
 def _setup(tmp_path: Path, *, pred_value: str, gt_value: str) -> dict:
-    """A staged, stamped classified bucket and a ground-truth file over the same box, one
-    prediction confirming ``pred_value``, the person's own record confirming ``gt_value``."""
+    """A published classified bucket and a ground-truth file over the same box, one prediction
+    confirming ``pred_value``, the person's own record confirming ``gt_value``, in ``tmp_path``
+    opened in the web backend."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
-    staged = _stage(dataset_root, value=pred_value)
-    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
-    _stamp_bucket(tmp_path, bucket)
+    bucket = _publish(tmp_path, dataset_root, value=pred_value)
     gt = _write_gt(dataset_root, value=gt_value)
-    return {"dataset_root": dataset_root, "img": img, "staged": staged, "bucket": bucket, "gt": gt}
+    open_new_project(tmp_path)
+    return {"dataset_root": dataset_root, "img": img,
+            "staged": {"path": str(bucket / f"{STEM}.json")}, "bucket": bucket, "gt": gt}
 
 
 def _matches(client: TestClient, s: dict) -> dict:

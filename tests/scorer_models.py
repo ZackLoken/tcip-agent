@@ -2,7 +2,7 @@
 
 Each builder returns a small ``nn.Module`` whose outputs a scorer test asserts on. A test reaches
 it the way every scorer caller does: the module is saved as a bespoke checkpoint, registered, and
-loaded through ``load_registered_checkpoint`` and ``build_predictor``. Not a ``test_*`` module.
+loaded through ``load_registered_checkpoint`` and ``GenericPredictor``. Not a ``test_*`` module.
 """
 
 from __future__ import annotations
@@ -61,12 +61,11 @@ def build_linear(**_: Any) -> torch.nn.Module:
 
 def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     """The predictor a scorer reads, built from ``tests.scorer_models:<builder>`` through the
-    platform's own checkpoint registration, load and ``build_predictor``."""
+    platform's own checkpoint registration, load and ``GenericPredictor``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     src = {"builder": f"tests.scorer_models:{builder}", "builder_kwargs": {}, "task": task}
     path = foreign_checkpoint(tmp_path, model_source=src)
-    return build_predictor(load_registered_checkpoint(path, project=tmp_path),
-                           device="cpu")
+    return GenericPredictor(load_registered_checkpoint(path, project=tmp_path), device="cpu")

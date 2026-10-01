@@ -19,7 +19,6 @@ its positive/measured state, from a validated classifier. The milestone math liv
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
@@ -27,14 +26,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
-from tcip_mcp.pipelines.resolution import Acknowledgment
 
 from tcip_web.paths import allowed_path, exposed_arrival, within
 from tcip_web.state import store
 
 if TYPE_CHECKING:
-    from tcip_mcp.subject_registry import SubjectRegistry
-    from tcip_mcp.pipelines.resolution import DeliveryRefused
+    from tcip_mcp.pipelines.postprocessing.phenology import PhenologyMeasurement
     from tcip_mcp.traits import TraitRecord, TraitRevision
 
 logger = logging.getLogger(__name__)
@@ -164,12 +161,10 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    registry_record = plant_mapping.load_registry(root, payload.plant_registry)
-    if registry_record is None:
-        raise HTTPException(
-            404,
-            f"plant registry not found: {payload.plant_registry!r} under {root}; register it "
-            "with register_plant_registry before naming it here")
+    try:
+        registry_record = plant_mapping.load_registry(root, payload.plant_registry)
+    except plant_mapping.PlantRegistryNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
     registry_ref = {"name": payload.plant_registry, "digest": registry_record["digest"]}
     # register_plant_registry applies no path confinement (MCP-only, no routable caller); check
     # the registered paths under the allowed roots now that a routable connection is reading them.
@@ -293,12 +288,13 @@ class PhenologyInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mapping_name: str  # a name persisted under the open project's own plant-mapping store
-    # map date -> predictions directory for that date. A trait's positive class id is resolved
-    # server-side from each bucket's own recorded id_map, never a client-supplied one.
-    predictions_by_date: dict[str, str]
+    # The published bucket of each delivered date; each stands for the date its record states.
+    buckets: list[str]
     trait: str
     # The population: the plant ids this measurement is for, one row each, never every mapped plot.
     plants: list[str]
+    # Whether a plant missing any delivered date is left out of the milestones.
+    require_all_dates_complete: bool = phenology.REQUIRE_ALL_DATES_COMPLETE
 
 
 class PhenologyPayload(PhenologyInputs):
@@ -308,255 +304,71 @@ class PhenologyPayload(PhenologyInputs):
     show_unvalidated: bool = False
 
 
-class _PhenologyMeasurement:
-    """One trait's per-plant phenology measurement plus the on-disk evidence that qualifies it."""
-
-    def __init__(
-        self, revision, plants: dict, recon: dict, classifier_recon: dict,
-        classifier_state: str | None, binding_note: str, tile_recon: dict, gate,
-        positive_class_id, project: Path, predictions_by_date: dict[str, str],
-        flags: dict[str, str | None], plant_mapping_disclosure: dict,
-    ) -> None:
-        # The confirmed trait revision this measurement was computed and is delivered under.
-        self.revision, self.plants, self.gate = revision, plants, gate
-        # The reconciliations this measurement was computed from, kept as the door itself ran
-        # them rather than pre-flattened: bindings and validity are both derived from these.
-        self.recon, self.classifier_recon = recon, classifier_recon
-        self.classifier_state, self.binding_note = classifier_state, binding_note
-        self.tile_recon = tile_recon
-        self.positive_class_id = positive_class_id
-        self.predictions_by_date = predictions_by_date
-        self.pred_dirs = list(predictions_by_date.values())
-        # The guarded, resolved root every later write and audit entry resolves from.
-        self.project = project
-        # The dimension flags the gate above was computed from; validity["tile_size"] is None for
-        # an untiled delivery, not the same as the key being absent from the gate's own flags.
-        self.flags = flags
-        # The mapping this delivery attributed detections through, threaded to the event and CSV.
-        self.plant_mapping_disclosure = plant_mapping_disclosure
-
-    @property
-    def bindings(self) -> dict:
-        """What the count reconciliation verified per bucket, by their resolved paths."""
-        return self.recon["bindings"]
-
-    @property
-    def validity(self) -> dict:
-        return {
-            "operating_point": self.recon["validated"],
-            "classifier": self.classifier_state,
-            "operating_point_conf": self.recon["conf"],
-            "operating_point_confs": self.recon["confs"],
-            "missing_operating_point_sidecars": self.recon["missing_sidecars"],
-            "unvalidated_buckets": self.recon["unvalidated_buckets"],
-            "binding_notes": self.recon["binding_notes"],
-            "missing_classifier_sidecars": self.classifier_recon["missing_sidecars"],
-            "classifier_binding_note": self.binding_note,
-            "tile_size": self.tile_recon["validated"],
-            "unvalidated_tile_size_buckets": self.tile_recon["unvalidated_buckets"],
-        }
-
-    @property
-    def document_reconciliations(self) -> dict:
-        return {
-            "operating_point": self.recon,
-            "classifier_operating_point": {
-                **self.classifier_recon, "bound_validated": self.classifier_state,
-                "delivery_note": self.binding_note,
-            },
-        }
-
-    @property
-    def dimension_reconciliations(self) -> dict:
-        return {"tile_size": self.tile_recon}
-
-    @property
-    def positive_class_assessed(self) -> bool:
-        """Whether the trait's positive-class axis was assessed at all: some bucket's recorded
-        ``id_map`` actually contains the trait's positive class, as well as a fully-classified
-        date.
-        """
-        return self.positive_class_id is not None and bool(self.plants["positive_class_assessed"])
-
-    def curve_rows(self) -> list[dict]:
-        """Per-(plant, date) rows: the milestone rows' own series, not a second aggregation."""
-        return [
-            {"plant_id": row["plant_id"], "accession": row["accession"], **point}
-            for row in self.plants["rows"] for point in row["series"]
-        ]
-
-    def milestone_rows(self) -> list[dict]:
-        return [{k: v for k, v in row.items() if k != "series"} for row in self.plants["rows"]]
-
-
-def _delivered_registry(pred_dirs: Sequence[str]) -> "SubjectRegistry | None":
-    """The subject registry for the single dataset this delivery's prediction buckets belong to.
-
-    Resolved from the buckets themselves, never from the open project's own root. ``None`` when
-    ``pred_dirs`` is empty. Otherwise refuses by name when the buckets span more than one dataset
-    root, or resolve to none with a registry.
-    """
-    if not pred_dirs:
-        return None
-    from tcip_mcp.subject_registry import RegistryError, registry_for_pred_dirs
-
-    try:
-        registry = registry_for_pred_dirs(pred_dirs)
-    except RegistryError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if registry is None:
-        raise HTTPException(
-            400,
-            f"no subject registry is reachable for the dataset behind {list(pred_dirs)}: register "
-            "the dataset (register_dataset) or write its subjects.json before a state_crossing_dates "
-            "delivery can check the positive value",
-        )
-    return registry
-
-
-def _measure_phenology(
-    payload: PhenologyInputs, *, acknowledgment: Acknowledgment | None = None,
-) -> _PhenologyMeasurement:
-    """Compute a trait's phenology measurement and reconcile the evidence behind it.
-
-    Rows come from ``per_plant_phenology`` under the trait's confirmed revision, read first,
-    against the guarded root and the delivered dataset's registry; the validity that qualifies
-    them is read from the buckets' own sidecars through one gate. ``acknowledgment`` is the
-    breeder's own act of shipping unvalidated, or ``None``.
-    """
-    from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
-    from tcip_mcp.pipelines.resolution import (
-        bind_classifier_validity,
-        check_delivery_gate,
-        reconcile_classifier_validity,
-        reconcile_operating_point_validity,
-        reconcile_tile_size_validity,
-    )
-    from tcip_mcp.traits import STATE_CROSSING_DATES, TraitUnknownError
+def _measure(payload: PhenologyInputs) -> "PhenologyMeasurement":
+    """:func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology` over the buckets this
+    route confines to the open project; each of its refusals answers 400."""
+    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.subject_registry import RegistryError
+    from tcip_mcp.traits import TraitUnknownError
 
     root = store.open_root()
-    resolved_dirs = _belonging(root, *payload.predictions_by_date.values())
-    predictions_by_date = {
-        date: str(p) for date, p in zip(payload.predictions_by_date, resolved_dirs) if p is not None
-    }
+    resolved = _belonging(root, *payload.buckets)
     try:
-        revision = confirmed_revision(
-            STATE_CROSSING_DATES, project=root, trait=payload.trait,
-            registry=_delivered_registry(list(predictions_by_date.values())))
-    except TraitUnknownError as e:
-        raise HTTPException(400, str(e)) from e
-    except OperationalizationRefused as e:
-        raise HTTPException(400, e.as_detail()) from e
-    spec = revision.entry
-
-    try:
-        mapping_build, verified = plant_mapping.resolve_delivery_mapping(
-            root, payload.mapping_name, predictions_by_date)
+        return phenology.measure_phenology(
+            root, trait=payload.trait, mapping_name=payload.mapping_name,
+            buckets=[p for p in resolved if p is not None], plants=payload.plants,
+            require_all_dates_complete=payload.require_all_dates_complete)
+    except OperationalizationRefused as exc:
+        raise HTTPException(400, exc.as_detail()) from exc
     except plant_mapping.MappingDeliveryRefusal as exc:
         raise HTTPException(exc.status, str(exc)) from exc
-    mapping_raw = mapping_build.rows()
-
-    pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait, project=root)
-    classifier_recon = reconcile_classifier_validity(pred_dirs, project=root)
-    # The same binding deliver_phenology_milestones applies, from the same shared function: a
-    # mismatched classifier stamp must not validate this delivery or land in the delivered CSV.
-    classifier_state, binding_note = bind_classifier_validity(
-        classifier_recon["validated"], pred_dirs, pred_dirs, trait=payload.trait, project=root,
-    )
-    # The tile scale is the other gating dimension: a tile edge with no real basis at all is as
-    # untrustworthy here as an uncalibrated conf, operative only for tiled buckets.
-    tile_recon = reconcile_tile_size_validity(pred_dirs, project=root)
-    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
-    gate = check_delivery_gate(flags, acknowledgment=acknowledgment)
-    try:
-        plants = phenology.per_plant_phenology(
-            mapping_raw, predictions_by_date,
-            spec=spec, plants=payload.plants,
-        )
     except phenology.measurement_refusals() as exc:
         raise HTTPException(400, str(exc)) from exc
-    positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
-    return _PhenologyMeasurement(
-        revision, plants, recon, classifier_recon, classifier_state, binding_note, tile_recon,
-        gate, positive_class_id, root, predictions_by_date, flags,
-        mapping_build.delivery_disclosure(verified, list(predictions_by_date)))
-
-
-def _refusal(measurement: _PhenologyMeasurement) -> str:
-    from tcip_mcp.pipelines.resolution import binding_notes_text
-
-    tile_note = ""
-    if measurement.validity["unvalidated_tile_size_buckets"]:
-        tile_note = (
-            f" Tiled bucket(s) {measurement.validity['unvalidated_tile_size_buckets']} carry a "
-            "tile_size with no persisted training geometry, no recoverable native-frame edge, and "
-            "no explicit caller override, so the scale their counts were produced at has no basis. "
-            "Re-export with an explicit tile_size, or from a checkpoint whose training tile "
-            "geometry was persisted."
-        )
-    return (
-        "phenology delivery requires a validated classifier and count operating point, reconciled from "
-        "the prediction buckets' own sidecars (never a caller-asserted string). Unvalidated: "
-        f"{list(measurement.gate.unvalidated)} (operating_point="
-        f"{measurement.validity['operating_point']!r}, classifier={measurement.validity['classifier']!r}, "
-        f"tile_size={measurement.validity['tile_size']!r}; "
-        f"missing operating_point.json: {measurement.validity['missing_operating_point_sidecars']}; "
-        f"unvalidated buckets: {measurement.validity['unvalidated_buckets']}; missing "
-        f"classifier_operating_point.json: {measurement.validity['missing_classifier_sidecars']}). "
-        "Produce the predictions via a calibrated run_inference and calibrate the classifier "
-        "via calibrate_classifier_operating_point."
-        + tile_note
-        + (f" {binding_notes_text(measurement.validity['binding_notes'])}"
-           if measurement.validity["binding_notes"] else "")
-        + (f" {measurement.validity['classifier_binding_note']}"
-           if measurement.validity["classifier_binding_note"] else "")
-    )
-
-
-def _disclosure(measurement: _PhenologyMeasurement) -> dict:
-    """What qualifies these numbers, returned beside them.
-
-    ``validated`` is the floored per-dimension value the delivered CSV's own columns would carry
-    (``DeliveryGateResult.owned_column_stamp``), never the gate's raw ``stamp``. ``validated_raw``
-    carries the gate's unfloored per-dimension stamp.
-    """
-    return {
-        "validated": measurement.gate.owned_column_stamp(),
-        "validated_raw": measurement.gate.stamp,
-        # True whenever a dimension lacked on-disk evidence, including one an acknowledgment
-        # cleared: exactly when a surface must not render these numbers as validated.
-        "has_unvalidated_dimensions": bool(measurement.gate.unvalidated),
-        "validity_detail": measurement.validity,
-        # Honest signal: was anything actually classified along the trait's axis? If false, the
-        # ratios are not a valid phenology measurement: do not deliver curves from them.
-        "positive_class_assessed": measurement.positive_class_assessed,
-        "captures_unverified": measurement.plant_mapping_disclosure["captures_unverified"],
-        "plant_csvs_unverified": measurement.plant_mapping_disclosure["plant_csvs_unverified"],
-        "dates_delivered": measurement.plant_mapping_disclosure["dates_delivered"],
-        "images_unattributed": measurement.plant_mapping_disclosure["images_unattributed"],
-    }
+    except (TraitUnknownError, RegistryError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/phenology_measurement")
 def phenology_measurement(payload: PhenologyPayload) -> dict:
     """Both phenology projections (the per-(plant, date) curve and the per-plant milestone dates)
-    from one ``_measure_phenology`` run, gated on the same reconciled evidence: refused unless
-    ``show_unvalidated``, in which case both ship marked with unvalidated dimensions.
+    from one measurement, with the milestone columns the producer writes, cleared through the one
+    delivery gate: its refusal answers 400 with the refusal's detail unless ``show_unvalidated``,
+    in which case both are returned with the refusal as ``unvalidated_reason`` and, as
+    ``result_sha256``, the digest of each projection's delivered result keyed ``curves`` and
+    ``milestones``, which a breeder's acknowledgment of exporting it binds to.
 
     Records no delivery event and no audit line.
     """
-    measurement = _measure_phenology(payload)
-    if not measurement.gate.ok and not payload.show_unvalidated:
-        raise HTTPException(400, _refusal(measurement))
+    from tcip_mcp.delivery import DeliveryRefused, gate
+    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.traits import STATE_CROSSING_DATES
+
+    measurement = _measure(payload)
+    reason = None
+    digests: dict[str, str] = {}
+    for projection in ("curves", "milestones"):
+        try:
+            gate(store.open_root(), list(measurement.buckets.values()),
+                 delivery_kind=STATE_CROSSING_DATES, revision=measurement.revision,
+                 result=measurement.result(curves=projection == "curves"))
+        except OperationalizationRefused as exc:
+            raise HTTPException(400, exc.as_detail()) from exc
+        except DeliveryRefused as exc:
+            if not payload.show_unvalidated or exc.result_sha256 is None:
+                raise HTTPException(400, exc.as_detail()) from exc
+            reason, digests[projection] = str(exc), exc.result_sha256
+    disclosure = measurement.plant_mapping
     return {
-        "curves": {
-            "rows": measurement.curve_rows(),
-            "n_plants": len(measurement.plants["rows"]),
-            "positive_class_id": measurement.positive_class_id,
-        },
-        "milestones": {"rows": measurement.milestone_rows()},
-        **_disclosure(measurement),
+        "curves": {"rows": measurement.curve_rows(), "n_plants": len(measurement.rows)},
+        "milestones": {"rows": measurement.milestone_rows(),
+                       "columns": phenology.milestone_date_columns(measurement.revision.entry)},
+        "validated": reason is None, "unvalidated_reason": reason,
+        "result_sha256": digests or None,
+        "require_all_dates_complete": measurement.require_all_dates_complete,
+        **measurement.revision.ref,
+        "positive_class_assessed": measurement.positive_class_assessed,
+        **{key: disclosure[key] for key in ("captures_unverified", "plant_csvs_unverified",
+                                            "dates_delivered", "images_unattributed")},
     }
 
 
@@ -564,38 +376,43 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 
 class AcknowledgmentPayload(BaseModel):
-    """The reason half of a breeder's acknowledgment; the ``acknowledged_by`` half is resolved
-    by the route from the request's own ``user``, never carried in this body."""
+    """Why the breeder ships the unvalidated result shown, and that result's digest
+    (``result_sha256``, as the refusal or the screen measurement served it)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    reason: str = Field(min_length=1)
+    reason: str
+    result_sha256: str
 
 
-def _acknowledgment_from(payload) -> Optional[Acknowledgment]:
-    """The breeder's own act of shipping a delivery unvalidated, resolved from a payload's own
-    ``acknowledgment`` (the reason) and ``user`` fields. A request naming an acknowledgment but
-    no user is refused before anything runs. ``None`` when the payload names no acknowledgment at
-    all.
+def _recorded_acknowledgment(payload, request: Request) -> Optional[str]:
+    """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
+    record_acknowledgment`) by the identity this backend runs as, and return its id; ``None``
+    when it carries none. A request with no browser ``Origin``, or one declaring an agent identity
+    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason refuses (400),
+    before anything runs; an act recorded whose audit line could not follow answers 409.
     """
     if payload.acknowledgment is None:
         return None
-    if not (payload.user or "").strip():
-        raise HTTPException(
-            400,
-            "an acknowledgment requires a user: a server identity is never written as a "
-            "breeder's name",
-        )
-    reason = payload.acknowledgment.reason.strip()
-    if not reason:
-        raise HTTPException(
-            400,
-            "an acknowledgment requires a non-blank reason: the one thing the record "
-            "carries that says why",
-        )
-    from tcip_web.identity import user_id
+    from tcip_mcp import agent_identity
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.delivery import record_acknowledgment
+    from tcip_web.identity import current_user, user_id
+    from tcip_web.routes.audit_gap import audit_gap_409
 
-    return Acknowledgment(acknowledged_by=user_id(payload.user), reason=reason)
+    if request.headers.get("origin") is None or any(
+            request.headers.get(h) for h in agent_identity.HEADERS.values()):
+        raise HTTPException(403, "an acknowledgment is the breeder's act in the Results tab: a "
+                                 "request from no browser, or from an agent, cannot record one.")
+    try:
+        return record_acknowledgment(
+            store.open_root(), acknowledged_by=user_id(current_user()),
+            reason=payload.acknowledgment.reason,
+            result_sha256=payload.acknowledgment.result_sha256).acknowledgment_id
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, exc.arguments) from exc
+    except ValueError as exc:
+        raise HTTPException(400, f"an acknowledgment states why: {exc}") from exc
 
 
 class ExportCsvPayload(PhenologyInputs):
@@ -606,87 +423,42 @@ class ExportCsvPayload(PhenologyInputs):
     # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
     payload: Literal["curves", "milestones"]
     filename: Optional[str] = None
-    user: Optional[str] = None
     # The breeder's own act of shipping this delivery unvalidated, or None for an ordinary
-    # validated export; who acknowledged is resolved from user, never carried here.
+    # validated export.
     acknowledgment: Optional[AcknowledgmentPayload] = None
 
 
 @router.post("/export_csv")
-def export_csv(payload: ExportCsvPayload) -> Response:
-    """Write the CSV for a phenology measurement this route computes itself
-    (``_measure_phenology``).
+def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
+    """Deliver a phenology measurement this route computes itself as a CSV
+    (:func:`~tcip_mcp.pipelines.postprocessing.phenology.deliver_phenology`), written to the
+    project's ``results_export/`` and returned as the response body.
 
-    The acknowledgment comes from :func:`_acknowledgment_from`. It is handed to
-    ``_measure_phenology``'s gate and to the writer below, which passes it through the same gate a
-    second time; the CSV tail and the delivery event both read what that gate actually applied
-    (``None`` when every dimension validated and nothing needed acknowledging).
-
-    Delegates to ``write_phenology_csv``/``write_phenology_curve_csv``, which own the gate, the
-    provenance cells and the recorded delivery event. The response body is the file read back as
-    bytes.
+    The acknowledgment is recorded by :func:`_recorded_acknowledgment`; a delivery refusal
+    answers 400 with its detail, and a delivery event its receipt could not follow answers 409.
     """
-    acknowledgment = _acknowledgment_from(payload)
-    measurement = _measure_phenology(payload, acknowledgment=acknowledgment)
-    if not measurement.gate.ok:
-        raise HTTPException(400, _refusal(measurement))
-    # The same refusal deliver_phenology_milestones makes: if no bucket anywhere ever assessed the trait's
-    # positive-class axis, the fraction is not a measurement and there is nothing valid to deliver.
-    if not measurement.positive_class_assessed:
-        raise HTTPException(
-            400,
-            f"predictions carry no {measurement.revision.entry.positive_value!r} class anywhere in this "
-            "delivery. The classifier that produced them never assessed this trait's positive "
-            "class, so the positive fraction is not a valid measurement. Run and validate the "
-            "classifier first.",
-        )
-
-    if payload.payload == "milestones":
-        rows = measurement.milestone_rows()
-        write_csv = phenology.write_phenology_csv
-    else:
-        rows = measurement.curve_rows()
-        write_csv = phenology.write_phenology_curve_csv
-    if not rows:
-        raise HTTPException(400, "no rows to export")
-
-    filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-
-    from tcip_mcp.pipelines.resolution import ProducerDiffers, stamped_producer
-
-    try:
-        producer = stamped_producer(measurement.predictions_by_date)
-    except ProducerDiffers as exc:
-        raise HTTPException(400, str(exc)) from exc
-    # The browser download lands wherever the breeder's browser puts it; the delivery itself
-    # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
-    saved_path = measurement.project / "results_export" / Path(filename).name
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.delivery import DeliveryRefused
     from tcip_web.routes.audit_gap import audit_gap_409
 
+    measurement = _measure(payload)
+    acknowledgment_id = _recorded_acknowledgment(payload, request)
+    filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
+    saved_path = store.open_root() / "results_export" / Path(filename).name
     try:
-        write_csv(
-            "results.export_csv", rows, saved_path, measurement.revision,
-            flags=measurement.flags, acknowledgment=acknowledgment,
-            document_reconciliations=measurement.document_reconciliations, producer=producer,
-            dimension_reconciliations=measurement.dimension_reconciliations,
-            predictions_by_date=measurement.predictions_by_date,
-            project=measurement.project,
-            plant_mapping=measurement.plant_mapping_disclosure)
+        phenology.deliver_phenology(
+            store.open_root(), measurement, curves=payload.payload == "curves",
+            output_path=saved_path, acknowledgment_id=acknowledgment_id,
+            door="results.export_csv")
     except AuditEntryNotWritten as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
-    body = saved_path.read_bytes()
-    committed = {"saved_path": str(saved_path)}
-    try:
-        _audit(str(measurement.project), "results.export_csv", {
-            "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
-            "rows": len(rows),
-        })
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
-    headers["X-TCIP-Saved-To"] = str(saved_path)
-    return Response(content=body, media_type="text/csv", headers=headers)
+    except DeliveryRefused as exc:
+        raise HTTPException(400, exc.as_detail()) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"',
+               "X-TCIP-Saved-To": str(saved_path)}
+    return Response(content=saved_path.read_bytes(), media_type="text/csv", headers=headers)
 
 
 # ── Count CSV export ────────────────────────────────────────────────────
@@ -703,18 +475,19 @@ class PerImageCountDelivery(BaseModel):
 
 
 class OrthomosaicPlantCountsDelivery(BaseModel):
-    """A per-plant count delivery from a persisted whole-raster prediction bucket plus a registered
-    plant registry. ``nn_tolerance_m`` is not exposed here: this door serves the derived tolerance
-    the core resolves from the plant grid's own spacing, or the ``canopy_subject`` regime.
+    """A per-plant count delivery from a published whole-raster prediction bucket plus a registered
+    plant registry, for the plants ``plants`` names. ``nn_tolerance_m`` is not exposed here: this
+    door serves the derived tolerance the core resolves from the plant grid's own spacing, or the
+    ``canopy_subject`` regime.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["orthomosaic_plant_counts"]
     predictions_dir: str = Field(min_length=1)
-    raster_path: str = Field(min_length=1)
     plant_registry: str
     delivered_phenotype: str
+    plants: list[str]
     crop: str = ""
     pipeline_version: str = ""
     canopy_subject: str = ""
@@ -730,129 +503,73 @@ class ExportCountCsvPayload(BaseModel):
     delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = Field(
         discriminator="kind")
     filename: str = Field(min_length=1)
-    user: Optional[str] = None
     acknowledgment: Optional[AcknowledgmentPayload] = None
 
 
-def _count_gate_detail(exc: DeliveryRefused) -> dict:
-    """The structured 400 body for a count door's own delivery-gate refusal: the gate's reason plus
-    this door's own remedy (acknowledge and re-export from this tab), beside every counts-bearing
-    fact the core already had in hand.
-    """
-    message = (
-        f"{exc} Acknowledge and re-export from this tab, or validate the dimension named above "
-        "and re-export."
-    )
-    return {"kind": "delivery_gate", "message": message,
-           "unvalidated_dimensions": exc.gate.unvalidated_cell(), **exc.facts}
-
-
 @router.post("/export_count_csv")
-def export_count_csv(payload: ExportCountCsvPayload) -> Response:
-    """Write the CSV for a per-image or per-plant count delivery, over the buckets (and, for the
-    per-plant kind, the registered plant registry) this route confines to the open project.
+def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Response:
+    """Deliver a per-image or per-plant count CSV over a bucket (and, for the per-plant kind, the
+    registered plant registry) this route confines to the open project, written to the project's
+    ``results_export/`` and returned as the response body.
 
-    ``per_image_count`` resolves the trait's confirmed revision and delegates to
-    ``inference_tools.per_image_counts_from_bucket``; ``per_plant_count_aggregate`` delegates to
-    ``orthomosaic_tools.orthomosaic_plant_counts``, whose writer resolves it. Either raises
-    ``OperationalizationRefused``.
-
-    ``predictions_dir``/``raster_path`` are confined to the open project's own tree or a dataset
-    registered to it; for the orthomosaic kind, every entry of the named plant registry is confined
-    the same way before the core ever reads it, so a registered, byte-valid CSV outside the
-    project's roots refuses 403 up front. ``DeliveryRefused`` returns 400 with ``{"kind":
-    "delivery_gate", "message", "unvalidated_dimensions", **facts}``; ``OperationalizationRefused``
-    returns 400 with its own ``as_detail()``; ``CountDeliveryRefused`` returns 400 with its
-    own message and facts. Each post is a distinct delivery with its own event: a second post
-    naming the same ``filename`` overwrites the file, and the earlier event's own digest no longer
-    describes it; ``supersede_delivery`` is the remedy.
+    ``per_image_count`` is
+    :func:`~tcip_mcp.pipelines.postprocessing.export.deliver_per_image_counts_csv`;
+    ``orthomosaic_plant_counts`` is :func:`~tcip_mcp.tools.orthomosaic_tools.orthomosaic_plant_counts`.
+    Every entry of the named plant registry is confined before the core reads it, so a registered
+    CSV outside the project's roots refuses 403 up front. A delivery refusal answers 400 with
+    ``{"kind", "message"}``, ``kind`` ``"operationalization"`` or ``"delivery"``; a delivery
+    event its receipt could not follow answers 409. The response headers name the saved path,
+    whether the delivery is validated and who acknowledged it when it is not.
     """
+    from urllib.parse import quote
+
     from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.delivery import DeliveryRefused
     from tcip_mcp.operationalization import OperationalizationRefused
-    from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
+    from tcip_mcp.traits import TraitUnknownError
     from tcip_web.routes.audit_gap import audit_gap_409
 
     root = store.open_root()
-    acknowledgment = _acknowledgment_from(payload)
     saved_path = root / "results_export" / Path(payload.filename).name
-
-    if payload.delivery.kind == "per_image_count":
-        (predictions_dir,) = _belonging(root, payload.delivery.predictions_dir)
-        if predictions_dir is None:
-            raise HTTPException(
-                400, {"kind": "count_delivery", "message": "predictions_dir is required"})
-        from tcip_mcp.operationalization import confirmed_revision
-        from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
-        from tcip_mcp.traits import PER_IMAGE_COUNT, TraitUnknownError
-
-        try:
-            result = per_image_counts_from_bucket(
-                root, str(predictions_dir), str(saved_path), revision=confirmed_revision(
-                    PER_IMAGE_COUNT, project=root, trait=payload.delivery.trait),
-                acknowledgment=acknowledgment)
-        except TraitUnknownError as exc:
-            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc)}) from exc
-        except OperationalizationRefused as exc:
-            raise HTTPException(400, exc.as_detail()) from exc
-        except DeliveryRefused as exc:
-            raise HTTPException(400, _count_gate_detail(exc)) from exc
-        except CountDeliveryRefused as exc:
-            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
-                                      **exc.facts}) from exc
-        except AuditEntryNotWritten as exc:
-            raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
-    else:
-        predictions_dir, raster_path = _belonging(
-            root, payload.delivery.predictions_dir, payload.delivery.raster_path)
-        if predictions_dir is None or raster_path is None:
-            raise HTTPException(
-                400, {"kind": "count_delivery",
-                      "message": "predictions_dir and raster_path are required"})
-        registry_record = plant_mapping.load_registry(root, payload.delivery.plant_registry)
-        if registry_record is None:
-            raise HTTPException(
-                404,
-                f"plant registry not found: {payload.delivery.plant_registry!r} under {root}; "
-                "register it with register_plant_registry before naming it here")
-        _belonging(root, *(e["path"]
-                           for e in plant_mapping.registry_csv_entries(registry_record, root)))
-        from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
-
-        try:
-            result = orthomosaic_plant_counts(
-                root, str(predictions_dir), str(raster_path), payload.delivery.plant_registry,
-                str(saved_path), payload.delivery.delivered_phenotype,
-                crop=payload.delivery.crop, pipeline_version=payload.delivery.pipeline_version,
-                canopy_subject=payload.delivery.canopy_subject, acknowledgment=acknowledgment)
-        except OperationalizationRefused as exc:
-            raise HTTPException(400, exc.as_detail()) from exc
-        except DeliveryRefused as exc:
-            raise HTTPException(400, _count_gate_detail(exc)) from exc
-        except CountDeliveryRefused as exc:
-            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
-                                      **exc.facts}) from exc
-        except AuditEntryNotWritten as exc:
-            raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
-
-    body = saved_path.read_bytes()
-    committed = {
-        "saved_path": str(saved_path),
-        "unvalidated_dimensions": result.get("unvalidated_dimensions"),
-        "acknowledged_by": result.get("acknowledged_by"),
-    }
+    delivery = payload.delivery
+    (predictions_dir,) = _belonging(root, delivery.predictions_dir)
+    assert predictions_dir is not None, "the payload requires a non-empty predictions_dir"
+    acknowledgment_id = _recorded_acknowledgment(payload, request)
     try:
-        _audit(str(root), "results.export_count_csv", {
-            "kind": payload.delivery.kind, "saved_path": str(saved_path),
-        })
-    except AuditEntryNotWritten as exc:
-        raise audit_gap_409(exc, committed) from exc
-    headers = {"Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"'}
-    headers["X-TCIP-Saved-To"] = str(saved_path)
-    headers["X-TCIP-Unvalidated-Dimensions"] = result.get("unvalidated_dimensions") or ""
-    from urllib.parse import quote
+        if delivery.kind == "per_image_count":
+            from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
 
-    headers["X-TCIP-Acknowledged-By"] = quote(result.get("acknowledged_by") or "")
-    return Response(content=body, media_type="text/csv", headers=headers)
+            result = deliver_per_image_counts_csv(
+                root, predictions_dir, str(saved_path), trait=delivery.trait,
+                acknowledgment_id=acknowledgment_id, door="results.export_count_csv")
+        else:
+            try:
+                registry_record = plant_mapping.load_registry(root, delivery.plant_registry)
+            except plant_mapping.PlantRegistryNotFound as exc:
+                raise HTTPException(404, str(exc)) from exc
+            _belonging(root, *(e["path"]
+                               for e in plant_mapping.registry_csv_entries(registry_record, root)))
+            from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+
+            result = orthomosaic_plant_counts(
+                root, str(predictions_dir), registry_record, str(saved_path),
+                delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
+                pipeline_version=delivery.pipeline_version,
+                canopy_subject=delivery.canopy_subject, acknowledgment_id=acknowledgment_id,
+                door="results.export_count_csv")
+    except AuditEntryNotWritten as exc:
+        raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
+    except (OperationalizationRefused, DeliveryRefused) as exc:
+        raise HTTPException(400, exc.as_detail()) from exc
+    except (TraitUnknownError, ValueError) as exc:
+        raise HTTPException(400, {"kind": "delivery", "message": str(exc)}) from exc
+    headers = {
+        "Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"',
+        "X-TCIP-Saved-To": str(saved_path),
+        "X-TCIP-Validated": "true" if result["validated"] else "false",
+        "X-TCIP-Acknowledged-By": quote(result["acknowledged_by"] or ""),
+    }
+    return Response(content=saved_path.read_bytes(), media_type="text/csv", headers=headers)
 
 
 # ── What has shipped: the delivery-event record, read-only ─────────────
@@ -860,42 +577,38 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
 
 @router.get("/delivery-events")
 def list_delivery_events() -> dict:
-    """Every delivery event the open project holds: what shipped, under which trait and kind, and the
-    real per-bucket verification evidence the delivering door reconciled at the time.
+    """Every delivery event the open project holds (:func:`~tcip_mcp.delivery.read_delivery_events`):
+    what shipped, under which trait revision and kind, over which buckets and with what each
+    bucket's gate finding was. A record that will not decode refuses the whole listing (400).
 
-    Every stored record is validated against ``DeliveryEventRecord`` before it is served. A record
-    that does not validate refuses the whole listing (400, naming the offending ``event_id``).
-
-    Each record carries its own ``superseded`` key: the ``delivery_supersessions`` record
-    ``supersede_delivery`` filed against its ``event_id`` (naming the reason and any replacement
-    event), or ``None`` when nothing supersedes it. A record naming a walked-mapping
-    ``plant_mapping`` (a dict carrying ``name`` and ``record_sha256``) also carries
-    ``plant_mapping_resolved_key``: the name to load to see exactly the record this event cites,
-    its own name when a rebuild has not moved past it, the archived key
-    (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
+    A record naming a walked-mapping ``plant_mapping`` (a dict carrying ``name`` and
+    ``record_sha256``) also carries ``plant_mapping_resolved_key``: the name to load to see exactly
+    the record this event cites, its own name when a rebuild has not moved past it, the archived
+    key (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
     neither name holds a stored record any more. A record naming a whole-raster ``plant_mapping``
-    instead (a ``PlantRegistryDisclosure`` or ``CanopySegmentDisclosure``) carries no
-    ``plant_mapping_resolved_key`` at all.
+    carries no ``plant_mapping_resolved_key`` at all.
     """
-    from tcip_mcp.pipelines.delivery_events_schema import is_mapping_disclosure, with_supersessions
+    from pydantic import ValidationError
+    from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
     from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
-    from tcip_mcp.pipelines.resolution import (
-        DeliveryEventShapeError,
-        load_delivery_supersessions,
-        read_delivery_events,
-    )
+
+    from tcip_store import StoreError
 
     root = store.open_root()
     try:
-        records = read_delivery_events(root)
-    except DeliveryEventShapeError as exc:
+        events = read_delivery_events(root)
+    except (StoreError, ValidationError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    for record in records:
-        pm = record.get("plant_mapping")
-        if is_mapping_disclosure(pm):
+    records = []
+    for event in events:
+        record = event.model_dump(mode="json")
+        pm = event.plant_mapping
+        if isinstance(pm, PlantMappingDisclosure):
             record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
-                root, pm["name"], pm["record_sha256"])
-    return {"records": with_supersessions(records, load_delivery_supersessions(root))}
+                root, pm.name, pm.record_sha256)
+        records.append(record)
+    return {"records": records}
 
 
 # ── Traits and the breeder's confirmation of a revision ────────────────

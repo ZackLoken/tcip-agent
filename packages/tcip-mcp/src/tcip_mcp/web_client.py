@@ -12,6 +12,7 @@ from typing import Any, Literal, Optional, get_args
 
 import tcip_store
 from pydantic import BaseModel, ConfigDict, Field
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
 
@@ -154,7 +155,6 @@ class DatasetSelection(BaseModel):
     dataset_root: Optional[str] = None
     subject: Optional[str] = None
     date: Optional[str] = None
-    model_name: Optional[str] = None
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
     images_dir: Optional[str] = None
@@ -181,7 +181,7 @@ class ReviewFilters(BaseModel):
     model_config = _TRANSPORT
 
     iou_threshold: float = 0.5
-    conf_threshold: float = 0.25
+    conf_threshold: float = REVIEW_CONF_FLOOR
     filter_type: ReviewFilterType = "all"
     # A subject name, or "all".
     filter_class: str = "all"
@@ -209,15 +209,16 @@ class GuiState(_GuiFields):
 
 
 class _DatasetChoice(BaseModel):
-    """The chosen part of a selection, the only part ``gui.json`` holds; ``dataset_root`` spelled
-    by :func:`tcip_mcp.registry_paths.stored_path` against the project."""
+    """The chosen part of a selection, the only part ``gui.json`` holds; ``dataset_root`` and
+    ``predictions_dir`` spelled by :func:`tcip_mcp.registry_paths.stored_path` against the
+    project."""
 
     model_config = ConfigDict(extra="forbid")
 
     dataset_root: str
     subject: Optional[str]
     date: Optional[str]
-    model_name: Optional[str]
+    predictions_dir: Optional[str]
     current_image_index: int
 
 
@@ -243,33 +244,33 @@ def require_whole(model: BaseModel, where: str) -> None:
 
 
 def selection_for(dataset_root: Path, subject: Optional[str], date: Optional[str],
-                  model_name: Optional[str], current_image_index: int) -> DatasetSelection:
-    """The selection a choice names: its image list and every reference the browser reads, all
-    through :mod:`tcip_mcp.dataset_layout`. ``current_image_index`` is clamped to the list.
+                  predictions_dir: Optional[str], current_image_index: int) -> DatasetSelection:
+    """The selection a choice names: its image list and every reference the browser reads, the
+    labels through :mod:`tcip_mcp.dataset_layout` and each image's prediction document as the
+    record of the bucket at ``predictions_dir`` names it (:func:`~tcip_mcp.buckets.read_bucket`,
+    refusing a directory that is no bucket). ``current_image_index`` is clamped to the list.
     Raises ``AmbiguousImageStem`` for a date directory holding two images of one stem."""
-    from tcip_mcp.dataset_layout import (
-        annotation_dir, annotation_path, image_dir, prediction_dir, prediction_path,
-    )
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import annotation_dir, annotation_path, image_dir
     from tcip_mcp.pipelines.image_utils import logical_images_by_name
 
     named = logical_images_by_name(image_dir(dataset_root, date)) if date else {}
     image_list = list(named)
     index = max(0, min(current_image_index, len(image_list) - 1)) if image_list else 0
-    bucket = bool(model_name and date)
+    bucket = read_bucket(predictions_dir) if predictions_dir else None
+    documents = {name: bucket.document(name) for name in named} if bucket is not None else {}
     return DatasetSelection(
         dataset_root=str(dataset_root),
         subject=subject,
         date=date,
-        model_name=model_name,
         image_list=image_list,
         current_image_index=index,
         images_dir=str(image_dir(dataset_root, date)) if date else None,
         annotations_dir=str(annotation_dir(dataset_root, date)) if date else None,
-        predictions_dir=str(prediction_dir(dataset_root, model_name, date)) if bucket else None,
+        predictions_dir=predictions_dir,
         label_paths={name: str(annotation_path(dataset_root, date, stem))
                      for name, stem in named.items()},
-        prediction_paths={name: str(prediction_path(dataset_root, model_name, date, stem))
-                          for name, stem in named.items()} if bucket else {},
+        prediction_paths={name: str(path) for name, path in documents.items() if path},
     )
 
 
@@ -288,8 +289,9 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     dataset = state.dataset
     choice = None if dataset.dataset_root is None else _DatasetChoice(
         dataset_root=stored_path(dataset.dataset_root, project), subject=dataset.subject,
-        date=dataset.date, model_name=dataset.model_name,
-        current_image_index=dataset.current_image_index)
+        date=dataset.date, current_image_index=dataset.current_image_index,
+        predictions_dir=(stored_path(dataset.predictions_dir, project)
+                         if dataset.predictions_dir else None))
     document = _PersistedGuiState(**{**state.model_dump(exclude={"dataset"}), "dataset": choice})
     tcip_store.replace(gui_snapshot_key(project), document.model_dump(mode="json"))
 
@@ -309,7 +311,8 @@ def read_gui_snapshot(project: Path) -> Optional[GuiState]:
     choice = persisted.dataset
     dataset = DatasetSelection() if choice is None else selection_for(
         resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,
-        choice.model_name, choice.current_image_index)
+        str(resolved_registry_path(project, choice.predictions_dir))
+        if choice.predictions_dir else None, choice.current_image_index)
     return GuiState(**{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset})
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).

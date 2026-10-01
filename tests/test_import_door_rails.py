@@ -455,7 +455,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
 
     splits_result = draw_splits(project, str(curated), subject="bud", output_path=str(curated / "splits"),
-                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
@@ -523,7 +523,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     study = hpo_result["study_name"]
 
     splits_result = draw_splits(root, str(root), output_path=str(root / "splits_out"), subject="bud",
-                                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"

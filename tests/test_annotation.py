@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from tcip_annotation import (
     Annotation,
     BBox,
@@ -85,11 +83,11 @@ def test_compute_matches():
 
 
 def test_score_predictions_single_image(data_dir: Path):
-    pytest.importorskip("tcip_mcp.tools.annotation_tools")
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
-    result = score_predictions(str(img), iou_threshold=0.5, conf_threshold=0.25)
+    result = score_predictions(str(img), str(data_dir / "predictions" / "live" / "2-11-26"),
+                               iou_threshold=0.5, conf_threshold=0.25)
     assert "tp" in result
     assert "fp" in result
     assert "fn" in result

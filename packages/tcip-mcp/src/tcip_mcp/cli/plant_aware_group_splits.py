@@ -16,12 +16,11 @@ admission and refuses to write a selection without one.
 Usage:
     tcip plant-aware-group-splits <dataset_root> --project <project> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
-        --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> [--seed 42] \
-        [--tolerance-m 5.0] [--output-path <dir>]
+        --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> \
+        --holdout-ratio <ratio> [--seed 42] [--tolerance-m 5.0] [--output-path <dir>]
 
-``--train-ratio``, ``--val-ratio`` and ``--calibration-ratio`` all have no default and are
-required: the three must sum to 1.0, and a selection write (``--output-path``) additionally refuses
-any of them being zero, by name.
+The four ratios have no default and are required: they must sum to 1.0, and a selection write
+(``--output-path``) additionally refuses any of them being zero, by name.
 """
 
 from __future__ import annotations
@@ -30,6 +29,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+from tcip_mcp.pipelines.data.splits import DEFAULT_SEED
 
 
 def _raster_pixel_extent(path: Path) -> tuple[int, int]:
@@ -122,16 +123,17 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
     parser.add_argument("--train-ratio", type=float, required=True,
-                         help="Fraction for the training side; --train-ratio, --val-ratio and "
-                              "--calibration-ratio must sum to 1.0. No default.")
+                         help="Fraction for the training side; the four ratios must sum to 1.0. "
+                              "No default.")
     parser.add_argument("--val-ratio", type=float, required=True,
-                         help="Fraction for the validation side; the three ratios must sum to "
-                              "1.0. No default.")
+                         help="Fraction for the validation side. No default.")
     parser.add_argument("--calibration-ratio", type=float, required=True,
-                         help="Fraction held out as the calibration universe; the three ratios "
-                              "must sum to 1.0. No default. A selection write (--output-path) "
-                              "refuses a zero ratio on any of the three, naming it.")
-    parser.add_argument("--seed", type=int, default=42)
+                         help="Fraction an assessment fits its operating point on. No default.")
+    parser.add_argument("--holdout-ratio", type=float, required=True,
+                         help="Fraction an assessment checks its operating point against. No "
+                              "default. A selection write (--output-path) refuses a zero ratio on "
+                              "any of the four, naming it.")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--tolerance-m", type=float, default=None,
                          help="Max GPS distance (m) to the nearest plant. Defaults to "
                               "grid_pitch_m(plants)/6, the same derivation build_mapping/"
@@ -185,6 +187,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         calibration_ratio=args.calibration_ratio,
+        holdout_ratio=args.holdout_ratio,
         seed=args.seed,
         group_key_map=group_key_map,
         output_path=args.output_path,

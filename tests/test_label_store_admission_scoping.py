@@ -58,7 +58,7 @@ def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
     assert bud_admitted.counts["skipped_unconfirmed_empty"] == 1
 
     bud_ds = dataset_over('detection', str(images), str(labels), subject=BUD)
-    for idx, stem in enumerate(bud_ds.record_stems):
+    for idx, stem in enumerate(bud_ds.stems):
         _img, target = bud_ds[idx]
         assert target["boxes"].shape[0] > 0, (
             f"{stem} was admitted as annotated for {BUD} but carries no target of it")

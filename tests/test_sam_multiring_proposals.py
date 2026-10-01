@@ -200,7 +200,8 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
 
-    anns = json_io.read_annotations(str(sam_project / "predictions" / "sam" / "occluded.json"))
+    anns = json_io.read_annotations(
+        str(sam_project / "predictions" / "sam" / "occluded" / "occluded.json"))
     assert len(anns) == 1
     geom = anns[0].geometry
     assert isinstance(geom, Polygon)

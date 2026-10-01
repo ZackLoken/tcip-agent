@@ -38,9 +38,8 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_annotation.json_io import LABEL_SUFFIX, prediction_documents
+from tcip_annotation.json_io import LABEL_SUFFIX
 
-DEFAULT_MODEL = "live"
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
 SUBJECTS_FILENAME = "subjects.json"
@@ -109,6 +108,19 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
         f"parse_image_path: {image_path!r} is not under a recognized dataset image tree "
         "(<root>/images/<date>/<stem> or <root>/images/<stem>), refusing to guess a dataset root."
     )
+
+
+def capture_of(source: str | Path) -> tuple[Optional[str], Optional[str]]:
+    """``(dataset_id, date)`` of the capture an image source belongs to: the identity record's id
+    of the dataset root whose image tree holds it, and its capture date folder. Each is ``None``
+    when the source sits in no dataset image tree, when the root records no identity, or, for the
+    date, when the image sits in the flat undated tree."""
+    try:
+        root, date, _stem = parse_image_path(source)
+    except ValueError:
+        return None, None
+    identity = read_dataset_identity(root)
+    return (identity["id"] if identity is not None else None), date
 
 
 def _date_seg(date: Optional[str]) -> tuple[str, ...]:
@@ -215,29 +227,6 @@ def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     return annotation_root(dataset_root).joinpath(*_date_seg(date))
 
 
-def prediction_bucket_date(path: str | Path) -> Optional[str]:
-    """The ``<date>`` a prediction bucket lives under (``<root>/predictions/<model>/<date>/``), or
-    ``None`` for an undated bucket (``<root>/predictions/<model>/``).
-
-    Answers ``None`` for a path whose model slot fails :func:`is_bucket_name`, which is every shape
-    under the cleared archive (``predictions/.cleared/...``).
-    """
-    p = Path(path)
-    parts = p.parts
-    if "predictions" not in parts:
-        return None
-    i = len(parts) - 1 - parts[::-1].index("predictions")
-    rest = parts[i + 1:]
-    if not rest:
-        return None
-    model, rest = rest[0], rest[1:]  # drop <model>
-    if not is_bucket_name(model):
-        return None
-    if rest and rest[-1].endswith(LABEL_SUFFIX):
-        rest = rest[:-1]
-    return rest[0] if len(rest) == 1 else None
-
-
 def annotation_date(path: str | Path) -> Optional[str]:
     """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
     ``annotations/<date>/`` layout; the only recoverable path fact, since subject/task live in the
@@ -278,12 +267,6 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
         return None
     i = max(idxs)
     return Path(*parts[:i]) if i > 0 else None
-
-
-def bucket_dataset_root(bucket: str | Path) -> Optional[Path]:
-    """The resolved dataset root a prediction bucket's current path sits under, or ``None``."""
-    root = dataset_root_of(bucket)
-    return root.resolve() if root is not None else None
 
 
 def subjects_path(dataset_root: str | Path) -> Path:
@@ -803,108 +786,6 @@ def prediction_root(dataset_root: str | Path) -> Path:
     return Path(dataset_root, *_PREDICTION_TREE.prefix)
 
 
-def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str]) -> Path:
-    """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs, one file per image)."""
-    return prediction_root(dataset_root).joinpath(model or DEFAULT_MODEL, *_date_seg(date))
-
-
-def canonical_prediction_bucket(
-    path: str | Path,
-) -> tuple[Path, str, Optional[str]] | None:
-    """``(dataset_root, model, date)`` for a canonical prediction bucket path
-    (``<dataset_root>/predictions/<model>[/<date>]``), or ``None`` when ``path`` is not one: not
-    under a ``predictions/`` tree at all, its model segment fails :func:`is_bucket_name`, or the
-    round trip through :func:`prediction_dir` does not spell ``path`` back exactly.
-    """
-    p = Path(path)
-    parts = p.parts
-    if "predictions" not in parts:
-        return None
-    i = len(parts) - 1 - parts[::-1].index("predictions")
-    rest = parts[i + 1:]
-    if not rest or len(rest) > 2:
-        return None
-    model, date = rest[0], (rest[1] if len(rest) == 2 else None)
-    if not is_bucket_name(model):
-        return None
-    dataset_root = Path(*parts[:i])
-    if prediction_dir(dataset_root, model, date) != p:
-        return None
-    return dataset_root, model, date
-
-
-_CLEARED_SEGMENT = ".cleared"
-"""The dot-prefixed directory a canonical prediction bucket moves into once
-:func:`clear_prediction_bucket` clears it, invisible to every model reader (``is_bucket_name``
-excludes any dot-prefixed segment) and enumerated only by the archive's own named walk
-(``prediction_bucket_dirs(..., include_cleared=True)``)."""
-
-CLEARED_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
-"""The UTC stamp format a cleared bucket's own directory name carries, admitted by
-``workspace.is_valid_name`` (which forbids ``:`` but admits ``@``) on every platform."""
-
-
-def _is_cleared_stamp(value: str) -> bool:
-    """Whether ``value`` parses as a :data:`CLEARED_STAMP_FORMAT` UTC stamp, with no filesystem or
-    clock read.
-    """
-    try:
-        datetime.strptime(value, CLEARED_STAMP_FORMAT)
-    except ValueError:
-        return False
-    return True
-
-
-def current_cleared_stamp() -> str:
-    """The current UTC time in :data:`CLEARED_STAMP_FORMAT`."""
-    return datetime.now(timezone.utc).strftime(CLEARED_STAMP_FORMAT)
-
-
-def cleared_prediction_dir(
-    dataset_root: str | Path, model: str, date: Optional[str], stamp: str,
-) -> Path:
-    """``<dataset_root>/predictions/.cleared/<model>@<stamp>/[<date>/]``: where
-    :func:`clear_prediction_bucket` archives a canonical bucket it moves out from under a
-    terminal experiment's own recorded path, one entry per call. ``stamp`` is the UTC time of the
-    call, ``%Y%m%dT%H%M%SZ`` (``:`` forbidden by ``workspace.is_valid_name``, ``@`` admitted).
-    """
-    return prediction_root(dataset_root).joinpath(
-        _CLEARED_SEGMENT, f"{model}@{stamp}", *_date_seg(date))
-
-
-def cleared_bucket_of(
-    path: str | Path,
-) -> tuple[Path, str, str, Optional[str]] | None:
-    """``(dataset_root, model, stamp, date)`` for a cleared-bucket path
-    (:func:`cleared_prediction_dir`'s own shape), or ``None`` when ``path`` is not one: splits the
-    cleared segment on its last ``@`` and requires the tail to parse as
-    :data:`CLEARED_STAMP_FORMAT`. Reads the tail arity for the date, never the filesystem: a third
-    segment past the cleared model directory is the date, a second is none.
-    """
-    p = Path(path)
-    parts = p.parts
-    if "predictions" not in parts:
-        return None
-    i = len(parts) - 1 - parts[::-1].index("predictions")
-    rest = parts[i + 1:]
-    if not rest or rest[0] != _CLEARED_SEGMENT:
-        return None
-    rest = rest[1:]
-    if not rest or len(rest) > 2:
-        return None
-    cleared_segment, date = rest[0], (rest[1] if len(rest) == 2 else None)
-    model, sep, stamp = cleared_segment.rpartition("@")
-    if not sep or not model or not _is_cleared_stamp(stamp):
-        return None
-    dataset_root = Path(*parts[:i])
-    return dataset_root, model, stamp, date
-
-
-def is_cleared_bucket(path: str | Path) -> bool:
-    """Whether ``path`` is a cleared bucket (:func:`cleared_bucket_of` recognizes it)."""
-    return cleared_bucket_of(path) is not None
-
-
 def label_filename(stem: str) -> str:
     """The file name one image's label or prediction record is written under."""
     return f"{stem}{LABEL_SUFFIX}"
@@ -918,12 +799,6 @@ def annotation_path_for_image(image_path: str | Path, *, date: Optional[str] = N
     """Canonical write path for an image's single label file (date derived from the image path)."""
     root, img_date, stem = parse_image_path(image_path)
     return annotation_path(root, date if date is not None else img_date, stem)
-
-
-def prediction_path(
-    dataset_root: str | Path, model: Optional[str], date: Optional[str], stem: str,
-) -> Path:
-    return prediction_dir(dataset_root, model, date) / label_filename(stem)
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
@@ -951,9 +826,7 @@ def subjects_on_date(
     Enumerates ``annotations/<date>/`` through ``json_io.prediction_documents`` and reads each
     document through ``reader`` (``json_io.read_annotations`` by default). Raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
-    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects. A label
-    whose filename is a bucket's own provenance stamp (``json_io.is_sidecar_name``) is excluded
-    from the walk entirely.
+    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
     """
     from tcip_annotation import json_io
 
@@ -976,58 +849,6 @@ def subjects_with_labels(
     return subjects_on_date(dataset_root, date, reader=reader)
 
 
-def list_models(dataset_root: str | Path) -> list[str]:
-    """Sorted live model bucket names under ``predictions/``. A dot-prefixed directory is never a
-    bucket (see ``is_bucket_name``) and is excluded, which also excludes the cleared archive
-    (``predictions/.cleared/``).
-    """
-    preds = prediction_root(dataset_root)
-    if not preds.is_dir():
-        return []
-    return sorted(p.name for p in preds.iterdir() if p.is_dir() and is_bucket_name(p.name))
-
-
-def prediction_bucket_dirs(dataset_root: str | Path, *, include_cleared: bool) -> list[Path]:
-    """Every directory under ``predictions/`` a live bucket's own sidecar could sit in: each
-    model's own directory, and each of its date subdirectories, whether or not either actually
-    holds one.
-
-    ``include_cleared`` takes no default. ``True`` appends a second walk over the cleared archive
-    (``predictions/.cleared/``): each directory :func:`cleared_bucket_of` recognizes as a cleared
-    model directory, and each of its date children in the same two shapes, following the first;
-    never the ``.cleared`` directory itself, and never a directory under it the inverse does not
-    recognize.
-    """
-    pred_root = prediction_root(dataset_root)
-    if not pred_root.is_dir():
-        return []
-    found: list[Path] = []
-    for model in list_models(dataset_root):
-        model_dir = pred_root / model
-        if not model_dir.is_dir():
-            continue
-        found.append(model_dir)
-        found.extend(sorted(p for p in model_dir.iterdir() if p.is_dir()))
-    if include_cleared:
-        cleared_root = pred_root / _CLEARED_SEGMENT
-        if cleared_root.is_dir():
-            for entry in sorted(p for p in cleared_root.iterdir() if p.is_dir()):
-                if not is_cleared_bucket(entry):
-                    continue
-                found.append(entry)
-                found.extend(sorted(
-                    p for p in entry.iterdir() if p.is_dir() and is_cleared_bucket(p)))
-    return found
-
-
-def models_with_predictions(dataset_root: str | Path, date: Optional[str]) -> list[str]:
-    """Models whose bucket on ``date`` holds at least one per-image prediction document, in
-    ``list_models`` order; a bucket holding only its stamp has none."""
-    root = Path(dataset_root)
-    return [model for model in list_models(root)
-            if prediction_documents(prediction_dir(root, model, date))]
-
-
 def find_gt_label(image_path: str | Path, *, date: Optional[str] = None) -> Optional[Path]:
     """Find the existing ground-truth label file for an image (read-time resolver).
 
@@ -1037,31 +858,3 @@ def find_gt_label(image_path: str | Path, *, date: Optional[str] = None) -> Opti
     root, img_date, stem = parse_image_path(image_path)
     cand = annotation_path(root, date if date is not None else img_date, stem)
     return cand if cand.is_file() else None
-
-
-def find_prediction(
-    image_path: str | Path,
-    *,
-    model: Optional[str] = None,
-    date: Optional[str] = None,
-) -> Optional[Path]:
-    """Find an existing prediction file for an image: a specific ``model`` if given, else every
-    live model. Returns the first existing file, or ``None``.
-
-    Raises ``ValueError`` when an explicit ``model`` fails :func:`is_bucket_name`, so a cleared
-    bucket's archive segment is never reached through this resolver.
-    """
-    root, img_date, stem = parse_image_path(image_path)
-    d = date if date is not None else img_date
-
-    if model is not None and not is_bucket_name(model):
-        raise ValueError(
-            f"find_prediction: {model!r} is not a canonical model bucket name; the cleared "
-            "archive and any other dot-prefixed segment are never addressed through this resolver"
-        )
-    models = [model] if model else list_models(root)
-    for m in models:
-        cand = prediction_path(root, m, d, stem)
-        if cand.is_file():
-            return cand
-    return None

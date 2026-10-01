@@ -170,7 +170,7 @@ def test_a_string_score_is_refused_by_the_reference_check(tmp_path: Path) -> Non
     (reference / "a.json").write_text(json.dumps({"image": "a", "annotations": [
         {"subject": "bud", "bbox": [1.0, 2.0, 3.0, 4.0], "score": "0.8"}]}), encoding="utf-8")
     with pytest.raises(UnreadableLabelDocument, match="score"):
-        require_reference_ground_truth(reference)
+        require_reference_ground_truth([reference / "a.json"])
 
 
 def test_gt_disk_schema_is_coco_xywh_without_score(tmp_path: Path) -> None:
@@ -711,15 +711,15 @@ def test_a_null_score_reads_as_ground_truth_and_a_bad_one_refuses(tmp_path: Path
         read_annotations(bad)
 
 
-def test_non_finite_score_is_written_as_valid_json(tmp_path: Path) -> None:
+def test_a_non_finite_score_is_refused_rather_than_written(tmp_path: Path) -> None:
+    """A confidence that is no finite number is refused by the writer, never collapsed to a
+    number that would read as one, and nothing lands."""
     path = tmp_path / "labels" / "a.json"
-    write_annotations(path, [Annotation(subject="bud", geometry=BBox(1.0, 2.0, 3.0, 4.0), score=float("nan"))], 100, 100)
-    # File must be strict-valid JSON (no bare NaN literal); the non-finite score collapses to 0.0.
-    text = path.read_text(encoding="utf-8")
-    assert "NaN" not in text and "Infinity" not in text
-    assert json.loads(text)["annotations"][0]["score"] == 0.0
-    (ann,) = read_annotations(path)
-    assert ann.score == 0.0
+
+    with pytest.raises(ValueError, match="not a finite number"):
+        write_annotations(path, [Annotation(subject="bud", geometry=BBox(1.0, 2.0, 3.0, 4.0),
+                                            score=float("nan"))], 100, 100)
+    assert not path.exists()
 
 
 def test_boolean_score_field_is_not_a_confidence(tmp_path: Path) -> None:
@@ -847,64 +847,28 @@ def test_load_label_document_returns_the_dict(tmp_path: Path) -> None:
     assert load_label_document(path) == {"annotations": []}
 
 
-def test_prediction_documents_excludes_every_sidecar_filename(tmp_path: Path) -> None:
-    from tcip_annotation.json_io import SIDECAR_FILENAMES, prediction_documents
-
-    bucket = tmp_path / "bucket"
-    bucket.mkdir()
-    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="bud", geometry=BBox(1, 1, 2, 2))],
-                      10, 10)
-    for name in SIDECAR_FILENAMES:
-        (bucket / name).write_text("{}", encoding="utf-8")
-
-    documents = prediction_documents(bucket)
-
-    assert [p.name for p in documents] == ["IMG_0001.json"]
-
-
-def test_prediction_documents_excludes_a_case_variant_sidecar_filename(tmp_path: Path) -> None:
-    """The exclusion is case-insensitive: a stamp saved under a different case still names the
+@pytest.mark.parametrize("record_name", ["bucket.json", "Bucket.JSON"])
+def test_prediction_documents_excludes_the_buckets_own_record(
+    tmp_path: Path, record_name: str,
+) -> None:
+    """The exclusion is case-insensitive: a record saved under a different case still names the
     file a case-insensitive filesystem would collide it with."""
-    from tcip_annotation.json_io import prediction_documents
+    from tcip_annotation.json_io import is_bucket_record, prediction_documents
 
     bucket = tmp_path / "bucket"
     bucket.mkdir()
     write_annotations(bucket / "IMG_0001.json", [Annotation(subject="bud", geometry=BBox(1, 1, 2, 2))],
                       10, 10)
-    (bucket / "Operating_Point.json").write_text("{}", encoding="utf-8")
+    (bucket / record_name).write_text("{}", encoding="utf-8")
 
-    documents = prediction_documents(bucket)
-
-    assert [p.name for p in documents] == ["IMG_0001.json"]
-
-
-def test_is_sidecar_name_is_case_insensitive() -> None:
-    from tcip_annotation.json_io import is_sidecar_name
-
-    assert is_sidecar_name("Operating_Point.json")
-    assert is_sidecar_name("OPERATING_POINT.JSON")
-    assert not is_sidecar_name("IMG_0001.json")
+    assert [p.name for p in prediction_documents(bucket)] == ["IMG_0001.json"]
+    assert is_bucket_record(record_name) and not is_bucket_record("IMG_0001.json")
 
 
 def test_prediction_documents_on_a_missing_directory_is_empty(tmp_path: Path) -> None:
     from tcip_annotation.json_io import prediction_documents
 
     assert prediction_documents(tmp_path / "nope") == []
-
-
-def test_require_reference_ground_truth_admits_a_bucket_holding_sidecars(tmp_path: Path) -> None:
-    # A calibration/holdout reference dir may itself be a prediction bucket carrying its own
-    # provenance stamps; those are not label documents and must never be read as one.
-    from tcip_annotation.json_io import SIDECAR_FILENAMES
-
-    bucket = tmp_path / "bucket"
-    bucket.mkdir()
-    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="bud", geometry=BBox(1, 1, 2, 2))],
-                      10, 10)
-    for name in SIDECAR_FILENAMES:
-        (bucket / name).write_text("{}", encoding="utf-8")
-
-    require_reference_ground_truth(bucket)  # must not raise
 
 
 def test_load_label_document_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
@@ -1051,21 +1015,23 @@ def test_a_prediction_document_the_writer_lands_in_a_bucket_reads_back_through_t
     tmp_path: Path,
 ) -> None:
     """The writer is write_annotations, called the shape pipelines/postprocessing/export.py's
-    write_predictions_json calls it: keep_empty=True, each Annotation carrying a score and a
-    created_by stamped through tcip_mcp.pipelines.resolution.prediction_producer, landing at
-    dataset_layout.prediction_dir(root, model, date) / label_filename(stem). The readers are
-    read_annotations (the document's own records), prediction_documents (the bucket listing) and
-    dataset_layout.models_with_predictions (the per-date model listing): a document only its
-    writer's test has seen is one any of these three readers could silently disagree with.
+    encode_predictions encodes it: keep_empty=True, each Annotation carrying a score and a
+    created_by stamped through tcip_mcp.buckets.prediction_producer, landing at a bucket
+    directory / label_filename(stem). The readers are read_annotations (the document's own
+    records) and prediction_documents (the bucket listing): a document only its writer's test has
+    seen is one either reader could silently disagree with.
     """
-    from tcip_mcp.dataset_layout import label_filename, models_with_predictions, prediction_dir
-    from tcip_mcp.pipelines.resolution import prediction_producer
+    from types import SimpleNamespace
 
-    root, model, date, stem = tmp_path, "baseline", "2026-02-11", "IMG_1"
-    created_by = prediction_producer("checkpoints/baseline.pt", "a" * 64)
+    from tcip_mcp.buckets import prediction_producer
+    from tcip_mcp.dataset_layout import label_filename, prediction_root
+
+    bucket, stem = prediction_root(tmp_path) / "baseline" / "2026-02-11", "IMG_1"
+    created_by = prediction_producer(
+        SimpleNamespace(path="checkpoints/baseline.pt", sha256="a" * 64))  # type: ignore[arg-type]
     preds = [Annotation(subject="bud", geometry=BBox(10.0, 20.0, 110.0, 220.0), score=0.875,
                         created_by=created_by, created_at="2026-02-11T10:00:00Z")]
-    target = prediction_dir(root, model, date) / label_filename(stem)
+    target = bucket / label_filename(stem)
     write_annotations(str(target), preds, 640, 480, keep_empty=True)
 
     got = read_annotations(target)
@@ -1075,10 +1041,7 @@ def test_a_prediction_document_the_writer_lands_in_a_bucket_reads_back_through_t
 
     from tcip_annotation.json_io import prediction_documents
 
-    assert prediction_documents(prediction_dir(root, model, date)) == [target]
-
-    assert models_with_predictions(root, date) == [model]
-    assert models_with_predictions(root, "2026-03-24") == []  # no bucket on this date
+    assert prediction_documents(bucket) == [target]
 
 
 def test_prediction_documents_skips_a_directory_named_like_a_json_file(tmp_path: Path) -> None:

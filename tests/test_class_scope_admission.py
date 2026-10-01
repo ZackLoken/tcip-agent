@@ -22,24 +22,6 @@ def test_an_attribute_with_no_subject_refuses_where_the_scope_is_built() -> None
         ClassScope.of({"scope": {"attribute": "condition", "id_map": {"healthy": 0}}})
 
 
-def test_a_door_stating_an_attribute_with_no_subject_refuses_by_the_same_admission(
-    tmp_path: Path,
-) -> None:
-    """A redraw stating an attribute and no subject answers with the scope's own refusal, before
-    any lock is drawn."""
-    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
-
-    root = _attribute_scoped_dataset(tmp_path / "ds")
-    labels_dir = root / "annotations" / DATES[0]
-
-    result = redraw_calibration_holdout(
-        tmp_path, dataset_root=str(root), labels_dir=str(labels_dir),
-        images_dir=str(root / "images" / DATES[0]),
-        attribute="condition", reason="a redraw naming no subject")
-
-    assert "stated with no subject" in result["error"]
-
-
 def test_a_classified_scope_the_admission_produced_round_trips_through_the_selection_and_the_run(
     tmp_path: Path,
 ) -> None:
@@ -53,7 +35,7 @@ def test_a_classified_scope_the_admission_produced_round_trips_through_the_selec
     out = tmp_path / "m"
     result = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
                          attribute="condition", seed=1, train_ratio=0.5, val_ratio=0.25,
-                         calibration_ratio=0.25)
+                         calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in result, result
 
     drawn = read_selection(out, project=tmp_path)
@@ -98,25 +80,3 @@ def test_a_recorded_document_scope_with_no_map_refuses_and_a_fresh_statement_get
     fresh = admit_run({"images_dir": images_dir, "labels_dir": labels_dir,
                        "scope": {"subject": SUBJECT, "attribute": "condition"}})
     assert fresh.scope.id_map == {"healthy": 0, "damaged": 1}
-
-
-def test_a_subject_or_attribute_beside_a_selection_refuses_the_redraw(tmp_path: Path) -> None:
-    """A selection records its own class space; the same redraw with no statement beside it
-    draws."""
-    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
-
-    root = _attribute_scoped_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    assert "error" not in draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
-                                      attribute="condition", seed=1, train_ratio=0.5,
-                                      val_ratio=0.25, calibration_ratio=0.25)
-    images_dir, labels_dir = _dirs(root)
-    call = {"project": tmp_path, "dataset_root": str(root), "labels_dir": labels_dir, "images_dir": images_dir,
-            "selection_dir": str(out), "reason": "redraw the held-out side"}
-
-    for stated in ({"subject": SUBJECT}, {"attribute": "condition"}, {"subject": ""}):
-        refused = redraw_calibration_holdout(**call, **stated)
-        assert "a second one" in refused.get("error", ""), (stated, refused)
-
-    drawn = redraw_calibration_holdout(**call)
-    assert "error" not in drawn, drawn

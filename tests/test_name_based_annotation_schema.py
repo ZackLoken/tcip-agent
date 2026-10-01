@@ -153,17 +153,17 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
 
 # (f) the loader's assign_class_ids map == decode_class_ids of the recorded operating_point map.
 def test_decode_inverts_the_recorded_map(tmp_path):
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     registry = _write_registry(tmp_path, Subject(name="bud"))
     id_map = subject_registry.assign_class_ids(registry, "bud")  # the run's single map
 
     # A prediction with a 1-indexed detector label decodes to its name through the recorded map.
-    out = tmp_path / "pred.json"
-    write_predictions_json(
-        out, {"boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1], "width": 640, "height": 480},
+    data, _dropped = encode_predictions(
+        {"image": "pred.jpg", "boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1],
+         "width": 640, "height": 480},
         created_by="model:x", scope=ClassScope(subject="bud", id_map=id_map))
-    preds = json_io.read_annotations(str(out))
+    preds = json_io.annotations_from_bytes(data, source="pred.json")
     assert len(preds) == 1
     inv = subject_registry.decode_class_ids(id_map)
     # loader-side map (id_map) inverted == the name the recorded-map decode wrote on disk.

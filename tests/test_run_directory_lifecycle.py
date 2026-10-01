@@ -89,9 +89,7 @@ def _contents(directory: Path) -> dict[str, bytes]:
 
 def test_a_launched_run_completes_and_its_completion_is_its_registration(launch, tmp_path):
     from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, observe, read_rows
-    from tcip_mcp.model_registry import (
-        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
-    )
+    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
 
     res = launch()
     assert "error" not in res, res
@@ -110,7 +108,7 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(launch,
                 if m["name"] == run_dir.name]
     assert entry["sha256"] == checkpoint["sha256"]
     loaded = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
-    assert resolve_model_identity(loaded)["experiment_id"] == run_dir.name
+    assert loaded.producer["experiment_id"] == run_dir.name
 
 
 def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):

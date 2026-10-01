@@ -6,7 +6,6 @@ import type {
   CanopySegmentDisclosure,
   ConfirmRevisionPayload,
   DeliveryEventRecord as StoredDeliveryEventRecord,
-  DeliverySupersessionRecord,
   ExportCountCsvPayload,
   ExportCsvPayload,
   JobStatus,
@@ -14,6 +13,7 @@ import type {
   PhenologyPayload,
   PlantMappingDisclosure,
   PlantRegistryDisclosure,
+  Stated,
   TraitRevision,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
@@ -49,15 +49,16 @@ export interface InferenceJob {
   audit_warning: string | null;
 }
 
-/** A run is named, not spelled: the backend resolves both the images dir and the prediction
- *  bucket from (dataset_root, model_name, date) through its own layout resolver. Everything the
- *  platform derives per checkpoint (conf, IoU, tile geometry, cross-tile merge) is left off. */
+/** A run over one capture date's images into a bucket directory that does not exist yet; every
+ *  execution value ``stated`` leaves unset the platform derives from the checkpoint, and an
+ *  ``assessment_id`` runs that assessment's execution record and publishes under it. */
 export interface LaunchInferenceBody {
   checkpoint_path: string;
   dataset_root: string;
-  model_name: string;
-  date?: string | null;
-  tile?: boolean;
+  date: string;
+  output_dir: string;
+  stated: Stated;
+  assessment_id: string | null;
 }
 
 export const inferenceApi = {
@@ -67,8 +68,6 @@ export const inferenceApi = {
       job_id: string;
       images_dir: string;
       output_dir: string;
-      bucket_redirected: boolean;
-      requested_output_dir: string | null;
     }>(ROUTES.postInferenceLaunch, body),
 
   listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
@@ -123,49 +122,53 @@ export interface PerPlantRow {
   ratio: number | null;
 }
 
-// Milestone column names are derived from the threaded trait's own spec, not hardcoded to
-// any one trait: the fixed fields below are the columns every phenology delivery carries
-// regardless of trait; the trait-specific milestone/date columns (e.g. <trait>_50per_date)
-// arrive as additional keys and are read generically (see ResultsTab.tsx's milestoneColumns
-// helper).
+// The fixed fields below are the columns every phenology delivery carries; the trait's milestone
+// date and bound columns arrive as additional keys the response's own `columns` name.
 export interface OnsetRow {
   plant_id: string;
   accession: string | null;
   n_dates: number;
   n_dates_unclassified: number;
   n_dates_missing_images: number;
-  // Dates with a real, non-zero-detection observation: a plant can be fully classified and fully
-  // observed (0 unclassified, 0 missing) while still never having detected anything, e.g. before
-  // emergence; that reads as "no observations", not "valid".
+  // Dates with a non-zero-detection observation; a complete plant may still have none.
   n_observed_dates: number;
-  [milestoneColumn: string]: string | number | null;
+  // Whether every one of the plant's dates is fully classified and fully observed.
+  complete: boolean;
+  [milestoneColumn: string]: string | number | boolean | null;
 }
 
-/** The count-export door's own response headers: present on every response, an empty string
- *  (never a rendering of null/undefined) when nothing was unvalidated or acknowledged. */
+/** One milestone's columns: its date column and the column holding that date's bound. */
+export interface MilestoneColumn {
+  date: string;
+  bound: string;
+}
+
+/** The count-export door's own response headers: present on every response, the acknowledging
+ *  user an empty string (never a rendering of null/undefined) when the delivery is validated. */
 export interface ExportCountCsvHeaders {
   savedTo: string;
-  unvalidatedDimensions: string;
+  validated: boolean;
   acknowledgedBy: string;
 }
 
 // One door returns both projections from one server-side measurement, so no surface can render
 // either projection bare, and a milestone date and the curve it was read off cannot disagree.
 export interface PhenologyMeasurementResponse {
-  curves: { rows: PerPlantRow[]; n_plants: number; positive_class_id: number | null };
-  milestones: { rows: OnsetRow[] };
-  // Per-dimension state floored exactly as the delivered CSV's columns would be: a dimension with
-  // no column of its own (tile_size) floors every dimension that does. Never stronger than the file.
-  validated: Record<string, string>;
-  // Each dimension's own unfloored state, e.g. { operating_point: "validated_held_out" }: for a
-  // reader wanting one dimension's real outcome regardless of an unrelated dimension's failure.
-  validated_raw: Record<string, string>;
-  // True when any dimension lacked on-disk evidence, including one an acknowledgment cleared,
-  // which is exactly when these numbers must not be rendered as validated.
-  has_unvalidated_dimensions: boolean;
-  validity_detail: Record<string, unknown>;
+  curves: { rows: PerPlantRow[]; n_plants: number };
+  milestones: { rows: OnsetRow[]; columns: MilestoneColumn[] };
+  // Whether an assessment answers for every delivered bucket; when not, unvalidated_reason is the
+  // gate's refusal and result_sha256 each projection's digest a breeder's acknowledgment of
+  // exporting it binds to.
+  validated: boolean;
+  unvalidated_reason: string | null;
+  result_sha256: Record<"curves" | "milestones", string> | null;
+  // The missingness rule the rows were computed under.
+  require_all_dates_complete: boolean;
+  trait: string;
+  trait_revision: number;
+  trait_revision_sha256: string;
   // False when nothing was ever classified along the trait's positive-class axis: the ratios are
-  // then not a valid phenology measurement (run + validate the classifier first).
+  // then not a valid phenology measurement.
   positive_class_assessed: boolean;
   // What this delivery could not verify, not merely what it did not read: a bare date omitted,
   // absent, or archived (predictions still counted), or "date/name" for one uncheckable capture.
@@ -216,103 +219,60 @@ export function operationalizationRefusalOf(e: unknown): OperationalizationRefus
   };
 }
 
-/** A count door's own delivery-gate refusal: the gate's reason plus this door's own remedy,
- *  beside every counts-bearing fact the core had in hand (image_count, n_detections, and the
- *  like, door-dependent, so this carries the raw detail rather than a fixed field set). */
-export interface DeliveryGateRefusal {
-  kind: "delivery_gate";
+/** A delivery door's own refusal: the delivery gate's sentence naming what answers for no
+ *  delivered bucket, and the digest of the result it computed when a breeder's acknowledgment can
+ *  ship it unvalidated (null when none can). */
+export interface DeliveryRefusal {
+  kind: "delivery";
   message: string;
-  unvalidated_dimensions: string;
-  [fact: string]: unknown;
+  result_sha256: string | null;
 }
 
 /**
- * The delivery-gate refusal a thrown error carries, or null for every other failure.
+ * The delivery refusal a thrown error carries, or null for every other failure.
  *
  * Read by kind off the parsed detail, the same dispatch `operationalizationRefusalOf` uses for
- * its own family, so a delivery-gate refusal is never matched by a prose regex either.
+ * its own family, so a delivery refusal is never matched by a prose regex either.
  */
-export function deliveryGateRefusalOf(e: unknown): DeliveryGateRefusal | null {
+export function deliveryRefusalOf(e: unknown): DeliveryRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
-  if (detail.kind !== "delivery_gate") return null;
+  if (detail.kind !== "delivery") return null;
   return {
-    ...detail,
-    kind: "delivery_gate",
+    kind: "delivery",
     message: typeof detail.message === "string" ? detail.message : e.message,
-    unvalidated_dimensions:
-      typeof detail.unvalidated_dimensions === "string" ? detail.unvalidated_dimensions : "",
+    result_sha256: typeof detail.result_sha256 === "string" ? detail.result_sha256 : null,
   };
 }
 
-/** The Inference tab's launch refusing a bucket a prior run already published into: the
- *  requested path, the document count and a fresh bucket name, or null when every variant to
- *  the resolver's ceiling is taken (the agent's own remedy is the only way forward then). */
-export interface BucketHoldsDocumentsRefusal {
-  kind: "bucket_holds_documents";
-  message: string;
-  date: string | null;
-  requested_model_name: string | null;
-  requested_output_dir: string | null;
-  document_stem_count: number | null;
-  suggested_model_name: string | null;
-  suggested_output_dir: string | null;
-}
-
-/** The launch's other refusal: a job of this process already writing the same (dataset, model,
- *  date), named so the breeder watches it instead of resolving past it into a second job. */
-export interface BucketInFlightRefusal {
-  kind: "bucket_in_flight";
+/** The Inference tab's launch refusing the bucket directory a live job is still writing: the
+ *  requested path and that job. */
+export interface BucketExistsRefusal {
+  kind: "bucket_exists";
   message: string;
   date: string | null;
   requested_output_dir: string | null;
-  job_id: string | null;
+  job_id: string;
 }
-
-export type BucketRefusal = BucketHoldsDocumentsRefusal | BucketInFlightRefusal;
 
 /**
- * Either of the launch's own bucket refusals a thrown error carries, or null for every other
- * failure (including the verdict-exhaustion 409, whose detail is a plain string).
+ * The launch's bucket refusal a thrown error carries, or null for every other failure.
  *
- * Read by kind off the parsed detail, the same dispatch `deliveryGateRefusalOf` uses for its own
- * family, so a bucket refusal is never matched by a prose regex either. The route sends every
- * field below on both refusal kinds; null here is the honest read of one that, despite that,
- * a given detail does not carry.
+ * Read by kind off the parsed detail, the same dispatch `deliveryRefusalOf` uses for its own
+ * family, so a bucket refusal is never matched by a prose regex either.
  */
-export function bucketRefusalOf(e: unknown): BucketRefusal | null {
+export function bucketRefusalOf(e: unknown): BucketExistsRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
   const detail = e.detail;
-  const date = typeof detail.date === "string" ? detail.date : null;
-  const message = typeof detail.message === "string" ? detail.message : e.message;
-  if (detail.kind === "bucket_holds_documents") {
-    return {
-      kind: "bucket_holds_documents",
-      message,
-      date,
-      requested_model_name:
-        typeof detail.requested_model_name === "string" ? detail.requested_model_name : null,
-      requested_output_dir:
-        typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
-      document_stem_count:
-        typeof detail.document_stem_count === "number" ? detail.document_stem_count : null,
-      suggested_model_name:
-        typeof detail.suggested_model_name === "string" ? detail.suggested_model_name : null,
-      suggested_output_dir:
-        typeof detail.suggested_output_dir === "string" ? detail.suggested_output_dir : null,
-    };
-  }
-  if (detail.kind === "bucket_in_flight") {
-    return {
-      kind: "bucket_in_flight",
-      message,
-      date,
-      requested_output_dir:
-        typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
-      job_id: typeof detail.job_id === "string" ? detail.job_id : null,
-    };
-  }
-  return null;
+  if (detail.kind !== "bucket_exists" || typeof detail.job_id !== "string") return null;
+  return {
+    kind: "bucket_exists",
+    message: typeof detail.message === "string" ? detail.message : e.message,
+    date: typeof detail.date === "string" ? detail.date : null,
+    requested_output_dir:
+      typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
+    job_id: detail.job_id,
+  };
 }
 
 export type PlantMappingUnion =
@@ -333,11 +293,10 @@ export function isPlantMappingDisclosure(pm: PlantMappingUnion): pm is PlantMapp
   return "name" in pm && "record_sha256" in pm;
 }
 
-/** One completed delivery as the backend serves it: the stored record, the key its cited mapping
- *  loads under (set only alongside `plant_mapping`), and the supersession filed against it. */
+/** One completed delivery as the backend serves it: the stored record, and the key its cited
+ *  mapping loads under (set only alongside `plant_mapping`). */
 export type DeliveryEventRecord = StoredDeliveryEventRecord & {
   plant_mapping_resolved_key?: string | null;
-  superseded: DeliverySupersessionRecord | null;
 };
 
 export const resultsApi = {
@@ -422,7 +381,7 @@ export const resultsApi = {
       blob,
       headers: {
         savedTo: resp.headers.get("X-TCIP-Saved-To") ?? "",
-        unvalidatedDimensions: resp.headers.get("X-TCIP-Unvalidated-Dimensions") ?? "",
+        validated: resp.headers.get("X-TCIP-Validated") === "true",
         acknowledgedBy: decodeURIComponent(resp.headers.get("X-TCIP-Acknowledged-By") ?? ""),
       },
     };

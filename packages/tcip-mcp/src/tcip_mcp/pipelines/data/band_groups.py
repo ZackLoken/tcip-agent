@@ -393,7 +393,7 @@ def detect_and_write_band_groups(
         candidates it leaves unclaimed. Files no strategy matches are left independent.
 
     A group whose own stem (the siblings' common prefix) is reserved for a prediction bucket's
-    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``) is not written; its members stay
+    record (``tcip_annotation.json_io.is_reserved_stem``) is not written; its members stay
     standalone files and the group is reported in ``"reserved_name_skips"``.
 
     A group whose ``image_utils.stem_collision_key`` (of the common-prefix stem, or the caller's
@@ -406,9 +406,8 @@ def detect_and_write_band_groups(
     Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips":
     [...]}``.
     """
-    from tcip_annotation.json_io import is_sidecar_name
+    from tcip_annotation.json_io import is_reserved_stem
 
-    from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities, stem_collision_key
 
     d = Path(images_dir)
@@ -439,7 +438,7 @@ def detect_and_write_band_groups(
     reserved_name_skips: list[dict] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
-        if is_sidecar_name(label_filename(stem)):
+        if is_reserved_stem(stem):
             reserved_name_skips.append(
                 {"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]}
             )

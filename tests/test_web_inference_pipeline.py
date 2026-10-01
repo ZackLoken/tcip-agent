@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.pipelines.execution import Stated
+
 
 def _checkpoint(project: Path, **kwargs) -> Path:
     """A checkpoint registered in ``project``, completed by a real run (``kwargs`` are its own)."""
@@ -13,36 +15,33 @@ def _checkpoint(project: Path, **kwargs) -> Path:
     return Path(project_checkpoint(project, **kwargs))
 
 
-def test_write_predictions_json_roundtrip_and_negative(tmp_path):
+def test_encode_predictions_roundtrip_and_negative():
     import json
 
     from tcip_annotation import json_io
     from tcip_mcp import subject_registry
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     id_map = subject_registry.assign_class_ids(
         SubjectRegistry(subjects=(Subject(name="bud"),)), "bud")  # {bud: 0}
-    p = tmp_path / "img.json"
-    write_predictions_json(p, {
-        "width": 100, "height": 100,
+    encoded, _dropped = encode_predictions({
+        "image": "img.jpg", "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
     }, scope=ClassScope(subject="bud", id_map=id_map))
-    data = json.loads(p.read_text())
-    ann = data["annotations"][0]
+    ann = json.loads(encoded)["annotations"][0]
     assert ann["subject"] == "bud"                       # 1-indexed label 1 -> id 0 -> "bud"
     assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
     assert ann["score"] == pytest.approx(0.9)
-    preds = json_io.read_annotations(p)                     # symmetric read
+    preds = json_io.annotations_from_bytes(encoded, source="img.json")  # symmetric read
     assert len(preds) == 1 and preds[0].score == pytest.approx(0.9)
 
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
-    neg = tmp_path / "empty.json"
-    write_predictions_json(neg, {"width": 100, "height": 100,
-                                 "boxes": [], "scores": [], "labels": [], "count": 0},
-                           scope=ClassScope(subject="bud"))
-    assert json.loads(neg.read_text())["annotations"] == []
+    empty, _dropped = encode_predictions({"image": "empty.jpg", "width": 100, "height": 100,
+                                          "boxes": [], "scores": [], "labels": [], "count": 0},
+                                         scope=ClassScope(subject="bud"))
+    assert json.loads(empty)["annotations"] == []
 
 
 def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch):
@@ -68,28 +67,27 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
             captured["checkpoint"] = getattr(checkpoint_path, "path", checkpoint_path)
             captured["kwargs"] = kwargs
 
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
-            captured["tile"] = tile
-            captured["postprocess"] = kw.get("postprocess")
+        def predict_batch(self, paths, execution=None, **kw):
+            captured["execution"] = execution
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
-                    for p in paths]
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                     "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
         project=str(tmp_path), job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nmm",
+        output_dir=str(out_dir), stated=Stated(
+            tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"),
     )
     _worker(job)
 
     assert job.status == "completed"
     assert job.done == 1 and job.total == 1
     assert captured["checkpoint"] == str(ckpt)
-    assert captured["tile"] is True                 # tile=True -> pipeline tiling
-    assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
+    assert captured["execution"].tile_size == 640    # tile=True -> pipeline tiling
+    assert captured["execution"].postprocess == "nmm"  # the GUI's merge choice reaches inference
     import hashlib
     import json
 
@@ -121,35 +119,35 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+        def predict_batch(self, paths, execution=None, **kw):
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [2], "count": 1}
-                    for p in paths]
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [2],
+                     "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(
         project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
+        output_dir=str(out_dir), stated=Stated(
+            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
     assert job.status == "completed"
     import json
 
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
+    from dataclasses import asdict
+
+    from tcip_mcp.buckets import read_bucket
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
     # label 2 -> 0-indexed 1 -> the recorded map's "open"; a classified run's decoded name
     # lands under attributes[attribute], with subject carrying the object class.
     assert obj["subject"] == "bud"
     assert obj["attributes"] == {"opening": "open"}
-    sidecar = tcip_store.read(sidecar_key(out_dir, "operating_point"))
-    assert sidecar["scope"] == {"subject": "bud", "attribute": "opening",
-                                "id_map": {"closed": 0, "open": 1}}
+    assert asdict(read_bucket(out_dir).scope) == {
+        "subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):
@@ -176,39 +174,39 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
-            captured["tile"] = tile
+        def predict_batch(self, paths, execution=None, **kw):
+            captured["execution"] = execution
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
-                    for p in paths]
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                     "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeInstanceSegPredictor)
 
     job = InferenceJob(
         project=str(tmp_path), job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
+        output_dir=str(out_dir), stated=Stated(
+            tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
     assert job.status == "completed"        # no crash
-    assert captured["tile"] is True          # the breeder's own checkbox choice is honored
-    assert job.tile is True
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    assert captured["execution"].tiled       # the breeder's own checkbox choice is honored
+    assert job.stated.tile is True
+    from tcip_mcp.buckets import read_bucket
 
-    stamp = read_operating_point_sidecar(out_dir)
-    assert stamp["slicing"] is not None
-    # The stated merge threshold is stamped as stated, never silently overridden to "default".
-    assert stamp["operating_point"]["cross_tile_nms"]["source"] == "explicit"
+    execution = read_bucket(out_dir).execution
+    assert execution.tiled
+    # The stated merge threshold is recorded as stated, never silently overridden to "default".
+    assert execution.sources["cross_tile_nms"] == "explicit"
 
 
 def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
         tmp_path, monkeypatch):
     """A checkpoint whose only geometry is its own uniform untiled training frame does justify a
-    tile edge, and (after promotion) a real geometry reference of its own, so this door runs
-    rather than refusing: the stamp carries the tier's own reference and the prediction call
-    receives the resolved tile edge plus the checkpoint's recorded train-time resize."""
+    tile edge, so this door runs rather than refusing: the record names that basis and the
+    prediction call runs at the resolved tile edge plus the checkpoint's recorded train-time
+    resize."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -229,35 +227,25 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, **kw):
-            captured.update(kw)
+        def predict_batch(self, paths, execution=None, **kw):
+            captured["execution"] = execution
             return [{"image": p, "count": 0, "width": 100, "height": 100, "boxes": [],
-                     "scores": [], "labels": []} for p in paths]
+                     "scores": [], "labels": [], "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
 
     job = InferenceJob(
         project=str(tmp_path), job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(tmp_path / "out"), tile=True, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
+        output_dir=str(tmp_path / "out"), stated=Stated(
+            tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 
-    assert job.status == "completed"
-    assert job.error is None
-    assert captured.get("tile_size") == 64
-    assert captured.get("tile_resize") == (128, 128)
-
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, sidecar_key
-
-    sidecar = tcip_store.read(sidecar_key(job.output_dir, "operating_point"))
-    tile_ref = sidecar["operating_point"]["tile_size"]["validated_against"]
-    assert tile_ref not in (VALIDATED_FALSE, None)
-    from tcip_mcp.pipelines.resolution import VALIDATED_NATIVE_FRAME_GEOMETRY
-
-    assert tile_ref == VALIDATED_NATIVE_FRAME_GEOMETRY
+    assert job.status == "completed", job.error
+    execution = captured["execution"]
+    assert (execution.tile_size, execution.tile_resize) == (64, (128, 128))
+    assert execution.sources["tile_size"] == "native_ratio"
 
 
 def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
@@ -272,41 +260,44 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+        def predict_batch(self, paths, execution=None, **kw):
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
-                    for p in paths]
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                     "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
     return str(ckpt), str(images_dir)
 
 
+def _sources(project: Path, out_dir: Path) -> dict:
+    from tcip_mcp.buckets import read_bucket
+
+    return read_bucket(out_dir).execution.sources
+
+
 def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_default(
     tmp_path, monkeypatch,
 ):
-    """A caller-stated conf/max_dets equal to the platform default is stamped 'explicit', the same
-    distinction tile/tile_size already carry, never silently read back as an untouched default."""
+    """A caller-stated conf/max_dets equal to the platform default is recorded 'explicit', the
+    same distinction tile/tile_size already carry, never silently read back as a default."""
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    from tcip_mcp.pipelines.resolution import (
-        DEFAULT_CONF, DEFAULT_MAX_DETS, read_operating_point_sidecar,
-    )
+    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
     ckpt, images_dir = _stub_predictor_for_conf_source(monkeypatch, tmp_path)
     out_dir = tmp_path / "out"
 
     job = InferenceJob(
         project=str(tmp_path), job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7,
-        max_dets=DEFAULT_MAX_DETS,
+        output_dir=str(out_dir), stated=Stated(
+            tile=False, conf=DEFAULT_CONF, cross_tile_nms=0.7, max_dets=DEFAULT_MAX_DETS),
     )
     _worker(job)
 
-    assert job.status == "completed"
-    stamp = read_operating_point_sidecar(out_dir)
-    assert stamp["operating_point"]["conf"]["source"] == "explicit"
-    assert stamp["operating_point"]["max_dets"]["source"] == "explicit"
+    assert job.status == "completed", job.error
+    sources = _sources(tmp_path, out_dir)
+    assert (sources["conf"], sources["max_dets"]) == ("explicit", "explicit")
 
 
 def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_path, monkeypatch):
@@ -315,8 +306,6 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     says 'default' rather than 'explicit'."""
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
     import json
 
     ckpt, images_dir = _stub_predictor_for_conf_source(monkeypatch, tmp_path)
@@ -324,7 +313,7 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
 
     job = InferenceJob(
         project=str(tmp_path), job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, cross_tile_nms=0.7,
+        output_dir=str(out_dir), stated=Stated(tile=False, cross_tile_nms=0.7),
     )
     _worker(job)
 
@@ -332,9 +321,8 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     # The pass ran unchanged at the platform default: the one image's one detection landed.
     persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
     assert len(persisted) == 1
-    stamp = read_operating_point_sidecar(out_dir)
-    assert stamp["operating_point"]["conf"]["source"] == "default"
-    assert stamp["operating_point"]["max_dets"]["source"] == "default"
+    sources = _sources(tmp_path, out_dir)
+    assert (sources["conf"], sources["max_dets"]) == ("default", "default")
 
 
 def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degenerate_box(
@@ -362,10 +350,10 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
-        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+        def predict_batch(self, paths, execution=None, **kw):
             return [{"image": p, "width": 100, "height": 100,
                      "boxes": [[10.0, 10.0, 30.0, 30.0], [50.0, 50.0, 50.0, 60.0]],
-                     "scores": [0.9, 0.4], "labels": [1, 1], "count": 2}
+                     "scores": [0.9, 0.4], "labels": [1, 1], "count": 2, "cap_hit": False}
                     for p in paths]
 
     monkeypatch.setattr(
@@ -373,8 +361,8 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
 
     job = InferenceJob(
         project=str(tmp_path), job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=True, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nmm",
+        output_dir=str(out_dir), stated=Stated(
+            tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nmm"),
     )
     _worker(job)
 
@@ -401,8 +389,8 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
 
     job = InferenceJob(
         project=str(tmp_path), job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(tmp_path / "out"), tile=False, conf=0.25, cross_tile_nms=0.7,
-        overlap=0.2, postprocess="nms",
+        output_dir=str(tmp_path / "out"), stated=Stated(
+            tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, postprocess="nms"),
     )
     _worker(job)
 

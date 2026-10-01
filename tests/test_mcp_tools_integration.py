@@ -13,33 +13,20 @@ import pytest
 from PIL import Image
 
 
-# ── Fixtures ────────────────────────────────────────────────────────────────
+DATE = "2-11-26"
+"""The capture date conftest's ``data_dir`` lays its images and its published bucket under."""
 
 
-@pytest.fixture
-def json_dataset(tmp_path: Path) -> Path:
-    """A minimal dataset in the canonical name-based per-image JSON layout."""
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
+def _empty_bucket(project: Path, *images: Path) -> Path:
+    """A bucket published at ``predictions/m`` under ``project`` that predicted nothing on each of
+    ``images`` (8 by 8 px)."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    labels_dir = tmp_path / "annotations"
-    labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live"
-    preds_dir.mkdir(parents=True)
-
-    for name in ("img_001", "img_002", "img_003"):
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
-        json_io.write_annotations(
-            str(labels_dir / f"{name}.json"),
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))], 640, 480)
-        json_io.write_annotations(
-            str(preds_dir / f"{name}.json"),
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.9),
-             Annotation(subject="bud", geometry=BBox(496, 372, 528, 396), score=0.7)], 640, 480)
-    return tmp_path
+    return published(project, project / "predictions" / "m", [
+        {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": []}
+        for image in images],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
 
 
 # ── Annotation tool integration tests ───────────────────────────────────────
@@ -120,11 +107,12 @@ class TestReadAnnotations:
 class TestEvaluatePredictions:
     """Test score_predictions with actual file I/O."""
 
-    def test_evaluate_single_image(self, json_dataset: Path):
+    def test_evaluate_single_image(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(json_dataset / "images" / "img_001.jpg")
-        result = score_predictions(img, iou_threshold=0.5, conf_threshold=0.25)
+        img = str(data_dir / "images" / DATE / "img_001.jpg")
+        result = score_predictions(img, str(data_dir / "predictions" / "live" / DATE),
+                                   iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in result
         assert result["tp"] >= 0
         assert result["fp"] >= 0
@@ -132,10 +120,12 @@ class TestEvaluatePredictions:
         assert 0.0 <= result["precision"] <= 1.0
         assert 0.0 <= result["recall"] <= 1.0
 
-    def test_evaluate_folder(self, json_dataset: Path):
+    def test_evaluate_folder(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        result = score_predictions(str(json_dataset), iou_threshold=0.5)
+        result = score_predictions(str(data_dir / "images" / DATE),
+                                   str(data_dir / "predictions" / "live" / DATE),
+                                   iou_threshold=0.5)
         assert result["image_count"] == 3
         assert "precision" in result
         assert "recall" in result
@@ -147,16 +137,17 @@ class TestEvaluatePredictions:
 class TestEvaluatePredictionsDetail:
     """Test score_predictions(detail=True) per-detection breakdown with actual file I/O."""
 
-    def test_detail_breakdown(self, json_dataset: Path):
+    def test_detail_breakdown(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(json_dataset / "images" / "img_001.jpg")
-        result = score_predictions(img, iou_threshold=0.5, detail=True)
+        img = str(data_dir / "images" / DATE / "img_001.jpg")
+        result = score_predictions(img, str(data_dir / "predictions" / "live" / DATE),
+                                   iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
 
 
-# ── score_predictions(dataset) enumeration: cumulative over the layout, one bucket level ────
+# ── score_predictions(images directory) enumeration ────
 
 
 def _write_empty_label(path: Path, w: int, h: int) -> None:
@@ -182,23 +173,10 @@ class TestEvaluateFolderEnumeration:
         write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
         _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
 
-        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
+        result = score_predictions(str(images_dir), str(bucket), iou_threshold=0.5)
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.bandgroup"]
-
-    def test_a_loose_image_beside_a_dated_bucket_still_scores(self, tmp_path: Path):
-        from tcip_mcp.tools.annotation_tools import score_predictions
-
-        images_dir = tmp_path / "images"
-        (images_dir / "2024-01-01").mkdir(parents=True)
-        Image.new("RGB", (8, 8)).save(images_dir / "2024-01-01" / "bucketed.jpg")
-        Image.new("RGB", (8, 8)).save(images_dir / "loose.jpg")
-        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "bucketed.json", 8, 8)
-        _write_empty_label(tmp_path / "annotations" / "loose.json", 8, 8)
-
-        result = score_predictions(str(tmp_path), iou_threshold=0.5)
-        assert result["image_count"] == 2
-        assert {row["image"] for row in result["per_image"]} == {"bucketed.jpg", "loose.jpg"}
 
     def test_an_npz_capture_scores(self, tmp_path: Path):
         import numpy as np
@@ -210,20 +188,21 @@ class TestEvaluateFolderEnumeration:
         np.savez(str(images_dir / "cap.npz"), bands=np.zeros((8, 8, 3), dtype=np.uint16))
         _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
 
-        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        bucket = _empty_bucket(tmp_path, images_dir / "cap.npz")
+        result = score_predictions(str(images_dir), str(bucket), iou_threshold=0.5)
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
 
-    def test_a_folder_nested_inside_a_bucket_is_not_scored(self, tmp_path: Path):
-        """``images/<bucket>/`` is the layout; a folder inside a bucket is not itself one, so it is
-        not descended into."""
+    def test_a_folder_nested_inside_the_images_directory_is_not_scored(self, tmp_path: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        nested = tmp_path / "images" / "2024-01-01" / "nested"
+        images_dir = tmp_path / "images" / "2024-01-01"
+        nested = images_dir / "nested"
         nested.mkdir(parents=True)
         Image.new("RGB", (8, 8)).save(nested / "inner.jpg")
 
-        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        result = score_predictions(str(images_dir), str(_empty_bucket(tmp_path)),
+                                   iou_threshold=0.5)
         assert result["image_count"] == 0
 
 

@@ -15,19 +15,32 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
-from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units, export_aggregated_csv
-from tcip_mcp.traits import crops_units
+from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
+from tcip_mcp.traits import (
+    PER_PLANT_COUNT_AGGREGATE, PER_PLANT_REGRESSION_AGGREGATE, crops_units,
+)
 from tests import _trait_fixtures as fx
-from tests._binding_fixtures import validated_bucket
 
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path: Path):
-    """Every export below ships under a trait whose delivered number has a confirmed meaning."""
+    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count",
-                                value_keys=["detections_count"])
-    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
+                                value_keys=["detections_count"], measured_subject="bud")
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
+                                delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
+
+
+def _deliver(project: Path, results: list[dict], out: Path, delivered_phenotype: str, *,
+             delivery_kind: str, buckets=None):
+    """The acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
+    if buckets is None:
+        pytest.importorskip("torch")
+    from tests._chain_fixtures import deliver_acknowledged
+
+    return deliver_acknowledged(project, results, out, delivered_phenotype,
+                                delivery_kind=delivery_kind, buckets=buckets)
 
 
 # crops.yml traits that declare a physical unit, one per declared unit shape it uses.
@@ -88,14 +101,12 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
     that is a tally."""
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "detections_count",
-         "plant_attribution": "image", "measurement_document": "operating_point"},
+         "plant_attribution": "image"},
         {"plant_id": "PLANT_014", "value": 2, "observations": 1, "value_key": "detections_count",
-         "plant_attribution": "image", "measurement_document": "operating_point"},
+         "plant_attribution": "image"},
     ]
     out_path = tmp_path / "counts.csv"
-    bucket = validated_bucket(tmp_path, fx.COUNT_TRAIT, tag="counts")
-    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count",
-                          pred_dirs=[bucket])
+    _deliver(tmp_path, results, out_path, "stem_count", delivery_kind=PER_PLANT_COUNT_AGGREGATE)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert [r["units"] for r in rows] == ["", ""]
@@ -107,24 +118,17 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     that the measurement is refused: an mm-keyed area still resolves to its own squared label. A
     stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal.
 
-    Delivered under a scalar head (regression_operating_point): its prediction is in the trait's
-    declared unit by construction, so a dimensional value ships with no stated physical scale,
-    unlike the same shape under operating_point, which has nothing answering for its unit without
-    one.
+    Delivered as a regression aggregate: its prediction is in the trait's declared unit by
+    construction, so a dimensional value ships with no stated physical scale, unlike the same
+    shape in a count delivery, which has nothing answering for its unit without one.
     """
     results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
-                "value_key": "area_mm2", "plant_attribution": "image",
-                "measurement_document": "regression_operating_point"}]
-    assert _resolve_units("plant_surface_area", results, "regression_operating_point")[:2] == (
-        "mm2", "mm")
+                "value_key": "area_mm2", "plant_attribution": "image"}]
+    assert _resolve_units("plant_surface_area", results, True)[:2] == ("mm2", "mm")
 
-    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
-                                measurement_document="regression_operating_point")
-    bucket = validated_bucket(tmp_path, "plant_surface_area", document="regression_operating_point",
-                               tag="area")
     out_path = tmp_path / "area.csv"
-    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="plant_surface_area",
-                          pred_dirs=[bucket])
+    _deliver(tmp_path, results, out_path, "plant_surface_area",
+             delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["units"] == "mm2"
@@ -134,8 +138,8 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(tmp_path: Pa
     """The absence rule above must not cost the check it exists to serve: a trait crops.yml does
     declare a unit for still refuses a value whose own key implies a different one."""
     results = [{"plant_id": "PLANT_001", "value": 3.4, "observations": 1,
-                "value_key": "thickness_cm", "plant_attribution": "image", "measurement_document": "operating_point"}]
+                "value_key": "thickness_cm", "plant_attribution": "image"}]
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
-        export_aggregated_csv(results, str(tmp_path / "mismatch.csv"),
-                              project=tmp_path, delivered_phenotype="bark_thickness")
+        _deliver(tmp_path, results, tmp_path / "mismatch.csv", "bark_thickness",
+                 delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[])

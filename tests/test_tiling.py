@@ -14,6 +14,9 @@ import pytest
 from tcip_mcp.pipelines.data.datasets import clip_boxes_to_tile, dedup_boxes
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
+SLIVER = 0.5
+"""The sliver cutoff the wrapper tests state: their one-box fixtures derive no size spread."""
+
 
 def test_clip_boxes_to_tile_sliver_drop_and_remap():
     # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
@@ -38,7 +41,7 @@ def test_dedup_boxes_class_aware():
     distinct = np.array([[0., 0., 10., 10.], [50., 50., 60., 60.]])
     assert dedup_boxes(distinct, np.array([1, 1]), 0.8) == [0, 1]  # both survive
     # same geometry, different labels -> both survive
-    assert dedup_boxes(boxes, np.array([1, 2]), 0.8, class_aware=True) == [0, 1]
+    assert dedup_boxes(boxes, np.array([1, 2]), 0.8) == [0, 1]
     assert dedup_boxes(boxes, np.array([1, 1]), 1.0) == [0, 1]  # iou_thresh >= 1.0: no-op
 
 
@@ -63,11 +66,27 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
     return images_dir, labels_dir
 
 
+def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_field(tmp_path):
+    """No fraction stands in for a cutoff the ground truth cannot derive: one box per image over
+    two images measures no size spread, so an unstated cutoff refuses naming what to state, and
+    the same dataset with the field stated tiles."""
+    pytest.importorskip("torch")
+
+    images_dir, labels_dir = _det_dataset(tmp_path, n=2)
+    with pytest.raises(ValueError, match="tiling.sliver_frac"):
+        dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                     tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    stated = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
+                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.2,
+                                  "sliver_frac": SLIVER})
+    assert len(stated) > 0
+
+
 def test_tiled_detection_dataset_wrapper(tmp_path):
     torch = pytest.importorskip("torch")
 
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -76,7 +95,7 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
     assert target["labels"].dtype == torch.int64
 
 
-def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
+def test_tiled_dataset_keeps_empty_tiles(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
@@ -91,43 +110,10 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
                               256, 256, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
-    # class_avg_size is derived from the class-average box size. sliver_frac would be too, but a
-    # single box is too few to measure a size spread from (derive_sliver_frac's own min_samples
-    # guard), an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
-    assert ds.class_avg_size == pytest.approx(25.6, abs=1.0)
-    assert ds.sliver_frac == pytest.approx(0.5)
-    assert ds.sliver_frac_source == "documented default (underivable: too few GT boxes to measure a spread)"
-    assert ds.min_box_size == pytest.approx(0.5 * ds.class_avg_size)
-    # skip_empty now defaults False -> tiles far from the object are kept as valid negatives.
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
+    # Tiles far from the object are kept as valid negatives.
     empties = sum(1 for i in range(len(ds)) if ds[i][1]["boxes"].shape[0] == 0)
     assert empties > 0
-
-
-def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
-    # With real spread and enough boxes (>= min_samples), the sliver cutoff is genuinely derived,
-    # end to end through build_dataset, not just the pure function in test_derivations.py.
-    pytest.importorskip("torch")
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.derivations import derive_sliver_frac
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
-    # 6 boxes with real size spread (10..90px char size), all near the top-left so tiling geometry
-    # is not the point of this test.
-    sizes = [10.0, 26.0, 42.0, 58.0, 74.0, 90.0]
-    anns = [Annotation(subject="bud", geometry=BBox(2.0, 2.0 + 5.0 * i, 2.0 + s, 2.0 + 5.0 * i + s))
-            for i, s in enumerate(sizes)]
-    json_io.write_annotations(str(labels_dir / "a.json"), anns, 256, 256, keep_empty=True)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
-    assert ds.sliver_frac_source == "GT characteristic-size spread (p10 / mean)"
-    assert ds.sliver_frac == pytest.approx(derive_sliver_frac(sizes))
-    assert ds.sliver_frac != 0.5  # genuinely derived, not the pinned constant it replaces
 
 
 def test_tiled_dataset_collate_roundtrip(tmp_path):
@@ -137,7 +123,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     from tcip_mcp.pipelines.training.collation import task_collate
 
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": SLIVER})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -183,8 +169,8 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
-    plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
-    explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=None)
+    plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
+    explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=None)
     from tcip_mcp.pipelines.slicing import slice_lattice
 
     assert plain.tile_entries == explicit_none.tile_entries
@@ -199,8 +185,8 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
-    full = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
-    left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
+    full = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER)
+    left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
 
     assert 0 < left_half.num_samples < full.num_samples
     for _stem, box in left_half.tile_entries:
@@ -217,9 +203,8 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over('detection', str(images_dir), str(labels_dir), subject="bud")
-    left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
-    right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(128, 0, 256, 256)])
+    left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(0, 0, 128, 256)])
+    right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=[(128, 0, 256, 256)])
 
     assert left.num_samples > 0 and right.num_samples > 0
     assert set(left.tile_entries).isdisjoint(set(right.tile_entries))
-    assert left.base is base and right.base is base  # one shared base, not two separate builds

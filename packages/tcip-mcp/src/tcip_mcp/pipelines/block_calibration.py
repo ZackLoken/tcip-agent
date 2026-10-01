@@ -1,5 +1,5 @@
-"""Block-aware calibration/holdout: validate a detection operating point directly against a
-mosaic's own reserved calibration/test bands (see
+"""The reserved-region reference of a within-image split: the band geometry, completeness and
+feasibility an assessment reads a mosaic's own reserved calibration and test regions through (see
 ``split_construction.spatial_single_source_split``'s four-way split,
 ``reserve_calibration_fraction``), for a raster training source too large or too singular to hold
 whole images out from.
@@ -8,27 +8,18 @@ whole images out from.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Enough bands to measure a per-band bias spread (resolve_operating_point's own equivalence gate
-# needs n >= 2 present images per side) without fragmenting a modest region into slivers.
+# Enough bands to measure a per-band bias spread (the count criterion needs n >= 2 present images
+# per side) without fragmenting a modest region into slivers.
 DEFAULT_K_CAL = 3
 DEFAULT_K_TEST = 3
 
 
-class BlockCalibrationRefused(ValueError):
-    """A named block-calibration refusal: completeness, feasibility, or a resolution precondition
-    (no experiment_id, no spatial-strip split, no reserved calibration region). Each message states
-    exactly what's missing.
-    """
-
-
-def _reserved_spatial_regions(resolved: dict) -> dict | None:
+def reserved_spatial_regions(resolved: dict) -> dict | None:
     """The spatial manifest of a run's resolution (``data.split.spatial_manifest``) when it
     reserved a calibration and a test region, else ``None``: a run that drew no within-image
     spatial split, or one that reserved no calibration or no test region."""
@@ -38,15 +29,7 @@ def _reserved_spatial_regions(resolved: dict) -> dict | None:
     return spatial
 
 
-def reserved_calibration_region_available(experiment_id: str, *, project: Path) -> bool:
-    """Whether ``experiment_id``'s run of ``project`` (``experiments.run_resolution``) reserved a
-    calibration region in a within-image spatial split (:func:`_reserved_spatial_regions`)."""
-    from tcip_mcp.experiments import run_resolution
-
-    return _reserved_spatial_regions(run_resolution(experiment_id, project=project)) is not None
-
-
-def _band_rects(
+def band_rects(
     region_rect: tuple[int, int, int, int], k: int, tile_size: int, overlap: float,
     buffer_px: int, name_prefix: str,
 ) -> dict[str, tuple[int, int, int, int]]:
@@ -77,7 +60,7 @@ def _band_rects(
     return out
 
 
-def _centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
+def centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
     """Which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
     x0, y0, x1, y1 = rect
     cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
@@ -85,16 +68,16 @@ def _centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarr
     return (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
 
 
-def _select_gt_for_band(
+def select_gt_for_band(
     gt: dict[str, np.ndarray], band_rect: tuple[int, int, int, int],
 ) -> dict[str, np.ndarray]:
     """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
-    ``iscrowd``) :func:`_centered_in` ``band_rect``, each box kept at its full extent (never
+    ``iscrowd``) :func:`centered_in` ``band_rect``, each box kept at its full extent (never
     clipped) and translated to the band's own local (inner-rect-relative) pixel space.
     """
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
-    keep = _centered_in(gt["boxes"], band_rect)
+    keep = centered_in(gt["boxes"], band_rect)
     band = {k: gt[k][keep] for k in PER_BOX_KEYS if k in gt}
     band["boxes"] = band["boxes"].astype(np.float64, copy=True)
     band["boxes"][:, [0, 2]] -= band_rect[0]
@@ -102,12 +85,14 @@ def _select_gt_for_band(
     return band
 
 
-def _check_completeness(
+def check_completeness(
     dataset_root: str, subject: str, stem: str, rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
-    """Refuse by name (the incomplete/stale cells and the subject) unless every rect in ``rects``
-    is fully covered by an attested-complete, non-stale region-completeness record.
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`, naming the incomplete or
+    stale cells and the subject) unless every rect in ``rects`` is fully covered by an
+    attested-complete, non-stale region-completeness record.
     """
+    from tcip_mcp.assessment import AssessmentRefused
     from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
 
     problems: list[str] = []
@@ -118,27 +103,29 @@ def _check_completeness(
         elif missing:
             problems.append(f"{name}: cells not attested complete for subject {subject!r}: {missing}")
     if problems:
-        raise BlockCalibrationRefused(
-            "block calibration refused: the reserved calibration/test regions are not fully "
-            f"attested complete for subject {subject!r}: {'; '.join(problems)}. Attest every "
-            "listed cell complete (the Annotate canvas's Attest control) before block "
-            "calibration can treat this region's GT as trustworthy."
+        raise AssessmentRefused(
+            "the reserved calibration/test regions are not fully attested complete for subject "
+            f"{subject!r}: {'; '.join(problems)}. Attest every listed cell complete (the Annotate "
+            "canvas's Attest control) before the regions' ground truth can be assessed against."
         )
 
 
-def _check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int = 2) -> None:
-    """Refuse by name when fewer than ``min_present`` bands on this side carry any GT at all."""
+def check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int = 2) -> None:
+    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefused`) when fewer than
+    ``min_present`` bands on this side carry any GT at all."""
+    from tcip_mcp.assessment import AssessmentRefused
+
     n_present = sum(1 for c in gt_counts.values() if c > 0)
     if n_present < min_present:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: the resolved {side} band layout "
+        raise AssessmentRefused(
+            f"the resolved {side} band layout "
             f"({len(gt_counts)} band(s)) leaves only {n_present} band(s) with any GT, fewer than "
             f"the {min_present} an equivalence check needs; reduce k_{side}, widen the reserved "
             f"fraction, or check region completeness/annotation density for this mosaic."
         )
 
 
-def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0) -> list[str]:
+def density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0) -> list[str]:
     """Band names whose GT count is a stark outlier (more than ``factor``x the median, or less
     than ``1/factor``x it) relative to its siblings: a cheap smoke check for a plausible
     attestation error (a region marked complete after only part of it was actually annotated),
@@ -155,312 +142,3 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
         name for name, c in gt_counts.items()
         if c > 0 and (c > factor * median or c < median / factor)
     )
-
-
-def resolve_block_calibration_records(
-    p: Any, *, project: Path, trait_name: str, experiment_id: str | None,
-    k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST,
-) -> tuple[Any, dict, dict]:
-    """Resolve a detection operating point directly against a mosaic's own reserved
-    calibration/test regions, every band predicted through the whole-mosaic export's own prepared
-    pass ``p`` (``inference_tools._PreparedPass``); ``experiment_id`` names a run of
-    ``project``.
-
-    Returns ``(bundle, provenance, evidence)``: ``bundle`` is a
-    :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle`; ``provenance`` carries the resolved
-    ``experiment_id``/``stem``/``spatial_manifest`` plus
-    ``density_uniformity_flags``; ``evidence`` is the resolver this ran, the arguments it ran over
-    (the dict passed to ``resolve_operating_point``, without the trait and the producing run) and
-    the reserved regions they came from.
-
-    ``experiment_id`` unresolved (``None``, or given but not found) refuses outright.
-
-    The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a real
-    planting-grid pitch over the GT-object-spacing fallback when the training run's resolved data
-    section (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves at least two
-    georeferenced plants and the training raster's own pixel size is resolvable
-    (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source always
-    falls back to GT-spacing.
-
-    ``p``'s tile edge is refused, naming both, when it differs from the spatial manifest's own
-    ``tile_size``. An unstated merge threshold on ``p`` is resolved from the calibration bands'
-    own GT before any band is predicted (:func:`~tcip_mcp.pipelines.calibration.resolve_pass_merge`),
-    so the bands are merged at the threshold the export runs at.
-    """
-    from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
-
-    if experiment_id is None:
-        raise BlockCalibrationRefused(
-            "block calibration refused: no run of this project produced this checkpoint (no "
-            "completed run's final status names it); block calibration validates against one "
-            "specific mosaic's own reserved regions and has no meaning without knowing which "
-            "training run's split produced them."
-        )
-
-    resolved = run_resolution(experiment_id, project=project)
-    spatial = _reserved_spatial_regions(resolved)
-    if spatial is None:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: run {experiment_id!r} resolved no within-image spatial "
-            "split with a reserved calibration and test region (train it with "
-            "data.split.reserve_calibration_fraction set); block calibration only applies to a "
-            "single-mosaic training run with a reserved calibration region."
-        )
-    cal_region = spatial["calibration_region"]
-    test_region = spatial["test_region"]
-    stem = spatial.get("stem")
-    if not stem:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: experiment {experiment_id!r}'s spatial manifest carries "
-            "no stem to resolve the training mosaic's own image/label files from."
-        )
-
-    data_cfg = resolved["data"]
-    labels_dir, images_dir = data_cfg.get("labels_dir"), data_cfg.get("images_dir")
-    if not labels_dir or not images_dir:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: run {experiment_id!r}'s resolved data section carries "
-            "no data.labels_dir/data.images_dir to resolve the training mosaic's own files from."
-        )
-    scope = p.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
-    subject = cast(str, scope.subject)
-
-    from tcip_mcp.dataset_layout import dataset_root_of
-
-    predictor = p.predictor
-    dataset_root = dataset_root_of(labels_dir)
-    if dataset_root is None:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: {labels_dir!r} is not under a recognized dataset root; "
-            "the region-completeness store resolves from the dataset root the mosaic's own label "
-            "file lives under."
-        )
-
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
-
-    from tcip_mcp.dataset_layout import label_filename
-
-    gt_path = str(Path(labels_dir) / label_filename(stem))
-    target, n_unlabeled = json_det_targets(gt_path, scope)
-    if n_unlabeled:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: {n_unlabeled} instance(s) in {stem!r} are unlabeled for "
-            f"attribute {scope.attribute!r}. The ordinary calibration path drops a whole image with any "
-            "unlabeled instance rather than score against partial GT; a block calibration has only "
-            "one image (the mosaic), so there is no partial-image exclusion available here, and "
-            "scoring the model's real detections of these instances as false positives would "
-            "silently bias the calibrated confidence. Label every instance for this attribute in "
-            "the reserved regions, or calibrate a trait with no attribute scope."
-        )
-    gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
-          "labels": np.asarray(target["labels"], dtype=np.int64),
-          "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
-
-    tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
-    if tile_size != p.geometry.tile_size:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: the run's reserved regions were tiled at "
-            f"{tile_size}px, but this export is resolved to run the whole-mosaic pass at "
-            f"{p.geometry.tile_size}px; the reserved-region claim and the exported bucket must be "
-            "tiled at one regime, or the claim says nothing about the counts the export actually "
-            "produces."
-        )
-    mosaic_w, mosaic_h = int(spatial["width"]), int(spatial["height"])
-
-    def _region_rect(region: list) -> tuple[int, int, int, int]:
-        # stripes_per_split's default (1) guarantees exactly one contiguous rect per side.
-        return tuple(region[0])
-
-    cal_rect, test_rect = _region_rect(cal_region), _region_rect(test_region)
-
-    # Completeness first, against the whole reserved regions, before any sub-banding: checking
-    # only after band geometry resolves could misreport an unattested region as a geometry error.
-    _check_completeness(
-        str(dataset_root), subject, stem, {"calibration_region": cal_rect, "test_region": test_rect})
-
-    from tcip_mcp.pipelines.derivations import derive_block_scale_px
-
-    from tcip_mcp.pipelines.data.datasets import object_rows
-
-    objects = gt["boxes"][object_rows(gt["iscrowd"])]
-    # One real spatial scale, pooled across both reserved regions' own GT objects: a crowd region
-    # is no object, so its extent says nothing about their spacing.
-    reserved_mask = np.zeros(len(objects), dtype=bool)
-    for region in list(cal_region) + list(test_region):
-        reserved_mask |= _centered_in(objects, tuple(region))
-    reserved_boxes_xywh = [
-        [x1, y1, x2 - x1, y2 - y1]
-        for (x1, y1, x2, y2) in objects[reserved_mask].tolist()
-    ]
-    training_source = resolve_image_source(images_dir, stem)
-
-    plants = None
-    plant_csv_paths = data_cfg.get("plant_csv_paths")
-    if plant_csv_paths:
-        from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
-
-        plants = read_plant_csvs([Path(p) for p in plant_csv_paths]) or None
-
-    from tcip_mcp.pipelines.raster_source import BandGroupRef
-
-    raster_path_for_scale = (
-        training_source if not isinstance(training_source, BandGroupRef) else None)
-
-    try:
-        buffer_px, scale_source = derive_block_scale_px(
-            tile_size=tile_size, gt_boxes_per_image=[reserved_boxes_xywh],
-            plants=plants, raster_path=raster_path_for_scale)
-    except ValueError as exc:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: no block scale is derivable for the reserved "
-            f"regions' own GT ({exc}); the reserved calibration/test regions need at least two "
-            "GT objects between them to derive a spatial scale from."
-        ) from exc
-
-    try:
-        cal_bands = _band_rects(cal_rect, k_cal, tile_size, overlap, buffer_px, "cal")
-        test_bands = _band_rects(test_rect, k_test, tile_size, overlap, buffer_px, "test")
-    except ValueError as exc:
-        raise BlockCalibrationRefused(
-            f"block calibration refused: the resolved band layout (k_cal={k_cal}, k_test={k_test}, "
-            f"block scale {buffer_px}px from {scale_source}) is infeasible for the reserved "
-            f"regions' own extent ({exc}); reduce k_cal/k_test or widen the reserved fraction."
-        ) from exc
-
-    def _band_gt_counts(bands: dict[str, tuple[int, int, int, int]]) -> dict[str, int]:
-        # Objects per band: a crowd region is never one.
-        return {name: int(object_rows(_select_gt_for_band(gt, rect)["iscrowd"]).sum())
-                for name, rect in bands.items()}
-
-    cal_gt_counts, test_gt_counts = _band_gt_counts(cal_bands), _band_gt_counts(test_bands)
-    _check_feasibility(cal_gt_counts, side="cal")
-    _check_feasibility(test_gt_counts, side="test")
-    density_flags = (
-        _density_uniformity_flags(cal_gt_counts) + _density_uniformity_flags(test_gt_counts))
-    if density_flags:
-        logger.warning("block calibration: GT-density outlier band(s) relative to siblings: %s",
-                       density_flags)
-
-    from tcip_mcp.pipelines.operating_point import (
-        STAGED_CONF_FLOOR, apply_operating_point, derive_max_dets_from_counts,
-    )
-
-    density_cap = derive_max_dets_from_counts(
-        list(cal_gt_counts.values()) + list(test_gt_counts.values()))
-    applied, applied_attribute_path = apply_operating_point(
-        predictor, STAGED_CONF_FLOOR, density_cap)
-
-    from tcip_mcp.pipelines.calibration import pass_resolver_inputs, resolve_pass_merge
-    from tcip_mcp.pipelines.raster_source import open_raster
-    from tcip_mcp.pipelines.training.evaluation import gt_records
-
-    resolve_pass_merge(p, [gt_records(_select_gt_for_band(gt, rect)) for rect in cal_bands.values()])
-    with open_raster(training_source, predictor.in_chans) as reader:
-        if (reader.width, reader.height) != (mosaic_w, mosaic_h):
-            raise BlockCalibrationRefused(
-                f"block calibration refused: the run's recorded mosaic dimensions "
-                f"({mosaic_w}x{mosaic_h}) do not match the actual raster {training_source}'s "
-                f"current dimensions ({reader.width}x{reader.height}); the raster was likely "
-                f"replaced or truncated since training. Retrain or re-split against the current "
-                f"file before block calibration can trust the reserved regions' geometry."
-            )
-        cal_records, cal_rects = _band_records(
-            reader, cal_bands, mosaic_w, mosaic_h, p, gt=gt, stem=stem)
-        test_records, test_rects = _band_records(
-            reader, test_bands, mosaic_w, mosaic_h, p, gt=gt, stem=stem)
-
-    from tcip_mcp.pipelines.operating_point import (
-        attach_spatial_split_kind_provenance, resolve_operating_point,
-    )
-    from tcip_mcp.pipelines.resolution import dataset_hash
-
-    dh = dataset_hash(labels_dir)
-    # Explicit dict[str, Any] so the **resolver_inputs splat below checks against each of
-    # resolve_operating_point's differently-typed keyword parameters.
-    resolver_inputs: dict[str, Any] = {
-        **pass_resolver_inputs(p),
-        "dataset_hash": dh, "calibration_records": cal_records, "holdout_records": test_records,
-        "max_dets": density_cap,
-        "max_dets_derived_from": (
-            "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
-        "staged_conf_floor": applied.get("score_thresh"),
-        "staged_conf_floor_attribute_path": applied_attribute_path,
-        "cal_rects": cal_rects, "hold_rects": test_rects,
-        # No selection on this route; not-applicable regardless via the record's spatial_strip.
-        "selection_dir": None, "calibration_labels_dir": str(labels_dir),
-    }
-    bundle = resolve_operating_point(trait_name, project=project, experiment_id=experiment_id,
-                                     **resolver_inputs)
-    attach_spatial_split_kind_provenance(bundle, spatial)
-
-    provenance = {
-        "experiment_id": experiment_id, "stem": stem, "spatial_manifest": spatial,
-        "density_uniformity_flags": density_flags, "block_scale_px": buffer_px,
-        "block_scale_source": scale_source, "k_cal": k_cal, "k_test": k_test,
-        "cal_gt_counts": cal_gt_counts, "test_gt_counts": test_gt_counts,
-    }
-    evidence = {
-        "resolver": "resolve_operating_point",
-        "inputs": resolver_inputs,
-        "reference_inputs": {
-            "label_dirs": {"reserved_regions": str(labels_dir)},
-            "scope_roots": {"training_mosaic": str(dataset_root)},
-            "stated_values": {"stem": stem, "calibration_region": list(cal_rect),
-                              "test_region": list(test_rect), "block_scale_px": buffer_px,
-                              "block_scale_source": scale_source, "k_cal": k_cal, "k_test": k_test},
-        },
-    }
-    return bundle, provenance, evidence
-
-
-def _band_records(
-    reader: Any, bands: dict[str, tuple[int, int, int, int]], mosaic_w: int, mosaic_h: int,
-    p: Any, *, gt: dict[str, np.ndarray], stem: str,
-) -> tuple[list[dict], dict[str, tuple[int, int, int, int]]]:
-    """Per-band COCO-shaped records
-    (:func:`~tcip_mcp.pipelines.training.evaluation.build_coco_image_record`) plus the band rects
-    keyed by a globally-unique image_id, for ``resolve_operating_point``'s
-    ``cal_rects``/``hold_rects`` geometric disjointness check.
-
-    Predicts through the prepared pass ``p`` (its geometry, slicing record and merge threshold)
-    over a :class:`~tcip_mcp.pipelines.raster_source._RegionView` of ``reader`` widened on every
-    side (clipped to the mosaic) by the overlap the slice lattice states between neighbors, and
-    keeps the detections and the GT :func:`_centered_in` the band's own rect, each at full extent.
-    """
-    from tcip_mcp.pipelines.raster_source import Rect, _RegionView
-    from tcip_mcp.pipelines.slicing import slice_lattice
-    from tcip_mcp.pipelines.training.evaluation import (
-        build_coco_image_record, detection_record, gt_records,
-    )
-
-    tile_size = p.geometry.tile_size
-    # The second slice's origin over a two-tile-wide frame is where the lattice's overlap ends.
-    halo = tile_size - slice_lattice(tile_size, 2 * tile_size, tile_size, p.geometry.overlap)[1][0]
-    records: list[dict] = []
-    rects_by_id: dict[str, tuple[int, int, int, int]] = {}
-    for name, inner in sorted(bands.items()):
-        ix0, iy0, ix1, iy1 = inner
-        hx0, hy0 = max(0, ix0 - halo), max(0, iy0 - halo)
-        hx1, hy1 = min(mosaic_w, ix1 + halo), min(mosaic_h, iy1 + halo)
-        view = _RegionView(reader, Rect(hx0, hy0, hx1, hy1))
-        image_id = f"{stem}::block_{name}"
-        result = p.predictor.predict_sliced(
-            view, tile_size=tile_size, overlap=p.geometry.overlap,
-            postprocess=p.slicing["postprocess"], cross_tile_nms=p.cross_tile_nms.value,
-            tile_batch_size=p.tile_batch_size, tile_resize=p.geometry.tile_resize,
-            require_masks=False, source_label=image_id,
-        )
-        cap_hit = result.get("cap_hit", False)
-        boxes = np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4) + [hx0, hy0, hx0, hy0]
-        dt = [detection_record((box - [ix0, iy0, ix0, iy0]).tolist(), label, score)
-              for box, score, label, kept in zip(boxes, result["scores"], result["labels"],
-                                                 _centered_in(boxes, inner)) if kept]
-        rec = build_coco_image_record(ix1 - ix0, iy1 - iy0,
-                                      gt_records(_select_gt_for_band(gt, inner)), dt,
-                                      image_id=image_id)
-        rec["cap_hit"] = cap_hit
-        records.append(rec)
-        rects_by_id[image_id] = inner
-    return records, rects_by_id

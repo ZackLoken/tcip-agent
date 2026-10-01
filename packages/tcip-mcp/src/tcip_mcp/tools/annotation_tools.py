@@ -12,14 +12,11 @@ from tcip_annotation.json_io import (
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.json_io import read_predictions
 
-from tcip_mcp.dataset_layout import (
-    annotation_path_for_image,
-    find_gt_label,
-    find_prediction,
-    image_root,
-)
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
+
+from tcip_mcp.buckets import Bucket, read_bucket
+from tcip_mcp.dataset_layout import annotation_path_for_image, find_gt_label
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 
@@ -35,14 +32,15 @@ def _dims_for(image_path: str) -> tuple[int, int]:
 
 
 
-def read_annotations(image_path: str) -> dict:
-    """Load the ground-truth labels and predictions for a single image.
+def read_annotations(image_path: str, predictions_dir: str | None = None) -> dict:
+    """Load the ground-truth labels for a single image and, given a bucket, its predictions.
 
     Both are the name-based per-image schema, one file per image, all subjects. A present document
     this schema cannot read returns an ``error``.
 
     Args:
         image_path: Absolute path to the image file.
+        predictions_dir: The published bucket whose document for this image to read, if any.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -63,7 +61,7 @@ def read_annotations(image_path: str) -> dict:
             "annotations": [client_annotation(a) for a in anns],
         }
 
-    pred_path = find_prediction(image_path)
+    pred_path = read_bucket(predictions_dir).document(image_path) if predictions_dir else None
     if pred_path is not None:
         try:
             preds = read_predictions(str(pred_path))
@@ -144,39 +142,64 @@ def save_annotations(
     return {"written": [str(out_path)], "count": len(typed)}
 
 
-def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None = None):
-    """Load GT + predictions for one image and build a COCO per-image record.
+def _scored(images: list[Path], bucket: Bucket, *, iou_threshold: float, conf_threshold: float,
+            trait: TraitEntry | None) -> dict:
+    """``bucket``'s documents for ``images`` scored against their ground truth: each predicted
+    image's annotations read once, one subject-to-id map across all of them, one COCO record per
+    image, the metrics over those records, and each image's TP/FP/FN, the trait's own criterion
+    governing them (``governing_criterion``) when ``trait`` is given and the IoU convention
+    otherwise. An image the bucket's record names no document for is not predicted, so it is left
+    out of every count and listed under ``not_predicted``. Returns ``{"read", "iou_type",
+    "records", "metrics", "counts", "governing_criterion", "not_predicted"}``, ``read`` each
+    scored image's ``(image, gt, preds, width, height)``."""
+    from tcip_annotation.state import polygonal
 
-    Returns ``(iou_type, record, (gt, preds), width, height)`` where ``gt`` / ``preds`` are
-    :class:`Annotation` lists; ``None`` if unreadable. When a prediction file is found, its
-    bucket's own recorded scope is read; an undecodable stamp propagates the seam's own
-    ``StoreError``, and a bare directory or any readable scope scores by ``subject``.
-    ``_checked_bucket_dirs`` skips a directory already read this pass.
-    """
-    from tcip_mcp.pipelines.resolution import bucket_scope
-    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
+    from tcip_mcp.pipelines.training.evaluation import (
+        coco_detection_metrics, governing_counts, records_from_annotation,
+        resolve_match_criterion, subject_category_ids,
+    )
 
-    img = Path(image_path)
-    if not img.is_file():
-        return None
-    w, h = _dims_for(image_path)
-    gt: list[Annotation] = []
-    preds: list[Annotation] = []
+    documents = {img: bucket.document(img) for img in images}
+    read = []
+    for img, document in documents.items():
+        if document is not None:
+            gt_path = find_gt_label(str(img))
+            read.append((img, read_labels(str(gt_path)) if gt_path else [],
+                         read_predictions(str(document)), *_dims_for(str(img))))
+    annotations = [a for _img, gt, preds, _w, _h in read for a in (*gt, *preds)]
+    segm = any(polygonal(a.geometry) for a in annotations)
+    name_id = subject_category_ids(annotations)
+    records = [records_from_annotation(gt, preds, width=w, height=h, force_segm=segm,
+                                       name_id=name_id)[1]
+               for _img, gt, preds, w, h in read]
+    iou_type = "segm" if segm else "bbox"
+    metrics = coco_detection_metrics(records, iou_type=iou_type, iou_threshold=iou_threshold,
+                                     conf_threshold=conf_threshold)
+    criterion = resolve_match_criterion(trait, records) if trait is not None else None
+    if criterion is not None:
+        counts = [governing_counts([rec], criterion, conf_threshold=conf_threshold)
+                  for rec in records]
+    else:
+        by_id = {c["image_id"]: c for c in metrics["per_image_counts"]}
+        counts = [by_id.get(i, {"tp": 0, "fp": 0, "fn": 0}) for i in range(1, len(records) + 1)]
+    return {"read": read, "iou_type": iou_type, "records": records, "metrics": metrics,
+            "counts": counts, "governing_criterion": criterion,
+            "not_predicted": [str(img) for img, document in documents.items() if document is None]}
 
-    gt_path = find_gt_label(image_path)
-    if gt_path:
-        gt = read_labels(str(gt_path))
-    pred_path = find_prediction(image_path)
-    if pred_path:
-        bucket_dir = Path(pred_path).parent
-        if _checked_bucket_dirs is None or bucket_dir not in _checked_bucket_dirs:
-            bucket_scope(bucket_dir)
-            if _checked_bucket_dirs is not None:
-                _checked_bucket_dirs.add(bucket_dir)
-        preds = read_predictions(str(pred_path))
 
-    iou_type, record = records_from_annotation(gt, preds, width=w, height=h)
-    return iou_type, record, (gt, preds), w, h
+def _totals(scored: dict) -> dict:
+    """The TP/FP/FN, precision, recall and F1 a scoring reports: its governing criterion's over
+    every record when it has one, the COCO metrics' otherwise; with a criterion the COCO counts
+    stay beside them under ``iou_*`` as a comparability metric."""
+    from tcip_mcp.pipelines.training.evaluation import governing_counts
+
+    m, criterion = scored["metrics"], scored["governing_criterion"]
+    if criterion is None:
+        return {k: m[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")}
+    gc = governing_counts(scored["records"], criterion, conf_threshold=m["conf_threshold"])
+    return {**{k: gc[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")},
+            "iou_tp": m["tp"], "iou_fp": m["fp"], "iou_fn": m["fn"],
+            "governing_criterion": criterion, "map50_role": "comparability_only"}
 
 
 def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annotation]) -> list[dict]:
@@ -192,211 +215,99 @@ def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annota
            for m in matches["fn"]])
 
 
-def _apply_governing_criterion(out: dict, records: list, *, trait: TraitEntry | None,
-                               iou_threshold: float, conf_threshold: float) -> dict:
-    """Override the human-facing TP/FP/FN + P/R/F1 with the trait's derived criterion.
-
-    A count trait using center-match governs the review count that feeds the phenotype; AP@0.5
-    stays as a labeled comparability metric. With no trait, ``out`` is returned unchanged.
-    """
-    from tcip_mcp.pipelines.training.evaluation import governing_counts, resolve_match_criterion
-
-    criterion = resolve_match_criterion(trait, records, iou_threshold=iou_threshold)
-    if criterion["kind"] != "center_match":
-        return out
-    gc = governing_counts(records, criterion, conf_threshold=conf_threshold)
-    out.update({
-        "iou_tp": out.get("tp"), "iou_fp": out.get("fp"), "iou_fn": out.get("fn"),
-        "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
-        "precision": round(gc["precision"], 4), "recall": round(gc["recall"], 4),
-        "f1": round(gc["f1"], 4),
-        "governing_criterion": criterion, "map50_role": "comparability_only",
-    })
-    return out
+def _rounded(totals: dict) -> dict:
+    """``totals`` with its precision, recall and F1 rounded to four places."""
+    return {k: round(v, 4) if k in ("precision", "recall", "f1") else v
+            for k, v in totals.items()}
 
 
-def _evaluate_image(
-    image_path: str,
-    iou_threshold: float = 0.5,
-    conf_threshold: float = DEFAULT_CONF,
-    detail: bool = False,
-    trait: TraitEntry | None = None,
-) -> dict:
-    """Match predictions against ground truth for a single image (COCOeval).
-
-    mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a per-box overlay the agent
-    can render for review (``compute_matches``). With a count ``trait`` the reported count is
-    governed by the trait's derived criterion, map50 kept as comparability.
-    """
-    loaded = _load_image_annotations(image_path)
-    if loaded is None:
-        return {"error": f"Image not found: {image_path}"}
-    iou_type, record, (gt, preds), w, h = loaded
-
-    from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics
-    m = coco_detection_metrics([record], iou_type=iou_type,
-                               iou_threshold=iou_threshold, conf_threshold=conf_threshold)
+def _evaluate_image(image: Path, bucket: Bucket, iou_threshold: float, conf_threshold: float,
+                    detail: bool, trait: TraitEntry | None) -> dict:
+    """``bucket``'s predictions for one image matched against its ground truth (:func:`_scored`),
+    with ``matches``, a per-box overlay the agent can render for review (``compute_matches``). An
+    image the bucket's record names no document for refuses (``ValueError``): it was not
+    predicted, so there is nothing to score."""
+    scored = _scored([image], bucket, iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+                     trait=trait)
+    if scored["not_predicted"]:
+        raise ValueError(f"{bucket.path} names no document for {image.name}: it was not "
+                         "predicted, so there is nothing to score.")
+    _img, gt, preds, w, h = scored["read"][0]
     matches = compute_matches(gt, preds, iou_threshold=iou_threshold, conf_threshold=conf_threshold)
-    out = {
-        "image": image_path,
-        "tp": m["tp"], "fp": m["fp"], "fn": m["fn"],
-        "precision": round(m["precision"], 4),
-        "recall": round(m["recall"], 4),
-        "f1": round(m["f1"], 4),
-        "map50": round(m["map50"], 4),
-        "iou_type": iou_type,
-        "iou_threshold": iou_threshold,
-        "conf_threshold": conf_threshold,
-        "matches": matches,
-    }
-    out = _apply_governing_criterion(out, [record], trait=trait,
-                                     iou_threshold=iou_threshold, conf_threshold=conf_threshold)
+    out = {"image": str(image), **_rounded(_totals(scored)),
+           "map50": round(scored["metrics"]["map50"], 4), "iou_type": scored["iou_type"],
+           "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "matches": matches}
     if detail:
-        out["img_w"] = w
-        out["img_h"] = h
-        out["detections"] = _detection_breakdown(matches, gt, preds)
+        out.update(img_w=w, img_h=h, detections=_detection_breakdown(matches, gt, preds))
     return out
 
 
-def _evaluate_folder(
-    folder_path: str,
-    iou_threshold: float = 0.5,
-    conf_threshold: float = DEFAULT_CONF,
-    trait: TraitEntry | None = None,
-) -> dict:
-    """Aggregate detection metrics across all images in a dataset.
+def _evaluate_folder(images_dir: str, bucket: Bucket, iou_threshold: float,
+                     conf_threshold: float, trait: TraitEntry | None) -> dict:
+    """Aggregate detection metrics across the logical images of one images directory against
+    ``bucket``'s documents for them (:func:`_scored`).
 
-    Scores the logical images directly under ``images_dir`` plus those in each of its direct bucket
-    subdirectories (``images/<bucket>/``, the dataset layout), one level: a loose image beside a
-    dated bucket still scores, a ``.bandgroup``-grouped capture scores as one logical image, and a
-    folder nested inside a bucket is not descended. A bucket holding two raw images under one
-    case-folded stem is refused by ``list_logical_images``.
+    A ``.bandgroup``-grouped capture scores as one logical image, and a nested folder is not
+    descended. A directory holding two raw images under one case-folded stem is refused by
+    ``list_logical_images``.
     """
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 
-    root = Path(folder_path)
-    images_dir = image_root(root)
-    if not images_dir.is_dir():
-        images_dir = root
-
-    def _logical_paths(d: Path) -> list[Path]:
-        return [src.manifest_path if isinstance(src, BandGroupRef) else src
-                for src in list_logical_images(d).values()]
-
-    images = _logical_paths(images_dir)
-    if images_dir.is_dir():
-        for bucket in sorted(p for p in images_dir.iterdir() if p.is_dir()):
-            images.extend(_logical_paths(bucket))
-    images.sort()
-
-    from tcip_mcp.pipelines.training.evaluation import (
-        coco_detection_metrics, records_from_annotation, subject_category_ids,
-    )
-
-    collected = []  # (iou_type, record, (gt, preds), w, h, img)
-    checked_bucket_dirs: set = set()
-    for img in images:
-        loaded = _load_image_annotations(str(img), _checked_bucket_dirs=checked_bucket_dirs)
-        if loaded is None:
-            continue
-        iou_type, record, raw, w, h = loaded
-        collected.append((iou_type, record, raw, w, h, img))
-
-    any_segm = any(c[0] == "segm" for c in collected)
-    dataset_iou_type = "segm" if any_segm else "bbox"
-    # One subject->id map across the whole scored set: coco_detection_metrics accumulates every
-    # per-image record into a single eval, so a subject must carry the same category id in every
-    # image. Rebuild all records with it (the per-image records built by _load_image_annotations
-    # used a per-image-local map, which would pool distinct subjects into one class across images).
-    name_id = subject_category_ids(
-        a for (_it, _rec, (gt, preds), _w, _h, _img) in collected for a in (*gt, *preds))
-    records = [records_from_annotation(gt, preds, width=w, height=h,
-                                       force_segm=any_segm, name_id=name_id)[1]
-               for (_it, _rec, (gt, preds), w, h, _img) in collected]
-    valid_images = [c[5] for c in collected]
-
-    m = coco_detection_metrics(records, iou_type=dataset_iou_type,
-                               iou_threshold=iou_threshold, conf_threshold=conf_threshold)
-
-    counts_by_id = {c["image_id"]: c for c in m["per_image_counts"]}
-    per_image = []
-    for idx, img in enumerate(valid_images, start=1):
-        c = counts_by_id.get(idx, {"tp": 0, "fp": 0, "fn": 0})
-        per_image.append({"image": img.name, "tp": c["tp"], "fp": c["fp"], "fn": c["fn"]})
-
-    out = {
-        "path": folder_path,
-        "image_count": len(images),
-        "map": round(m["map"], 4),
-        "map50": round(m["map50"], 4),
-        "total_tp": m["tp"], "total_fp": m["fp"], "total_fn": m["fn"],
-        "precision": round(m["precision"], 4),
-        "recall": round(m["recall"], 4),
-        "f1": round(m["f1"], 4),
-        "iou_type": dataset_iou_type,
-        "per_image": per_image,
-    }
-    from tcip_mcp.pipelines.training.evaluation import governing_counts, resolve_match_criterion
-    criterion = resolve_match_criterion(trait, records, iou_threshold=iou_threshold)
-    if criterion["kind"] == "center_match":
-        gc = governing_counts(records, criterion, conf_threshold=conf_threshold)
-        out.update({
-            "iou_total_tp": out["total_tp"], "iou_total_fp": out["total_fp"],
-            "iou_total_fn": out["total_fn"],
-            "total_tp": gc["tp"], "total_fp": gc["fp"], "total_fn": gc["fn"],
-            "precision": round(gc["precision"], 4), "recall": round(gc["recall"], 4),
-            "f1": round(gc["f1"], 4),
-            "governing_criterion": criterion, "map50_role": "comparability_only",
-        })
-        out["per_image"] = [
-            {"image": img.name,
-             **{k: governing_counts([rec], criterion, conf_threshold=conf_threshold)[k]
-                for k in ("tp", "fp", "fn")}}
-            for rec, img in zip(records, valid_images)
-        ]
-    return out
+    images = sorted(src.manifest_path if isinstance(src, BandGroupRef) else src
+                    for src in list_logical_images(images_dir).values())
+    scored = _scored(images, bucket, iou_threshold=iou_threshold,
+                     conf_threshold=conf_threshold, trait=trait)
+    counts = {"tp": "total_tp", "fp": "total_fp", "fn": "total_fn", "iou_tp": "iou_total_tp",
+              "iou_fp": "iou_total_fp", "iou_fn": "iou_total_fn"}
+    totals = {counts.get(k, k): v for k, v in _rounded(_totals(scored)).items()}
+    m = scored["metrics"]
+    return {"path": images_dir, "image_count": len(scored["read"]),
+            "not_predicted": scored["not_predicted"], "map": round(m["map"], 4),
+            "map50": round(m["map50"], 4), **totals, "iou_type": scored["iou_type"],
+            "per_image": [{"image": img.name, **{k: c[k] for k in ("tp", "fp", "fn")}}
+                          for (img, *_rest), c in zip(scored["read"], scored["counts"])]}
 
 
 def score_predictions(
     path: str,
+    predictions_dir: str,
     iou_threshold: float = 0.5,
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
     detail: bool = False,
     trait: TraitEntry | None = None,
 ) -> dict:
-    """Score on-disk predictions against on-disk ground truth (COCOeval).
+    """Score a published bucket's predictions against on-disk ground truth (COCOeval).
 
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
-    per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``); a
-    dataset directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes share
+    per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``); an
+    images directory returns aggregate metrics plus ``per_image`` TP/FP/FN. Both regimes share
     ``coco_detection_metrics``.
 
     A classified bucket's predictions carry the object class in ``subject``, so this scores the
-    localization of the object class, never the classifier's own call. A prediction bucket whose
-    own recorded stamp will not decode, or decodes with no ``(subject, attribute)`` pair at all,
-    refuses by name.
+    localization of the object class, never the classifier's own call.
 
     Args:
-        path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
+        path: Absolute path to an image file (single-image match) or an images directory
+            (aggregate).
+        predictions_dir: The bucket whose documents are scored.
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
         conf_threshold: Minimum confidence to consider a prediction.
         detail: Single-image only, also return the per-detection ``detections`` breakdown: each
             entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,
             ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and the
             provenance it holds) beside its ``tag``, ``iou`` and indices.
-        trait: The trait's confirmed entry; when set, its derived localization criterion
-            governs the reported TP/FP/FN count; map50 stays a labeled comparability metric.
-            Absent -> the IoU convention governs.
+        trait: The trait's confirmed entry; when set, its own localization criterion governs the
+            reported TP/FP/FN count; map50 stays a labeled comparability metric. Absent -> the IoU
+            convention governs.
     """
-    from tcip_store import StoreError
-
     p = Path(path)
     try:
+        bucket = read_bucket(predictions_dir)
         if p.is_file():
-            return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
+            return _evaluate_image(p, bucket, iou_threshold, conf_threshold, detail, trait)
         if p.is_dir():
-            return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
-    except (UnreadableLabelDocument, StoreError) as exc:
+            return _evaluate_folder(path, bucket, iou_threshold, conf_threshold, trait)
+    except (UnreadableLabelDocument, ValueError) as exc:
         return {"error": str(exc)}
     return {"error": f"Path not found: {path}"}
 

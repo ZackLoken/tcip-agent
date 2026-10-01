@@ -11,13 +11,15 @@ import os
 from pathlib import Path
 
 from tcip_store import registered_stores
-from tcip_store.layout_claims import PREDICTION_BUCKET, ROOT, RUN, SPLITS, STATE
+from tcip_store.layout_claims import ROOT, RUN, SPLITS, STATE
 
 from tcip_annotation import json_io, review_engine  # noqa: F401
 from tcip_mcp import experiments
 from tcip_mcp import (  # noqa: F401
     audit,
+    buckets,
     dataset_layout,
+    delivery,
     model_registry,
     operationalization,
     project_record,
@@ -27,7 +29,6 @@ from tcip_mcp import (  # noqa: F401
     workspace,
 )
 from tcip_mcp.project_paths import project_state_dir
-from tcip_mcp.pipelines import resolution  # noqa: F401
 from tcip_mcp.pipelines.data import band_groups, selection, splits  # noqa: F401
 from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
 from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
@@ -79,9 +80,6 @@ def project_roots(project: str | Path) -> tuple[tuple[str, str], ...]:
     - ``RUN``: each run directory (``experiments.run_observations``).
     - ``SPLITS``: the selection directory each bound training run's partition names, off the same
       walk, present only while that directory exists.
-    - ``PREDICTION_BUCKET``: every model directory and its date subdirectories under each dataset's
-      own ``predictions/`` tree, live and cleared alike
-      (:func:`tcip_mcp.dataset_layout.prediction_bucket_dirs` with ``include_cleared=True``).
     """
     root = Path(project)
     roots: list[tuple[str, str]] = []
@@ -101,8 +99,6 @@ def project_roots(project: str | Path) -> tuple[tuple[str, str], ...]:
         dataset_root = project_tools.dataset_entry_path(root, dataset_entry)
         _add(roots, seen, dataset_root, ROOT)
         _add(roots, seen, project_state_dir(dataset_root), STATE)
-        for bucket in dataset_layout.prediction_bucket_dirs(dataset_root, include_cleared=True):
-            _add(roots, seen, bucket, PREDICTION_BUCKET)
 
     return tuple(roots)
 

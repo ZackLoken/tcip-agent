@@ -28,26 +28,17 @@ def _resolve(label: str):
 
 def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered():
     """The conf label is built from whichever picker ran, so the objective registry is the source
-    of that text. Every base label it holds, and the review-verdict variant the same picker earns
-    when it runs over confirmed review verdicts, must be registered against the same
-    implementation. The label is assembled into a variable before it is stamped, so a registry key
-    that drifts from the text the picker registry names is invisible to a scan of stamp sites."""
+    of that text, and every label it holds must be registered. The label is assembled into a
+    variable before it is stamped, so a registry key that drifts from the text the picker registry
+    names is invisible to a scan of stamp sites."""
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
-    base_labels = {label for _, label in COUNT_OBJECTIVE_PICKERS.values()}
-    assert base_labels, "expected at least one registered count-objective picker"
-    for base in base_labels:
-        assert base in DERIVATION_IMPLEMENTATIONS, (
-            f"picker label {base!r} is stamped on conf but is not registered in "
+    labels = {label for _, label in COUNT_OBJECTIVE_PICKERS.values()}
+    assert labels, "expected at least one registered count-objective picker"
+    for label in labels:
+        assert label in DERIVATION_IMPLEMENTATIONS, (
+            f"picker label {label!r} is stamped on conf but is not registered in "
             "DERIVATION_IMPLEMENTATIONS")
-        variants = [k for k in DERIVATION_IMPLEMENTATIONS if k.startswith(base) and k != base]
-        assert variants, (
-            f"no review-reference variant of {base!r} is registered, so the label that same picker "
-            "earns over review verdicts has no implementation recorded behind it")
-        for variant in variants:
-            assert DERIVATION_IMPLEMENTATIONS[variant] == DERIVATION_IMPLEMENTATIONS[base], (
-                f"{variant!r} and {base!r} name the same picker running over different references "
-                "and must record the same implementation")
 
 
 def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamped_number(
@@ -70,10 +61,10 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
 
 
 def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
-    """A picker's label, and the variant it earns over confirmed review verdicts, are the picker
-    registry's own text. A second list of them would let a registered picker stamp a label no
-    implementation is recorded for, which is the auditing gap this registry exists to close, so
-    the labels are read from the registry rather than restated beside it."""
+    """A picker's label is the picker registry's own text. A second list of them would let a
+    registered picker stamp a label no implementation is recorded for, which is the auditing gap
+    this registry exists to close, so the labels are read from the registry rather than restated
+    beside it."""
     from tcip_mcp.pipelines import derivations, operating_point
 
     label = "a sweep registered by this test"
@@ -84,7 +75,6 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
     live = derivations.DERIVATION_IMPLEMENTATIONS
     _picker, existing = next(iter(operating_point.COUNT_OBJECTIVE_PICKERS.values()))
     assert live[label] == live[existing]
-    assert live[label + operating_point.REVIEW_VERDICT_LABEL_SUFFIX] == live[existing]
 
 
 def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance(

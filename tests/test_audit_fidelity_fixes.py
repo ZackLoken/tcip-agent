@@ -65,15 +65,15 @@ def test_review_engine_save_gt_empty_keeps_record(tmp_path):
     assert json.loads(det.read_text())["annotations"] == []
 
 
-def test_write_predictions_json_stamps_model_provenance(tmp_path):
+def test_encode_predictions_stamps_model_provenance():
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    p = tmp_path / "pred.json"
-    write_predictions_json(p, {"width": 100, "height": 80,
-                               "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
-                           created_by="model:best_bud", scope=ClassScope(subject="bud", id_map={"bud": 0}))
-    obj = json.loads(p.read_text())["annotations"][0]
+    data, _dropped = encode_predictions(
+        {"image": "pred.jpg", "width": 100, "height": 80,
+         "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
+        created_by="model:best_bud", scope=ClassScope(subject="bud", id_map={"bud": 0}))
+    obj = json.loads(data)["annotations"][0]
     assert obj["created_by"] == "model:best_bud"
     assert obj["created_at"]
     assert obj["score"] == pytest.approx(0.9)

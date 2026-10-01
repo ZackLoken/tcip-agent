@@ -1,7 +1,7 @@
-"""``mark_complete``'s classified-scope membership admission: a classified stamp admits exactly its
-own object class as a Complete's stated subject, never one of its attribute's values, and a stamp
-this door cannot resolve at all (an undecodable one, a bare directory) omits the coverage entry
-rather than refusing the Complete.
+"""``mark_complete``'s classified-scope membership admission: a classified bucket admits exactly its
+own object class as a Complete's stated subject, never one of its attribute's values, and a bucket
+this door cannot resolve a subject for (a directory of no bucket) omits the coverage entry rather
+than refusing the Complete, while a record that will not read refuses it.
 """
 
 from __future__ import annotations
@@ -14,47 +14,28 @@ from fastapi.testclient import TestClient
 from tcip_annotation.json_io import write_annotations
 from tcip_web.app import app
 
-from tests._binding_fixtures import complete_stamp
-
 IMG_W, IMG_H = 160, 100
 SUBJECT = "bud"
 ATTRIBUTE = "opening"
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(opened_project: Path) -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
+def _classified_bucket(project: Path, date: str) -> Path:
+    """A classified bucket published over ``date`` holding an empty document for each of two
+    images."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), complete_stamp(sidecar),
-                       expect=tcip_store.Version.ABSENT)
-
-
-def _damage_sidecar(pred_dir: Path) -> None:
-    import os
-
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    key = sidecar_key(pred_dir, "operating_point")
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(b"{not json")
-        return
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute("update records set value = ? where store = ? and parts = ?",
-                    (b"{not json", key.store, encode_parts(key.parts)))
-    finally:
-        conn.close()
+    bucket = project / "predictions" / "classifier" / date
+    published(project, bucket, [
+        {"image": name, "width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
+        for name in ("IMG_0010.JPG", "IMG_0011.JPG")],
+        scope={"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": {"open": 0, "closed": 1}})
+    return bucket
 
 
 def _dataset_root(tmp_path: Path) -> Path:
@@ -73,68 +54,63 @@ def _shard(dataset_root: Path, image_name: str) -> dict:
     return tcip_store.read(found[0])["state"]
 
 
-def test_a_classified_stamp_admits_its_own_subject_and_omits_a_value_name(
+def _complete(client: TestClient, dataset_root: Path, image_name: str, pred_dir: Path,
+              subject: str):
+    return client.post("/api/review/mark_complete", json={
+        "dataset_root": str(dataset_root), "image_name": image_name, "pred_dir": str(pred_dir),
+        "subject": subject})
+
+
+def test_a_classified_bucket_admits_its_own_subject_and_omits_a_value_name(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    d = tmp_path / "predictions" / "classifier" / "2026-05-10"
-    d.mkdir(parents=True)
-    write_annotations(str(d / "IMG_0010.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
-                                "id_map": {"open": 0, "closed": 1}}})
+    d = _classified_bucket(tmp_path, "2026-05-10")
     dataset_root = _dataset_root(tmp_path)
 
-    own_subject = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0010.JPG",
-        "pred_dir": str(d), "subject": SUBJECT,
-    })
+    own_subject = _complete(client, dataset_root, "IMG_0010.JPG", d, SUBJECT)
     assert own_subject.status_code == 200
     assert _shard(dataset_root, "IMG_0010.JPG")["adjudication_covered"] == {SUBJECT: True}
 
-    value_name = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0011.JPG",
-        "pred_dir": str(d), "subject": "open",
-    })
+    value_name = _complete(client, dataset_root, "IMG_0011.JPG", d, "open")
     assert value_name.status_code == 200
     state = _shard(dataset_root, "IMG_0011.JPG")
     assert not (state.get("adjudication_covered") or {})
 
 
-def test_an_undecodable_stamp_omits_the_entry_and_still_completes(
+def test_an_undecodable_bucket_record_refuses_the_complete_and_writes_nothing(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    d = tmp_path / "predictions" / "classifier" / "2026-05-12"
-    d.mkdir(parents=True)
-    write_annotations(str(d / "IMG_0030.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"scope": {"subject": SUBJECT, "attribute": ATTRIBUTE,
-                                "id_map": {"open": 0, "closed": 1}}})
-    _damage_sidecar(d)
+    """The record states which model produced the predictions the Complete adjudicates, so one
+    that will not read refuses naming it rather than recording a Complete with no producer."""
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    d = _classified_bucket(tmp_path, "2026-05-12")
+    (d / "bucket.json").write_bytes(b"{not json")
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0030.JPG",
-        "pred_dir": str(d), "subject": SUBJECT,
-    })
+    resp = _complete(client, dataset_root, "IMG_0030.JPG", d, SUBJECT)
 
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-    state = _shard(dataset_root, "IMG_0030.JPG")
-    assert not (state.get("adjudication_covered") or {})
+    assert resp.status_code == 400
+    assert "does not decode" in resp.json()["detail"]
+    assert tcip_store.keys(REVIEW_VERDICTS_STORE, str(dataset_root / ".tcip" / "state")) == []
 
 
-def test_a_bare_directory_with_a_named_subject_omits_the_entry_and_still_completes(
+def test_a_directory_with_no_bucket_record_refuses_the_complete_and_records_nothing(
     client: TestClient, tmp_path: Path,
 ) -> None:
+    """Documents with no record beside them name no producer, so a Complete adjudicating them
+    refuses naming the record rather than reading them as some model's predictions."""
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
     d = tmp_path / "predictions" / "baseline" / "2026-05-13"
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0040.json"), [], IMG_W, IMG_H, keep_empty=True)
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0040.JPG",
-        "pred_dir": str(d), "subject": SUBJECT,
-    })
+    resp = _complete(client, dataset_root, "IMG_0040.JPG", d, SUBJECT)
 
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-    state = _shard(dataset_root, "IMG_0040.JPG")
-    assert not (state.get("adjudication_covered") or {})
+    assert resp.status_code == 400
+    assert "bucket.json" in resp.json()["detail"]
+    assert tcip_store.keys(REVIEW_VERDICTS_STORE, str(dataset_root / ".tcip" / "state")) == []

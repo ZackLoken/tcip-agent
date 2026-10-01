@@ -4,35 +4,28 @@ A delivery is normally many plants with genuinely different statistics, so these
 per-plant groups distinguishable from each other and from the cohort as a whole: every plant's
 summary, observation count and identity-provenance must describe that plant's own records, and a
 continuous trait's mean and standard deviation must describe the same estimator of the same values.
-The delivery gate's validity dimensions are exercised here only where the count dimension and the
-ordinal dimension could be mistaken for one another.
+The gate is exercised here only where the kind an assessment measured could be mistaken for the
+kind a delivery ships.
 """
 
 from __future__ import annotations
 
 import csv
-import json
 
 import pytest
 
-from tcip_mcp.pipelines.postprocessing.aggregation import (
-    aggregate_per_plant,
-    export_aggregated_csv,
-)
-from tcip_mcp.pipelines.resolution import DeliveryRefused, VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
 from tests import _trait_fixtures as fx
-from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
     """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
     fx.seed_delivery_traits(tmp_path)
-    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
-    fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"],
-                                measurement_document="ordinal_operating_point")
-    # A delivery stating operating_point rests on the same trait's count aggregate, its own record.
-    fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"])
+    # The count measures what the chain's unassessed bucket detects.
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"],
+                                measured_subject="bud")
 
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
@@ -97,25 +90,27 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     """The whole path a mosaic delivery takes, aggregate then export: every CSV row's value,
     n_images and identity columns belong to the plant named in that row. A cohort-wide number in
     n_images tells the breeder a single-image plant was measured from six."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import deliver_acknowledged
+
     results = [
-        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "plant_attribution": "image", "measurement_document": "operating_point",
+        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "plant_attribution": "image",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 0.4},
-        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "plant_attribution": "image", "measurement_document": "operating_point",
+        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "plant_attribution": "image",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 1.9},
-        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_attribution": "image", "measurement_document": "operating_point",
+        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_attribution": "image",
          "plant_id_source": "gnss_sequence"},
-        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_attribution": "image", "measurement_document": "operating_point",
+        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_attribution": "image",
          "plant_id_source": "qr_code"},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_attribution": "image", "measurement_document": "operating_point",
+        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_attribution": "image",
          "plant_id_source": "qr_code"},
-        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "plant_attribution": "image", "measurement_document": "operating_point"},
+        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "plant_attribution": "image"},
     ]
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
-    bucket = _count_bucket(tmp_path, "count_preds")
     out_path = tmp_path / "per_plant.csv"
-    export_aggregated_csv(summaries, str(out_path), project=tmp_path, delivered_phenotype="stem_count", crop="currant",
-                          pred_dirs=[bucket])
+    deliver_acknowledged(tmp_path, summaries, out_path, "stem_count",
+                         delivery_kind=PER_PLANT_COUNT_AGGREGATE, crop="currant")
     with open(out_path, newline="") as f:
         rows = _by_plant(list(csv.DictReader(f)))
 
@@ -171,117 +166,66 @@ def test_summed_areas_stay_within_their_own_plant():
     assert out["PLANT_B"]["n_observations_with_value"] == 1
 
 
-# -- the count and ordinal validity dimensions are not interchangeable -------
+# -- an assessment answers for the kind it measured, and no other -------
 
 
-def _count_bucket(tmp_path, name, *, validated=True):
-    root = tmp_path / "ds"
-    d = root / "predictions" / name
-    write_prediction(d, "img_a")
-    stamp = {
-        "validated": validated, "trait": fx.COUNT_TRAIT,
-        "operating_point": {"conf": {
-            "value": 0.55,
-            "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
-        }},
-        "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None},
-    }
-    if validated:
-        write_bound_sidecar(tmp_path, d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
-    else:
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
-    return str(d)
+def _assessed(project, kind: str, experiment_id: str):
+    """A bucket published under an assessment of ``kind``, the count trait confirmed first with both
+    its per-image and its per-plant count operationalizations; the bucket as recorded."""
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._chain_fixtures import (
+        DATE, SUBJECT, draw_reference_selection, synthetic_capture, train_on,
+    )
+
+    entry = fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT)
+    fx.propose_and_confirm(project, fx.with_operationalization(
+        entry, PER_PLANT_COUNT_AGGREGATE, measured_subject=SUBJECT,
+        delivered_phenotypes=("stem_count",), delivered_value_keys=("count",)))
+    root = project / "ds"
+    images_dir, _labels = synthetic_capture(root)
+    draw_reference_selection(project, root, project / "selection")
+    checkpoint = train_on(project / "selection", project, experiment_id)
+    assessment = assess_checkpoint(project, checkpoint_path=checkpoint, trait=fx.COUNT_TRAIT,
+                                   delivery_kind=kind, selection_dir=str(project / "selection"))
+    assert assessment.get("passed") is True, assessment
+    bucket = root / "predictions" / kind / DATE
+    published = run_inference(project, checkpoint_path=checkpoint, images_dir=str(images_dir),
+                              output_dir=str(bucket), assessment_id=assessment["assessment_id"])
+    assert "error" not in published, published
+    return read_bucket(bucket)
 
 
-def _ordinal_bucket(tmp_path, name, *, validated=True):
-    d = tmp_path / name
-    d.mkdir(parents=True, exist_ok=True)
-    stamp = {
-        "validated": validated, "trait": "astringency",
-        "operating_point": {"ordinal": {
-            "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
-            "criterion": "quadratic_weighted_kappa",
-        }},
-    }
-    if validated:
-        write_bound_sidecar(tmp_path, d, stamp, document="ordinal_operating_point", dataset_root=tmp_path,
-                            experiment_id=f"exp-{name}-ordinal")
-    else:
-        (d / "ordinal_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
-    return str(d)
+_ROWS = [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
+          "plant_attribution": "image"}]
 
 
-def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_path):
-    """Which sidecar dimension a delivery reconciles against comes from the records' own stated
-    measurement_document, so a bucket holding only operating_point.json cannot answer for records
-    naming ordinal_operating_point, and must refuse rather than ship stamped with a dimension
-    nothing validated. The two matching pairings still ship, so the rail admits the legitimate
-    deliveries it exists to protect."""
-    ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
-    count_only = _count_bucket(tmp_path, "count_preds")
+def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
 
-    with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
-        export_aggregated_csv(
-            [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-             "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}],
-            str(tmp_path / "wrong_dimension.csv"), project=tmp_path, delivered_phenotype="astringency",
-            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
+    bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
+    delivered = deliver_per_plant_aggregate(
+        tmp_path, _ROWS, str(tmp_path / "matched.csv"), delivered_phenotype="stem_count",
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
+        door="test")
 
-    matched_ordinal = tmp_path / "matched_ordinal.csv"
-    export_aggregated_csv(
-        [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-         "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}],
-        str(matched_ordinal), project=tmp_path, delivered_phenotype="astringency",
-        operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
-    matched_count = tmp_path / "matched_count.csv"
-    export_aggregated_csv(
-        [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
-         "plant_attribution": "image", "measurement_document": "operating_point", "scale_document": None}],
-        str(matched_count), project=tmp_path, delivered_phenotype="stem_count",
-        operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
-
-    for path in (matched_ordinal, matched_count):
-        with open(path, newline="") as f:
-            assert next(csv.DictReader(f))["operating_point_validated"] == VALIDATED_HELD_OUT
+    assert delivered["validated"] is True
 
 
-def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_path):
-    """A count stamp validated for one trait must not answer for a delivery under a different
-    trait: the refusal names the sidecar and both traits."""
-    bucket = _count_bucket(tmp_path, "count_preds")  # stamped trait=fx.COUNT_TRAIT ("stem")
+def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(tmp_path):
+    """The per-image count the assessment measured is not the per-plant number the delivery ships:
+    the gate refuses, naming both kinds, rather than lend one measurement to another."""
+    pytest.importorskip("torch")
+    from tcip_mcp.delivery import DeliveryRefused
+    from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
 
-    with pytest.raises(DeliveryRefused) as exc:
-        export_aggregated_csv(
-            [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
-             "plant_attribution": "image", "measurement_document": "operating_point", "scale_document": None}],
-            str(tmp_path / "mismatched_trait.csv"), project=tmp_path, delivered_phenotype="astringency",
-            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
-    message = str(exc.value)
-    assert bucket in message
-    assert fx.COUNT_TRAIT in message and "astringency" in message
-
-
-def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
-    """A record set that states nothing about which sidecar document its value rests on refuses
-    naming the field, rather than falling through to any particular reconciler."""
-    ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency"}]
-
-    with pytest.raises(ValueError, match="measurement_document"):
-        export_aggregated_csv(rows, str(tmp_path / "unstated.csv"), project=tmp_path, delivered_phenotype="astringency",
-                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
-
-
-def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
-    """The caller's own assertion may only lower what the sidecar says, and it must keep doing so on
-    the ordinal dimension: a caller who knows the measurement is not validated saying so must refuse
-    the delivery, not be overruled by the on-disk stamp."""
-    bucket = _ordinal_bucket(tmp_path, "ordinal_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-             "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}]
-
-    with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
-        export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
-                              project=tmp_path, delivered_phenotype="astringency",
-                              operating_point_validated=VALIDATED_FALSE,
-                              pred_dirs=[bucket])
+    bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
+    with pytest.raises(DeliveryRefused, match=f"{PER_IMAGE_COUNT} delivery, not a "
+                                              f"{PER_PLANT_COUNT_AGGREGATE} one"):
+        deliver_per_plant_aggregate(
+            tmp_path, _ROWS, str(tmp_path / "crossed.csv"), delivered_phenotype="stem_count",
+            delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
+            door="test")
+    assert not (tmp_path / "crossed.csv").exists()

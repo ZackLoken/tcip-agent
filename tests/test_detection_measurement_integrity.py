@@ -1,5 +1,5 @@
 """Detection measurement-integrity coverage: val-loss over negatives, standard+operating mAP,
-tiled evaluation, inference tile geometry, calibrated inference.
+tiled evaluation, and the tile geometry a pass derives from its checkpoint.
 
 Kept in one file so the audit's measurement-integrity locks live together. Vision/state
 tests here are pure-Python or monkeypatched (no GPU) so they stay xdist-safe.
@@ -14,7 +14,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
-from tests._dense_op_fixtures import shifted_cal_holdout, toy_records  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
@@ -27,19 +27,14 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 _DIMS = {"in_chans": 3, "num_classes": 1}
 """What a one-subject detector over three-band sources is built at."""
 
-# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real
-# bud.yml into this test's pinned platform state root so trait="bud_opening" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+
+def _patch_predictor(monkeypatch, predictor_mod, stub_factory):
+    """Stub the predictor a pass builds so the registered checkpoint a test loads runs no forward
+    pass."""
+    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: stub_factory())
 
 
-def _patch_build_predictor(monkeypatch, predictor_mod, stub_factory):
-    """Stub build_predictor so the registered checkpoint a test loads runs no forward pass."""
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: stub_factory())
-
-
-# ======================================================================
-# Detection val-loss must include all-negative images
-# ======================================================================
+# ── detection val-loss includes all-negative images ──────────────────────
 
 class _StubDetector:
     """Minimal detector: records every loss-pass call so we can assert negatives are forwarded."""
@@ -84,7 +79,8 @@ def _det_batch(box_counts: list[int]):
     for n in box_counts:
         images.append(torch.zeros(3, 32, 32))
         boxes = torch.tensor([[1.0, 1.0, 5.0, 5.0]] * n, dtype=torch.float32).reshape(-1, 4)
-        targets.append({"boxes": boxes, "labels": torch.ones((n,), dtype=torch.long)})
+        targets.append({"boxes": boxes, "labels": torch.ones((n,), dtype=torch.long),
+                        "iscrowd": torch.zeros((n,), dtype=torch.long)})
     return images, targets
 
 
@@ -106,9 +102,7 @@ def test_all_negative_only_loader_is_not_skipped():
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
 
-# ======================================================================
-# Report standard map@100 and map@max_dets
-# ======================================================================
+# ── standard map@100 beside map@max_dets ─────────────────────────────────
 
 def _rec(gt, dt, w=100, h=100):
     return build_coco_image_record(w, h, gt, dt)
@@ -146,9 +140,7 @@ def test_standard_keys_unchanged_at_100():
     assert m["map_at_maxdets"] == pytest.approx(m["map"])
 
 
-# ======================================================================
-# Tiled evaluation regimes
-# ======================================================================
+# ── tiled evaluation regimes ──────────────────────────────────────────────
 
 def _det_dataset(tmp_path, n=3, size=128):
     from PIL import Image
@@ -163,7 +155,8 @@ def _det_dataset(tmp_path, n=3, size=128):
     for i in range(n):
         Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
+                                  size, size)
     return images_dir, labels_dir
 
 
@@ -173,7 +166,7 @@ def _capture_run_test_evaluation(monkeypatch):
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, **kw):
+    def _fake(pass_, loader, device, **kw):
         captured["ds"] = loader.dataset
         captured["tiling"] = kw.get("tiling")
         return {"eval_regime": "tile-level"}
@@ -188,7 +181,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import finished_run
 
     images_dir, labels_dir = _det_dataset(tmp_path)
-    data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64}}
+    data = {**SCOPED_DATA, "tiling": {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}}
     run_dir = finished_run(tmp_path, experiment_id="det-measure-tiled", data=data)
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -305,14 +298,14 @@ def _detections_as_ground_truth(payload, images_dir, labels_dir, *, subject: str
 
 
 def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatch):
-    """One build per evaluation, and the metrics it produces are the model's own.
+    """One build per evaluation, and the execution it reports is the one its model ran under.
 
     The door builds the checkpoint to read the width it measures at, and the runner scores through
-    that same module at the operating point the builder gave it: a separately built copy of the
-    same checkpoint, untouched, answers with the same numbers over the same loader. This
-    checkpoint declares a score floor above what it scores at, so a run that replaced that floor
-    with one of its own would report detections this model does not emit, which the last
-    assertion measures rather than assumes.
+    that same module governed by the execution record it reports: a separately built copy of the
+    same checkpoint, set to that record's conf and cap, answers with the same numbers over the
+    same loader. This checkpoint's builder declares a score floor above what it scores at, so a
+    run that scored at the builder's floor while reporting the record's would report numbers
+    this record does not produce, which the last assertion measures rather than assumes.
     """
     from PIL import Image
 
@@ -322,7 +315,6 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tcip_mcp.pipelines.training.evaluation import evaluate
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -354,9 +346,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     recorded: dict = {}
     run_test_evaluation = runners.run_test_evaluation
 
-    def _record(checkpoint, model, loader, device, **kw):
-        recorded.update(loader=loader, device=device, task=checkpoint.task, kw=kw)
-        return run_test_evaluation(checkpoint, model, loader, device, **kw)
+    def _record(pass_, loader, device, **kw):
+        recorded.update(loader=loader, device=device, task=pass_.checkpoint.task, kw=kw)
+        return run_test_evaluation(pass_, loader, device, **kw)
 
     monkeypatch.setattr(runners, "run_test_evaluation", _record)
 
@@ -377,19 +369,23 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     def _independent() -> dict:
         return evaluate(
             independent_model, recorded["loader"], recorded["device"], recorded["task"],
-            dims=dims, conf_threshold=kw["conf_threshold"], iou_threshold=kw["iou_threshold"],
-            iou_type=kw["iou_type"], max_dets=kw["max_dets"], trait=kw["trait"])
+            dims=dims, conf_threshold=measured["execution"]["conf"],
+            iou_threshold=kw["iou_threshold"], iou_type=kw["iou_type"],
+            max_dets=measured["execution"]["max_dets"], trait=kw["trait"])
 
+    set_detector_operating_point(independent_model, score_thresh=measured["execution"]["conf"],
+                                 detections_per_img=measured["execution"]["max_dets"])
     independent = _independent()
     assert independent
     for key, value in independent.items():
         # Two forward passes over the same weights are equal to float noise, not bit for bit.
         assert measured[key] == pytest.approx(value, rel=1e-4), key
 
-    # What a floor of someone else's choosing would have reported instead, so the equality above
-    # is evidence about this fixture rather than a comparison nothing could separate.
-    set_detector_operating_point(independent_model, score_thresh=0.0)
-    assert _independent()["map50"] > measured["map50"]
+    # What the builder's own floor reports instead, so the equality above is evidence about this
+    # fixture rather than a comparison nothing could separate.
+    set_detector_operating_point(
+        independent_model, score_thresh=declares_its_point["builder_kwargs"]["box_score_thresh"])
+    assert _independent()["map50"] != measured["map50"]
 
 
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
@@ -402,41 +398,58 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(tmp_path, ckpt, str(images_dir), str(labels_dir),
-                   tiling={"enabled": True, "tile_size": 64})
+                   tiling={"enabled": True, "tile_size": 64, "sliver_frac": 0.5})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
 
-def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+class _SlicedStub:
+    """A predictor answering one fixed sliced result, recording the execution each call ran
+    under."""
+
+    task = "detection"
+    in_chans = 3
+
+    def __init__(self, boxes, *, train_tile_size=None, train_overlap=None):
+        self.boxes = boxes
+        self.train_tile_size, self.train_overlap = train_tile_size, train_overlap
+        self.executions: list = []
+
+    def predict_sliced(self, path, **kw):
+        self.executions.append(kw["execution"])
+        return {"image": path, "width": 128, "height": 128, "boxes": self.boxes,
+                "scores": [0.9] * len(self.boxes), "labels": [1] * len(self.boxes),
+                "count": len(self.boxes), "cap_hit": False}
+
+
+def _full_frame(tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **stated) -> dict:
+    """``run_full_frame_evaluation`` of one 128px frame labeled with ``annotations`` through
+    ``stub``."""
+    from PIL import Image
+
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
+    from tcip_annotation import json_io
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    # object straddling the x=64 tile seam
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
+    json_io.write_annotations(str(labels_dir / "a.json"), annotations, 128, 128,
+                              keep_empty=True)
+    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: stub)
+    return run_full_frame_evaluation(checkpoint or verified_checkpoint(tmp_path),
+                                     str(images_dir), str(labels_dir), stated=Stated(**stated))
 
-    class _Stub:
-        task = "detection"
-        in_chans = 3
 
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128,
-                    "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
+def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
+    from tcip_annotation.state import Annotation, BBox
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    # This stub carries no persisted training tile geometry, so the delivery-grade
-    # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
-    # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
-    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
-                                  tile_size=64, overlap=0.2)
+    # An object straddling the x=64 tile seam; this stub carries no persisted geometry, so the
+    # caller states it.
+    r = _full_frame(tmp_path, monkeypatch, _SlicedStub([[54, 54, 74, 74]]),
+                    [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))],
+                    tile_size=64, overlap=0.2)
+
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
@@ -445,63 +458,22 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
 def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(tmp_path, monkeypatch):
     """The delivery-grade gate reads each record's crowd flag off the loader's target: a
     detection inside a crowd region is neither a true nor a false positive."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"), [
-        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30)),
-        Annotation(subject="bud", geometry=BBox(60, 60, 120, 120), iscrowd=True)], 128, 128)
+    r = _full_frame(tmp_path, monkeypatch,
+                    _SlicedStub([[10, 10, 30, 30], [60, 60, 120, 120]]),
+                    [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30)),
+                     Annotation(subject="bud", geometry=BBox(60, 60, 120, 120), iscrowd=True)],
+                    tile_size=64, overlap=0.2)
 
-    class _Stub:
-        task = "detection"
-        in_chans = 3
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128,
-                    "boxes": [[10, 10, 30, 30], [60, 60, 120, 120]], "scores": [0.9, 0.9],
-                    "labels": [1, 1], "count": 2}
-
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
-    r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
-                                  tile_size=64, overlap=0.2)
     assert (r["tp"], r["fp"], r["fn"]) == (1, 0, 0)
 
 
 def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, monkeypatch):
     """The delivery-grade gate scores the box its document holds, on the stored two-decimal grid,
     never the float arithmetic of the loader's corners."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    from PIL import Image
-    from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-
-    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"), [
-        Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))], 128, 128)
-
-    class _Stub:
-        task = "detection"
-        in_chans = 3
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128,
-                    "boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1],
-                    "count": 1}
 
     scored: list = []
     real_record = evaluation.build_coco_image_record
@@ -511,10 +483,11 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
         return real_record(w, h, gt, dt, **kw)
 
     monkeypatch.setattr(evaluation, "build_coco_image_record", recording)
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     bur = {"num_channels": 3, "scope": {"subject": "bur", "id_map": {"bur": 0}}}
-    run_full_frame_evaluation(verified_checkpoint(tmp_path, data=bur),
-                              str(images_dir), str(labels_dir), tile_size=64, overlap=0.2)
+    _full_frame(tmp_path, monkeypatch, _SlicedStub([[10.1, 10.1, 40.3, 30.3]]),
+                [Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))],
+                checkpoint=verified_checkpoint(tmp_path, data=bur), tile_size=64, overlap=0.2)
+
     assert [g["bbox"] for gt, _ in scored for g in gt] == [[10.1, 10.1, 30.2, 20.2]]
     assert [d["bbox"] for _, dt in scored for d in dt] == [[10.1, 10.1, 30.2, 20.2]]
 
@@ -526,207 +499,126 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
     count (scored on its real content, not silently dropped) and named in the result's
     contradicted_negatives so a reviewer sees the stale confirmation without a separate doctor
     pass."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from PIL import Image
+
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses, status_bucket
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"), [], 128, 128, keep_empty=True)
     record_image_statuses(tmp_path, status_bucket("bud", None), {"a.png": CONFIRMED_NEGATIVE},
                           recorded_by="user:breeder")
-    json_io.write_annotations(
-        str(labels_dir / "a.json"),
-        [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128,
-    )
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
+    monkeypatch.setattr(predictor_mod, "GenericPredictor",
+                        lambda *a, **kw: _SlicedStub([[54, 54, 74, 74]]))
 
-    class _Stub:
-        task = "detection"
-        in_chans = 3
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 128, "height": 128,
-                    "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
-
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir), str(labels_dir),
-                                  tile_size=64, overlap=0.2)
+                                  stated=Stated(tile_size=64, overlap=0.2))
+
     assert r["contradicted_negatives"] == ["a.png"]
     # scored against the real content, not held out as a still-trusted negative
     assert r["scored_images"] == 1 and r["tp"] == 1 and r["fn"] == 0
 
 
-# ======================================================================
-# Inference tile geometry derived from the checkpoint
-# ======================================================================
+# ── the tile geometry a pass derives from its checkpoint ──────────────────
 
-def _stub_inference(monkeypatch, *, train_tile_size=None, train_overlap=None):
-    """Patch build_predictor with a stub that records the tile geometry it was asked to run."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+class _BatchStub:
+    """A predictor carrying the given persisted training geometry, answering empty results."""
 
-    captured: dict = {}
+    task = "detection"
+    in_chans = 3
 
-    class _Stub:
-        task = "detection"
-        def __init__(self):
-            if train_tile_size is not None:
-                self.train_tile_size = train_tile_size
-            if train_overlap is not None:
-                self.train_overlap = train_overlap
+    def __init__(self, *, train_tile_size=None, train_overlap=None):
+        self.train_tile_size, self.train_overlap = train_tile_size, train_overlap
+        self.executions: list = []
 
-        def predict_batch(self, paths, tile=False, tile_size=None, overlap=None, **kw):
-            captured["tile_size"] = tile_size
-            captured["overlap"] = overlap
-            return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
-
-    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
-    return captured
+    def predict_batch(self, paths, execution=None, **kw):
+        self.executions.append(execution)
+        return [{"image": p, "width": 100, "height": 100, "boxes": [], "scores": [],
+                 "labels": [], "count": 0, "cap_hit": False} for p in paths]
 
 
-def _one_image(tmp_path):
+def _pass_over(tmp_path, monkeypatch, stub, **stated):
+    """The pass a registered checkpoint prepares over one image with ``stub`` as its predictor."""
     from PIL import Image
-    img = tmp_path / "a.png"
-    Image.new("RGB", (100, 100)).save(img)
-    return str(img)
 
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
+    from tests._verified_checkpoint_fixtures import predicted_over
 
-def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    ckpt = project_checkpoint(tmp_path)
-    captured = _stub_inference(monkeypatch, train_tile_size=224, train_overlap=0.1)
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
-                      tile=True, tile_size=None, overlap=None)
-    assert captured["tile_size"] == 224
-    assert captured["overlap"] == pytest.approx(0.1)
-    ts = r["operating_point"]["tile_size"]
-    assert ts["value"] == 224 and ts["source"] == "derived"
-    assert "warning" not in r  # geometry was recoverable
-
-
-def test_foreign_checkpoint_with_no_geometry_refuses_explicit_tile(tmp_path, monkeypatch):
-    """A checkpoint with no persisted training tile geometry has no real basis to tile at: an
-    explicit tile=True with no explicit tile_size either must refuse (naming the missing basis),
-    never silently fabricate a scale to proceed on."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    ckpt = project_checkpoint(tmp_path)
-    _stub_inference(monkeypatch)  # no train geometry
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
-                      tile=True, tile_size=None)
-    assert "error" in r
-    assert "tile_size" in r["error"]
-
-
-# ======================================================================
-# The delivery-gating path resolves tile geometry the same
-# way run_inference does (via the shared resolve_tile_geometry), and refuses
-# rather than silently defaulting when nothing can be resolved.
-# ======================================================================
-
-def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
-    """A checkpoint with no persisted tiling and no explicit override must refuse the delivery
-    gate rather than silently score it at an ungrounded scale, on the path the docstring calls
-    "the number that gates a phenotype delivery"."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
+    images_dir = tmp_path / "one"
     images_dir.mkdir()
-    labels_dir.mkdir()
-
-    class _NoGeometryStub:
-        train_tile_size = None
-        train_overlap = None
-
-        def predict_sliced(self, path, **kw):
-            return {"image": path, "width": 100, "height": 100,
-                    "boxes": [], "scores": [], "labels": [], "count": 0}
-
-    predictor_mod_build = predictor_mod.build_predictor
-    try:
-        predictor_mod.build_predictor = lambda *a, **kw: _NoGeometryStub()
-        with pytest.raises(ValueError, match="tiling="):
-            run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
-                                      str(labels_dir))
-    finally:
-        predictor_mod.build_predictor = predictor_mod_build
+    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
+    _patch_predictor(monkeypatch, predictor_mod, lambda: stub)
+    return predicted_over(tmp_path, project_checkpoint(tmp_path), str(images_dir), device="cpu",
+                          **stated)
 
 
-def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
-    """The checkpoint's own persisted training geometry (already sitting on the predictor object)
-    governs the gate instead of an arbitrary fixed scale, avoiding a scale mismatch (~2.9x for this
-    checkpoint) between the geometry the gate assumes and the geometry the model was trained at."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
+def test_a_tiled_pass_derives_its_tile_edge_from_the_checkpoint(tmp_path, monkeypatch):
+    stub = _BatchStub(train_tile_size=224, train_overlap=0.1)
 
-    from PIL import Image
-    from tcip_annotation import json_io
+    p, _results = _pass_over(tmp_path, monkeypatch, stub, tile=True)
+
+    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (224, "derived")
+    assert p.execution.overlap == pytest.approx(0.1)
+    assert stub.executions == [p.execution]
+
+
+def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(tmp_path, monkeypatch):
+    """A checkpoint with no persisted training tile geometry has no real basis to tile at: a tiled
+    pass with no stated edge refuses, naming the missing basis, never fabricating a scale."""
+    from tcip_mcp.pipelines.execution import ExecutionRefused
+
+    with pytest.raises(ExecutionRefused, match="tile_size"):
+        _pass_over(tmp_path, monkeypatch, _BatchStub(), tile=True)
+
+
+def test_a_stated_edge_agreeing_with_the_checkpoint_is_recorded_as_stated(tmp_path, monkeypatch):
+    p, _results = _pass_over(tmp_path, monkeypatch, _BatchStub(train_tile_size=224), tile=True,
+                             tile_size=224)
+
+    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (224, "explicit")
+
+
+def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(tmp_path, monkeypatch):
+    from tcip_mcp.pipelines.execution import ExecutionRefused
+
+    with pytest.raises(ExecutionRefused) as exc_info:
+        _pass_over(tmp_path, monkeypatch, _BatchStub(train_tile_size=224), tile=True,
+                   tile_size=512)
+    assert "512" in str(exc_info.value) and "224" in str(exc_info.value)
+
+
+# ── the delivery-grade evaluation resolves tile geometry the same way ──────
+
+def test_the_evaluation_refuses_an_unresolvable_tile_geometry(tmp_path, monkeypatch):
+    """A checkpoint with no persisted tiling and no stated edge refuses the delivery-grade
+    evaluation rather than silently scoring it at an ungrounded scale."""
+    from tcip_mcp.pipelines.execution import ExecutionRefused
+
+    with pytest.raises(ExecutionRefused, match="tile_size"):
+        _full_frame(tmp_path, monkeypatch, _SlicedStub([]), [])
+
+
+def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(tmp_path, monkeypatch):
+    """The checkpoint's own persisted training geometry governs the evaluation instead of an
+    arbitrary fixed scale."""
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
-    json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 100, 100)
-    captured: dict = {}
+    stub = _SlicedStub([], train_tile_size=224, train_overlap=0.1)
 
-    class _DerivedGeometryStub:
-        task = "detection"
-        train_tile_size = 224
-        train_overlap = 0.1
-        in_chans = 3
+    r = _full_frame(tmp_path, monkeypatch, stub,
+                    [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))])
 
-        def predict_sliced(self, path, **kw):
-            captured["tile_size"] = kw.get("tile_size")
-            captured["overlap"] = kw.get("overlap")
-            return {"image": path, "width": 100, "height": 100,
-                    "boxes": [], "scores": [], "labels": [], "count": 0}
-
-    predictor_mod_build = predictor_mod.build_predictor
-    try:
-        predictor_mod.build_predictor = lambda *a, **kw: _DerivedGeometryStub()
-        r = run_full_frame_evaluation(verified_checkpoint(tmp_path), str(images_dir),
-                                      str(labels_dir))
-    finally:
-        predictor_mod.build_predictor = predictor_mod_build
-    assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
-    assert r["tile_size"] == 224 and r["tile_size_source"] == "derived"
-
-
-def test_explicit_tile_size_wins(tmp_path, monkeypatch):
-    """An explicit edge that agrees with the checkpoint's own persisted geometry wins over
-    deriving it, still stamped as the caller's own explicit statement."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    ckpt = project_checkpoint(tmp_path)
-    captured = _stub_inference(monkeypatch, train_tile_size=224)
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
-                      tile=True, tile_size=224)
-    assert captured["tile_size"] == 224
-    assert r["operating_point"]["tile_size"]["source"] == "explicit"
-
-
-def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, monkeypatch):
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    ckpt = project_checkpoint(tmp_path)
-    _stub_inference(monkeypatch, train_tile_size=224)
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu",
-                      tile=True, tile_size=512)
-    assert "error" in r
-    assert "512" in r["error"] and "224" in r["error"]
+    assert [(e.tile_size, e.overlap) for e in stub.executions] == [(224, pytest.approx(0.1))]
+    assert (r["execution"]["tile_size"], r["execution"]["sources"]["tile_size"]) == (224,
+                                                                                      "derived")
 
 
 def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
@@ -767,7 +659,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
         json_io.write_annotations(str(labels_dir / f"t{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
+                                  128, 128)
     Image.new("RGB", (128, 128)).save(val_images / "v0.png")
     json_io.write_annotations(str(val_labels / "v0.json"),
                               [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
@@ -781,9 +674,10 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "scope": {"subject": "bud"},
-                 "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
+                 # no tile_size: the effective default must be persisted
+                 "tiling": {"enabled": True, "sliver_frac": 0.5}},
         "batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False, "device": "cpu",
+        "mixed_precision": False, "device": "cpu",
     }
     res = training_tools.launch_training(tmp_path, cfg)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
@@ -804,528 +698,3 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     else:
         pytest.fail("timed out waiting for training subprocess to finish")
     assert final_status == "completed"
-
-
-# ======================================================================
-# Calibrated operating point wired into the delivery doors
-# ======================================================================
-
-class _CalStub:
-    """Predictor stub with the mutable operating-point surface run_inference sets."""
-
-    def __init__(self):
-        from types import SimpleNamespace
-        self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
-        self.device = "cpu"
-        self.score_threshold = 0.5
-        self.train_tile_size = None
-        self.train_overlap = None
-        self.in_chans = 3
-        self.applied_conf = None
-
-    def predict_batch(self, paths, **kw):
-        self.applied_conf = self.score_threshold  # conf applied before inference
-        return [{"image": p, "width": 100, "height": 100,
-                 "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
-
-
-def test_default_path_unchanged(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-
-    stub = _CalStub()
-    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
-    ckpt = project_checkpoint(tmp_path)
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(Path(_one_image(tmp_path)).parent), device="cpu", tile=False)
-    assert r["conf_source"] == "default"
-    assert r["validated"] is False
-    assert r["operating_point"]["conf"]["value"] == pytest.approx(DEFAULT_CONF)
-    assert r["operating_point"]["conf"]["validated_against"] == "false"
-    assert r["gate_evidence_summary"] is None  # the default path swept nothing
-
-
-def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
-    """Stand in for the calibration pass's collection, resolving under the regime of the pass it
-    is handed and returning what it returns: the resolved bundle, its dataset identity, no
-    excluded stems, and the evidence a delivery door reopens the gate over."""
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = shifted_cal_holdout()
-
-    def _calibrate(p, *a, project, **k):
-        inputs = {**calibration_pipeline.pass_resolver_inputs(p), "dataset_hash": "H",
-                  "calibration_records": cal, "holdout_records": hold, "staged_conf_floor": 0.01}
-        bundle = resolve_operating_point("bud_opening", project=project, experiment_id=None,
-                                         **inputs)
-        evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
-                    "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
-        return bundle, "H", 0, evidence
-
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _calibrate)
-
-
-def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
-    import tcip_store as ts
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
-    stub = _CalStub()
-    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
-    monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
-
-    ckpt = project_checkpoint(tmp_path)
-    _one_image(tmp_path)
-    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="bud_opening",
-                               calibration_labels_dir=str(tmp_path))
-    assert r["conf_source"] == "calibration"
-    assert r["validated"] is True                                   # held-out passed
-    assert r["dataset_hash"] == "H"
-    assert r["operating_point"]["conf"]["value"] == pytest.approx(0.9)
-    assert stub.applied_conf == pytest.approx(0.9)                  # resolved conf governs the model
-    assert r["gate_evidence_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
-    assert ts.exists(itools.calibration_curve_key(tmp_path, r["calibration_evidence_key"]))
-
-
-def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
-    """Two calibrations on the same checkpoint+labels but different predictor-path
-    settings must not collide on the sweep artifact filename."""
-    import tcip_store as ts
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
-    stub = _CalStub()
-    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
-    monkeypatch.chdir(tmp_path)
-
-    ckpt = project_checkpoint(tmp_path)
-    _one_image(tmp_path)
-
-    r_untiled = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
-                                       device="cpu", tile=False, trait="bud_opening",
-                                       calibration_labels_dir=str(tmp_path))
-    r_tiled = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
-                                     device="cpu", tile=True, tile_size=256, trait="bud_opening",
-                                     calibration_labels_dir=str(tmp_path))
-
-    # Distinct predictor paths, distinct records.
-    assert r_untiled["calibration_evidence_key"] != r_tiled["calibration_evidence_key"]
-    assert ts.exists(itools.calibration_curve_key(tmp_path, r_untiled["calibration_evidence_key"]))
-    assert ts.exists(itools.calibration_curve_key(tmp_path, r_tiled["calibration_evidence_key"]))
-
-    sweep_body = ts.read(itools.calibration_curve_key(tmp_path, r_tiled["calibration_evidence_key"]))
-    assert sweep_body["checkpoint_sha256"]  # identity threaded through, not omitted
-    regime = sweep_body["calibration_evidence"]["inputs"]
-    assert regime["slicing"] is not None
-    assert regime["tile_size"] == 256
-
-
-def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
-    """Inferencing the same labeled set with a bundle scoped to a different hash flags inheritance and
-    refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    # Real labeled inference target; bundle is (mockingly) scoped to a foreign hash "H".
-    img = _one_image(tmp_path)
-    json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
-                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
-    inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": toy_records("c"),
-              "holdout_records": toy_records("h", shift=3.0)}
-    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
-    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
-                "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, "H", 0, evidence))
-    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
-    monkeypatch.chdir(tmp_path)
-
-    ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="bud_opening",
-                               calibration_labels_dir=str(tmp_path))
-    assert r["cross_dataset_check"] == "same-labeled-set"
-    assert any("inherited across a different dataset" in i for i in r["shippable_issues"])
-    assert r["validated"] is False  # not shippable under the target actually used
-
-
-def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp_path, monkeypatch):
-    """Under a manifest the calibration's own universe is a held-out subset of the labeled
-    directory; inferring the whole directory is still the same labeled set, so the firewall
-    compares real hashes instead of reading a fully-labeled target as unlabeled."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    from PIL import Image
-
-    cal, hold = shifted_cal_holdout()
-    inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
-             "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
-    evidence = {
-        "resolver": "resolve_operating_point", "inputs": inputs,
-        "reference_inputs": {
-            "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
-            "stated_values": {"selection_dir": str(tmp_path / "m")},
-        },
-        "calibration_stems": ["a"],
-    }
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, "H", 0, evidence))
-    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
-    monkeypatch.chdir(tmp_path)
-
-    img_a, img_b = tmp_path / "a.png", tmp_path / "b.png"
-    Image.new("RGB", (100, 100)).save(img_a)
-    Image.new("RGB", (100, 100)).save(img_b)
-    ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(
-        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
-        selection_dir=str(tmp_path / "m"))
-
-    assert r["cross_dataset_check"] == "same-labeled-set"
-
-
-@pytest.mark.parametrize("give_calibration_images_dir", [False, True])
-@pytest.mark.parametrize("case,inf_stems,expected_check", [
-    ("superset", ("a", "b", "c"), "same-labeled-set"),
-    ("equal", ("a", "b"), "same-labeled-set"),
-    ("subset", ("a",), "not-comparable-unlabeled-target"),
-    ("disjoint", ("c", "d"), "not-comparable-unlabeled-target"),
-])
-def test_manifest_calibration_firewall_hashes_the_universe(
-        tmp_path, monkeypatch, case, inf_stems, expected_check, give_calibration_images_dir):
-    """The firewall's target hash under a manifest is computed over the calibration universe (the
-    same stems the bundle's own hash covers), not the inference stem list: a superset or equal
-    inference target compares real, matching hashes and validates; a genuine subset or disjoint
-    target stays the honest not-comparable case, in both cases regardless of whether
-    calibration_images_dir is given."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.pipelines.resolution import dataset_hash
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    from PIL import Image
-
-    cal, hold = shifted_cal_holdout()
-    universe = ["a", "b"]
-    dh = dataset_hash(tmp_path, stems=universe)
-    inputs = {"slicing": None, "dataset_hash": dh, "calibration_records": cal,
-             "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
-    evidence = {
-        "resolver": "resolve_operating_point", "inputs": inputs,
-        "reference_inputs": {
-            "label_stems": {"calibration": {"path": str(tmp_path), "stems": universe}},
-            "stated_values": {"selection_dir": str(tmp_path / "m")},
-        },
-        "calibration_stems": universe,
-    }
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, dh, 0, evidence))
-    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
-    monkeypatch.chdir(tmp_path)
-
-    image_paths = []
-    for stem in inf_stems:
-        p = tmp_path / f"{stem}.png"
-        Image.new("RGB", (100, 100)).save(p)
-        image_paths.append(str(p))
-    ckpt = project_checkpoint(tmp_path)
-
-    kwargs = dict(calibration_labels_dir=str(tmp_path), selection_dir=str(tmp_path / "m"))
-    if give_calibration_images_dir:
-        kwargs["calibration_images_dir"] = str(tmp_path)
-
-    r = run_inference_verified(
-        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="bud_opening", **kwargs)
-
-    assert r["cross_dataset_check"] == expected_check
-    assert r["validated"] is True
-    assert not any("inherited across a different dataset" in i for i in r["shippable_issues"])
-
-
-def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_path, monkeypatch):
-    """A manifest-restricted calibration answers how many members the selection put elsewhere
-    under this scope, its train side's and its val side's, as counts beside the incomplete
-    attribute count, so the caller learns the exclusions without opening the persisted
-    evidence."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    from PIL import Image
-
-    cal, hold = shifted_cal_holdout()
-    inputs = {"slicing": None, "dataset_hash": "H", "calibration_records": cal,
-              "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("bud_opening", project=tmp_path, experiment_id=None, **inputs)
-    evidence = {
-        "resolver": "resolve_operating_point", "inputs": inputs,
-        "reference_inputs": {
-            "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
-            "stated_values": {"selection_dir": str(tmp_path / "m")},
-        },
-        "calibration_stems": ["a"],
-        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"]},
-    }
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
-                        lambda *a, **k: (bundle, "H", 0, evidence))
-    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
-    monkeypatch.chdir(tmp_path)
-
-    img = tmp_path / "a.png"
-    Image.new("RGB", (100, 100)).save(img)
-    ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(
-        tmp_path, str(ckpt), images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
-        selection_dir=str(tmp_path / "m"))
-
-    assert r["n_excluded_training_stems"] == 2
-    assert r["n_excluded_validation_stems"] == 1
-    assert r["n_excluded_incomplete_attribute"] == 0
-
-
-def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
-    """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
-    the held-out calibration passed (no validated/shippable_issues contradiction)."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified
-
-    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
-    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
-    monkeypatch.chdir(tmp_path)
-
-    ckpt = project_checkpoint(tmp_path)
-    r = run_inference_verified(tmp_path, str(ckpt), images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="bud_opening",
-                               calibration_labels_dir=str(tmp_path))  # no labels beside the image
-    assert r["cross_dataset_check"] == "not-comparable-unlabeled-target"
-    assert r["shippable_issues"] == []
-    assert r["validated"] is True
-
-
-def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
-    """Regime lock: calibration must run the same tiled predictor path the delivery uses, not an
-    untiled model forward, else the conf is validated in a different regime than it ships through."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    for i in range(4):
-        Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
-
-    calls: list[dict] = []
-
-    class _RegimeStub:
-        def __init__(self):
-            from types import SimpleNamespace
-            self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
-            self.device = "cpu"
-            self.score_threshold = 0.5
-            self.train_tile_size = 64
-            self.train_overlap = 0.2
-            self.in_chans = 3
-            # the run's recorded scope
-            self.config: dict = {"data": {"scope": {"subject": "bud", "id_map": {"bud": 0}}}}
-
-        def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
-                          tile_batch_size=96, cross_tile_nms=None, postprocess="nms",
-                          tile_resize=None):
-            calls.append({"tile": tile, "tile_size": tile_size, "overlap": overlap,
-                          "tile_resize": tile_resize})
-            # tiled finds two boxes/img; untiled finds none, so a sweep over untiled records differs.
-            boxes = [[10, 10, 40, 40], [100, 100, 130, 130]] if tile else []
-            scores = [0.9, 0.6] if tile else []
-            labels = [1, 1] if tile else []
-            return [{"image": p, "width": 128, "height": 128, "boxes": boxes,
-                     "scores": scores, "labels": labels, "count": len(boxes)} for p in paths]
-
-    _patch_build_predictor(monkeypatch, predictor_mod, _RegimeStub)
-    monkeypatch.chdir(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-
-    run_inference(tmp_path, str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
-                  trait="bud_opening", calibration_labels_dir=str(labels_dir))
-    # Every predictor pass, both calibration splits and the delivery pass, ran tiled at the same
-    # geometry, not an untiled calibration sweep.
-    assert len(calls) >= 3
-    assert all(c["tile"] is True for c in calls)
-    assert all(c["tile_size"] == 64 for c in calls)
-    assert len({c["overlap"] for c in calls}) == 1
-    # Including any train-time resize: calibrating at a geometry the delivery pass does not run at
-    # would resolve the conf against a scale the shipped count never sees.
-    assert len({c["tile_resize"] for c in calls}) == 1
-
-
-def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monkeypatch):
-    """A checkpoint with no persisted geometry has no real basis to tile at: an explicit tile=True
-    with no explicit tile_size refuses before the (expensive) calibration pass ever runs, never
-    silently calibrates (or ships) against a fabricated scale."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
-
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    images_dir = tmp_path / "images"
-    labels_dir = tmp_path / "labels"
-    images_dir.mkdir()
-    labels_dir.mkdir()
-    for i in range(4):
-        Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
-
-    class _NoGeometryStub:
-        def __init__(self):
-            from types import SimpleNamespace
-            self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
-            self.device = "cpu"
-            self.score_threshold = 0.5
-            self.train_tile_size = None
-            self.train_overlap = None
-
-        def predict_batch(self, paths, **kw):
-            raise AssertionError("must refuse before any predictor pass, calibration included")
-
-    _patch_build_predictor(monkeypatch, predictor_mod, _NoGeometryStub)
-    monkeypatch.chdir(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-
-    r = run_inference(tmp_path, str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
-                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
-    assert "error" in r
-    assert "tile_size" in r["error"]
-
-
-def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_bud_trait_spec):
-    import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    from tests._binding_fixtures import calibrated_run_fields, run_result
-
-    img = _one_image(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-    sha = "the-checkpoint-behind-this-bucket"
-
-    def _fake_run_inference_verified(*a, **kw):
-        return run_result(
-            results=[{"image": img, "width": 100, "height": 100,
-                      "boxes": [], "scores": [], "labels": [], "count": 0}],
-            **calibrated_run_fields(tmp_path, labels_dir=tmp_path, checkpoint_sha256=sha))
-
-    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(tmp_path, str(ckpt), str(tmp_path), output_dir=str(out_dir),
-                             trait="bud_opening",
-                             calibration_labels_dir=str(tmp_path))
-    assert "error" not in r, r
-    stamp = read_operating_point_sidecar(out_dir)
-    assert stamp["validated"] is True                       # not hardcoded False
-    assert r["validated"] is True and r["conf_source"] == "calibration"
-
-
-def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None):
-    """Run deliver_per_image_counts against a stubbed run_inference returning ``op``/``validated``.
-
-    The dimension under test here is which reference the conf param itself recorded. With no
-    ``predictions_dir`` these counts rest on no bucket anyone can re-read, and this door takes no
-    acknowledgment, so the CSV itself always refuses; the refusal still carries the operating
-    point and the run's own narrowed conf reference for a caller to inspect.
-    """
-    import tcip_mcp.tools.inference_tools as itools
-
-    def _fake_run_inference_verified(*a, **kw):
-        if captured is not None:
-            captured.update(kw)
-        from tests._binding_fixtures import run_result
-
-        return run_result(op, [{"image": "a.png", "count": 3}], validated=validated,
-                          conf_source="calibration")
-
-    from tests import _trait_fixtures as fx
-
-    fx.seed_confirmed_count(tmp_path)
-    ckpt = project_checkpoint(tmp_path)
-    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
-    return itools.deliver_per_image_counts(tmp_path, str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
-                                  trait=fx.COUNT_TRAIT,
-                                  calibration_labels_dir=str(tmp_path))
-
-
-def test_deliver_per_image_counts_carries_operating_point(tmp_path, monkeypatch):
-    """No predictions_dir means no bucket to back the count, so this door's own no-acknowledgment
-    rule refuses the CSV outright; the refusal still threads the calibration call through and
-    reports the run's own operating point and narrowed conf reference."""
-    captured: dict = {}
-    op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
-    r = _deliver_per_image_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
-    from tests import _trait_fixtures as fx
-
-    assert captured["trait"] == fx.COUNT_TRAIT              # calibration threaded through
-    assert captured["calibration_labels_dir"] == str(tmp_path)
-    assert "error" in r
-    assert r["validated"] is False
-    assert r["operating_point"] == op
-    assert r["run_conf_validated_against"] == "held_out_annotations"
-
-
-def test_deliver_per_image_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
-    """The count CSV door reads the reference conf itself recorded, never the run's bare bool.
-
-    A run whose conf param records no (or a wrong-kind) reference is unvalidated for this dimension
-    even when the run's overall ``validated`` flag is true: promoting the bool to
-    ``held_out_annotations`` would be a laundering path (the same shape resolution._sidecar_reference
-    guards against).
-    """
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
-
-    for conf_prov in ({"value": 0.6},                                        # no reference at all
-                      {"value": 0.6, "validated_against": VALIDATED_FALSE},
-                      {"value": 0.6, "validated_against": "make-believe"},
-                      # a real reference, but for the wrong validation kind (physical, not annotations)
-                      {"value": 0.6, "validated_against": VALIDATED_PHYSICAL_MEASUREMENT}):
-        r = _deliver_per_image_counts_over(monkeypatch, tmp_path, {"conf": conf_prov}, validated=True)
-        assert "error" in r, conf_prov
-        assert r["operating_point_validated"] == VALIDATED_FALSE
-        assert r["validated"] is False
-    # A real annotations reference is still reported under its own name even though this door
-    # takes no acknowledgment and no bucket backs the count, so the CSV-facing column floors too.
-    ok = _deliver_per_image_counts_over(
-        monkeypatch, tmp_path,
-        {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
-        validated=True)
-    assert "error" in ok
-    assert ok["operating_point_validated"] == VALIDATED_FALSE
-    assert ok["run_conf_validated_against"] == "reviewer_confirmed_annotations"

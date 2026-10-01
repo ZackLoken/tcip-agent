@@ -78,7 +78,6 @@ const initialStoreState = useStore.getState();
 
 const PRED_DIR_A = "C:/data/predictions/model_a/2026-01-01";
 const PRED_DIR_B = "C:/data/predictions/model_b/2026-01-01";
-const MODEL_OF_DIR: Record<string, string> = { [PRED_DIR_A]: "model_a", [PRED_DIR_B]: "model_b" };
 
 function setupDataset(opts: { predDir?: string | null } = {}) {
   const predDir = opts.predDir !== undefined ? opts.predDir : PRED_DIR_A;
@@ -90,7 +89,6 @@ function setupDataset(opts: { predDir?: string | null } = {}) {
         dataset_root: "C:/data",
         subject: "subject_a",
         date: "2026-01-01",
-        model_name: predDir ? (MODEL_OF_DIR[predDir] ?? null) : null,
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
         images_dir: "C:/data/images/2026-01-01",
@@ -168,7 +166,7 @@ beforeEach(() => {
   // the warning override this per-case.
   vi.spyOn(api.review, "generationConf").mockResolvedValue({
     generation_conf: null,
-    admission_rule: null,
+    admission_conf: null,
     admission_reason: "",
   });
   // The priority-queue model picker fetches this on every render with a project open. Default
@@ -321,7 +319,6 @@ describe("ReviewTab with a project open but no dataset selected", () => {
       screen.getByText(/Reopen this project from the top bar to select its dataset/),
     ).toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: /validation reference/i })).toBeDisabled();
     expect(screen.getByTitle(/Draw a box around an object the model missed/i)).toBeDisabled();
     expect(
       screen.getByTitle("Record that you checked this image for missed objects and found none"),
@@ -339,74 +336,6 @@ describe("ReviewTab with a project open but no dataset selected", () => {
     expect(matchesSpy).not.toHaveBeenCalled();
     expect(statusesSpy).not.toHaveBeenCalled();
     expect(actionSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("ReviewTab validation-reference affordance", () => {
-  const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
-
-  it("promotes a validated review and surfaces the honest result", async () => {
-    const spy = vi.spyOn(api.review, "validateReference").mockResolvedValue({
-      validated: true,
-      reference: "review_confirmed",
-      reviewed_image_count: 4,
-      conf: 0.42,
-      reason: "Validated. Your review confirms this model's counts.",
-      buckets_stamped: [PRED_DIR_A],
-    });
-    render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    await waitFor(() => expect(refBtn()).not.toBeDisabled());
-
-    fireEvent.click(refBtn());
-    await waitFor(() =>
-      expect(spy).toHaveBeenCalledWith({
-        dataset_root: "C:/data",
-        trait: "subject_a",
-        pred_dir: PRED_DIR_A,
-        subject: "subject_a",
-      }),
-    );
-    expect(await screen.findByText("Validated")).toBeInTheDocument();
-  });
-
-  it("shows a not-yet result honestly when the gate refuses", async () => {
-    vi.spyOn(api.review, "validateReference").mockResolvedValue({
-      validated: false,
-      reference: "false",
-      reviewed_image_count: 2,
-      conf: 0.5,
-      reason: "Not yet. Too few images have been reviewed.",
-      buckets_stamped: [PRED_DIR_A],
-    });
-    render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    await waitFor(() => expect(refBtn()).not.toBeDisabled());
-
-    fireEvent.click(refBtn());
-    expect(await screen.findByText("Not yet")).toBeInTheDocument();
-    expect(screen.queryByText("Validated")).not.toBeInTheDocument();
-  });
-
-  it("renders a joined multi-failure reason with its line breaks preserved", async () => {
-    const joined = "Not yet. First blocker.\n\nNot yet. Second blocker.";
-    vi.spyOn(api.review, "validateReference").mockResolvedValue({
-      validated: false,
-      reference: "false",
-      reviewed_image_count: 2,
-      conf: 0.5,
-      reason: joined,
-      buckets_stamped: [PRED_DIR_A],
-    });
-    const { container } = render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    await waitFor(() => expect(refBtn()).not.toBeDisabled());
-
-    fireEvent.click(refBtn());
-    await screen.findByText("Not yet");
-    const span = container.querySelector("span.whitespace-pre-wrap");
-    expect(span).not.toBeNull();
-    expect(span?.textContent).toBe(joined);
   });
 });
 
@@ -546,66 +475,13 @@ describe("ReviewTab audit-gap handling", () => {
     expect(mirrorSpy.mock.calls[0][1]).toBe("complete");
     expect(useStore.getState().toasts.map((t) => t.message)).toContain(gapMessage);
   });
-
-  it("promoteReviewToValidationReference adopts the committed body and toasts after the reason", async () => {
-    const committed = {
-      validated: true,
-      reference: "review_confirmed",
-      reviewed_image_count: 4,
-      conf: 0.42,
-      reason: "Validated. Your review confirms this model's counts.",
-      buckets_stamped: [PRED_DIR_A],
-    };
-    vi.spyOn(api.review, "validateReference").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: gapMessage, committed },
-        409,
-        gapMessage,
-      ),
-    );
-    render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
-    await waitFor(() => expect(refBtn()).not.toBeDisabled());
-
-    fireEvent.click(refBtn());
-    expect(await screen.findByText("Validated")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(useStore.getState().toasts.at(-1)?.message).toBe(`${committed.reason} ${gapMessage}`),
-    );
-  });
-
-  it("promoteReviewToValidationReference discloses no bucket stamped on a sealed-record 409", async () => {
-    const committed = {
-      validated: true,
-      reference: "review_confirmed",
-      reviewed_image_count: 4,
-      conf: 0.42,
-      reason: "Validated. Your review confirms this model's counts.",
-      buckets_stamped: [],
-    };
-    vi.spyOn(api.review, "validateReference").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message: gapMessage, committed },
-        409,
-        gapMessage,
-      ),
-    );
-    render(<ReviewTab />);
-    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
-    const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
-    await waitFor(() => expect(refBtn()).not.toBeDisabled());
-
-    fireEvent.click(refBtn());
-    expect(await screen.findByText("No bucket was stamped.")).toBeInTheDocument();
-  });
 });
 
 describe("ReviewTab Conf >= filter censoring warning", () => {
   it("shows no censoring warning when the filter sits at or below generation confidence", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue({
       generation_conf: 0.5,
-      admission_rule: null,
+      admission_conf: null,
       admission_reason: "",
     });
     render(<ReviewTab />);
@@ -617,7 +493,7 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
   it("warns when the filter has been raised above the bucket's own generation confidence", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue({
       generation_conf: 0.1,
-      admission_rule: null,
+      admission_conf: null,
       admission_reason: "",
     });
     render(<ReviewTab />);
@@ -633,7 +509,7 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
   it("warns when the bucket has no recorded generation confidence (always conf-censored, per _conf_censored's own None branch)", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue({
       generation_conf: null,
-      admission_rule: null,
+      admission_conf: null,
       admission_reason: "",
     });
     render(<ReviewTab />);
@@ -648,7 +524,7 @@ describe("ReviewTab Conf >= filter censoring warning", () => {
     setupDataset({ predDir: null });
     vi.spyOn(api.review, "generationConf").mockResolvedValue({
       generation_conf: null,
-      admission_rule: null,
+      admission_conf: null,
       admission_reason: "",
     });
     render(<ReviewTab />);
@@ -1182,7 +1058,6 @@ describe("ReviewTab matches-recompute effect", () => {
       s.patchGui({
         dataset: {
           ...s.gui.dataset,
-          model_name: "model_b",
           predictions_dir: PRED_DIR_B,
           prediction_paths: {
             "img1.jpg": `${PRED_DIR_B}/img1.json`,
@@ -1493,7 +1368,7 @@ describe("ReviewTab confirm-admitted", () => {
   function ruleConf(conf: number) {
     return {
       generation_conf: conf,
-      admission_rule: { conf, experiment_id: "exp-1", record_digest: "0123456789abcdef" },
+      admission_conf: conf,
       admission_reason: "",
     };
   }
@@ -2238,8 +2113,8 @@ describe("ReviewTab priority queue", () => {
       status: "completed",
       error: null,
       queue: [
-        { image: "img2.jpg", score: 0.9, calibration_member: true },
-        { image: "img1.jpg", score: 0.4, calibration_member: false },
+        { image: "img2.jpg", score: 0.9, reference_member: true },
+        { image: "img1.jpg", score: 0.4, reference_member: false },
       ],
       total_candidates: 2,
       reviewed_skipped: 0,
@@ -2270,11 +2145,11 @@ describe("ReviewTab priority queue", () => {
       true,
     );
     // img1.jpg is the tab's initial current image (see the dataset fixture below); its own
-    // queue entry names calibration_member: false, so no badge for it.
-    expect(screen.queryByText("Calibration")).not.toBeInTheDocument();
+    // queue entry names reference_member: false, so no badge for it.
+    expect(screen.queryByText("Reference")).not.toBeInTheDocument();
   });
 
-  it("badges the current image when its queue entry names it a calibration member", async () => {
+  it("badges the current image when its queue entry names it a reference member", async () => {
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [{ name: "run-42", checkpoint_path: "C:/ckpts/run-42.pt" }],
     });
@@ -2287,8 +2162,8 @@ describe("ReviewTab priority queue", () => {
       status: "completed",
       error: null,
       queue: [
-        { image: "img1.jpg", score: 0.9, calibration_member: true },
-        { image: "img2.jpg", score: 0.4, calibration_member: false },
+        { image: "img1.jpg", score: 0.9, reference_member: true },
+        { image: "img2.jpg", score: 0.4, reference_member: false },
       ],
       total_candidates: 2,
       reviewed_skipped: 0,
@@ -2305,7 +2180,7 @@ describe("ReviewTab priority queue", () => {
       screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
     );
 
-    expect(await screen.findByText("Calibration")).toBeInTheDocument();
+    expect(await screen.findByText("Reference")).toBeInTheDocument();
   });
 
   it("surfaces the tool's own refusal honestly, not a generic failure", async () => {

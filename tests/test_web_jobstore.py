@@ -2,6 +2,11 @@
 
 import pytest
 
+from tcip_mcp.pipelines.execution import Stated
+
+STATED = Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2)
+"""The execution values every inference job here states."""
+
 
 def test_evict_terminal_caps_and_keeps_running():
     from tcip_web.jobstore import evict_terminal
@@ -124,8 +129,8 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, opened_project, monkeypa
 
     job = InferenceJob(job_id="j1", project=str(tmp_path),
                        checkpoint_path=project_checkpoint(tmp_path),
-                       images_dir=str(images_dir), output_dir=str(tmp_path / "out"), tile=False,
-                       conf=0.25, cross_tile_nms=0.7, overlap=0.2)
+                       images_dir=str(images_dir), output_dir=str(tmp_path / "out"),
+                       stated=STATED)
     _register(job)
 
     res = cancel_job("j1", EmptyBodyPayload())
@@ -165,8 +170,7 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-audit", project=str(tmp_path), checkpoint_path=ckpt, images_dir=str(images_dir),
-                       output_dir=str(output_dir), tile=False, conf=0.25, cross_tile_nms=0.7,
-                       overlap=0.2)
+                       output_dir=str(output_dir), stated=STATED)
     _register(job)
 
     _worker(job)
@@ -174,7 +178,7 @@ def test_inference_worker_sets_audit_warning_on_a_lost_audit_line(
     assert served.get("status") == "completed"
     warning = served.get("audit_warning")
     assert warning is not None
-    assert "stamp_written" in warning
+    assert "prediction_bucket_published" in warning
     assert (output_dir / "img.json").exists()
 
 
@@ -194,8 +198,7 @@ def test_inference_worker_healthy_run_serves_audit_warning_none(
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-healthy", project=str(tmp_path),
                        checkpoint_path=project_checkpoint(tmp_path),
-                       images_dir=str(images_dir), output_dir=str(output_dir), tile=False,
-                       conf=0.25, cross_tile_nms=0.7, overlap=0.2)
+                       images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
     _register(job)
 
     _worker(job)
@@ -238,8 +241,7 @@ def test_inference_stream_final_frame_never_precedes_the_audit_attempt(
 
     output_dir = tmp_path / "ds" / "predictions" / "model" / "2026-01-01"
     job = InferenceJob(job_id="j-stream-order", project=str(tmp_path), checkpoint_path=ckpt,
-                       images_dir=str(images_dir), output_dir=str(output_dir), tile=False,
-                       conf=0.25, cross_tile_nms=0.7, overlap=0.2)
+                       images_dir=str(images_dir), output_dir=str(output_dir), stated=STATED)
     _register(job)
 
     worker_thread = threading.Thread(target=_worker, args=(job,))
@@ -264,7 +266,7 @@ def test_inference_stream_final_frame_never_precedes_the_audit_attempt(
                 assert frame["status"] == "running"
             assert frame is not None and frame["type"] == "final"
             assert frame["audit_warning"] is not None
-            assert "stamp_written" in frame["audit_warning"]
+            assert "prediction_bucket_published" in frame["audit_warning"]
     finally:
         release_append.set()
         worker_thread.join(10)
@@ -285,7 +287,7 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
 
     job = InferenceJob(
         job_id="launched-under-a", project=str(opened_project), checkpoint_path="c",
-        images_dir="i", output_dir="o", tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
+        images_dir="i", output_dir="o", stated=STATED,
     )
     _register(job)
 

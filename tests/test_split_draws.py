@@ -566,7 +566,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
     make_result = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
     captured: dict = {}
@@ -605,7 +605,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     selection_dir = tmp_path / "m"
     make_result = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject=SUBJECT,
-                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125)
     assert "error" not in make_result, make_result
 
     def fake_search(**kw):
@@ -1356,8 +1356,9 @@ def _one_source_tiled_cfg(images_dir, labels_dir) -> dict:
         "data": {
             "images_dir": str(images_dir), "labels_dir": str(labels_dir),
             "scope": {"subject": "bud"},
-            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {"val_ratio": 0.2, "test_ratio": 0.1},
+            "auto_val": True, "split": {"val_ratio": 0.2, "test_ratio": 0.1},
+            # sliver_frac stated: a fixture this small derives no box-size spread.
+            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2, "sliver_frac": 0.5},
         },
     }
 

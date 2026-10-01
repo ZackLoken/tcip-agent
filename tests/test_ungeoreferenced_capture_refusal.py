@@ -1,8 +1,8 @@
 """No positioned capture refuses a plant-mapping build or delivery by name; a partly positioned
 mapping keeps delivering with its unattributed count disclosed. Reuses the platform's own
-producers (``initialize_project``, ``register_dataset``, ``build_plant_mapping``, ``deliver_phenology_milestones``)
-and the binding family's own geolocated-scene writer, a second registered trait rather than the
-pilot's, so nothing here generalizes from one trait's own vocabulary.
+producers (``initialize_project``, ``register_dataset``, ``build_plant_mapping``, publication and
+the phenology delivery) and the binding family's own geolocated-scene writer, a second registered
+trait rather than the pilot's, so nothing here generalizes from one trait's own vocabulary.
 """
 
 from __future__ import annotations
@@ -16,20 +16,19 @@ import pytest
 from PIL import Image
 
 import tcip_store as ts
-from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingBuild
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
-from tests._binding_fixtures import register_plant_registry_for
-from tests._binding_fixtures import write_geo_image as _write_geo_image
-from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_scene
+from tests._image_fixtures import write_geo_image as _write_geo_image
+from tests._mapping_fixtures import register_plant_registry_for
+from tests.test_plant_mapping_binding import (
+    PLANTS, _dataset, _deliver, _events, _init, _publish, _write_scene,
+)
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 DATE = "2026-02-11"
-
-from tests._population import mapped_plants
+PLANT_IDS = [p["plot"] for p in PLANTS]
 
 
 def _write_ungeoreferenced_image(path: Path) -> None:
@@ -195,19 +194,12 @@ def _unmapped_row(stem: str, distance_m: float | None) -> Assignment:
 
 def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, str]]:
     """A registered dataset with one real prediction bucket, and the trait this module's
-    deliveries run under; returns ``(dataset_root, predictions_by_date)``.
+    deliveries run under; returns ``(dataset_root, {date: bucket})``.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     _, _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _seed_currant_bloom_trait(tmp_path)
-
-    from tcip_mcp.subject_registry import copy_registry
-    from tcip_mcp.dataset_layout import subjects_path
-
-    # The project's own registry (seeded by _seed_currant_bloom_trait) is copied to the delivered
-    # dataset root, since the web door resolves its registry from there, not the project.
-    copy_registry(subjects_path(tmp_path), subjects_path(dataset_root))
     return dataset_root, preds_by_date
 
 
@@ -220,8 +212,8 @@ def _assert_all_doors_refuse(
 
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv))
+        tmp_path, trait="currant_bloom", mapping_name=mapping_name, plants=["P1"],
+        buckets=list(preds_by_date.values()), output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
     assert not out_csv.exists()
@@ -230,7 +222,7 @@ def _assert_all_doors_refuse(
     client = TestClient(app, base_url="http://127.0.0.1")
     payload = {
         "mapping_name": mapping_name,
-        "predictions_by_date": preds_by_date, "trait": "currant_bloom",
+        "buckets": list(preds_by_date.values()), "trait": "currant_bloom",
         "plants": ["P1"],
     }
     resp = client.post("/api/results/export_csv",
@@ -324,41 +316,21 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert list(per_plant) == ["P1"]
 
 
-def _validate_delivery_buckets(
-    project: Path, preds_by_date: dict[str, str], dataset_root: Path,
-) -> list[str]:
-    """Bind a genuinely validated operating_point and classifier_operating_point sidecar onto
-    every bucket a delivery names, all naming one shared producing run, so a delivery earns its
-    result the way the door requires rather than through the acknowledgment it no longer takes.
-    Mirrors ``test_second_trait_acceptance._currant_bloom_fixture``'s own validated branch, over
-    buckets this module's own ``_write_scene`` already wrote. Returns the bucket paths, so a
-    caller can pass them straight through as ``classifier_pred_dirs``.
-    """
-    from tests._binding_fixtures import write_bound_sidecar
-    from tests.test_second_trait_acceptance import _ID_MAP
+def _republished(dataset_root: Path, date: str) -> dict[str, str]:
+    """Every image now under ``date`` published as a fresh bucket of that date, for a scene whose
+    capture set grew after :func:`_write_scene` published it."""
+    images = sorted((dataset_root / "images" / date).glob("*.jpg"))
+    bucket = dataset_root / "predictions" / "all" / date
+    return {date: _publish(dataset_root.parent, bucket, images)}
 
-    producing = "exp-currant-run"
-    classifier_dirs = []
-    for date, bucket in preds_by_date.items():
-        sidecar = {
-            "validated": True, "trait": "currant_bloom",
-            "scope": {"subject": "flower", "attribute": "bloom_state", "id_map": _ID_MAP},
-            "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
-            "experiment_id": producing, "checkpoint_sha256": "abc123",
-        }
-        write_bound_sidecar(project, bucket, sidecar, dataset_root=dataset_root,
-                            experiment_id=f"exp-op-{date}", producing_experiment_id=producing,
-                            trait="currant_bloom")
-        classifier_stamp = {
-            "validated": True, "trait": "currant_bloom", "experiment_id": producing,
-            "operating_point": {"classifier": {"value": "open",
-                                               "validated_against": "held_out_annotations"}},
-        }
-        write_bound_sidecar(project, bucket, classifier_stamp, document="classifier_operating_point",
-                            dataset_root=dataset_root, experiment_id=f"exp-cls-{date}",
-                            producing_experiment_id=producing, trait="currant_bloom")
-        classifier_dirs.append(bucket)
-    return classifier_dirs
+
+def _delivered_disclosure(project: Path, preds_by_date: dict[str, str]) -> dict:
+    """Deliver ``preds_by_date`` through ``valley`` for both plants; the event's plant-mapping
+    disclosure."""
+    res = _deliver(project, trait="currant_bloom", mapping_name="valley", plants=PLANT_IDS,
+                   buckets=preds_by_date.values(), output_csv_path=str(project / "out.csv"))
+    assert "error" not in res, res
+    return _events(project)[-1]["plant_mapping"]
 
 
 # ── admits valid work: a partly positioned dataset keeps delivering, disclosed ──────────
@@ -368,21 +340,17 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two images positioned, one not: both doors build, ``summary()`` reports one unattributed
-    per date and in total, the load route returns the same summary, and ``deliver_phenology_milestones``
-    delivers with ``images_unattributed == 1`` and ``dates_delivered`` in the tool's return, the
-    CSV's own row and the delivery event's block."""
+    per date and in total, the load route returns the same summary, and the delivery event
+    discloses one unattributed image over the delivered date."""
     from fastapi.testclient import TestClient
     from tcip_web.app import app
     from tcip_web.state import store
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
+    images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
     _write_ungeoreferenced_image(images_root / DATE / "P3_extra.jpg")
-    json_io.write_annotations(
-        Path(preds_by_date[DATE]) / "P3_extra.json",
-        [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
-                   attributes={"bloom_state": "open"})], 8, 8)
+    preds_by_date = _republished(dataset_root, DATE)
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
@@ -399,26 +367,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert loaded_summary["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
-    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
-    out_csv = tmp_path / "out.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
-    assert "error" not in res, res
-    assert res["n_images_unattributed"] == 1
-    assert res["dates_delivered"] == [DATE]
-
-    rows = list(csv.DictReader(out_csv.open(newline="", encoding="utf-8")))
-    assert rows[0]["images_unattributed"] == "1"
-    assert rows[0]["dates_delivered"] == DATE
-
-    from tcip_mcp.pipelines import resolution
-    from tcip_mcp.project_paths import project_state_dir
-
-    scope = project_state_dir(tmp_path)
-    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
-    pm = events[-1]["plant_mapping"]
+    pm = _delivered_disclosure(tmp_path, preds_by_date)
     assert pm["images_unattributed"] == 1
     assert pm["dates_delivered"] == [DATE]
     assert pm["images_unattributed_scope"] == "delivered_dates"
@@ -434,10 +383,6 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     dates = ["2026-02-11", "2026-02-25"]
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=dates)
     _write_ungeoreferenced_image(images_root / dates[1] / "P3_extra.jpg")
-    json_io.write_annotations(
-        Path(preds_by_date[dates[1]]) / "P3_extra.json",
-        [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
-                   attributes={"bloom_state": "open"})], 8, 8)
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
@@ -446,30 +391,23 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     assert build_res["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
-    delivered = {dates[0]: preds_by_date[dates[0]]}
-    classifier_dirs = _validate_delivery_buckets(tmp_path, delivered, dataset_root)
-    out_csv = tmp_path / "out.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered,
-        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
-    assert "error" not in res, res
-    assert res["n_images_unattributed"] == 0
-    assert res["dates_delivered"] == [dates[0]]
+    pm = _delivered_disclosure(tmp_path, {dates[0]: preds_by_date[dates[0]]})
+    assert pm["images_unattributed"] == 0
+    assert pm["dates_delivered"] == [dates[0]]
 
 
 def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The no-capture-at-all refusal fires only when nothing across the delivered dates
-    attributes: a delivery naming a fully attributed date beside a date recorded with no
-    capture at all still ships."""
+    attributes: a mapping recording one date with no capture at all beside a fully attributed
+    one still delivers the attributed date's bucket. A bucket of no documents states no capture
+    date, so no delivery names the empty date itself."""
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     empty_date = "2026-02-25"
     (images_root / empty_date).mkdir()
-    empty_bucket = dataset_root / "predictions" / "live" / empty_date
-    empty_bucket.mkdir(parents=True)
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
@@ -479,34 +417,24 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     assert build_res["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
-    delivered = {**preds_by_date, empty_date: str(empty_bucket)}
-    classifier_dirs = _validate_delivery_buckets(tmp_path, delivered, dataset_root)
-    out_csv = tmp_path / "out.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=delivered,
-        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
-    assert "error" not in res, res
-    assert sorted(res["dates_delivered"]) == sorted([DATE, empty_date])
+    pm = _delivered_disclosure(tmp_path, preds_by_date)
+    assert pm["dates_delivered"] == [DATE]
 
 
 def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
-    images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    _init(tmp_path)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path, name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 0
 
-    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
-    out_csv = tmp_path / "out.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
-    assert "error" not in res, res
-    assert res["n_images_unattributed"] == 0
+    _seed_currant_bloom_trait(tmp_path)
+    assert _delivered_disclosure(tmp_path, preds_by_date)["images_unattributed"] == 0
 
 
 def test_a_raster_beside_positioned_photographs_still_delivers(
@@ -523,13 +451,8 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    classifier_dirs = _validate_delivery_buckets(tmp_path, preds_by_date, dataset_root)
-    out_csv = tmp_path / "out.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
-    assert "error" not in res, res
-    assert out_csv.exists()
+    _delivered_disclosure(tmp_path, preds_by_date)
+    assert (tmp_path / "out.csv").exists()
 
 
 def test_a_capture_at_the_origin_is_admitted_as_positioned(

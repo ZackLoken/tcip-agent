@@ -285,13 +285,11 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     tmp_path: Path,
 ):
     """project_roots reaches every layout a project's own records name it under, not only the
-    registered dataset roots: each run directory, the selection a run bound to (its resolved
-    partition's selection.selection_dir), and a prediction bucket under a registered dataset's
-    own predictions/ tree."""
-    from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
+    registered dataset roots: each run directory and the selection a run bound to (its resolved
+    partition's selection.selection_dir)."""
+    from tcip_store.layout_claims import RUN, SPLITS
 
     from tcip_mcp.store_catalog import project_roots
-    from tcip_mcp.dataset_layout import prediction_dir
 
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"
@@ -304,14 +302,10 @@ def test_project_roots_names_a_run_output_dir_a_selection_and_a_prediction_bucke
     split_dir.mkdir(parents=True)
     run_dir = _run_bound_to(project, split_dir)
 
-    bucket = prediction_dir(dataset, "modelA", "2-11-26")
-    bucket.mkdir(parents=True)
-
     roots = project_roots(project)
 
     assert (str(run_dir.absolute()), RUN) in roots
     assert (str(split_dir.absolute()), SPLITS) in roots
-    assert (str(bucket.absolute()), PREDICTION_BUCKET) in roots
 
 
 def _run_bound_to(project: Path, selection_dir: Path) -> Path:

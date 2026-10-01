@@ -69,24 +69,6 @@ def test_a_built_in_engines_candidate_carries_the_score_its_engine_reported():
                           score_key="predicted_iou", meta_keys=())
 
 
-def test_both_content_identities_of_ground_truth_see_its_crowd_flag(tmp_path: Path):
-    """The review reference's hash and the holdout's content-overlap identity hash one
-    projection of ground truth, so neither can call a crowd region and one object the same."""
-    from tcip_mcp.pipelines.feedback.review_calibration import review_reference_hash
-    from tcip_mcp.pipelines.operating_point import _record_content_hash
-    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
-
-    records = []
-    for crowd in (False, True):
-        gt = _read_back(tmp_path / f"g{crowd}.json",
-                        [Annotation(subject=SUBJECT, geometry=BOX, iscrowd=crowd)])
-        record = records_from_annotation(gt, [], width=IMG, height=IMG)[1]
-        records.append({**record, "image_id": "a"})
-
-    assert _record_content_hash(records[0]) != _record_content_hash(records[1])
-    assert review_reference_hash([records[0]]) != review_reference_hash([records[1]])
-
-
 def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(tmp_path: Path):
     """The instance loader's target comes from the one target builder, over the geometry the
     loader declares it reads: a box beside the polygon is no instance and no mask."""
@@ -123,68 +105,14 @@ def test_the_completeness_digest_reads_a_box_on_the_writers_own_grid(tmp_path: P
         _read_back(tmp_path / "c.json", anns), SUBJECT, cell)
 
 
-def test_a_review_box_is_put_on_the_stored_grid_only_where_it_has_pixels():
-    """A verdict's box scaled to its image lands on the 2-decimal grid its stored ground truth
-    lives on; one kept on the unit square (no image dimensions) keeps its full precision."""
-    from tcip_mcp.pipelines.feedback.review_calibration import _to_xywh
-
-    assert _to_xywh((1 / 3, 0.5, 0.1, 0.1), (600, 400)) == [170.0, 180.0, 60.0, 40.0]
-    assert _to_xywh((1 / 3, 0.5, 0.1, 0.1), None)[0] == 1 / 3 - 0.05
-
-
-def test_every_stamp_write_leaves_its_one_line_and_a_merge_that_writes_nothing_leaves_none(
-        tmp_path: Path):
-    """The stamp library records its own write, whichever door called it, under the bucket's
-    dataset root; a merge that leaves the stamp as it was is no act."""
-    import tcip_store as ts
-
-    from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.pipelines.resolution import update_sidecar, write_sidecar
-
-    root = tmp_path / "orchard"
-    bucket = root / "predictions" / "m" / "2025-09-14"
-    write_sidecar(bucket, {"validated": False, "scope": {"subject": SUBJECT, "attribute": None}},
-                  project=tmp_path)
-    assert update_sidecar(bucket, lambda stored: {**stored, "shippable_issues": ["merged"]},
-                          project=tmp_path)
-    assert not update_sidecar(bucket, lambda stored: None, project=tmp_path)
-
-    rows = ts.read_log(audit_log_key(root)).records
-    assert [(r["tool"], r["arguments"]["pred_dir"]) for r in rows] == [
-        ("stamp_written", str(bucket)), ("stamp_written", str(bucket))]
-    assert rows[1]["stamp"]["shippable_issues"] == ["merged"]
-    assert ts.read_log(audit_log_key(tmp_path)).records == []
-
-
-def test_a_split_lock_missing_a_recorded_field_raises_naming_it(tmp_path: Path):
-    """A lock is read as its draw stated it: a field it lacks is never read as empty history."""
-    import tcip_store as ts
-
-    from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_lock_key,
-        resolve_locked_cal_holdout_split,
-    )
-
-    stems = [f"plot_{i}" for i in range(6)]
-    resolve_locked_cal_holdout_split(stems, identity_hash="h", scope_root=tmp_path)
-    key = cal_holdout_lock_key("h", scope_root=tmp_path)
-    lock = ts.read(key)
-    del lock["redraw_history"]
-    ts.replace(key, lock)
-
-    with pytest.raises(KeyError, match="redraw_history"):
-        resolve_locked_cal_holdout_split(stems, identity_hash="h", scope_root=tmp_path,
-                                         force_redraw=True)
-
-
-def test_every_reader_of_a_buckets_dataset_root_answers_what_bucket_dataset_root_answers(
+def test_every_reader_of_a_buckets_dataset_root_answers_what_dataset_root_of_answers(
     tmp_path: Path, monkeypatch,
 ):
     """One bucket spelled two ways, absolute and relative through a ``..`` segment, is one bucket
     under one root to the verdict key and to a delivery's single-dataset check; a bucket under no
     dataset root has none to either."""
-    from tcip_mcp.dataset_layout import bucket_dataset_root
-    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.buckets import bucket_key_of
+    from tcip_mcp.dataset_layout import dataset_root_of as bucket_dataset_root
     from tcip_mcp.subject_registry import distinct_dataset_root
 
     dataset = tmp_path / "orchard"
@@ -194,7 +122,8 @@ def test_every_reader_of_a_buckets_dataset_root_answers_what_bucket_dataset_root
     monkeypatch.chdir(tmp_path)
     detour = Path("orchard", "predictions", "other", "..", "detector", "2026-05-01")
 
-    assert bucket_dataset_root(detour) == bucket_dataset_root(bucket) == dataset.resolve()
+    assert (bucket_dataset_root(detour).resolve() == bucket_dataset_root(bucket).resolve()
+            == dataset.resolve())
     assert bucket_key_of(detour) == bucket_key_of(bucket) == "predictions/detector/2026-05-01"
     assert distinct_dataset_root([bucket, detour]) == dataset.resolve()
 

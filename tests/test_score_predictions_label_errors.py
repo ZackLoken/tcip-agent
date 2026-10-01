@@ -6,11 +6,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.tools.annotation_tools import score_predictions
+
+pytest.importorskip("torch")
 
 
 def _write_image(path: Path) -> None:
@@ -18,20 +21,29 @@ def _write_image(path: Path) -> None:
     Image.new("RGB", (100, 80), color=(120, 120, 120)).save(path)
 
 
+def _published(project: Path, out: Path, image: Path, scope: dict) -> Path:
+    """One box at 0.9 on ``image``, labeled with ``scope``'s last class, published as the bucket
+    ``out``; its directory."""
+    from tests._chain_fixtures import published
+
+    return published(project, out, [
+        {"image": str(image), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 5.0, 5.0]],
+         "scores": [0.9], "labels": [max(scope["id_map"].values()) + 1]}], scope=scope).path
+
+
+BUD = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
+
+
 def test_score_predictions_single_image_reports_an_unreadable_gt(tmp_path: Path) -> None:
-    images = tmp_path / "images"
     labels = tmp_path / "annotations"
-    preds = tmp_path / "predictions" / "baseline"
     labels.mkdir(parents=True)
-    preds.mkdir(parents=True)
-    img = images / "IMG_0000.jpg"
+    img = tmp_path / "images" / "IMG_0000.jpg"
     _write_image(img)
     bad = labels / "IMG_0000.json"
     bad.write_bytes(b"{not json")
-    write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
+    preds = _published(tmp_path, tmp_path / "predictions" / "baseline", img, BUD)
 
-    res = score_predictions(str(img))
+    res = score_predictions(str(img), str(preds))
 
     assert "error" in res
     assert str(bad) in res["error"]
@@ -41,102 +53,62 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(tmp_path: Pat
     root = tmp_path / "ds"
     images = root / "images"
     labels = root / "annotations"
-    preds = root / "predictions" / "baseline"
     labels.mkdir(parents=True)
-    preds.mkdir(parents=True)
     _write_image(images / "IMG_0000.jpg")
     write_annotations(labels / "IMG_0000.json",
                       [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
+    preds = _published(tmp_path, root / "predictions" / "baseline", images / "IMG_0000.jpg", BUD)
     bad = preds / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = score_predictions(str(root))
+    res = score_predictions(str(images), str(preds))
 
     assert "error" in res
     assert str(bad) in res["error"]
 
 
-def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
-    """A bucket's own stamp, written straight through the store: the rail refuses a fresh
-    write_sidecar call missing the (subject, attribute) pair, so a pre-conform stamp (and its
-    undecodable counterpart, below) has no live producer left to build it through."""
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar, expect=tcip_store.Version.ABSENT)
-
-
-def _damage_sidecar(pred_dir: Path) -> None:
-    """Corrupt a bucket's already-seeded stamp in place, wherever the bound backend keeps it."""
-    import os
-
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    key = sidecar_key(pred_dir, "operating_point")
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(b"{not json")
-        return
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute("update records set value = ? where store = ? and parts = ?",
-                    (b"{not json", key.store, encode_parts(key.parts)))
-    finally:
-        conn.close()
-
-
-def test_score_predictions_folder_refuses_an_undecodable_stamp(tmp_path: Path) -> None:
-    root = tmp_path / "ds"
-    images = root / "images"
-    labels = root / "annotations"
-    preds = root / "predictions" / "classifier"
-    labels.mkdir(parents=True)
-    preds.mkdir(parents=True)
-    _write_image(images / "IMG_0000.jpg")
-    write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
-    write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="open", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
-    _seed_sidecar(preds, {"scope": {"id_map": {"open": 0}}})
-    _damage_sidecar(preds)
-
-    res = score_predictions(str(root))
-
-    assert "error" in res
-
-
-def test_score_predictions_over_a_conformed_classified_bucket_scores_the_object_class(
+def test_score_predictions_over_classified_documents_scores_the_object_class(
     tmp_path: Path,
 ) -> None:
-    """Once a classified bucket carries the object class in subject (the conformed shape), this
-    scores its localization, a valid number about finding the object, never the classifier's own
-    call: the pinned reading a classified bucket now gets instead of matching nothing."""
-    from tcip_mcp.pipelines.resolution import write_sidecar
-
-    images = tmp_path / "images"
+    """A classified document carries the object class in subject, so this scores its
+    localization, a valid number about finding the object, never the classifier's own call."""
     labels = tmp_path / "annotations"
-    preds = tmp_path / "predictions" / "classifier"
     labels.mkdir(parents=True)
-    preds.mkdir(parents=True)
-    img = images / "IMG_0000.jpg"
+    img = tmp_path / "images" / "IMG_0000.jpg"
     _write_image(img)
     write_annotations(labels / "IMG_0000.json",
                       [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
-    write_annotations(
-        preds / "IMG_0000.json",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5), score=0.9,
-                   attributes={"opening": "open"})],
-        100, 80,
-    )
-    write_sidecar(preds, {"scope": {"subject": "bud", "attribute": "opening",
-                                    "id_map": {"open": 0}}}, project=tmp_path)
+    preds = _published(tmp_path, tmp_path / "predictions" / "classifier", img,
+                       {"subject": "bud", "attribute": "opening",
+                        "id_map": {"closed": 0, "open": 1}})
 
-    res = score_predictions(str(img))
+    res = score_predictions(str(img), str(preds))
 
     assert "error" not in res
     assert res["tp"] == 1
+
+
+def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(tmp_path: Path):
+    """A labeled image the bucket's record never predicted is no false negative and no triage
+    score: scoring and triage leave it out and name it, while the image it did predict scores."""
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.tools.vision_tools import get_worst_predictions
+
+    root = tmp_path / "ds"
+    images, labels = root / "images", root / "annotations"
+    labels.mkdir(parents=True)
+    for stem in ("IMG_0000", "IMG_0001"):
+        _write_image(images / f"{stem}.jpg")
+        write_annotations(labels / f"{stem}.json",
+                          [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
+    preds = _published(tmp_path, root / "predictions" / "baseline", images / "IMG_0000.jpg", BUD)
+
+    scored = score_predictions(str(images), str(preds))
+    triaged = get_worst_predictions(read_bucket(preds), str(labels))
+
+    assert "error" not in scored, scored
+    assert (scored["total_tp"], scored["total_fn"], scored["image_count"]) == (1, 0, 1)
+    assert scored["not_predicted"] == [str(images / "IMG_0001.jpg")]
+    assert [w["stem"] for w in triaged["worst_images"]] == ["IMG_0000"]
+    assert triaged["not_predicted"] == ["IMG_0001"]
+    assert "not predicted" in score_predictions(str(images / "IMG_0001.jpg"), str(preds))["error"]

@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp import dataset_layout, workspace
+from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.project_record import record_fields, rename_project
 from tcip_web import identity
 from tcip_web.state import store
@@ -39,11 +40,10 @@ class ProjectSummary(BaseModel):
     modified: float
     dates: list[str]
     subjects: list[str]
-    models: list[str]
-    # Per-date availability: which subjects have labels / which models have predictions on each
-    # date, so the pickers never offer a date with nothing there (an empty canvas).
+    # Per-date availability: which subjects have labels / which buckets are published on each
+    # date (name to directory), so the pickers never offer a date with nothing there.
     subjects_by_date: dict[str, list[str]]
-    models_by_date: dict[str, list[str]]
+    prediction_dirs: dict[str, dict[str, str]]
     image_count: int
     is_open: bool
     # The first date's labels that would not read, naming the file; the project still lists, and
@@ -71,9 +71,8 @@ def _summarize(project_dir: Path) -> ProjectSummary:
         modified=st.st_mtime,
         dates=dates,
         subjects=dataset_layout.list_subjects(project_dir),
-        models=dataset_layout.list_models(project_dir),
         subjects_by_date=subjects_by_date,
-        models_by_date={d: dataset_layout.models_with_predictions(project_dir, d) for d in dates},
+        prediction_dirs=buckets_by_date(project_dir, dates),
         image_count=image_count,
         is_open=record["id"] is not None and record["id"] == store.project_id,
         label_problem=label_problem,

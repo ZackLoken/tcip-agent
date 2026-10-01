@@ -13,12 +13,13 @@ import {
 import { api } from "@/api/client";
 import { committedOf } from "@/api/http";
 import {
-  deliveryGateRefusalOf,
+  deliveryRefusalOf,
   operationalizationRefusalOf,
   resultsApi,
   type DeliveryEventRecord,
-  type DeliveryGateRefusal,
+  type DeliveryRefusal,
   type ExportCountCsvHeaders,
+  type MilestoneColumn,
   type OperationalizationRefusal,
   type OnsetRow,
   type PerPlantRow,
@@ -60,8 +61,7 @@ function SetupTabNote({ children }: { children: ReactNode }) {
 function auditGapExportMessage(savedPath: string, detail: string): string {
   return (
     `The file is already written at ${savedPath}, but its delivery is unrecorded. Exporting ` +
-    "again is a second delivery with its own event; supersede_delivery is the remedy for the " +
-    `first. ${detail}`
+    `again is a second delivery with its own event. ${detail}`
   );
 }
 
@@ -79,9 +79,6 @@ export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = dataset.dataset_root;
-  // An acknowledged export is refused server-side with no user set; read reactively so the
-  // acknowledged-export buttons disable themselves before a breeder types a reason for nothing.
-  const user = useStore((s) => s.user);
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
@@ -89,16 +86,17 @@ export function ResultsTab() {
   // True unless a computed run reported that its predictions carried no positive-state class.
   const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
 
-  // Dataset tree (dates + which models actually have predictions per date) drives the structured
-  // per-date picker below, never a hand-edited JSON blob; models_with_predictions is the same
-  // primitive the backend already computes this from, via api.dataset.tree.
+  // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
+  // below, never a hand-edited JSON blob.
   const [dates, setDates] = useState<string[]>([]);
-  const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
   const [predictionDirs, setPredictionDirs] = useState<Record<string, Record<string, string>>>({});
+  // Each bucket published over ``date``, as [its name under predictions/, its directory].
+  const bucketsFor = (date: string): [string, string][] =>
+    Object.entries(predictionDirs[date] ?? {});
   const [datesError, setDatesError] = useState<string | null>(null);
   const [labelProblem, setLabelProblem] = useState<string | null>(null);
-  // The model picked per date; "" means "skip this date" (dropped before compute()).
-  const [dateModel, setDateModel] = useState<Record<string, string>>({});
+  // The bucket directory the breeder picked per date; a date with none picked is not delivered.
+  const [dateBucket, setDateBucket] = useState<Record<string, string>>({});
   // The population, typed by the breeder: one plant id per line or comma. The mapping names
   // every plot its plant CSVs carry, which is never the same list, so nothing fills this in.
   const [plantsText, setPlantsText] = useState("");
@@ -109,15 +107,26 @@ export function ResultsTab() {
 
   const [curves, setCurves] = useState<PerPlantRow[]>([]);
   const [onset, setOnset] = useState<OnsetRow[]>([]);
+  // The milestone columns the trait's own entry names, as the server's producer writes them.
+  const [milestoneColumns, setMilestoneColumns] = useState<MilestoneColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   // The exact request the displayed numbers came from: the CSV door recomputes from these inputs
   // rather than being handed the rows, so export and screen share one producer.
   const [lastRequest, setLastRequest] = useState<PhenologyPayload | null>(null);
-  // Reconciled evidence for what is currently displayed. `unvalidated` is true whenever a dimension
-  // lacked on-disk backing, so the tables can say so instead of rendering a phenology date as "valid".
+  // Whether an assessment answers for what is currently displayed, and the gate's sentence when
+  // not, so the tables can say so instead of rendering a phenology date as "valid".
   const [unvalidated, setUnvalidated] = useState(false);
-  const [validity, setValidity] = useState<Record<string, string>>({});
+  const [unvalidatedReason, setUnvalidatedReason] = useState<string | null>(null);
+  // Each projection's digest of the unvalidated result shown, which the breeder's acknowledgment
+  // of exporting it binds to.
+  const [resultSha256, setResultSha256] = useState<Record<"curves" | "milestones", string> | null>(
+    null,
+  );
+  // The missingness rule the breeder chose (null leaves the server's own), and the rule the
+  // displayed rows were computed under.
+  const [requireAllComplete, setRequireAllComplete] = useState<boolean | null>(null);
+  const [appliedRule, setAppliedRule] = useState<boolean | null>(null);
   // What the mapping's own delivery-time check could not verify, shown beside the numbers rather
   // than only in the exported CSV.
   const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
@@ -138,14 +147,12 @@ export function ResultsTab() {
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
   // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
-  // route serves, reachable here only (an MCP tool call builds no acknowledgment for either).
+  // route serves; an acknowledgment of either is recorded here, never by an MCP tool call.
   const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
     "per_image_count",
   );
-  const [countDate, setCountDate] = useState("");
-  const [countModel, setCountModel] = useState("");
+  const [countPredictionsDir, setCountPredictionsDir] = useState("");
   const [countTrait, setCountTrait] = useState("");
-  const [countRasterPath, setCountRasterPath] = useState("");
   const [countPlantRegistry, setCountPlantRegistry] = useState("");
   const [countDeliveredPhenotype, setCountDeliveredPhenotype] = useState("");
   const [countCrop, setCountCrop] = useState("");
@@ -154,7 +161,7 @@ export function ResultsTab() {
   const [countFilename, setCountFilename] = useState("");
   const [countExporting, setCountExporting] = useState(false);
   const [countError, setCountError] = useState<string | null>(null);
-  const [countGateRefusal, setCountGateRefusal] = useState<DeliveryGateRefusal | null>(null);
+  const [countGateRefusal, setCountGateRefusal] = useState<DeliveryRefusal | null>(null);
   const [countOperationalizationRefusal, setCountOperationalizationRefusal] =
     useState<OperationalizationRefusal | null>(null);
   const [countAckReason, setCountAckReason] = useState("");
@@ -226,12 +233,8 @@ export function ResultsTab() {
       .tree(datasetRoot)
       .then((t) => {
         setDates(t.dates_with_images);
-        setModelsByDate(t.models_by_date);
         setPredictionDirs(t.prediction_dirs);
-        // Default each date to its first model with predictions; a date with none stays "" (skip).
-        setDateModel(
-          Object.fromEntries(t.dates_with_images.map((d) => [d, t.models_by_date[d]?.[0] ?? ""])),
-        );
+        setDateBucket({});
         setDatesError(null);
         setLabelProblem(t.label_problem);
       })
@@ -246,13 +249,7 @@ export function ResultsTab() {
     refreshDatasetTree();
   }, [refreshDatasetTree]);
 
-  // The dir the backend itself says a model's predictions for a date live in, looked up from the
-  // tree response. A path assembled here would only agree with the writers by coincidence.
-  function predDirFor(date: string, model: string): string {
-    return (model && predictionDirs[date]?.[model]) || "";
-  }
-
-  async function compute(showUnvalidated = false) {
+  async function compute(showUnvalidated = false, rule: boolean | null = requireAllComplete) {
     if (!projectRoot) return;
     if (!trait) {
       setError(traitError ?? "Pick a trait before computing.");
@@ -268,17 +265,13 @@ export function ResultsTab() {
     setShowAckExport(false);
     setAckReason("");
     try {
-      const predsMap: Record<string, string> = {};
-      for (const d of dates) {
-        const dir = predDirFor(d, dateModel[d] ?? "");
-        if (dir) predsMap[d] = dir;
-      }
-      const request = {
+      const request: PhenologyPayload = {
         mapping_name: mappingName,
-        predictions_by_date: predsMap,
+        buckets: Object.values(dateBucket).filter((dir) => dir),
         trait,
         plants,
         show_unvalidated: showUnvalidated,
+        ...(rule === null ? {} : { require_all_dates_complete: rule }),
       };
       setLastRequest(request);
       // One request computes both projections from one server-side measurement: a milestone
@@ -286,8 +279,10 @@ export function ResultsTab() {
       const res = await resultsApi.phenologyMeasurement(request);
       // The numbers and the evidence that qualifies them arrive together, so the tables below can
       // never render an unvalidated phenology measurement as though it were a delivery.
-      setUnvalidated(res.has_unvalidated_dimensions);
-      setValidity(res.validated);
+      setUnvalidated(!res.validated);
+      setUnvalidatedReason(res.unvalidated_reason);
+      setResultSha256(res.result_sha256);
+      setAppliedRule(res.require_all_dates_complete);
       setCapturesUnverified(res.captures_unverified ?? []);
       setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
       setDatesDelivered(res.dates_delivered ?? []);
@@ -299,6 +294,7 @@ export function ResultsTab() {
       // No positive-state class: not a phenology measurement, so the milestones projection is
       // dropped rather than shown (belt-and-braces with the disabled export buttons).
       setOnset(unclassified ? [] : (res.milestones.rows ?? []));
+      setMilestoneColumns(res.milestones.columns);
     } catch (e) {
       // A refusal naming its own kind is routed by that kind, before any prose is read.
       const refusal = operationalizationRefusalOf(e);
@@ -308,15 +304,15 @@ export function ResultsTab() {
         setOnset([]);
         return;
       }
-      // The server refuses unvalidated evidence by default. Surface why, plus the one-click way
-      // to see the numbers anyway, marked with their unvalidated dimensions.
-      const detail = e instanceof Error ? e.message : String(e);
-      if (!showUnvalidated && /unvalidated|not validated/i.test(detail)) {
-        setUnvalidatedRefusal(detail);
+      // The server refuses an unassessed delivery by default. Surface why, plus the one-click way
+      // to see the numbers anyway, marked unvalidated.
+      const delivery = deliveryRefusalOf(e);
+      if (delivery) {
+        setUnvalidatedRefusal(delivery.message);
         setCurves([]);
         setOnset([]);
       } else {
-        setError(detail);
+        setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setLoading(false);
@@ -325,17 +321,20 @@ export function ResultsTab() {
 
   async function downloadCsv(payload: "curves" | "milestones", filename: string) {
     if (!lastRequest) return;
-    if (unvalidated && !ackReason.trim()) return;
+    if (unvalidated && (!ackReason.trim() || !resultSha256)) return;
     try {
       const body: ExportCsvPayload = {
         mapping_name: lastRequest.mapping_name,
-        predictions_by_date: lastRequest.predictions_by_date,
+        buckets: lastRequest.buckets,
         trait: lastRequest.trait,
         plants: lastRequest.plants,
+        require_all_dates_complete: lastRequest.require_all_dates_complete,
         payload,
         filename,
-        user: useStore.getState().user || undefined,
-        acknowledgment: unvalidated ? { reason: ackReason.trim() } : null,
+        acknowledgment:
+          unvalidated && resultSha256
+            ? { reason: ackReason.trim(), result_sha256: resultSha256[payload] }
+            : null,
       };
       const blob = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
@@ -366,12 +365,11 @@ export function ResultsTab() {
     }
   }
 
-  const countPredictionsDir = (countModel && predictionDirs[countDate]?.[countModel]) || "";
   // Each kind's own required fields, beside the bucket and filename every kind needs.
   const countKindFieldsMissing =
     countKind === "per_image_count"
       ? !countTrait
-      : !countRasterPath.trim() || !countPlantRegistry.trim() || !countDeliveredPhenotype.trim();
+      : plants.length === 0 || !countPlantRegistry.trim() || !countDeliveredPhenotype.trim();
 
   async function exportCountCsv() {
     if (!projectRoot || !countPredictionsDir || !countFilename.trim()) return;
@@ -379,7 +377,6 @@ export function ResultsTab() {
     if (countShowAck && !countAckReason.trim()) return;
     setCountExporting(true);
     setCountError(null);
-    setCountGateRefusal(null);
     setCountOperationalizationRefusal(null);
     setCountResultHeaders(null);
     try {
@@ -389,9 +386,9 @@ export function ResultsTab() {
           : {
               kind: "orthomosaic_plant_counts",
               predictions_dir: countPredictionsDir,
-              raster_path: countRasterPath,
               plant_registry: countPlantRegistry,
               delivered_phenotype: countDeliveredPhenotype,
+              plants,
               crop: countCrop || undefined,
               pipeline_version: countPipelineVersion || undefined,
               canopy_subject: countCanopySubject || undefined,
@@ -399,8 +396,10 @@ export function ResultsTab() {
       const body: ExportCountCsvPayload = {
         delivery,
         filename: countFilename.trim(),
-        user: useStore.getState().user || undefined,
-        acknowledgment: countShowAck ? { reason: countAckReason.trim() } : null,
+        acknowledgment:
+          countShowAck && countGateRefusal?.result_sha256
+            ? { reason: countAckReason.trim(), result_sha256: countGateRefusal.result_sha256 }
+            : null,
       };
       const { blob, headers } = await resultsApi.downloadCountCsv(body);
       const url = URL.createObjectURL(blob);
@@ -411,6 +410,7 @@ export function ResultsTab() {
       URL.revokeObjectURL(url);
       setCountResultHeaders(headers);
       setCountShowAck(false);
+      setCountGateRefusal(null);
     } catch (e) {
       const committed = committedOf<{ saved_path: string }>(e);
       if (committed) {
@@ -424,10 +424,10 @@ export function ResultsTab() {
         setCountOperationalizationRefusal(opRefusal);
         return;
       }
-      const gateRefusal = deliveryGateRefusalOf(e);
+      const gateRefusal = deliveryRefusalOf(e);
       if (gateRefusal) {
         setCountGateRefusal(gateRefusal);
-        setCountShowAck(true);
+        setCountShowAck(gateRefusal.result_sha256 !== null);
         return;
       }
       setCountError(e instanceof Error ? e.message : String(e));
@@ -465,27 +465,14 @@ export function ResultsTab() {
     return Array.from(set);
   }, [curves]);
 
-  // Which delivery dimensions the reconciled evidence actually failed on, reused to make the
-  // agent hand-off below specific to what's missing rather than a generic "go calibrate" ask.
-  const unvalidatedDims = useMemo(
-    () =>
-      Object.entries(validity)
-        .filter(([, state]) => state === "false")
-        .map(([dim]) => dim),
-    [validity],
-  );
-
-  // What a breeder can't act on themselves: the backend refuses to deliver phenology until a
-  // calibrated run_inference + calibrate_classifier_operating_point stand behind it (see
-  // results.py's _refusal). Hand that off to the agent instead of leaving the tool names on
-  // screen with no next step.
-  function calibrationRequest(detail: string | null): string {
-    const dims = unvalidatedDims.length > 0 ? unvalidatedDims.join(", ") : "the operating point";
+  // The backend refuses to deliver phenology until an assessment answers for every delivered
+  // bucket; hand that off to the agent rather than leave tool names on screen.
+  function assessmentRequest(detail: string | null): string {
     const subject = trait ? `the "${trait}" trait` : "this trait";
     return (
-      `Phenology delivery for ${subject} is blocked: ${dims} not validated on disk. ` +
-      "Please produce the predictions via a calibrated run_inference and calibrate the " +
-      "classifier via calibrate_classifier_operating_point so this validates, then let me know " +
+      `Phenology delivery for ${subject} is blocked: no passing assessment answers for its ` +
+      "predictions. Please assess the checkpoint against a held-out reference selection " +
+      "(assess_checkpoint) and publish its predictions under that assessment, then let me know " +
       "when it's ready so I can recompute here." +
       (detail ? ` Details from the app: ${detail}` : "")
     );
@@ -500,29 +487,6 @@ export function ResultsTab() {
       "and how I get it, and propose a revision if milestones are part of it."
     );
   }
-
-  // Milestone columns are read generically off whatever the (threaded) trait's spec returned,
-  // never hardcoded to one trait's own column names, so a different trait's rows render instead
-  // of showing empty.
-  const milestoneColumns = useMemo(() => {
-    const known = new Set([
-      "plant_id",
-      "accession",
-      "n_datapoints",
-      "n_dates_unclassified",
-      "n_dates_missing_images",
-      "n_observed_dates",
-    ]);
-    const cols = new Set<string>();
-    onset.forEach((r) => {
-      Object.keys(r).forEach((k) => {
-        // `_date` only: each milestone's `*_date_bound` is rendered beside its own date below
-        // rather than as a column of its own.
-        if (!known.has(k) && k.endsWith("_date")) cols.add(k);
-      });
-    });
-    return Array.from(cols).sort();
-  }, [onset]);
 
   // The entry a delivery reads for the selected trait: its latest confirmed revision's, or null.
   const selectedRecord = traitRecords.find((r) => r.trait === trait);
@@ -598,18 +562,14 @@ export function ResultsTab() {
             <label className="tcip-label">Prediction bucket</label>
             <select
               className="tcip-select"
-              value={countDate && countModel ? `${countDate} ${countModel}` : ""}
-              onChange={(e) => {
-                const [d, m] = e.target.value.split(" ");
-                setCountDate(d ?? "");
-                setCountModel(m ?? "");
-              }}
+              value={countPredictionsDir}
+              onChange={(e) => setCountPredictionsDir(e.target.value)}
             >
               <option value="">Choose a bucket…</option>
               {dates.flatMap((d) =>
-                (modelsByDate[d] ?? []).map((m) => (
-                  <option key={`${d} ${m}`} value={`${d} ${m}`}>
-                    {`${d} (${m})`}
+                bucketsFor(d).map(([name, dir]) => (
+                  <option key={dir} value={dir}>
+                    {`${d} (${name})`}
                   </option>
                 )),
               )}
@@ -633,12 +593,15 @@ export function ResultsTab() {
               </>
             ) : (
               <>
-                <label className="tcip-label">Raster path</label>
-                <input
-                  className="tcip-input"
-                  value={countRasterPath}
-                  onChange={(e) => setCountRasterPath(e.target.value)}
-                  placeholder="the georeferenced raster the bucket was produced from"
+                <label className="tcip-label" htmlFor="count-plants">
+                  Plants to deliver (one id per line)
+                </label>
+                <textarea
+                  id="count-plants"
+                  className="tcip-input text-[11px] font-mono h-20"
+                  value={plantsText}
+                  onChange={(e) => setPlantsText(e.target.value)}
+                  placeholder={"PLOT-01\nPLOT-02"}
                 />
                 <label className="tcip-label">Plant registry (registered by name)</label>
                 <input
@@ -692,25 +655,20 @@ export function ResultsTab() {
             {countGateRefusal && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                 <div>{countGateRefusal.message}</div>
-                {!user.trim() && (
-                  <div>
-                    Set your name on the workspace page before delivering an acknowledged export.
-                  </div>
+                {countShowAck && (
+                  <input
+                    className="tcip-input text-[11px]"
+                    placeholder="Reason for delivering unvalidated"
+                    value={countAckReason}
+                    onChange={(e) => setCountAckReason(e.target.value)}
+                  />
                 )}
-                <input
-                  className="tcip-input text-[11px]"
-                  placeholder="Reason for delivering unvalidated"
-                  value={countAckReason}
-                  onChange={(e) => setCountAckReason(e.target.value)}
-                />
               </div>
             )}
             {countResultHeaders && (
               <div className="text-[11px] text-tcip-muted">
                 Saved to {countResultHeaders.savedTo}.
-                {countResultHeaders.unvalidatedDimensions
-                  ? ` Unvalidated: ${countResultHeaders.unvalidatedDimensions}.`
-                  : ""}
+                {countResultHeaders.validated ? "" : " Not validated."}
                 {countResultHeaders.acknowledgedBy
                   ? ` Acknowledged by ${countResultHeaders.acknowledgedBy}.`
                   : ""}
@@ -724,7 +682,7 @@ export function ResultsTab() {
                 !countPredictionsDir ||
                 !countFilename.trim() ||
                 countKindFieldsMissing ||
-                (countShowAck && (!countAckReason.trim() || !user.trim()))
+                (countShowAck && !countAckReason.trim())
               }
             >
               {countExporting ? "Exporting…" : countShowAck ? "Acknowledge and export" : "Export"}
@@ -776,30 +734,30 @@ export function ResultsTab() {
                     <table className="w-full text-[11px]">
                       <tbody>
                         {dates.map((d) => {
-                          const opts = modelsByDate[d] ?? [];
+                          const opts = bucketsFor(d);
                           return (
                             <tr key={d} className="border-t border-tcip-border first:border-t-0">
                               <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
                               <td className="py-1 pr-2">
                                 <select
                                   className="tcip-select text-[11px] w-full"
-                                  value={dateModel[d] ?? ""}
+                                  value={dateBucket[d] ?? ""}
                                   onChange={(e) =>
-                                    setDateModel((prev) => ({ ...prev, [d]: e.target.value }))
+                                    setDateBucket((prev) => ({ ...prev, [d]: e.target.value }))
                                   }
                                   disabled={opts.length === 0}
                                   title={
                                     opts.length === 0
-                                      ? "No model has predictions for this date"
-                                      : "Model whose predictions to use for this date"
+                                      ? "No bucket is published over this date"
+                                      : "The bucket whose predictions to use for this date"
                                   }
                                 >
                                   <option value="">
                                     {opts.length === 0 ? "no predictions" : "(skip)"}
                                   </option>
-                                  {opts.map((m) => (
-                                    <option key={m} value={m}>
-                                      {m}
+                                  {opts.map(([name, dir]) => (
+                                    <option key={dir} value={dir}>
+                                      {name}
                                     </option>
                                   ))}
                                 </select>
@@ -842,7 +800,7 @@ export function ResultsTab() {
                 />
                 <p className="text-[11px] text-tcip-muted">
                   The positive-state fraction is the share of a plant's detected objects that are in
-                  the trait's positive state. That state is a class from the validated classifier,
+                  the trait's positive state. That state is a class from the assessed classifier,
                   not a bbox measurement; predictions must be classified for it.
                 </p>
                 {positiveClassUnassessed && (
@@ -855,11 +813,9 @@ export function ResultsTab() {
                 {unvalidatedRefusal && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
-                      At least one dimension behind this measurement (the count operating point, the
-                      positive-state classifier, or the tile scale; see detail below) has no
-                      validated evidence on disk, so this is not yet a deliverable phenology
-                      measurement. Calibrate first, or look at the numbers with their unvalidated
-                      dimensions marked and acknowledge and export them anyway.
+                      No passing assessment answers for these predictions (see detail below), so
+                      this is not yet a deliverable phenology measurement. Assess first, or look at
+                      the numbers marked unvalidated and acknowledge and export them anyway.
                     </div>
                     <div className="text-tcip-muted">{unvalidatedRefusal}</div>
                     <div className="flex gap-2">
@@ -875,10 +831,10 @@ export function ResultsTab() {
                         onClick={() =>
                           useStore
                             .getState()
-                            .sendToAgentTerminal(calibrationRequest(unvalidatedRefusal))
+                            .sendToAgentTerminal(assessmentRequest(unvalidatedRefusal))
                         }
                       >
-                        Ask the agent to calibrate this
+                        Ask the agent to assess this
                       </button>
                     </div>
                   </div>
@@ -886,18 +842,34 @@ export function ResultsTab() {
                 {unvalidated && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
-                      Unvalidated dimensions {unvalidatedDims.join(", ") || "unknown"}. Calibrate to
-                      deliver a validated phenotype, or acknowledge and export it unvalidated below.
+                      Not validated: {unvalidatedReason}. Assess to deliver a validated phenotype,
+                      or acknowledge and export it unvalidated below.
                     </div>
                     <button
                       className="tcip-btn-primary text-[11px] self-start"
                       onClick={() =>
-                        useStore.getState().sendToAgentTerminal(calibrationRequest(null))
+                        useStore
+                          .getState()
+                          .sendToAgentTerminal(assessmentRequest(unvalidatedReason))
                       }
                     >
-                      Ask the agent to calibrate this
+                      Ask the agent to assess this
                     </button>
                   </div>
+                )}
+                {appliedRule !== null && (
+                  <label className="text-[11px] flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={requireAllComplete ?? appliedRule}
+                      onChange={(e) => {
+                        setRequireAllComplete(e.target.checked);
+                        void compute(unvalidated, e.target.checked);
+                      }}
+                      disabled={loading}
+                    />
+                    Milestones only for plants observed completely on every delivered date
+                  </label>
                 )}
                 {datesDelivered.length > 0 && (
                   <div className="text-[11px] text-tcip-muted">
@@ -930,7 +902,7 @@ export function ResultsTab() {
                   A phenology milestone delivery here, and a per-image or per-plant-orthomosaic
                   count in the section below, can each be acknowledged and exported unvalidated.
                   Every other count kind (ordinal, regression, a per-plant walked-capture count) has
-                  no acknowledged route yet and needs a validated operating point before it can be
+                  no acknowledged route yet and needs a passing assessment before it can be
                   delivered at all.
                 </p>
                 {!unvalidated || !showAckExport ? (
@@ -964,13 +936,6 @@ export function ResultsTab() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1">
-                    {!user.trim() && (
-                      <div className="text-[11px] text-tcip-fp">
-                        Set your name on the workspace page before delivering an acknowledged
-                        export: the recorded name is the one this session states, not an
-                        authenticated identity.
-                      </div>
-                    )}
                     <input
                       className="tcip-input text-[11px]"
                       placeholder="Reason for delivering unvalidated"
@@ -981,20 +946,14 @@ export function ResultsTab() {
                       <button
                         className="tcip-btn flex-1 text-[11px]"
                         onClick={downloadCurvesCsv}
-                        disabled={curves.length === 0 || !ackReason.trim() || !user.trim()}
-                        title={
-                          !user.trim() ? "set your name on the workspace page first" : undefined
-                        }
+                        disabled={curves.length === 0 || !ackReason.trim()}
                       >
                         Curves CSV
                       </button>
                       <button
                         className="tcip-btn flex-1 text-[11px]"
                         onClick={downloadOnsetCsv}
-                        disabled={onset.length === 0 || !ackReason.trim() || !user.trim()}
-                        title={
-                          !user.trim() ? "set your name on the workspace page first" : undefined
-                        }
+                        disabled={onset.length === 0 || !ackReason.trim()}
                       >
                         Milestones CSV
                       </button>
@@ -1069,8 +1028,8 @@ export function ResultsTab() {
                       <th className="tcip-th">N points</th>
                       <th className="tcip-th">Validity</th>
                       {milestoneColumns.map((c) => (
-                        <th key={c} className="tcip-th">
-                          {c}
+                        <th key={c.date} className="tcip-th">
+                          {c.date}
                         </th>
                       ))}
                     </tr>
@@ -1080,8 +1039,7 @@ export function ResultsTab() {
                       // Gate the derivation itself (matching the setOnset([]) pattern used above)
                       // rather than a banner, so a plant with any unclassified/missing date shows as
                       // such, not silently blank milestone cells with no explanation.
-                      const rowValid =
-                        r.n_dates_unclassified === 0 && r.n_dates_missing_images === 0;
+                      const rowValid = r.complete;
                       // "Valid" alone doesn't distinguish real detection data from a plant that was fully
                       // classified/observed but never had a single detection (before emergence, or a
                       // genuinely empty scene): that reads as no observations, not blank cells next
@@ -1126,8 +1084,8 @@ export function ResultsTab() {
                             )}
                           </td>
                           {milestoneColumns.map((c) => {
-                            const date = r[c] as string | null;
-                            const bound = r[`${c}_bound`] as string | null;
+                            const date = r[c.date] as string | null;
+                            const bound = r[c.bound] as string | null;
                             // A left-censored crossing means the first observation already met the
                             // target, so the true date is only an upper bound; a right-censored one
                             // means the last observation still hadn't, so the true date (if any) is
@@ -1156,7 +1114,7 @@ export function ResultsTab() {
                                       }
                                     : null;
                             return (
-                              <td key={c} className="pr-3 tabular-nums">
+                              <td key={c.date} className="pr-3 tabular-nums">
                                 {date ?? UNSET_GLYPH}
                                 {date && marker && (
                                   <span className={`ml-1 ${marker.className}`} title={marker.title}>

@@ -1,7 +1,7 @@
 """``run_inference``'s images regime, publishing a classified bucket end to end: the checkpoint's
-own recorded ``scope`` decodes every detection into the ground-truth shape and stamps the bucket's
-``operating_point.json`` with the same scope, read back through ``bucket_scope``. A detector run
-(no attribute) decodes through its own one-subject map the same way.
+own recorded ``scope`` decodes every detection into the ground-truth shape and the bucket's record
+states the same scope, read back through ``read_bucket``. A detector run (no attribute) decodes
+through its own one-subject map the same way.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 SUBJECT = "bud"
 ATTRIBUTE = "opening"
@@ -37,10 +38,10 @@ class _ClassifiedPredictor:
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
 
-    def predict_batch(self, paths, **kw):
+    def predict_batch(self, paths, execution=None, **kw):
         return [{"image": p, "width": 100, "height": 100,
                  "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 40.0, 60.0, 60.0]],
-                 "scores": [0.9, 0.8], "labels": [1, 2], "count": 2}
+                 "scores": [0.9, 0.8], "labels": [1, 2], "count": 2, "cap_hit": False}
                 for p in paths]
 
 
@@ -50,9 +51,10 @@ class _DetectorPredictor:
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
 
-    def predict_batch(self, paths, **kw):
+    def predict_batch(self, paths, execution=None, **kw):
         return [{"image": p, "width": 100, "height": 100,
-                 "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                 "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
+                 "cap_hit": False}
                 for p in paths]
 
 
@@ -66,7 +68,7 @@ def _one_image(images_dir: Path) -> None:
 def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pair(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from tcip_mcp.pipelines.resolution import bucket_scope
+    from tcip_mcp.buckets import read_bucket
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
@@ -76,7 +78,8 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out),
+                           stated=Stated(tile=False))
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())
@@ -86,15 +89,13 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
     assert set(by_value) == {"open", "closed"}
     assert all(a["subject"] == SUBJECT for a in anns)
 
-    scope = bucket_scope(out)
-    assert scope is not None
-    assert scope == CLASSIFIED
+    assert read_bucket(out).scope == CLASSIFIED
 
 
 def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_stamps_the_pair(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from tcip_mcp.pipelines.resolution import bucket_scope
+    from tcip_mcp.buckets import read_bucket
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
@@ -104,7 +105,8 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out), tile=False)
+    result = run_inference(tmp_path, checkpoint, str(images_dir), output_dir=str(out),
+                           stated=Stated(tile=False))
 
     assert "error" not in result, result
     data = json.loads((out / "img.json").read_text())
@@ -113,4 +115,4 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
     assert anns[0]["subject"] == SUBJECT  # decoded through the run's own one-subject map
     assert not anns[0].get("attributes")
 
-    assert bucket_scope(out) == DETECTOR
+    assert read_bucket(out).scope == DETECTOR

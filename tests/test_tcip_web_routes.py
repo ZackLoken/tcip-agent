@@ -36,18 +36,38 @@ def _write_gt(path, boxes, *, w: int = 100, h: int = 80, keep_empty: bool = Fals
     write_annotations(str(path), anns, w, h, keep_empty=keep_empty)
 
 
-def _write_pred(path, preds, *, w: int = 100, h: int = 80, subject: str = "bud") -> None:
-    """Author a per-image JSON prediction label; each pred is ``(x1, y1, x2, y2, conf)``."""
-    anns = [Annotation(subject=subject, geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
-            for p in preds]
-    write_annotations(str(path), anns, w, h)
+def _write_pred(dataset_root: Path, preds: dict[str, list[tuple]], *, w: int = 100, h: int = 80,
+                subject: str = "bud", name: str = "baseline") -> Path:
+    """Publish the bucket ``predictions/<name>/2-11-26`` under ``dataset_root``: one document per
+    image name of ``preds``, each entry ``(x1, y1, x2, y2, conf)`` a box of ``subject``; the
+    bucket's directory."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    return published(dataset_root.parent, dataset_root / "predictions" / name / "2-11-26", [
+        {"image": str(dataset_root / "images" / "2-11-26" / image), "width": w, "height": h,
+         "boxes": [list(p[:4]) for p in boxes], "scores": [p[4] for p in boxes],
+         "labels": [1] * len(boxes)} for image, boxes in preds.items()],
+        scope={"subject": subject, "attribute": None, "id_map": {subject: 0}}).path
 
 
-def _write_operating_point_sidecar(pred_dir, fields: dict) -> None:
-    """Author a bucket's ``operating_point.json`` stamp through the seam, not a bare file write."""
-    from tcip_mcp.pipelines.resolution import sidecar_key
+def _pred_doc(dataset_root: Path, boxes: list[tuple], **kwargs) -> Path:
+    """The document :func:`_write_pred` publishes for ``IMG_0000.JPG`` holding ``boxes``."""
+    return _write_pred(dataset_root, {"IMG_0000.JPG": boxes}, **kwargs) / "IMG_0000.json"
 
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), fields, expect=tcip_store.Version.ABSENT)
+
+def _published_bucket(project: Path, bucket: Path, image: Path, labels: list[int], *,
+                      scope: dict) -> Path:
+    """``bucket`` published under ``scope`` holding ``image``'s document: one box at
+    ``(40, 32, 60, 48)`` per entry of ``labels``, each its class index plus one."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    published(project, bucket, [{
+        "image": str(image), "width": 100, "height": 80,
+        "boxes": [[40.0, 32.0, 60.0, 48.0]] * len(labels), "scores": [0.9] * len(labels),
+        "labels": labels}], scope=scope)
+    return bucket
 
 
 # ── paths.safe_join ──────────────────────────────────────────────────────
@@ -101,7 +121,8 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     assert "2-11-26" in body["dates_with_images"]
     assert "3-2-26" in body["dates_with_images"]
     assert sorted(body["subjects"]) == ["bud", "bush"]
-    assert "baseline" in body["model_names"]
+    # predictions/baseline holds no bucket record, so no date lists a bucket.
+    assert body["prediction_dirs"] == {"2-11-26": {}, "3-2-26": {}}
     # Per-date maps present for every image date (empty here: the registry declares subjects but
     # no label files exist yet).
     assert set(body["subjects_by_date"]) == {"2-11-26", "3-2-26"}
@@ -147,25 +168,27 @@ def test_dataset_tree_label_problem_is_not_stale_after_an_in_place_edit(
     assert str(ann / "IMG_0000.json") in second["label_problem"]
 
 
-def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_path: Path) -> None:
+def test_dataset_tree_per_date_reflects_actual_labels(
+    client: TestClient, tmp_path: Path, opened_project: Path,
+) -> None:
     root = tmp_path / "ds"
     (root / "images" / "2026-02-11").mkdir(parents=True)
     (root / "images" / "2026-03-24").mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-02-11" / "IMG_1.JPG")
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-03-24" / "IMG_2.JPG")
-    # bud labeled + baseline predicted on 02-11; nothing on 03-24. One file per image.
+    # bud labeled + a bucket published over 02-11; nothing on 03-24. One file per image.
     det = root / "annotations" / "2026-02-11"
     det.mkdir(parents=True)
     _write_gt(det / "IMG_1.json", [(1, 1, 3, 3)], w=8, h=8)
-    pdet = root / "predictions" / "baseline" / "2026-02-11"
-    pdet.mkdir(parents=True)
-    _write_pred(pdet / "IMG_1.json", [(1, 1, 3, 3, 0.9)], w=8, h=8)
+    pdet = _published_bucket(opened_project, root / "predictions" / "baseline" / "2026-02-11",
+                             root / "images" / "2026-02-11" / "IMG_1.JPG", [1],
+                             scope={"subject": "bud", "id_map": {"bud": 0}})
 
     body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     assert body["subjects_by_date"]["2026-02-11"] == ["bud"]
     assert body["subjects_by_date"]["2026-03-24"] == []
-    assert body["models_by_date"]["2026-02-11"] == ["baseline"]
-    assert body["models_by_date"]["2026-03-24"] == []
+    assert body["prediction_dirs"]["2026-02-11"] == {"baseline/2026-02-11": str(pdet)}
+    assert body["prediction_dirs"]["2026-03-24"] == {}
 
 
 def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
@@ -232,7 +255,6 @@ def test_dataset_select_populates_state(
             "dataset_root": str(dataset_root),
             "subject": "bud",
             "date": "2-11-26",
-            "model_name": "baseline",
         },
     )
     assert resp.status_code == 200
@@ -256,7 +278,6 @@ def test_dataset_select_returns_400_for_a_stem_collision(
             "dataset_root": str(dataset_root),
             "subject": "bud",
             "date": "2-11-26",
-            "model_name": "baseline",
         },
     )
     assert resp.status_code == 400
@@ -265,24 +286,26 @@ def test_dataset_select_returns_400_for_a_stem_collision(
 def test_dataset_select_advisory_reflects_actual_labels(
     client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    body = {
-        "dataset_root": str(dataset_root),
-        "subject": "bud",
-        "date": "2-11-26",
-        "model_name": "baseline",
-    }
-    # No label files yet → advisory says "starts empty".
+    body = {"dataset_root": str(dataset_root), "subject": "bud", "date": "2-11-26"}
+    bucket = dataset_root / "predictions" / "baseline" / "2-11-26"
+    # No label files and no bucket yet → advisory says "starts empty"; a predictions directory
+    # that is no bucket is refused rather than read as one holding nothing.
     r1 = client.post("/api/dataset/select", json=body).json()
     assert r1["annotations_present"] is False
     assert r1["predictions_present"] is False
+    bucket.mkdir(parents=True)
+    refused = client.post("/api/dataset/select", json={**body, "predictions_dir": str(bucket)})
+    assert refused.status_code == 400 and "holds no bucket.json" in refused.json()["detail"]
+    bucket.rmdir()
+    body["predictions_dir"] = str(bucket)
 
-    # Drop in a real label + prediction; the advisory flips to present (never rejects either way).
+    # Drop in a real label and publish a bucket; the advisory flips to present (never rejects
+    # either way).
     ann = dataset_root / "annotations" / "2-11-26"
     ann.mkdir(parents=True, exist_ok=True)
     _write_gt(ann / "IMG_0000.json", [(40, 32, 60, 48)])
-    pdet = dataset_root / "predictions" / "baseline" / "2-11-26"
-    pdet.mkdir(parents=True, exist_ok=True)
-    _write_pred(pdet / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
+    _published_bucket(opened_project, bucket, dataset_root / "images" / "2-11-26" / "IMG_0000.JPG",
+                      [1], scope={"subject": "bud", "id_map": {"bud": 0}})
     r2 = client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True
@@ -301,7 +324,7 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
         "/api/dataset/select",
         json={
             "dataset_root": str(dataset_root),
-            "subject": "bud", "date": "2-11-26", "model_name": "baseline",
+            "subject": "bud", "date": "2-11-26",
         },
     )
     assert resp.status_code == 200
@@ -539,13 +562,9 @@ def test_annotate_load_authorship_tool_accepted_through_review(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     write_annotations(str(gt), [], 100, 80, keep_empty=True)
-    pred = tmp_path / "pred.json"
-    write_annotations(
-        str(pred),
-        [Annotation(subject="bush", geometry=BBox(40, 32, 60, 48), score=0.9,
-                   created_by="model:m1")],
-        100, 80,
-    )
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)], subject="bush")
+    produced_by = read_annotations(str(pred))[0].created_by
+    assert str(produced_by).startswith("model:")
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -558,7 +577,7 @@ def test_annotate_load_authorship_tool_accepted_through_review(
         params={"image_path": str(img_path), "label_path": str(gt)},
     ).json()
     assert len(body["annotations"]) == 1
-    assert body["annotations"][0]["created_by"] == "model:m1"
+    assert body["annotations"][0]["created_by"] == produced_by
     assert body["annotations"][0]["authorship"] == "tool_accepted"
 
 
@@ -900,8 +919,7 @@ def test_review_matches_returns_400_for_a_stem_collision(
     Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     resp = client.post(
         "/api/review/matches",
@@ -923,9 +941,8 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
     gt = tmp_path / "gt.json"
     # Image is 100x80; one GT covering the center (pixel xyxy [40,32,60,48]).
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
     # One prediction matching the GT (TP) + one off-center prediction (FP).
-    _write_pred(pred, [(40, 32, 60, 48, 0.9), (75, 60, 85, 68, 0.8)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9), (75, 60, 85, 68, 0.8)])
     resp = client.post(
         "/api/review/matches",
         json={
@@ -948,10 +965,8 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
 def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     # A prediction file with a box (reviewable), a confirmed-negative empty file (nothing to review),
     # and a third image with no file at all: only the first should surface as a detection stem.
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
-    write_annotations(str(pred_dir / "IMG_0001.json"), [], 100, 80, keep_empty=True)  # empty negative
+    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)],
+                                          "IMG_0001.JPG": []})  # IMG_0001's document is empty
 
     # Give one image a review status so the engine has state to return.
     gt = tmp_path / "gt.json"
@@ -972,15 +987,34 @@ def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp
     assert body["unreadable"] == []
 
 
+def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
+    client: TestClient, dataset_root: Path,
+) -> None:
+    """A bucket's documents are the ones its record names: a file dropped beside them afterward
+    is read by no reader, neither as the image's document nor as a stem with something to
+    review."""
+    from tcip_mcp.buckets import read_bucket
+
+    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)]})
+    _write_gt(pred_dir / "IMG_0001.json", [(40, 32, 60, 48)])
+
+    bucket = read_bucket(pred_dir)
+    assert bucket.document("IMG_0000.JPG") == pred_dir / "IMG_0000.json"
+    assert bucket.document("IMG_0001.JPG") is None
+    resp = client.get("/api/review/image_statuses",
+                      params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)})
+    assert resp.status_code == 200
+    assert resp.json()["detection_stems"] == ["IMG_0000"]
+
+
 def test_review_image_statuses_batch_reports_an_unreadable_prediction(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """A corrupt prediction document costs its own stem, never the whole batch: the good stem
     still surfaces as a detection, and the bad one is named by its document's path in unreadable
     instead of silently reading as nothing to review."""
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
+    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)],
+                                          "IMG_0002.JPG": [(40, 32, 60, 48, 0.9)]})
     bad = pred_dir / "IMG_0002.json"
     bad.write_text("not json {][", encoding="utf-8")
 
@@ -1001,10 +1035,9 @@ def test_review_image_statuses_checks_a_prediction_even_when_gt_already_has_obje
     prediction document opened: an unreadable prediction must not go unnoticed just because
     another directory already answered for the same stem."""
     gt_dir = tmp_path / "gt"
-    pred_dir = tmp_path / "predictions"
     gt_dir.mkdir(parents=True)
-    pred_dir.mkdir(parents=True)
     _write_gt(gt_dir / "IMG_0000.json", [(40, 32, 60, 48)])
+    pred_dir = _write_pred(dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)]})
     bad = pred_dir / "IMG_0000.json"
     bad.write_text("not json {][", encoding="utf-8")
 
@@ -1017,15 +1050,16 @@ def test_review_image_statuses_checks_a_prediction_even_when_gt_already_has_obje
     assert body["unreadable"] == [str(bad)]
 
 
-def test_review_image_statuses_admits_a_bucket_holding_sidecars(
-    client: TestClient, dataset_root: Path, tmp_path: Path,
+def test_review_image_statuses_admits_a_published_bucket(
+    client: TestClient, dataset_root: Path, opened_project: Path,
 ) -> None:
-    """A prediction bucket's own provenance stamps are not label documents and must never be
-    read as one, or enumerated as an image with nothing to review."""
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
-    (pred_dir / "operating_point.json").write_text('{"conf": {"value": 0.5}}', encoding="utf-8")
+    """A bucket's own record is not a label document and is never read as one, or enumerated as
+    an image with nothing to review."""
+    pred_dir = _published_bucket(
+        opened_project, dataset_root / "predictions" / "baseline" / "2-11-26",
+        dataset_root / "images" / "2-11-26" / "IMG_0000.JPG", [1],
+        scope={"subject": "bud", "id_map": {"bud": 0}})
+    assert (pred_dir / "bucket.json").is_file()
 
     resp = client.get(
         "/api/review/image_statuses",
@@ -1041,8 +1075,7 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     resp = client.post(
         "/api/review/action",
@@ -1069,7 +1102,7 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
 
 
 def test_review_action_records_before_building_the_response_so_a_build_failure_still_logs(
-    dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    dataset_root: Path, tmp_path: Path, opened_project: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The order is record, then build, then answer: a response build that fails after a
     recorded line answers 500 with the line already on the log (coverage of the order)."""
@@ -1083,8 +1116,7 @@ def test_review_action_records_before_building_the_response_so_a_build_failure_s
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     no_raise_client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     resp = no_raise_client.post(
@@ -1104,28 +1136,25 @@ def test_review_action_records_before_building_the_response_so_a_build_failure_s
     assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
 
 
+_STAGED_SCOPE = {"subject": "bud", "attribute": "phenology_stage",
+                 "id_map": {"closed": 0, "open": 1}}
+
+
 def test_review_action_resolves_class_id_from_bucket_id_map(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, tmp_path: Path, opened_project: Path,
 ) -> None:
     """The verdict entry's ``class_id`` is resolved from the producing bucket's own recorded
-    ``id_map`` (``operating_point.json``) at record time, never defaulted to 0."""
+    ``id_map`` at record time, never defaulted to 0."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    pred = pred_dir / "pred.json"
-    write_annotations(str(pred), [Annotation(subject="bud", geometry=BBox(40, 32, 60, 48),
-                                              score=0.9, attributes={"phenology_stage": "open"})],
-                       100, 80)
-    _write_operating_point_sidecar(
-        pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
-                   "scope": {"subject": "bud", "attribute": "phenology_stage",
-                             "id_map": {"closed": 0, "open": 1}}})
+    pred_dir = _published_bucket(opened_project, dataset_root / "predictions" / "staged" / "2-11-26",
+                                 img_path, [2], scope=_STAGED_SCOPE)
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
-        pred_path=str(pred), det_type="tp", class_name="open", action="accepted",
+        pred_path=str(pred_dir / "IMG_0000.json"), det_type="tp", class_name="open",
+        action="accepted",
     )
     assert resp.status_code == 200
     state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
@@ -1133,25 +1162,17 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
 
 
 def test_review_action_records_unresolvable_class_id_as_none(
-    client: TestClient, dataset_root: Path, tmp_path: Path
+    client: TestClient, dataset_root: Path, tmp_path: Path, opened_project: Path,
 ) -> None:
     """A verdict class_name the producing bucket's id_map does not recognize (e.g. an attribute-
     scoped bucket handed a GT annotation's raw subject name) records ``class_id: null``, an honest
-    unresolved fact, never a guessed 0/1. This is exactly the case a later review-confirmed build
-    (``review_calibration.review_to_records``) must refuse on, not silently mis-class."""
+    unresolved fact, never a guessed 0/1."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred_dir = tmp_path / "predictions"
-    pred_dir.mkdir(parents=True)
-    pred = pred_dir / "pred.json"
-    write_annotations(str(pred), [Annotation(subject="bud", geometry=BBox(40, 32, 60, 48),
-                                              score=0.9, attributes={"phenology_stage": "closed"})],
-                       100, 80)
-    _write_operating_point_sidecar(
-        pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
-                   "scope": {"subject": "bud", "attribute": "phenology_stage",
-                             "id_map": {"closed": 0, "open": 1}}})
+    pred_dir = _published_bucket(opened_project, dataset_root / "predictions" / "staged" / "2-11-26",
+                                 img_path, [1], scope=_STAGED_SCOPE)
+    pred = pred_dir / "IMG_0000.json"
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1162,16 +1183,20 @@ def test_review_action_records_unresolvable_class_id_as_none(
     assert state["detections"][0]["class_id"] is None
 
 
-def test_review_action_no_sidecar_records_unresolvable_class_id(
+def test_review_action_on_staged_proposals_records_unresolvable_class_id(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """No recorded ``id_map`` at all (no sidecar, or an older bucket) also records
-    ``class_id: null``, never silently defaulting to a guessed single class."""
+    """Staged proposals record no ``id_map``, so the verdict records ``class_id: null``, never
+    silently defaulting to a guessed single class."""
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    staged = stage_proposals(tmp_path, str(img_path), model_name="sam", boxes=[
+        {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
+    assert "error" not in staged, staged
+    pred = staged["path"]
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1207,8 +1232,7 @@ def test_review_action_swept_records_verdict_without_mutating_gt(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1231,8 +1255,7 @@ def test_review_action_refuses_an_action_outside_the_declared_vocabulary(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1247,8 +1270,7 @@ def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -1335,8 +1357,7 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
 
 def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     # Accepting an FP writes GT; with no GT path configured the route must refuse loudly rather
     # than report ok while writing nothing.
@@ -1364,8 +1385,7 @@ def test_review_action_auto_completes_and_audits(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])  # one matching prediction -> one TP
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])  # one matching prediction -> one TP
 
     resp = client.post(
         "/api/review/action",
@@ -1400,8 +1420,7 @@ def test_review_action_answers_409_with_the_committed_body_on_a_lost_audit_line(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
     payload = {
         "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
@@ -1440,8 +1459,7 @@ def test_review_action_requires_dataset_root(
     ``dataset_root`` tree, so the write probe reads the cwd's review-verdict store and audit
     store (coverage on the gate's tree, where the cwd's ``.tcip`` already exists)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
 
     cwd = Path.cwd()
     before = _cwd_write_fingerprint(cwd)
@@ -1603,8 +1621,7 @@ def test_review_action_records_subject_name_and_reviewer(
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    pred = tmp_path / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
     state = dataset_root / ".tcip" / "state"
 
     resp = client.post(
@@ -1627,82 +1644,6 @@ def test_review_action_records_subject_name_and_reviewer(
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
-def _verdicted_launch_dataset(tmp_path: Path) -> tuple[Path, Path, str]:
-    """A dataset with one image, one canonical bucket and one verdict in its own verdict store.
-
-    The open project (``tmp_path``) is a different root from the dataset, holding no verdict, so
-    a launch door counting verdicts there rather than in the dataset's own store would find none.
-    """
-    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
-    from tcip_mcp.prediction_buckets import bucket_key_of
-
-    dataset_root = tmp_path / "data"
-    date = "2026-02-11"
-    images = image_dir(dataset_root, date)
-    images.mkdir(parents=True)
-    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    out = prediction_dir(dataset_root, "baseline", date)
-    out.mkdir(parents=True)
-    write_annotations(out / "img.json", [], img_w=100, img_h=100, keep_empty=True)
-    engine = ReviewEngine(dataset_root / ".tcip" / "state")
-    ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
-                        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
-                                          score=0.9)])
-    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
-                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
-    return dataset_root, ckpt, date
-
-
-def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
-    client: TestClient, tmp_path: Path, monkeypatch
-) -> None:
-    """The launch door counts a bucket's verdicts in the store belonging to the dataset it is
-    writing into, so the breeder's recorded verdicts are the ones that freeze it."""
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
-
-    # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date, "overwrite": True,
-    })
-    assert resp.status_code == 409
-    assert "verdict" in resp.json()["detail"].lower()
-
-
-def test_inference_launch_writes_an_unreviewed_bucket_in_place(
-    client: TestClient, tmp_path: Path, monkeypatch
-) -> None:
-    """The same dataset-scoped guard still admits the ordinary re-run into an unreviewed bucket."""
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
-    from tcip_web.routes import inference as inference_routes
-
-    # The bucket resolution under test is the route's own synchronous step; the prediction pass
-    # behind it is not what this pins.
-    monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
-
-    dataset_root = tmp_path / "data"
-    date = "2026-02-11"
-    images = image_dir(dataset_root, date)
-    images.mkdir(parents=True)
-    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date, "overwrite": True,
-    })
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["bucket_redirected"] is False
-    assert Path(body["output_dir"]) == prediction_dir(dataset_root, "baseline", date)
-
-
 def _launch_setup(tmp_path, monkeypatch):
     from tcip_mcp.dataset_layout import image_dir
     from tcip_web.routes import inference as inference_routes
@@ -1719,166 +1660,66 @@ def _launch_setup(tmp_path, monkeypatch):
     return str(ckpt), str(dataset_root), date, inference_routes
 
 
-def test_inference_launch_refuses_a_bucket_that_already_holds_a_document(
+def _launch_bucket(dataset_root: str, date: str) -> str:
+    """The bucket directory every launch here names for ``date``."""
+    return str(Path(dataset_root) / "predictions" / "baseline" / date)
+
+
+def test_a_launch_into_a_directory_that_exists_fails_its_job_and_writes_nothing(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: a launch into a bucket already holding a document is refused by name rather than
-    admitted beside it (the document's bytes, the job registry and the dataset's audit log are
-    asserted unchanged as coverage of the no-state-change decision, not part of what this guards)."""
-    from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.prediction_buckets import BucketHoldsDocuments
+    """The publication refuses a directory that exists, as it refuses every door's: the job ends
+    failed naming the rule, the directory keeps exactly what it held, and no line is logged."""
+    from tcip_web.routes import inference
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
-    bucket = prediction_dir(Path(dataset_root), "baseline", date)
-    bucket.mkdir(parents=True, exist_ok=True)
+    real_worker = inference._worker
+    _ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(inference_routes, "_worker", real_worker)
+    ckpt = registered_checkpoint(tmp_path)
+    bucket = Path(_launch_bucket(dataset_root, date))
+    bucket.mkdir(parents=True)
     doc_path = bucket / "img.json"
     write_annotations(doc_path, [], img_w=100, img_h=100, keep_empty=True)
     before_bytes = doc_path.read_bytes()
-    before_jobs = inference_routes._list_jobs()
-    expected_message = str(BucketHoldsDocuments("baseline", 1, "baseline@r2"))
 
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
+        "stated": {"tile": False},
     })
 
-    assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"] == {
-        "kind": "bucket_holds_documents",
-        "message": expected_message,
-        "date": date,
-        "requested_model_name": "baseline",
-        "requested_output_dir": str(bucket),
-        "document_stem_count": 1,
-        "suggested_model_name": "baseline@r2",
-        "suggested_output_dir": str(prediction_dir(Path(dataset_root), "baseline@r2", date)),
-    }
-    assert inference_routes._list_jobs() == before_jobs
+    assert resp.status_code == 200, resp.text
+    job = inference_routes._get(resp.json()["job_id"])
+    job.thread.join(60)
+    assert job.status == "failed"
+    assert "a bucket is published once" in job.error
+    assert sorted(p.name for p in bucket.iterdir()) == ["img.json"]
     assert doc_path.read_bytes() == before_bytes
     assert _audit_entries(Path(dataset_root)) == []
 
 
-def test_inference_launch_admits_the_suggested_fresh_bucket(
+def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """Admits valid work: the bucket a document refusal suggests is itself free, and posting the
-    identical launch with model_name set to it writes in place rather than refusing again."""
-    from tcip_mcp.dataset_layout import prediction_dir
-
     ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
-    bucket = prediction_dir(Path(dataset_root), "baseline", date)
-    bucket.mkdir(parents=True, exist_ok=True)
-    write_annotations(bucket / "img.json", [], img_w=100, img_h=100, keep_empty=True)
 
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline@r2", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
 
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["bucket_redirected"] is False
-    assert Path(body["output_dir"]) == prediction_dir(Path(dataset_root), "baseline@r2", date)
-
-
-def test_inference_launch_redirects_past_a_verdict_though_the_bucket_also_holds_a_document(
-    client: TestClient, tmp_path: Path, monkeypatch,
-) -> None:
-    """Coverage of the verdict-first order: a bucket carrying both a verdict and a document still
-    redirects rather than refusing on the document (the fixture leaves the real worker running,
-    so nothing about a prediction pass is asserted here, only the route's own synchronous step)."""
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
-
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date,
-    })
-
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["bucket_redirected"] is True
-
-
-def test_inference_launch_admits_a_bucket_holding_only_a_stamp(
-    client: TestClient, tmp_path: Path, monkeypatch,
-) -> None:
-    """Coverage of the document predicate's own edge: a bucket carrying an earlier run's stamp
-    and no prediction document still runs in place (a cancel before the first image is the tab's
-    own producer of this state); the worker is stubbed, so the stamp's own bytes are not asserted
-    here."""
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
-    from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
-    ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
-    bucket = prediction_dir(Path(dataset_root), "baseline", date)
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}},
-        slicing=None,
-        validated=False,
-        validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[],
-        scope=ClassScope(subject="bud", id_map={"bud": 0}),
-        trait=None,
-        dataset_hash="abc123",
-        checkpoint="baseline",
-        checkpoint_sha256="f" * 64,
-        experiment_id="exp_001",
-        images_dir=str(image_dir(Path(dataset_root), date)),
-        raster_path=None,
-        produced_at="2026-01-01T00:00:00+00:00",
-    )
-    write_sidecar(bucket, stamp, project=tmp_path)
-
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
-    })
-
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["bucket_redirected"] is False
-    assert Path(body["output_dir"]) == bucket
-
-
-def test_inference_launch_refuses_by_name_with_no_suggestion_when_every_variant_is_taken(
-    client: TestClient, tmp_path: Path, monkeypatch,
-) -> None:
-    """A guard: once every bucket variant up to the ceiling holds a document, the launch is
-    refused by name with no fresh bucket suggested."""
-    import functools
-
-    from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.prediction_buckets import resolve_writable_bucket
-
-    ckpt, dataset_root, date, _inference_routes = _launch_setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "tcip_mcp.prediction_buckets.resolve_writable_bucket",
-        functools.partial(resolve_writable_bucket, max_variants=3),
-    )
-    for name in ("baseline", "baseline@r2", "baseline@r3"):
-        bucket = prediction_dir(Path(dataset_root), name, date)
-        bucket.mkdir(parents=True, exist_ok=True)
-        write_annotations(bucket / "img.json", [], img_w=100, img_h=100, keep_empty=True)
-
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
-    })
-
-    assert resp.status_code == 409, resp.text
-    detail = resp.json()["detail"]
-    assert detail["kind"] == "bucket_holds_documents"
-    assert detail["suggested_model_name"] is None
-    assert detail["suggested_output_dir"] is None
+    assert Path(resp.json()["output_dir"]) == Path(_launch_bucket(dataset_root, date))
+    assert not Path(resp.json()["output_dir"]).exists()
 
 
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: a second launch of the same model and date while the first job still writes is
-    refused by that job's own identity rather than resolving a fresh job over the same images;
-    admitted again once the first job is terminal."""
+    """A second launch of the same model and date while the first job still writes is refused
+    naming that job; once the first job is terminal the launch is admitted again, the
+    publication being what refuses a bucket that exists."""
     import threading
     import time
 
@@ -1894,25 +1735,24 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 
     first = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
     second = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert second.status_code == 409, second.text
     detail = second.json()["detail"]
     assert detail == {
-        "kind": "bucket_in_flight",
+        "kind": "bucket_exists",
         "message": detail["message"],
         "date": date,
         "requested_output_dir": first.json()["output_dir"],
         "job_id": job_id,
     }
-    assert isinstance(detail["message"], str) and detail["message"]
 
     event.set()
     job = inference_routes._get(job_id)
@@ -1924,7 +1764,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 
     third = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert third.status_code == 200, third.text
 
@@ -1932,9 +1772,8 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset_root(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A guard: the in-flight key compares dataset_root by resolved filesystem identity, so a
-    trailing-separator spelling of the same directory still names the first job's own launch
-    rather than reaching the resolver as an apparently distinct request."""
+    """The live job a refusal names is found by resolved directory identity, so a
+    trailing-separator spelling of the same dataset root still names the first job."""
     import os
     import threading
     import time
@@ -1951,18 +1790,18 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
 
     first = client.post("/api/inference/launch", json={
         "checkpoint_path": ckpt, "dataset_root": dataset_root,
-        "model_name": "baseline", "date": date,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date),
     })
     assert first.status_code == 200, first.text
     job_id = first.json()["job_id"]
 
     second = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root + os.sep,
-        "model_name": "baseline", "date": date,
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "date": date, "output_dir": _launch_bucket(dataset_root, date) + os.sep,
     })
     assert second.status_code == 409, second.text
     detail = second.json()["detail"]
-    assert detail["kind"] == "bucket_in_flight"
+    assert detail["kind"] == "bucket_exists"
     assert detail["job_id"] == job_id
 
     event.set()
@@ -1974,82 +1813,24 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     assert job.status == "completed"
 
 
-def test_inference_launch_refuses_by_the_requested_name_though_the_redirected_bucket_moved(
-    client: TestClient, tmp_path: Path, monkeypatch,
-) -> None:
-    """A guard: keyed on the requested (dataset_root, model_name, date) rather than the resolved
-    path, so a second launch of a verdicted model and date whose first job redirected to @r2 and
-    already wrote a document there is refused naming that job, never resolved past it (which the
-    resolver would otherwise do, landing on @r3) into a second concurrent job."""
-    import threading
-    import time
-
-    from tcip_web.routes import inference as inference_routes
-
-    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path)
-    event = threading.Event()
-
-    def _wait_worker(job) -> None:
-        job.status = "running"
-        event.wait(timeout=5)
-        job.status = "completed"
-
-    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
-
-    first = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date,
-    })
-    assert first.status_code == 200, first.text
-    assert first.json()["bucket_redirected"] is True
-    redirected_dir = Path(first.json()["output_dir"])
-    write_annotations(redirected_dir / "img2.json", [], img_w=100, img_h=100, keep_empty=True)
-
-    second = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date,
-    })
-    assert second.status_code == 409, second.text
-    detail = second.json()["detail"]
-    assert detail["kind"] == "bucket_in_flight"
-    assert detail["job_id"] == first.json()["job_id"]
-
-    event.set()
-    job = inference_routes._get(first.json()["job_id"])
-    for _ in range(100):
-        if job.status not in ("pending", "running"):
-            break
-        time.sleep(0.05)
-    assert job.status == "completed"
-
-    third = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
-        "model_name": "baseline", "date": date,
-    })
-    assert third.status_code == 200, third.text
-    assert third.json()["bucket_redirected"] is True
-    from tcip_mcp.dataset_layout import prediction_dir
-
-    assert Path(third.json()["output_dir"]) == prediction_dir(dataset_root, "baseline@r3", date)
-
-
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """A caller-stated conf/max_dets equal to the platform default travels on the job as stated,
-    which the worker's pass stamps 'explicit'."""
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
+    which the worker's pass records as stated."""
+    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root, "model_name": "baseline",
-        "date": date, "conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS,
+        "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
+        "output_dir": _launch_bucket(dataset_root, date),
+        "stated": {"conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS},
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
-    assert job.conf == DEFAULT_CONF
-    assert job.max_dets == DEFAULT_MAX_DETS
+    assert job.stated.conf == DEFAULT_CONF
+    assert job.stated.max_dets == DEFAULT_MAX_DETS
 
 
 def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
@@ -2060,13 +1841,13 @@ def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
 
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": ckpt, "dataset_root": dataset_root, "model_name": "baseline",
-        "date": date,
+        "checkpoint_path": ckpt, "dataset_root": dataset_root, "date": date,
+        "output_dir": _launch_bucket(dataset_root, date),
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
-    assert job.conf is None
-    assert job.max_dets is None
+    assert job.stated.conf is None
+    assert job.stated.max_dets is None
 
 
 # ── /api/state ───────────────────────────────────────────────────────────
@@ -2215,10 +1996,8 @@ def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, data
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
-    pred = tmp_path / "pred.json"
-    write_annotations(str(pred), [Annotation(
-        subject="bud", geometry=BBox(40, 32, 60, 48), score=0.9,
-        created_by="sam", created_at="2026-01-01T00:00:00+00:00")], 100, 80)
+    pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)])
+    produced_by = read_annotations(str(pred))[0].created_by
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
@@ -2226,7 +2005,7 @@ def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, data
     )
     assert resp.status_code == 200
     obj = json.loads(gt.read_text())["annotations"][0]
-    assert obj["created_by"] == "sam"          # prediction origin carried into GT
+    assert obj["created_by"] == produced_by    # prediction origin carried into GT
     assert obj["accepted_by"] == "user:breeder"   # reviewer stamped
     assert obj["accepted_at"]
 
@@ -2411,8 +2190,7 @@ def test_review_subject_names_flow_from_annotations(
     def _class_name_for(subject: str) -> str:
         gt = tmp_path / f"gt_{subject}.json"
         _write_gt(gt, [(40, 32, 60, 48)], subject=subject)
-        pred = tmp_path / f"pred_{subject}.json"
-        _write_pred(pred, [(40, 32, 60, 48, 0.9)], subject=subject)
+        pred = _pred_doc(dataset_root, [(40, 32, 60, 48, 0.9)], subject=subject, name=subject)
         resp = client.post(
             "/api/review/action",
             json={
@@ -2425,8 +2203,12 @@ def test_review_subject_names_flow_from_annotations(
             },
         )
         assert resp.status_code == 200
-        state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
-        return state["detections"][0]["class_name"]
+        from tcip_annotation.review_engine import review_verdict_key
+        from tcip_mcp.buckets import bucket_key_of
+
+        key = review_verdict_key(dataset_root / ".tcip" / "state", bucket_key_of(pred.parent),
+                                 "IMG_0000.JPG")
+        return tcip_store.read(key)["state"]["detections"][0]["class_name"]
 
     assert _class_name_for("bud") == "bud"
     assert _class_name_for("efb") == "efb"  # different subject, its own name, no bleed

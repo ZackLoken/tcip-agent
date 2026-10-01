@@ -4,38 +4,12 @@
  * confirmed, which it names, so this panel carries no confirm/withdraw affordance.
  */
 
-import { Fragment } from "react";
-
 import {
   isCanopySegmentDisclosure,
   isPlantMappingDisclosure,
   isPlantRegistryDisclosure,
   type DeliveryEventRecord,
 } from "@/api/inference";
-import type {
-  DocumentBinding,
-  ReconciledDimension,
-  ReconciledDocument,
-} from "@/api/types.generated";
-
-function bucketStatusText(binding: DocumentBinding): string {
-  if (binding.ok && binding.claimed) return "verified";
-  if (binding.claimed) return "claimed, not verified";
-  return "no claim";
-}
-
-/** One rendered line for a recorded document or dimension reconciliation: its key, the validity
- *  it reconciled to (or "not operative" for a dimension that never ran), the delivery-level
- *  `bound_validated` beside it when the entry carries one, and its unvalidated-bucket count. */
-function reconciliationLine(key: string, entry: ReconciledDocument | ReconciledDimension): string {
-  const operative = "operative" in entry ? entry.operative : true;
-  const validated = operative ? (entry.validated ?? "not operative") : "not operative";
-  const bound =
-    "bound_validated" in entry && entry.bound_validated != null
-      ? ` (bound: ${entry.bound_validated})`
-      : "";
-  return `${key}: ${validated}${bound}, ${entry.unvalidated_buckets.length} unvalidated bucket(s)`;
-}
 
 function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
   return (
@@ -54,43 +28,29 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         <dt className="text-tcip-muted">Door</dt>
         <dd className="font-mono">{record.door}</dd>
         <dt className="text-tcip-muted">Output path</dt>
-        <dd>{record.output_path ?? "no file"}</dd>
-        {record.acknowledged_by && (
+        <dd>{record.output_path}</dd>
+        <dt className="text-tcip-muted">Validated</dt>
+        <dd>{record.validated ? "yes" : "no"}</dd>
+        {record.acknowledgment && (
           <>
             <dt className="text-tcip-muted">Acknowledged by</dt>
-            <dd>{record.acknowledged_by}</dd>
+            <dd>{record.acknowledgment.acknowledged_by}</dd>
             <dt className="text-tcip-muted">Reason</dt>
-            <dd>{record.acknowledgment_reason}</dd>
+            <dd>{record.acknowledgment.reason}</dd>
           </>
         )}
       </dl>
-      {(() => {
-        const documentEntries = Object.entries(record.document_reconciliations);
-        const dimensionEntries = Object.entries(record.dimension_reconciliations);
-        if (documentEntries.length === 0 && dimensionEntries.length === 0) return null;
-        return (
-          <div className="mt-2 flex flex-col gap-0.5">
-            <div className="text-[11px] text-tcip-muted">Reconciled validity</div>
-            {documentEntries.map(([key, entry]) => (
-              <Fragment key={`document-${key}`}>
-                <div className="font-mono text-[11px] text-tcip-muted">
-                  {reconciliationLine(key, entry)}
-                </div>
-                {Object.entries(entry.bindings).map(([bucket, binding]) => (
-                  <div key={bucket} className="pl-3 font-mono text-[11px] text-tcip-muted">
-                    {bucket}: {bucketStatusText(binding)}
-                  </div>
-                ))}
-              </Fragment>
-            ))}
-            {dimensionEntries.map(([key, entry]) => (
-              <div key={`dimension-${key}`} className="font-mono text-[11px] text-tcip-muted">
-                {reconciliationLine(key, entry)}
-              </div>
-            ))}
+      <div className="mt-2 flex flex-col gap-0.5">
+        <div className="text-[11px] text-tcip-muted">Buckets delivered</div>
+        {record.buckets.map((bucket) => (
+          <div key={bucket.path} className="font-mono text-[11px] text-tcip-muted">
+            {`${bucket.path}: ` +
+              (bucket.validated
+                ? `validated by assessment ${bucket.assessment_id}`
+                : `not validated (${bucket.reason})`)}
           </div>
-        );
-      })()}
+        ))}
+      </div>
       {record.plant_mapping && isCanopySegmentDisclosure(record.plant_mapping) && (
         <div className="mt-2 text-[11px] text-tcip-muted" data-testid="canopy-disclosure">
           {(() => {
@@ -149,17 +109,6 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
             ` (cited record archived as ${record.plant_mapping_resolved_key})`}
         </div>
       )}
-      {record.superseded && (
-        <div
-          className="mt-2 text-[11px] text-tcip-fp"
-          data-testid={`superseded-${record.event_id}`}
-        >
-          {`Superseded: ${record.superseded.reason}` +
-            (record.superseded.replacement_event_id
-              ? ` (replaced by ${record.superseded.replacement_event_id})`
-              : "")}
-        </div>
-      )}
     </li>
   );
 }
@@ -175,9 +124,9 @@ export function DeliveryEventsPanel({
     <div className="tcip-panel p-4">
       <div className="tcip-heading mb-1">Delivery events</div>
       <p className="mb-3 text-[11px] text-tcip-muted">
-        What has shipped from this project, and the real per-bucket verification evidence the
-        delivering door reconciled at the time. A delivery event is a fact, not a statement: there
-        is nothing here to confirm.
+        What has shipped from this project, and for each delivered bucket the assessment that
+        answered for it or why none did. A delivery event is a fact, not a statement: there is
+        nothing here to confirm.
       </p>
       {loadError ? (
         <div className="text-[11px] text-tcip-fp">{loadError}</div>

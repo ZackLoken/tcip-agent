@@ -10,7 +10,6 @@ from __future__ import annotations
 import csv
 import math
 from functools import partial
-from pathlib import Path
 
 import pytest
 
@@ -18,16 +17,17 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     DEFAULT_SCORE_WEIGHTS,
     build_coco_image_record,
-    center_match_pairs,
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
     concordance_correlation_coefficient,
     effective_iou_type,
     gt_class_avg_size,
+    match_pairs,
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
@@ -45,10 +45,9 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
     resolve_selection_metric,
 )
-from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._trait_fixtures import confirm_bare  # noqa: E402
 
 # A test naming trait="bud_opening" proposes it in its project (conftest.seed_bud_trait_spec).
 _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -181,8 +180,17 @@ def test_golden_gt_class_avg_size():
     assert gt_class_avg_size(_sweep_records(), class_id=0) == pytest.approx(20.0)
 
 
+CENTER_10 = {"kind": "center_match", "tolerance": 10.0}
+"""A center match at a 10 px tolerance."""
+
+
+def _points(centers: list[tuple[float, float]]) -> list[list[float]]:
+    """Each center as a zero-extent xywh box, so a center match reads its distance exactly."""
+    return [[x, y, 0.0, 0.0] for x, y in centers]
+
+
 def test_golden_derive_operating_point_curve():
-    sweep = derive_operating_point_curve(_sweep_records(), tolerance=10.0, class_id=0)
+    sweep = derive_operating_point_curve(_sweep_records(), criterion=CENTER_10, class_id=0)
     curve = sweep["curve"]
     assert [round(c["conf"], 2) for c in curve] == [0.0, 0.3, 0.6, 0.9]
 
@@ -197,54 +205,60 @@ def test_golden_derive_operating_point_curve():
 
 
 def test_golden_operating_point_pickers():
-    sweep = derive_operating_point_curve(_sweep_records(), tolerance=10.0, class_id=0)
+    sweep = derive_operating_point_curve(_sweep_records(), criterion=CENTER_10, class_id=0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)   # zero count bias
     assert pick_f1_max(sweep) == pytest.approx(0.0)           # recall-max point
     at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))
     assert at06["count_bias_mean"] == pytest.approx(0.0)
 
 
-# center_match_pairs: one matcher, two stated policies (score_first for the count,
-# distance_first for the classifier calibration pairing); coverage of the pinned tie rules.
+# match_pairs: one matcher, two stated policies (score_first for the count, distance_first for
+# the classifier pairing), under a center or an IoU criterion; coverage of the pinned tie rules.
 
-def test_center_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
+def test_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
     """Two ground truths, one detection within tolerance of both: score-first (walking
     detections in the given, score-descending order) claims one pair; distance-first (every
     pair sorted by distance ascending) claims two. Exact pairs, not just counts."""
-    gt_centers = [(0.0, 0.0), (10.0, 0.0)]
-    dt_centers = [(4.0, 0.0), (0.0, 0.0)]  # score 0.9 then 0.1, already score-descending
+    gt = _points([(0.0, 0.0), (10.0, 0.0)])
+    dt = _points([(4.0, 0.0), (0.0, 0.0)])  # score 0.9 then 0.1, already score-descending
+    criterion = {"kind": "center_match", "tolerance": 6.0}
 
-    score_first = center_match_pairs(gt_centers, dt_centers, 6.0, policy="score_first")
-    assert score_first == [(0, 0)]
-
-    distance_first = center_match_pairs(gt_centers, dt_centers, 6.0, policy="distance_first")
-    assert distance_first == [(0, 1), (1, 0)]
+    assert match_pairs(gt, dt, criterion, policy="score_first") == [(0, 0)]
+    assert match_pairs(gt, dt, criterion, policy="distance_first") == [(0, 1), (1, 0)]
 
 
-def test_center_match_pairs_score_first_tie_keeps_the_last_index():
-    """Coverage: among equidistant unused ground truths, score-first keeps the last index,
-    the count's existing tie rule, unchanged by this primitive's introduction."""
-    gt_centers = [(0.0, 0.0), (2.0, 0.0)]
-    dt_centers = [(1.0, 0.0)]  # equidistant (1.0) from both
-    pairs = center_match_pairs(gt_centers, dt_centers, 1.0, policy="score_first")
+def test_match_pairs_score_first_tie_keeps_the_last_index():
+    """Coverage: among equidistant unused ground truths, score-first keeps the last index."""
+    pairs = match_pairs(_points([(0.0, 0.0), (2.0, 0.0)]), _points([(1.0, 0.0)]),
+                        {"kind": "center_match", "tolerance": 1.0}, policy="score_first")
     assert pairs == [(1, 0)]
 
 
-def test_center_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
+def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
     """Coverage: distance-first breaks a tied distance by (gt index, detection index)
     ascending, so a fully degenerate 2x2 assigns each detection to the ground truth sharing
     its own index rather than crossing them."""
-    gt_centers = [(0.0, 0.0), (0.0, 0.0)]
-    dt_centers = [(5.0, 0.0), (5.0, 0.0)]  # every pair is equidistant (5.0)
-    pairs = center_match_pairs(gt_centers, dt_centers, 10.0, policy="distance_first")
+    pairs = match_pairs(_points([(0.0, 0.0), (0.0, 0.0)]), _points([(5.0, 0.0), (5.0, 0.0)]),
+                        {"kind": "center_match", "tolerance": 10.0}, policy="distance_first")
     assert pairs == [(0, 0), (1, 1)]
 
 
-def test_center_match_pairs_refuses_an_unknown_policy_by_name():
+def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
+    """The same matcher under an IoU criterion: a detection overlapping its ground truth past the
+    threshold pairs, one beside it does not, however near its center sits."""
+    gt = [[0.0, 0.0, 10.0, 10.0], [100.0, 0.0, 10.0, 10.0]]
+    dt = [[1.0, 0.0, 10.0, 10.0], [106.0, 0.0, 10.0, 10.0]]
+    pairs = match_pairs(gt, dt, {"kind": "iou_match", "iou_threshold": 0.5},
+                        policy="score_first")
+    assert pairs == [(0, 0)]
+
+
+def test_match_pairs_refuses_an_unknown_policy_by_name():
     """Coverage: a policy outside the two stated ones refuses rather than falling through to
     either, so a typo never silently picks a matching rule."""
     with pytest.raises(ValueError, match="policy"):
-        center_match_pairs([(0.0, 0.0)], [(0.0, 0.0)], 1.0, policy="nearest")
+        match_pairs(_points([(0.0, 0.0)]), _points([(0.0, 0.0)]),
+                    {"kind": "center_match", "tolerance": 1.0}, policy="nearest")
 
 
 def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
@@ -259,63 +273,36 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
         _dt_score({"bbox": [0, 0, 1, 1], "score": None})
     per_image = [{"image_id": 1, "gt": [], "dt": [{"bbox": [0, 0, 1, 1], "category_id": 1}]}]
     with pytest.raises(ValueError, match="no 'score' field"):
-        derive_operating_point_curve(per_image, tolerance=1.0)
+        derive_operating_point_curve(per_image, criterion={"kind": "center_match",
+                                                           "tolerance": 1.0})
 
 
-# resolve_match_criterion derives/records the localization kind once, reuses it, and warns
-# (never silently switches) on divergence.
+# resolve_match_criterion reads the revision's stated localization and never derives one.
 
-def test_resolve_match_criterion_derives_an_unstated_kind_and_leaves_the_entry_alone(
-    tmp_path: Path,
-):
-    """An entry stating no localization has it derived from this call's GT and stamped as
-    derived; the entry itself changes only through a proposed revision, so a second call derives
-    it again rather than reading back a value nobody proposed."""
-    from tcip_mcp.traits import read_trait
+def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_breeder():
+    """No localization is derived from the boxes in hand: a revision that states none refuses,
+    naming the field and the breeder's question, whatever the ground truth would suggest."""
+    from tcip_mcp.traits import UnauthoredField
 
-    trait = confirm_bare(tmp_path, "leaf").entry
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]  # char size 20 -> center_match
-    result = resolve_match_criterion(trait, gt_only(small_boxes))
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    with pytest.raises(UnauthoredField, match="localization"):
+        resolve_match_criterion(fx.entry("leaf", ("leaf_length",)), gt_only(small_boxes))
+
+
+def test_resolve_match_criterion_reads_the_stated_kind_as_is():
+    """Boxes small enough to suit a center match change nothing when the revision states IoU."""
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    assert resolve_match_criterion(trait, gt_only(small_boxes))["kind"] == "iou_match"
+
+
+def test_resolve_match_criterion_scales_a_center_match_to_the_reference():
+    """A center match carries its tolerance as a fraction of the average object size and the
+    tolerance that fraction is on this reference."""
+    trait = fx.entry("leaf", ("leaf_length",), localization="center_match")
+    result = resolve_match_criterion(trait, gt_only([(0, 0, 20, 20), (500, 0, 20, 20)]))
     assert result["kind"] == "center_match"
-    assert result["kind_source"] == "data_derived_at_runtime"
-    assert result["kind_diverged"] is False
-
-    record = read_trait("leaf", tmp_path)
-    assert len(record.revisions) == 1 and record.latest.entry.localization == ""
-    assert resolve_match_criterion(
-        record.latest.entry, gt_only(small_boxes))["kind_source"] == "data_derived_at_runtime"
-
-
-def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_path: Path):
-    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
-    # Small boxes would derive center_match fresh, but a recorded kind must be used as-is.
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion(trait, gt_only(small_boxes))
-    assert result["kind"] == "iou_match"
-    assert result["kind_source"] == "recorded"
-
-
-def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
-    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
-    # Small boxes: derive_localization_kind would say center_match, diverging from the recorded
-    # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion(trait, gt_only(small_boxes))
-    assert result["kind_diverged"] is True
-    assert result["kind"] == "iou_match"  # unchanged despite the divergence
-
-
-def test_resolve_match_criterion_no_divergence_when_kinds_agree(tmp_path: Path):
-    trait = confirm_bare(tmp_path, "leaf", localization="center_match").entry
-    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
-    result = resolve_match_criterion(trait, gt_only(small_boxes))
-    assert result["kind_diverged"] is False
-
-
-def test_resolve_match_criterion_refuses_when_unrecorded_and_underivable(tmp_path: Path):
-    trait = confirm_bare(tmp_path, "leaf").entry
-    with pytest.raises(ValueError, match="states no localization kind"):
-        resolve_match_criterion(trait, [])  # no GT at all -> nothing to derive from
+    assert result["tolerance"] == pytest.approx(result["tolerance_frac"] * 20.0)
 
 
 def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
@@ -324,24 +311,25 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
     assert result["trait"] is None
 
 
-def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
+def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5():
     """iou_match's threshold must be genuinely derived from the GT in hand
     (derive_iou_match_threshold), not pinned to 0.5."""
-    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
+    from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION
+
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
     result = resolve_match_criterion(trait, gt_only(large_boxes))
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] > 0.5
-    assert "achievable IoU" in result["derived_from"]
+    assert result["derived_from"] == IOU_MATCH_DERIVATION
 
 
-def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(tmp_path: Path):
-    trait = confirm_bare(tmp_path, "leaf", localization="iou_match").entry
-    result = resolve_match_criterion(trait, [], iou_threshold=0.42)
-    assert result["kind"] == "iou_match"
-    assert result["iou_threshold"] == pytest.approx(0.42)  # caller/default, not a fabricated derivation
-    assert "underivable" in result["derived_from"]
+def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_derive_from():
+    """No conventional IoU stands in for a threshold the reference cannot derive."""
+    trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
+    with pytest.raises(ValueError, match="no ground-truth box"):
+        resolve_match_criterion(trait, [], iou_threshold=0.42)
 
 
 # --------------------------------------------------------------------------
@@ -552,7 +540,8 @@ def _detection_batch(num_images: int = 2, img_size: int = 64):
     for i in range(num_images):
         img = torch.rand(3, img_size, img_size)
         target = {"boxes": torch.tensor([boxes[i % len(boxes)]]),
-                  "labels": torch.ones((1,), dtype=torch.long), "image_id": i}
+                  "labels": torch.ones((1,), dtype=torch.long),
+                  "iscrowd": torch.zeros((1,), dtype=torch.long), "image_id": i}
         items.append((img, target))
     return task_collate("detection")(items)
 
@@ -655,36 +644,35 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     """The result must record the iou_type evaluate() actually scored with (instance_seg
     defaults to segm AP; recording 'bbox' would misreport mask AP)."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
-
-    class _DummyModel:
-        def to(self, device):
-            pass
+    from tcip_mcp.pipelines.execution import prepare_pass
 
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, verified_checkpoint
 
-    segmenter = verified_checkpoint(tmp_path, model_source={
-        "builder": "tests.bespoke_models:build_fixed_mask_instance_seg", "task": "instance_seg"})
-    detector = verified_checkpoint(tmp_path, model_source=dict(BUILT_DETECTOR))
+    segmenter = prepare_pass(verified_checkpoint(tmp_path, model_source={
+        "builder": "tests.bespoke_models:build_fixed_mask_instance_seg", "task": "instance_seg"}),
+        Stated(tile=False))
+    detector = prepare_pass(verified_checkpoint(tmp_path, model_source=dict(BUILT_DETECTOR)),
+                            Stated(tile=False))
 
-    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu")
+    r = run_test_evaluation(segmenter, None, "cpu")
     assert r["iou_type"] == "segm"
 
-    r = run_test_evaluation(detector, _DummyModel(), None, "cpu")
+    r = run_test_evaluation(detector, None, "cpu")
     assert r["iou_type"] == "bbox"
 
-    r = run_test_evaluation(segmenter, _DummyModel(), None, "cpu", iou_type="bbox")
+    r = run_test_evaluation(segmenter, None, "cpu", iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
 def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, monkeypatch):
     """run_test_evaluation and run_full_frame_evaluation compose through one shared
     evaluation_result: both regimes' results carry the same common identity keys by name and
-    presence, and neither carries the other's regime-specific fields."""
+    presence, and the test regime carries none of the full-frame regime's fields."""
     from PIL import Image
 
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_annotation import json_io
@@ -693,27 +681,21 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     common_fields = {
-        "model_path", "task", "model_sha256", "experiment_id", "iou_type",
-        "iou_threshold", "conf_threshold", "max_dets", "eval_regime",
+        "model_path", "task", "checkpoint_sha256", "experiment_id", "iou_type",
+        "iou_threshold", "execution", "eval_regime",
     }
-    test_only_fields = {"selection_dir", "evaluated_stem_count"}
     full_frame_only_fields = {
-        "tile_size", "tile_size_source", "overlap", "overlap_source", "scored_images",
-        "sample_counts", "contradicted_negatives",
-        "max_dets_cap_saturated_frac", "postprocess", "operating_point",
+        "scored_images", "sample_counts", "contradicted_negatives",
+        "max_dets_cap_saturated_frac",
     }
 
-    class _DummyModel:
-        def to(self, device):
-            pass
+    from tcip_mcp.pipelines.execution import prepare_pass
 
     ckpt_path = registered_checkpoint(tmp_path)
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
     checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-    test_result = run_test_evaluation(checkpoint, _DummyModel(), None, "cpu",
-                                      selection_dir=str(tmp_path / "manifest"),
-                                      evaluated_stem_count=3)
+    test_result = run_test_evaluation(prepare_pass(checkpoint, Stated(tile=False)), None, "cpu")
 
     images_dir, ff_labels = tmp_path / "ff_images", tmp_path / "ff_labels"
     images_dir.mkdir()
@@ -727,16 +709,16 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         in_chans = 3
 
         def predict_sliced(self, path, **kw):
-            return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": []}
+            return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": [],
+                    "cap_hit": False}
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
+    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
     ff_result = run_full_frame_evaluation(
-        checkpoint, str(images_dir), str(ff_labels), tile_size=32, overlap=0.0)
+        checkpoint, str(images_dir), str(ff_labels), stated=Stated(tile_size=32, overlap=0.0))
 
     for field in common_fields:
         assert field in test_result, f"{field} missing from the test-regime record"
         assert field in ff_result, f"{field} missing from the full-frame-regime record"
-    assert not (test_only_fields & set(ff_result))
     assert not (full_frame_only_fields & set(test_result))
 
 
@@ -746,8 +728,9 @@ def test_evaluation_result_refuses_a_key_extra_shares_with_common():
     unification evaluation_result exists to enforce, so this refuses naming the key rather than
     pick a winner."""
     common = {
-        "model_path": "m.pt", "task": "detection", "model_sha256": "abc", "experiment_id": "e1",
-        "iou_type": "bbox", "iou_threshold": 0.5, "conf_threshold": 0.3, "max_dets": 100,
+        "model_path": "m.pt", "task": "detection", "checkpoint_sha256": "abc",
+        "experiment_id": "e1",
+        "iou_type": "bbox", "iou_threshold": 0.5, "execution": {"conf": 0.3, "max_dets": 100},
         "eval_regime": "full-frame-single-pass",
     }
     extra = {"precision": 0.9, "task": "classification"}
@@ -876,48 +859,10 @@ def test_validate_classification_metrics(tmp_path):
     assert run.best_metric == pytest.approx(last["val_loss"])  # selection falls back to val_loss
 
 
-@pytest.fixture
-def json_data_dir(tmp_path: Path) -> Path:
-    """Minimal dataset with per-image JSON labels/predictions in the canonical layout.
-
-    score_predictions reads GT and predictions through the canonical json_io per-image schema
-    (name-based, one file per image, pixel COCO xywh + native ``score``).
-    """
-    from PIL import Image
-
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    date = "2-11-26"
-    images_dir = tmp_path / "images" / date
-    images_dir.mkdir(parents=True)
-    labels_dir = tmp_path / "annotations" / date
-    labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / date
-    preds_dir.mkdir(parents=True)
-
-    for name in ("img_001", "img_002", "img_003"):
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
-        json_io.write_annotations(
-            str(labels_dir / f"{name}.json"),
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))],
-            640, 480,
-        )
-        # 1 matching prediction (TP) + 1 elsewhere (FP), confidence in each annotation's score.
-        json_io.write_annotations(
-            str(preds_dir / f"{name}.json"),
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.9),
-             Annotation(subject="bud", geometry=BBox(496, 372, 528, 396), score=0.7)],
-            640, 480,
-        )
-    return tmp_path
-
-
-def test_score_predictions_folder_uses_pycocotools(json_data_dir):
-    data_dir = json_data_dir
+def test_score_predictions_folder_uses_pycocotools(data_dir):
     from tcip_mcp.tools.annotation_tools import score_predictions
-    r = score_predictions(str(data_dir))
+    r = score_predictions(str(data_dir / "images" / "2-11-26"),
+                          str(data_dir / "predictions" / "live" / "2-11-26"))
     assert "map50" in r
     # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image (x3 images).
     assert r["total_tp"] == 3 and r["total_fp"] == 3 and r["total_fn"] == 3
@@ -982,8 +927,8 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     for target in (listed, arrays, target_tensors(listed), off_grid):
         assert gt_records(target) == expected
     flagless = {"boxes": [[0, 0, 10, 10]], "labels": [1]}
-    assert gt_records(flagless) == [
-        {"category_id": 1, "bbox": [0.0, 0.0, 10.0, 10.0], "area": 100.0, "iscrowd": 0}]
+    with pytest.raises(ValueError, match="iscrowd"):
+        gt_records(flagless)
 
 
 def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(tmp_path):

@@ -68,10 +68,11 @@ def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path) -> None:
 
     from tcip_web.app import app
 
-    from tests.test_tcip_web_results_routes import _phenology_fixture
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import classified_series
 
     client = TestClient(app, base_url="http://127.0.0.1")
-    body = _phenology_fixture(tmp_path, validated=True, detections=100)
+    body = classified_series(tmp_path).body()
     before = _rows(tmp_path)
 
     resp = client.post("/api/results/phenology_measurement", json=body)
@@ -87,7 +88,7 @@ def test_ranking_a_review_queue_leaves_no_line(tmp_path: Path, monkeypatch: pyte
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
-    from tests.test_selection_disjointness_label_movement import DATES, _dataset, _draw
+    from tests.test_selection_ground_truth_digests import DATES, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"

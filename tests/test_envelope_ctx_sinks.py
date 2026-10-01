@@ -4,8 +4,7 @@ These are the promises ``TrainContext`` makes to a training body independent of 
 per-epoch signal reaches an HPO trial's pruner, the run's ``metrics.jsonl`` accumulates rather
 than truncates, only real scalars reach TensorBoard, a checkpoint lands once under the tag it was
 asked for without stamping the caller's own live state, an artifact is a file in the run's
-directory, cancellation is visible through the run's cancellation record, and the calibration seam
-defaults to this run without overriding one the caller named.
+directory, and cancellation is visible through the run's cancellation record.
 """
 
 from __future__ import annotations
@@ -207,41 +206,3 @@ def test_cancellation_is_seen_through_the_runs_cancellation_record(tmp_path):
     assert ctx.should_cancel() is False
     request_cancel(run_dir)
     assert ctx.should_cancel() is True
-
-
-def _spy_on_operating_point(monkeypatch):
-    import tcip_mcp.pipelines.operating_point as op
-
-    seen: dict = {}
-
-    def _record(trait_name, **kwargs):
-        seen.clear()
-        seen.update({"trait_name": trait_name, **kwargs})
-        return {"conf": 0.5}
-
-    monkeypatch.setattr(op, "resolve_operating_point", _record)
-    return seen
-
-
-def test_calibration_defaults_to_the_run_it_belongs_to(tmp_path, monkeypatch):
-    """The train-disjointness gate must check against the split this exact run drew."""
-    seen = _spy_on_operating_point(monkeypatch)
-    ctx, run_dir = _context(tmp_path)
-
-    ctx.calibrate("bud_opening", calibration_records=[], holdout_records=[], slicing=None,
-                  staged_conf_floor=0.05)
-
-    assert seen["trait_name"] == "bud_opening"
-    assert seen["experiment_id"] == run_dir.name
-    assert seen["staged_conf_floor"] == 0.05
-
-
-def test_calibration_keeps_an_experiment_the_caller_named(tmp_path, monkeypatch):
-    """Calibrating against a different run's split is a caller decision, not one to overwrite."""
-    seen = _spy_on_operating_point(monkeypatch)
-    ctx, _ = _context(tmp_path)
-
-    ctx.calibrate("bud_opening", experiment_id="expOther", calibration_records=[],
-                  holdout_records=[], slicing=None, staged_conf_floor=0.05)
-
-    assert seen["experiment_id"] == "expOther"

@@ -3,9 +3,7 @@
 From a mask compute, in pixels, the area, perimeter, the extents along the PCA principal and
 secondary axes, and the centroid; when a physical ``scale`` (per-pixel, in a caller-stated
 ``unit``, never assumed to be millimeters) is supplied, the same quantities are also returned in
-that unit. Numpy-first with no heavy imports. :func:`resolve_scale` firewalls a candidate physical
-scale the same way :func:`resolve_binarize_threshold` firewalls the binarization threshold:
-un-shippable until validated against a real reference for its kind.
+that unit. Numpy-first with no heavy imports.
 
 An axis extent is not an anatomical span. It is the width of the mask's own footprint projected
 onto a data-derived direction: it equals the anatomical dimension only when the structure is
@@ -28,52 +26,17 @@ from __future__ import annotations
 
 from typing import Any
 
-# The mask-binarization threshold is a dimensional-phenotype knob: 0.5 is an honest engineering
-# default, not a validated derivation. A calibrated mask-area measurement should derive it against
-# validated masks (measured area vs GT); until then its provenance must travel as validated=false so
-# a frozen 0.5 never silently defines every area/extent number. Surfaced here as the one shared
-# placeholder (resolve_binarize_threshold) so a delivery door stamps it rather than pinning it.
 DEFAULT_MASK_BINARIZE_THRESHOLD = 0.5
+"""A documented engineering default for the mask-binarization threshold, not a derivation; a
+bucket records it with its source beside every mask it cut."""
 
 
-def resolve_binarize_threshold(value: float | None = None):
-    """The mask-binarization threshold as a firewalled ``ResolvedParam`` (default 0.5,
-    validated=false).
-
-    Requires validation (``validation_kind="annotations"``, a mask GT reference): un-shippable as a
-    bare number until derived/validated against validated masks (``.value`` raises). An explicit
-    ``value`` is honored but still stamped unvalidated until a door validates it.
-    """
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedParam
-
-    v = DEFAULT_MASK_BINARIZE_THRESHOLD if value is None else float(value)
-    return ResolvedParam("mask_binarize_threshold", v,
-                         source="explicit" if value is not None else "default",
-                         derived_from="documented default (derive against validated masks)",
-                         requires_validation=True, validation_kind="annotations",
-                         validated_against=VALIDATED_FALSE)
-
-
-def resolve_scale(value: float | None = None, *, unit: str, capture_id: str | None = None):
-    """A physical per-pixel scale as a firewalled ``ResolvedParam`` (validated=false by default).
-
-    Requires validation (``validation_kind="physical"``), shippable only once ``validated_against``
-    names a real physical-measurement reference (``VALIDATED_PHYSICAL_MEASUREMENT``). Wraps
-    whatever candidate scale a caller has already derived, in whatever ``unit`` that scale is
-    actually in (never assumed to be mm).
-
-    ``capture_id`` scopes the value to a single capture when the caller has one; ``None`` leaves it
-    scoped no finer than the caller's own choice.
-    """
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedParam
-
-    return ResolvedParam(
-        f"scale_{unit}_per_px", value, source="explicit" if value is not None else "default",
-        derived_from="caller-supplied scale, unvalidated until a door confirms it against a real "
-                     "physical reference",
-        requires_validation=True, validation_kind="physical", validated_against=VALIDATED_FALSE,
-        capture_scoped=capture_id is not None, capture_id=capture_id,
-    )
+def resolve_binarize_threshold(value: float | None = None) -> dict:
+    """The mask-binarization threshold, ``{"value", "source"}``: a stated ``value`` (``explicit``),
+    else :data:`DEFAULT_MASK_BINARIZE_THRESHOLD` (``default``)."""
+    if value is None:
+        return {"value": DEFAULT_MASK_BINARIZE_THRESHOLD, "source": "default"}
+    return {"value": float(value), "source": "explicit"}
 
 
 def _to_numpy(mask: Any):
@@ -227,7 +190,7 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
                   threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
-    ``scale`` is a plain float (per-pixel, in ``unit``), never a ``ResolvedParam``.
+    ``scale`` is a plain float (per-pixel, in ``unit``).
 
     Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale
     is given::

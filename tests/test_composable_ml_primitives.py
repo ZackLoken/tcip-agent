@@ -202,9 +202,12 @@ class TestToolImports:
         src = inspect.getsource(mt)
         assert "pipelines.models.builder" not in src
 
-    def test_inference_tools_uses_build_predictor(self):
-        """inference_tools should build its predictor through the model-kind factory."""
+    def test_inference_tools_build_their_predictor_through_prepare_pass(self):
+        """inference_tools obtain their predictor from ``prepare_pass``, the one constructor of
+        a pass's ``GenericPredictor``."""
         import inspect
         import tcip_mcp.tools.inference_tools as it
-        src = inspect.getsource(it)
-        assert "build_predictor" in src
+        from tcip_mcp.pipelines.execution import prepare_pass
+        assert "prepare_pass" in inspect.getsource(it)
+        assert "GenericPredictor(" not in inspect.getsource(it)
+        assert "GenericPredictor(" in inspect.getsource(prepare_pass)

@@ -1,4 +1,4 @@
-"""End-to-end integration test: build → train → infer → export.
+"""End-to-end integration test: build → train → infer.
 
 Proves the full bespoke ``model_source`` pipeline works as a connected system.
 Uses synthetic data for classification and real sample data for detection.
@@ -53,9 +53,9 @@ def output_dir(tmp_path):
 # ---------------------------------------------------------------------------
 
 class TestFullClassificationPipeline:
-    """End-to-end: bespoke builder → train → checkpoint → predict → CSV."""
+    """End-to-end: bespoke builder → train → checkpoint → predict."""
 
-    def test_build_train_infer_export(self, tiny_classification_data, output_dir, tmp_path):
+    def test_build_train_infer(self, tiny_classification_data, output_dir, tmp_path):
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": "tests.bespoke_models:build_bespoke_classifier",
@@ -136,7 +136,7 @@ class TestFullClassificationPipeline:
         assert "model_source" in ckpt["config"] and "model_source" not in ckpt
 
         # --- Step 5: Register the checkpoint, load it verified, and run inference ---
-        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tcip_mcp.pipelines.execution import Stated, prepare_pass
         from tcip_mcp.tools.model_tools import register_model
         from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -145,55 +145,15 @@ class TestFullClassificationPipeline:
                                 config={})
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-        predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.1)
+        p = prepare_pass(checkpoint, Stated(tile=False), device="cpu")
 
         # Pick some test images
         test_images = sorted(Path(images_dir).rglob("*.png"))[:4]
-        results = predictor.predict_batch([str(p) for p in test_images])
+        results = p.predict([str(path) for path in test_images])
 
         assert len(results) == 4
         for r in results:
             assert "image" in r
-
-        # --- Step 6: Export CSV ---
-        from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
-
-        csv_path = str(out / "results.csv")
-        # Adapt classification results to detection CSV format
-        csv_results = []
-        for r in results:
-            preds = r.get("head0_labels", [])
-            confs = r.get("head0_confidences", [])
-            csv_results.append({
-                "image": r["image"],
-                "count": len(preds) if isinstance(preds, list) else 1,
-                "scores": confs if isinstance(confs, list) else [confs] if confs else [],
-            })
-        # A genuinely validated bucket stands behind the export: the delivery gate refuses a bare
-        # unvalidated write, and this door takes no acknowledgment at all.
-        from tests import _trait_fixtures as fx
-        from tests._binding_fixtures import write_bound_sidecar, write_prediction
-        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-
-        fx.seed_confirmed_count(tmp_path)
-        bucket = tmp_path / "ds" / "predictions" / "cls_preds"
-        write_prediction(bucket, "img_a")
-        write_bound_sidecar(
-            tmp_path, bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
-                    "operating_point": {"conf": {"value": 0.6,
-                                                 "validated_against": VALIDATED_HELD_OUT}},
-                    "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
-            dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
-        export_detection_csv(csv_results, csv_path, revision=fx.count_revision(tmp_path),
-                             operating_point_validated=VALIDATED_HELD_OUT,
-                             pred_dirs=[str(bucket)], project=tmp_path)
-
-        assert Path(csv_path).is_file()
-        content = Path(csv_path).read_text()
-        assert "image" in content
-        assert "detection_count" in content
-        lines = content.strip().splitlines()
-        assert len(lines) == 5  # header + 4 images
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +195,12 @@ def detection_output_dir(tmp_path):
     reason="No nested-schema sample project (set TCIP_SAMPLE_PROJECT to a converted dataset)",
 )
 class TestDetectionPipelineRealData:
-    """End-to-end: build → train → infer → export CSV using real bud images (nested schema)."""
+    """End-to-end: build → train → infer using real bud images (nested schema)."""
 
-    def test_build_train_infer_export(self, detection_output_dir, tmp_path):
+    def test_build_train_infer(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.training.generic_trainer import train
         from tcip_mcp.pipelines.training.collation import task_collate
-        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         from tests.tiny_trainer_fixtures import trainer_run
-        from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
         # --- Step 1: A bespoke detection model_source (small input sizes for speed) ---
         model_source = {
@@ -310,6 +268,7 @@ class TestDetectionPipelineRealData:
         assert "model_source" in ckpt["config"] and "model_source" not in ckpt
 
         # --- Step 4: Register the checkpoint, load it verified, and run inference ---
+        from tcip_mcp.pipelines.execution import Stated, prepare_pass
         from tcip_mcp.tools.model_tools import register_model
         from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -318,13 +277,13 @@ class TestDetectionPipelineRealData:
                                 config={})
         assert "error" not in result, result
         checkpoint = load_registered_checkpoint(ckpt_path, project=tmp_path)
-        predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.01)
+        detector = prepare_pass(checkpoint, Stated(tile=False, conf=0.01), device="cpu")
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
         test_images = sorted(p for p in images_dir.iterdir()
                              if p.suffix.lower() in img_exts)[:3]
         assert test_images, "no images on the sample date"
-        results = predictor.predict_batch([str(p) for p in test_images])
+        results = detector.predict([str(p) for p in test_images])
 
         assert len(results) == len(test_images)
         for r in results:
@@ -332,29 +291,3 @@ class TestDetectionPipelineRealData:
             assert "boxes" in r
             assert "scores" in r
             assert "count" in r
-
-        # --- Step 5: Export detection CSV ---
-        csv_path = str(out / "bud_detections.csv")
-        from tests import _trait_fixtures as fx
-        from tests._binding_fixtures import write_bound_sidecar, write_prediction
-        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
-
-        fx.seed_confirmed_count(tmp_path)
-        bucket = tmp_path / "ds" / "predictions" / "det_preds"
-        write_prediction(bucket, "img_a")
-        write_bound_sidecar(
-            tmp_path, bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
-                    "operating_point": {"conf": {"value": 0.6,
-                                                 "validated_against": VALIDATED_HELD_OUT}},
-                    "scope": {"subject": fx.COUNT_SUBJECT, "attribute": None}},
-            dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
-        export_detection_csv(results, csv_path, revision=fx.count_revision(tmp_path),
-                             operating_point_validated=VALIDATED_HELD_OUT,
-                             pred_dirs=[str(bucket)], project=tmp_path)
-
-        assert Path(csv_path).is_file()
-        content = Path(csv_path).read_text()
-        assert "image" in content
-        assert "detection_count" in content
-        lines = content.strip().splitlines()
-        assert len(lines) == len(test_images) + 1  # header + one row per image

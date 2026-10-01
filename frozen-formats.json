@@ -31,12 +31,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "cal_holdout_split_lock": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "canvas_geometry": {
       "kind": "record",
       "frozen": false,
@@ -46,18 +40,6 @@
     "canvas_meta": {
       "kind": "record",
       "frozen": false,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "classifier_operating_point_sidecar": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "confidence_sweep": {
-      "kind": "record",
-      "frozen": true,
       "schema_version": 1,
       "cannot_carry_field": null
     },
@@ -85,13 +67,13 @@
       "schema_version": 1,
       "cannot_carry_field": "a top-level JSON array of entries, with no object to hold the field; a future bump wraps this into {schema_version, entries}"
     },
-    "delivery_events": {
+    "delivery_acknowledgments": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "delivery_supersessions": {
+    "delivery_events": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,
@@ -140,18 +122,6 @@
       "cannot_carry_field": null
     },
     "model_registry": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "operating_point_sidecar": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "ordinal_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,
@@ -206,18 +176,6 @@
       "cannot_carry_field": null
     },
     "region_completeness_digest": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "regression_operating_point_sidecar": {
-      "kind": "record",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
-    "resolve_scale_sidecar": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,

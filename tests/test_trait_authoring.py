@@ -12,9 +12,6 @@ from tcip_mcp import traits
 from tcip_mcp.operationalization import latest_confirmed
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import TraitEntry, TraitUnknownError, trait_names
-from tests._binding_fixtures import write_bound_sidecar
-from tests._population import mapped_plants
-from tests._regime_fixtures import tiled_regime
 from tests._trait_fixtures import BUD_OPENING, entry, latest, propose, propose_and_confirm
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -72,44 +69,33 @@ def test_count_objective_is_not_a_closed_vocabulary_and_unset_stays_empty():
 # ── how the calibration path reads an entry ──────────────────────────────────
 
 
-def test_resolve_operating_point_defaults_an_unset_count_objective_instead_of_refusing(
-    tmp_path: Path,
-):
-    """An unset count_objective defaults to COUNT_UNBIASED and proceeds, stamped as a platform
-    default rather than trait-authored, so the distinction is never lost."""
-    import tcip_mcp.pipelines.operating_point as OP
-    from tcip_mcp.traits import COUNT_UNBIASED
+def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(tmp_path: Path):
+    """No platform default stands in for the objective a count is fitted under: a count
+    operationalization proposed without one refuses asking the breeder, and a stated one is
+    admitted."""
+    from tests._trait_fixtures import with_operationalization
 
-    propose_and_confirm(tmp_path, entry("undecided", ("leaf_length",)))
-    bundle = OP.resolve_operating_point("undecided", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                        calibration_records=[])
-    param = bundle.params["count_objective"]
-    assert param._raw == COUNT_UNBIASED
-    assert param.source == "default"
-    assert "not breeder-confirmed" in param.derived_from
+    floors = {"localization": "center_match", "count_bias_tolerance_frac": 0.1,
+              "count_error_tolerance": 1.0, "holdout_match_quality_floor": 0.5}
+    undecided = with_operationalization(entry("undecided", ("leaf_length",), **floors),
+                                        traits.PER_IMAGE_COUNT)
+    decided = with_operationalization(
+        entry("decided", ("leaf_length",), count_objective="detection_f1", **floors),
+        traits.PER_IMAGE_COUNT)
 
-
-def test_resolve_operating_point_stamps_a_stated_count_objective_as_trait_authored(
-    tmp_path: Path,
-):
-    import tcip_mcp.pipelines.operating_point as OP
-
-    propose_and_confirm(tmp_path, entry("decided", ("leaf_length",), count_objective="detection_f1"))
-    bundle = OP.resolve_operating_point("decided", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                        calibration_records=[])
-    param = bundle.params["count_objective"]
-    assert param._raw == "detection_f1"
-    assert param.derived_from == "trait-authored"
+    with pytest.raises(traits.UnauthoredField, match="count_objective"):
+        propose(tmp_path, undecided)
+    assert "undecided" not in trait_names(tmp_path)
+    assert propose(tmp_path, decided).entry.count_objective == "detection_f1"
 
 
-def test_resolve_operating_point_refuses_an_unregistered_count_objective(tmp_path: Path):
-    import tcip_mcp.pipelines.operating_point as OP
+def test_an_unregistered_count_objective_refuses_the_count_criterion_by_name():
+    from tcip_mcp.pipelines.operating_point import count_criterion
 
-    propose_and_confirm(
-        tmp_path, entry("custom", ("leaf_length",), count_objective="a_brand_new_objective"))
+    custom = entry("custom", ("leaf_length",), count_objective="a_brand_new_objective")
     with pytest.raises(ValueError, match="no registered picker"):
-        OP.resolve_operating_point("custom", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                   calibration_records=[])
+        count_criterion([], [], custom, staged_conf_floor=0.05,
+                        staged_conf_floor_attribute_path=None)
 
 
 # ── the record ───────────────────────────────────────────────────────────────
@@ -129,21 +115,17 @@ def test_an_unknown_trait_hard_fails(tmp_path: Path):
 
 
 def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name(tmp_path: Path):
-    """Calibration reads the latest confirmed revision: an entry proposed and never confirmed
+    """A measurement reads the latest confirmed revision: an entry proposed and never confirmed
     refuses by name, and a later unconfirmed proposal never changes what the confirmed one says."""
-    import tcip_mcp.pipelines.operating_point as OP
     from tcip_mcp.operationalization import OperationalizationRefused
 
     propose(tmp_path, entry("pending", ("leaf_length",), count_objective="detection_f1"))
     with pytest.raises(OperationalizationRefused, match="'pending'"):
-        OP.resolve_operating_point("pending", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                   calibration_records=[])
+        latest_confirmed("pending", tmp_path)
 
     propose_and_confirm(tmp_path, entry("leaf", ("leaf_length",), count_objective="detection_f1"))
     propose(tmp_path, entry("leaf", ("leaf_length",), count_objective="count_unbiased"))
-    bundle = OP.resolve_operating_point("leaf", project=tmp_path, **tiled_regime(), dataset_hash="h1",
-                                        calibration_records=[])
-    assert bundle.params["count_objective"]._raw == "detection_f1"
+    assert latest_confirmed("leaf", tmp_path).entry.count_objective == "detection_f1"
 
 
 def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revision(
@@ -204,111 +186,73 @@ def test_the_file_backend_places_a_trait_record_at_the_state_traits_path(tmp_pat
 
 # ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
-def _op_sidecar(project: Path, dir_path: Path, id_map: dict | None, *, dataset_root: Path,
-                subject: str = "bud", attribute: str | None = "opening") -> None:
-    dir_path.mkdir(parents=True, exist_ok=True)
-    stamp = {
-        "validated": True,
-        "trait": "bud_opening",
-        "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
-        "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
-    }
-    write_bound_sidecar(project, dir_path, stamp, dataset_root=dataset_root,
-                        experiment_id=f"exp-record-{dir_path.name}",
-                        producing_experiment_id="exp-trait-authoring")
+def _bucket(project: Path, date: str, id_map: dict, *, attribute: str | None,
+            images: list[Path] | None = None) -> Path:
+    """Each of ``images`` (by default one frame ``P1.png``) holding one detection of ``id_map``'s
+    last class, published as the bucket ``ds/predictions/run/<date>``
+    (``_chain_fixtures.published``)."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    bucket = project / "ds" / "predictions" / "run" / date
+    published(project, bucket, [{"image": str(image), "width": 8, "height": 8,
+                                 "boxes": [[1.0, 1.0, 3.0, 3.0]], "scores": [0.9],
+                                 "labels": [max(id_map.values()) + 1]}
+                                for image in images or [Path("P1.png")]],
+              scope={"subject": "bud", "attribute": attribute, "id_map": id_map})
+    return bucket
 
 
-def test_resolve_positive_class_id_by_name(tmp_path: Path):
-    d = tmp_path / "preds"
-    _op_sidecar(tmp_path, d, {"closed": 0, "open": 1}, dataset_root=tmp_path)
-    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2026-02-11": str(d)})
-    assert cid == 1
-    assert "open" in msg
+def test_the_positive_class_id_resolves_by_name_from_the_buckets_own_map(tmp_path: Path):
+    from tcip_mcp.buckets import read_bucket
+
+    named = read_bucket(_bucket(tmp_path, "2026-02-11", {"closed": 0, "open": 1},
+                                attribute="opening"))
+    absent = read_bucket(_bucket(tmp_path, "2026-02-25", {"closed": 0, "bud": 1},
+                                 attribute="opening"))
+
+    assert named.scope.positive_id(BUD_OPENING.positive_value) == 1
+    assert absent.scope.positive_id(BUD_OPENING.positive_value) is None
 
 
-def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
-    d = tmp_path / "preds"
-    _op_sidecar(tmp_path, d, {"closed": 0, "bud": 1}, dataset_root=tmp_path)  # no 'open' class
-    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2026-02-11": str(d)})
-    assert cid is None  # never silently defaults to 1
-    assert "open" in msg
+# ── end-to-end through the phenology delivery ─────────────────────────────────
 
+def _deliver_series(tmp_path: Path, *, classified: bool) -> dict:
+    """Two dated buckets over two mapped plots, classified for the positive value or bare
+    detector output, delivered through the mapping over them under a breeder's acknowledgment; a
+    refusal answers ``{"error": ...}``."""
+    from tests._chain_fixtures import acknowledged
+    from tests._mapping_fixtures import PLOTS, map_captures
+    from tests._trait_fixtures import seed_positive_class
 
-def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
-    cid, _ = phenology.resolve_positive_class_id(
-        BUD_OPENING, {"2026-02-11": str(tmp_path / "missing")})
-    assert cid is None
-
-
-# ── end-to-end through deliver_phenology_milestones ────────────────────────────
-
-def _pheno_fixture(tmp_path: Path, *, classified: bool):
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-
-    root = tmp_path / "ds"
-    d1 = root / "predictions" / "run" / "2026-02-11"
-    d2 = root / "predictions" / "run" / "2026-03-09"
     id_map = {"closed": 0, "open": 1} if classified else {"bud": 0}
-    attribute = "opening" if classified else None
-    attrs = {"opening": "open"} if classified else {}
-    for d in (d1, d2):
-        d.mkdir(parents=True, exist_ok=True)
-        json_io.write_annotations(
-            d / "P1.json",
-            [Annotation(subject="bud", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
-                       attributes=attrs)], 8, 8)
-        _op_sidecar(tmp_path, d, id_map, dataset_root=root, subject="bud", attribute=attribute)
-    from tests._binding_fixtures import write_plant_mapping
-
-    mapping_name = "valley"
-    write_plant_mapping(tmp_path, mapping_name, {
-        "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
-        "2026-03-09": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
-    }, dataset_root=root)
-    return mapping_name, d1, d2
+    captures = map_captures(tmp_path, tmp_path / "ds", ["2026-02-11", "2026-03-09"])
+    buckets = [str(_bucket(tmp_path, d, id_map, attribute="opening" if classified else None,
+                           images=images)) for d, images in captures.items()]
+    seed_positive_class(tmp_path / "ds", "bud", "open")
+    try:
+        measurement = phenology.measure_phenology(
+            tmp_path, trait="bud_opening", mapping_name="valley", buckets=buckets,
+            plants=list(PLOTS), require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
+        return acknowledged(tmp_path, lambda ack: phenology.deliver_phenology(
+            tmp_path, measurement, curves=False, output_path=tmp_path / "out.csv",
+            acknowledgment_id=ack, door="test_trait_authoring"),
+            reason="no assessment in this fixture")
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+def test_a_classified_series_derives_its_class_id_and_delivers(tmp_path: Path):
+    res = _deliver_series(tmp_path, classified=True)
 
-    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=True)
-    out_csv = tmp_path / "out.csv"
-    classifier_stamp = {
-        "validated": True,
-        "operating_point": {"classifier": {"value": "open",
-                                           "validated_against": "held_out_annotations"}},
-        "trait": "bud_opening",
-    }
-    write_bound_sidecar(tmp_path, d1, classifier_stamp, document="classifier_operating_point",
-                        dataset_root=tmp_path / "ds", experiment_id="exp-classifier-derives-id",
-                        producing_experiment_id="exp-trait-authoring", trait="bud_opening")
-
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-        classifier_pred_dirs=[str(d1)],
-    )
-    # The positive class id resolves from the buckets' own recorded id_map; both dimensions are
-    # validated, so this delivers.
     assert "error" not in res, res
-    assert res["positive_class_assessed"] is True
-    assert out_csv.exists()
+    assert (tmp_path / "out.csv").exists()
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+def test_a_series_that_never_classified_the_positive_value_refuses(tmp_path: Path):
+    res = _deliver_series(tmp_path, classified=False)
 
-    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'open' anywhere
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(tmp_path / "out.csv"),
-    )
-    assert "error" in res
+    assert "classify no 'open'" in res["error"]
     assert not (tmp_path / "out.csv").exists()

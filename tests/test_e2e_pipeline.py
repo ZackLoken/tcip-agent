@@ -44,7 +44,7 @@ def project_dir(tmp_path: Path) -> Path:
     images = root / "images" / date
     labels_dir = root / "annotations" / date
     preds_dir = root / "predictions" / "live" / date
-    for d in (images, labels_dir, preds_dir):
+    for d in (images, labels_dir):
         d.mkdir(parents=True)
 
     from tcip_annotation import json_io
@@ -57,6 +57,7 @@ def project_dir(tmp_path: Path) -> Path:
         SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     # 5 synthetic images (640x480 gray) with GT labels and predictions
+    results = []
     for i in range(5):
         name = f"img_{i:03d}"
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
@@ -70,13 +71,14 @@ def project_dir(tmp_path: Path) -> Path:
             640, 480,
         )
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
-        json_io.write_annotations(
-            str(preds_dir / f"{name}.json"),
-            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.92),
-             Annotation(subject="bud", geometry=BBox(499.2, 374.4, 524.8, 393.6), score=0.60)],
-            640, 480,
-        )
+        results.append({"image": str(images / f"{name}.jpg"), "width": 640, "height": 480,
+                        "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
+                        "scores": [0.92, 0.60], "labels": [1, 1]})
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
+    published(root, preds_dir, results,
+              scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
     return root
 
 
@@ -114,7 +116,8 @@ class TestE2EPipeline:
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
-        ann = read_annotations(img_path)
+        preds_dir = str(project_dir / "predictions" / "live" / "2-11-26")
+        ann = read_annotations(img_path, preds_dir)
         assert "error" not in ann
         assert ann["labels"]["count"] >= 2
         assert ann["predictions"]["count"] >= 2
@@ -138,7 +141,7 @@ class TestE2EPipeline:
         assert len(anns) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
-        eval_result = score_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25)
+        eval_result = score_predictions(img_path, preds_dir, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
         assert "precision" in eval_result
@@ -147,14 +150,16 @@ class TestE2EPipeline:
         assert isinstance(eval_result["precision"], float)
 
         # ── Step 8: Detailed per-detection breakdown (score_predictions detail=True) ─
-        match_result = score_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
+        match_result = score_predictions(img_path, preds_dir, iou_threshold=0.5, conf_threshold=0.25,
+                                         detail=True)
         assert "error" not in match_result
         assert "detections" in match_result
         assert "img_w" in match_result
         assert "img_h" in match_result
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
-        dataset_eval = score_predictions(root, iou_threshold=0.5, conf_threshold=0.25)
+        dataset_eval = score_predictions(str(project_dir / "images" / "2-11-26"), preds_dir,
+                                         iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in dataset_eval
         assert dataset_eval["image_count"] == 5
         assert "precision" in dataset_eval
@@ -167,7 +172,7 @@ class TestE2EPipeline:
         split_dir = tmp_path / "splits"
         split_result = draw_splits(project_dir, root, output_path=str(split_dir),
                                    subject="bud", train_ratio=0.5, val_ratio=0.25,
-                                   calibration_ratio=0.25)
+                                   calibration_ratio=0.125, holdout_ratio=0.125)
         assert split_result["total_stems"] == 5
         drawn = read_selection(split_dir, project=project_dir)
         assert drawn.on("train")
@@ -239,8 +244,8 @@ class TestE2EPipelineEdgeCases:
         json_io.write_annotations(str(labels / "test.json"),
                                   [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
-        # No predictions directory: evaluate should handle gracefully
-        result = score_predictions(str(img_path))
+        # A bucket directory that holds nothing: evaluate should handle gracefully
+        result = score_predictions(str(img_path), str(tmp_path / "predictions" / "none"))
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 

@@ -59,16 +59,6 @@ def _opened(experiment_id: str, tmp_path: Path, builder: str = "my_models:chestn
     return opened_run(tmp_path, config, experiment_id=experiment_id)
 
 
-def _calibration(project: Path):
-    """A calibration run under ``project`` opened by its own writer."""
-    from tcip_mcp.experiments import open_calibration_run
-
-    return open_calibration_run({
-        "document": "operating_point", "checkpoint_sha256": None,
-        "reference_identity": {"calibration_dataset_hash": "h"}, "trait": "bud_50per_date",
-        "derived_from": "a calibration door"}, project=project)
-
-
 def test_list_configs_route_reports_a_launchable_config(opened_project) -> None:
     from tcip_web.routes.training import list_configs_route
 
@@ -84,14 +74,6 @@ def test_list_configs_route_reports_a_launchable_config(opened_project) -> None:
 
 def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> None:
     resp = client.post("/api/training/runs", json={"experiment_id": "nope"})
-    assert resp.status_code == 404
-
-
-def test_relaunch_route_404s_for_a_calibration_run(tmp_path, client: TestClient) -> None:
-    """A calibration run's launch record carries no config, so there is nothing to relaunch."""
-    calibration = _calibration(tmp_path)
-
-    resp = client.post("/api/training/runs", json={"experiment_id": calibration.name})
     assert resp.status_code == 404
 
 
@@ -341,18 +323,15 @@ def _fails_at_data_load(ctx) -> None:
 
 def test_list_runs_reads_every_training_run_directory(opened_project, monkeypatch) -> None:
     """The route's rows come from the project's run directories: a run whose process stopped
-    touching its heartbeat reads interrupted, and a calibration run (no config) is not a
-    training run."""
+    touching its heartbeat reads interrupted."""
     from tcip_mcp import experiments
     from tcip_web.routes import training
 
     _opened("run_1", opened_project)
-    calibration = _calibration(opened_project)
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
 
     by_id = {r["experiment_id"]: r for r in training.list_runs_route()["runs"]}
     assert by_id["run_1"]["status"] == "interrupted"
-    assert calibration.name not in by_id
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(opened_project) -> None:

@@ -57,7 +57,7 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef, image_dimensions, list_logical_images, refuse_incomplete_band_group,
     )
-    from tcip_mcp.pipelines.resolution import digest_bytes
+    from tcip_mcp.pipelines.data.selection import digest_bytes
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
     document, root = Path(document).resolve(), Path(dataset_root).resolve()

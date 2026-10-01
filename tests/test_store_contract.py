@@ -24,6 +24,7 @@ from tcip_annotation import json_io, review_engine
 from tcip_mcp import (
     audit,
     dataset_layout,
+    delivery,
     model_registry,
     project_record,
     project_status,
@@ -31,10 +32,10 @@ from tcip_mcp import (
     web_client,
     workspace,
 )
-from tcip_mcp.pipelines import image_utils, resolution
+from tcip_mcp.pipelines import image_utils
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
-from tcip_mcp.pipelines.data import band_groups, selection, splits
+from tcip_mcp.pipelines.data import band_groups, selection
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.training import hpo
@@ -1744,8 +1745,7 @@ def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
     only_on(store, SQLITE, _DATABASE_MECHANICS)
     ts.replace(traits.trait_key(store.root, "bud_opening"), {"revisions": []},
                expect=ts.Version.ABSENT)
-    ts.replace(resolution.delivery_event_key(project_state_dir(store.root), "e1"),
-               {"event_id": "e1"})
+    ts.replace(delivery.delivery_event_key(store.root, "e1"), {"event_id": "e1"})
 
     databases = sorted(store.root.rglob(DATABASE_FILENAME))
     assert databases == [store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME]
@@ -1843,9 +1843,8 @@ PROPOSAL_STEM = "a_1"
 TRAIT_UNDER_TEST = "trait_under_test"
 DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
 EVENT_ID_UNDER_TEST = "a1b2c3d4e5f60718"
+ACKNOWLEDGMENT_UNDER_TEST = "9e8d7c6b5a403122"
 EXPERIMENT = "exp_042"
-LOCK_IDENTITY = "d41d8cd98f00b204"
-SWEEP_IDENTITY = "7f3a1b9c2d4e5f60"
 IMAGE_DATE = "2026-03-04"
 IMAGE_STEM = "a_1"
 IMAGE_EXT = ".JPG"
@@ -1903,11 +1902,6 @@ def _curated_dir(root: Path) -> Path:
     return root / "curated"
 
 
-def _stamp_bucket(root: Path) -> Path:
-    """The prediction bucket a run's provenance stamps sit in, from the layout's own resolver."""
-    return dataset_layout.prediction_dir(root, "live", "2026-03-04")
-
-
 @dataclass(frozen=True)
 class Registered:
     """One registered store: a ``golden`` value of the shape it holds, the key it is written
@@ -1953,17 +1947,6 @@ def _real_selection() -> dict:
         return ts.read(selection_key(scratch))
 
     return _construct_via_scratch_backend(build)
-
-
-def _real_cal_holdout_lock() -> dict:
-    """The lock ``splits.resolve_locked_cal_holdout_split`` writes, drawn in a scratch
-    directory."""
-    def draw(scratch: Path) -> dict:
-        splits.resolve_locked_cal_holdout_split(
-            ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=scratch)
-        return ts.read(splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=scratch))
-
-    return _construct_via_scratch_backend(draw)
 
 
 REGISTERED = {
@@ -2034,64 +2017,21 @@ REGISTERED = {
         f".tcip/state/proposals/2026-03-04/{PROPOSAL_STEM}.json"),
     "backend_port": Registered(
         "8765", web_client.backend_port_key, ".tcip/state/web_port.txt"),
-    "operating_point_sidecar": Registered(
-        {"trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
-         "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
-                                      "validated_against": "held_out_annotations"}},
-         "scope": {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
-         "validated": True, "shippable_issues": [], "checkpoint": "ü_best", "raster_path": None},
-        lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
-        "predictions/live/2026-03-04/operating_point.json", root_of=_stamp_bucket),
-    "classifier_operating_point_sidecar": Registered(
-        {"operating_point": {"classifier": {"validated_against": "held_out_annotations",
-                                            "value": "elongiert"}},
-         "validated": True, "failures": [], "gate_evidence": {"kappa": 0.81}},
-        lambda root: resolution.sidecar_key(_stamp_bucket(root), "classifier_operating_point"),
-        "predictions/live/2026-03-04/classifier_operating_point.json", root_of=_stamp_bucket),
-    "ordinal_operating_point_sidecar": Registered(
-        {"operating_point": {"ordinal": {"validated_against": "held_out_annotations",
-                                         "criterion": "quadratic_weighted_kappa"}},
-         "validated": True, "failures": [], "gate_evidence": {"qwk": 0.77},
-         "trait": "ü_ordinal_trait"},
-        lambda root: resolution.sidecar_key(_stamp_bucket(root), "ordinal_operating_point"),
-        "predictions/live/2026-03-04/ordinal_operating_point.json", root_of=_stamp_bucket),
-    "regression_operating_point_sidecar": Registered(
-        {"operating_point": {"regression": {"validated_against": "held_out_annotations",
-                                            "criterion": "r_squared"}},
-         "validated": False, "failures": ["insufficient_holdout"],
-         "gate_evidence": {"score": None, "score_state": "nan"}, "trait": "ü_regression_trait"},
-        lambda root: resolution.sidecar_key(_stamp_bucket(root), "regression_operating_point"),
-        "predictions/live/2026-03-04/regression_operating_point.json", root_of=_stamp_bucket),
-    "resolve_scale_sidecar": Registered(
-        # every key scale_tools.calibrate_physical_scale's stamp literal writes, "unit" as the
-        # writer spells it rather than "units"
-        {"operating_point": {"scale": {
-             "name": "scale_mm_per_px", "value": 0.271, "unit": "mm", "source": "derived",
-             "derived_from": "mean of 3 'reference_object' reference object(s), the calibration "
-                              "half of the locked reference split",
-             "requires_validation": True, "validation_kind": "physical",
-             "validated_against": "physical_measurement",
-             "capture_scoped": True, "capture_id": "2026-03-04_handheld"}},
-         "validated": True, "validated_by": None, "failures": [],
-         "gate_evidence": {"calibration_implied_scales": {"a_1": 0.27}},
-         "trait": "büsch_length", "reference_subject": "reference_object",
-         "produced_at": "2026-03-04T12:00:00+00:00"},
-        lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
-        "predictions/live/2026-03-04/resolve_scale.json", root_of=_stamp_bucket),
     "raster_pass_progress": Registered(
         {"schema_version": 1,
          "raster_identity": {"width": 100, "height": 100, "num_channels": 3, "dtype": "uint8",
                              "pixel_checksum": "ab12", "seed": 0, "window_size": 1024,
                              "max_windows": 8, "pixel_fraction": 1.0, "band_interpretations": None,
                              "geotransform": None},
-         "checkpoint_sha256": "0" * 64, "trait": "büsch_count", "experiment_id": None,
-         "tile_batch_size": 96,
-         "operating_point": {"conf": 0.42, "cross_tile_nms": 0.5, "max_dets": None,
-                             "tile_size": 512, "overlap": 0.2, "tile_resize": None,
-                             "postprocess": "nms", "require_masks": False}},
-        lambda root: inference_tools._raster_pass_key(_stamp_bucket(root), "identity"),
-        "predictions/live/2026-03-04/.tcip/raster_pass_progress/identity.json",
-        root_of=_stamp_bucket),
+         "checkpoint_sha256": "0" * 64, "experiment_id": None, "assessment_id": None,
+         "tile_batch_size": 96, "require_masks": False,
+         "execution": {"conf": 0.42, "max_dets": 1000, "tile_size": 512, "overlap": 0.2,
+                       "tile_resize": None, "postprocess": "nms", "merge_type": "NMS",
+                       "match_metric": "IOU", "cross_tile_nms": 0.5, "sahi_version": "0.11",
+                       "sources": {"conf": "explicit", "tile_size": "explicit"}}},
+        lambda root: ts.Key(inference_tools.RASTER_PASS_PROGRESS_STORE, str(root),
+                            ("ab12cd34ef567890", "identity")),
+        ".tcip/raster_pass_progress/ab12cd34ef567890/identity.json"),
     "traits": Registered(
         # One trait's record as the proposing and confirming producers leave it; the
         # producer-agreement module holds this golden's keys to what those producers write.
@@ -2106,6 +2046,7 @@ REGISTERED = {
                 "localization_tolerance_frac": 0.5, "count_bias_tolerance_frac": None,
                 "count_error_tolerance": None, "classifier_agreement_floor": None,
                 "ordinal_agreement_floor": None, "regression_skill_floor": None,
+                "regression_criterion": "",
                 "scale_tolerance_frac": None, "holdout_match_quality_floor": None, "notes": "ü",
                 "operationalizations": {DELIVERY_KIND_UNDER_TEST: {
                     "statement": "the date each büsch reached the measured state",
@@ -2141,10 +2082,6 @@ REGISTERED = {
         IMAGE_BYTES,
         lambda root: image_utils.flat_image_key(_band_group_dir(root), "cap_ü.jpg"),
         "images/cap_ü.jpg", root_of=_band_group_dir),
-    "cal_holdout_split_lock": Registered(
-        _real_cal_holdout_lock(),
-        lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=root),
-        f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
     "ray_dashboard": Registered(
         {"url": "http://127.0.0.1:8265", "pid": 4242},
         hpo.ray_dashboard_key, ".tcip/state/ray_dashboard.json"),
@@ -2166,12 +2103,6 @@ REGISTERED = {
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
          "status": "ok", "source": "gui"},
         lambda root: audit.audit_log_key(root), ".tcip/audit.jsonl"),
-    "confidence_sweep": Registered(
-        {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
-         "checkpoint_sha256": "0" * 64,
-         "gate_evidence": [{"conf": 0.1, "f1": 0.4}, {"conf": 0.2, "f1": 0.6}]},
-        lambda root: inference_tools.calibration_curve_key(root, SWEEP_IDENTITY),
-        f".tcip/artifacts/operating_point_sweep_{SWEEP_IDENTITY}.json"),
     "imagery": Registered(
         IMAGE_BYTES,
         lambda root: dataset_layout.image_key(root, IMAGE_DATE, IMAGE_STEM, IMAGE_EXT),
@@ -2189,22 +2120,17 @@ REGISTERED = {
          "registered_at": "2026-03-04T12:00:00+00:00"},
         lambda root: plant_mapping.plant_registry_key(root, "valley-plants"),
         ".tcip/state/plant_registries/valley-plants.json", root_of=project_state_dir),
-    "delivery_supersessions": Registered(
-        {"superseded_event_id": EVENT_ID_UNDER_TEST, "output_sha256": "0" * 64,
-         "replacement_event_id": None, "reason": "a mis-stated crop was corrected upstream",
-         "superseded_by": "agent:supersede_delivery",
-         "superseded_at": "2026-03-04T12:00:00+00:00"},
-        lambda root: resolution.delivery_supersession_key(
-            project_state_dir(root), EVENT_ID_UNDER_TEST),
-        f".tcip/state/delivery_supersessions/{EVENT_ID_UNDER_TEST}.json",
-        root_of=project_state_dir),
-    # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
+    # one completed delivery, with the gate's finding for the bucket it shipped
     "delivery_events": Registered(
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST, "trait_revision": 1,
          "trait_revision_sha256": "7f3a1b9c2d4e5f60",
          "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
          "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
-         "acknowledged_by": None, "acknowledgment_reason": None,
+         "producer": {"checkpoint_sha256": "0" * 64, "experiment_id": EXPERIMENT},
+         "buckets": [{"path": "predictions/live/2026-03-04", "date": "2026-03-04",
+                      "assessment_id": "assessment-ü", "validated": True, "reason": None}],
+         "scale_assessment_id": None, "validated": True, "acknowledgment": None,
+         "population": ["plot_ü"], "require_all_dates_complete": True,
          "plant_mapping": {
              "name": "valley", "dataset_id": "ds-1",
              "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",
@@ -2213,33 +2139,16 @@ REGISTERED = {
              "plant_csvs_unverified": [], "dates_delivered": ["2026-03-04"],
              "images_unattributed": 0, "images_unattributed_scope": "delivered_dates",
              "plant_attribution": "image"},
-         "document_reconciliations": {
-             "operating_point": {
-                 "validated": "held_out_annotations", "on_disk_validated": True,
-                 "missing_sidecars": [], "unvalidated_buckets": [], "binding_notes": {},
-                 "bindings": {"predictions/live/2026-03-04": {
-                     "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
-                     "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
-                     "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
-                 "conf": 0.42, "confs": {"predictions/live/2026-03-04": 0.42},
-                 "per_bucket": {"predictions/live/2026-03-04": "held_out_annotations"}},
-             "classifier_operating_point": {
-                 "validated": "held_out_annotations", "on_disk_validated": True,
-                 "missing_sidecars": [], "unvalidated_buckets": [], "binding_notes": {},
-                 "bindings": {"predictions/live/2026-03-04": {
-                     "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
-                     "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
-                     "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
-                 "conf": None, "confs": {"predictions/live/2026-03-04": None},
-                 "per_bucket": {"predictions/live/2026-03-04": "held_out_annotations"},
-                 "bound_validated": "held_out_annotations", "delivery_note": ""}},
-         "dimension_reconciliations": {
-             "tile_size": {
-                 "operative": False, "validated": None, "per_bucket": {},
-                 "unvalidated_buckets": [], "binding_notes": {}}},
          "produced_at": "2026-03-04T12:00:00+00:00"},
-        lambda root: resolution.delivery_event_key(project_state_dir(root), EVENT_ID_UNDER_TEST),
+        lambda root: delivery.delivery_event_key(root, EVENT_ID_UNDER_TEST),
         f".tcip/state/delivery_events/{EVENT_ID_UNDER_TEST}.json", root_of=project_state_dir),
+    "delivery_acknowledgments": Registered(
+        {"acknowledgment_id": ACKNOWLEDGMENT_UNDER_TEST, "acknowledged_by": "user:breeder",
+         "reason": "a look before the büsch assessment", "result_sha256": "0" * 64,
+         "recorded_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: delivery._acknowledgment_key(root, ACKNOWLEDGMENT_UNDER_TEST),
+        f".tcip/state/delivery_acknowledgments/{ACKNOWLEDGMENT_UNDER_TEST}.json",
+        root_of=project_state_dir),
 }
 
 CODEC_EXEMPT = {

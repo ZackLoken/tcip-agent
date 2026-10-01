@@ -57,37 +57,28 @@ def viz_dataset(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
-    """A bucket's own stamp, written straight through the store: the rail refuses a fresh
-    write_sidecar call missing the (subject, attribute) pair."""
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar, expect=tcip_store.Version.ABSENT)
+PUBLISHED = "predictions/published"
+"""Where :func:`viz_bucket` publishes the dataset's predictions as a bucket."""
 
 
-def _damage_sidecar(pred_dir: Path) -> None:
-    """Corrupt a bucket's already-seeded stamp in place, wherever the bound backend keeps it."""
-    import os
+@pytest.fixture
+def viz_bucket(viz_dataset: Path) -> Path:
+    """``viz_dataset`` with each image's two predictions published as the bucket
+    :data:`PUBLISHED` (``_chain_fixtures.published``)."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-    from tcip_mcp.pipelines.resolution import sidecar_key
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
+    published(viz_dataset, viz_dataset / PUBLISHED, [
+        {"image": f"{name}.jpg", "width": 640, "height": 480,
+         "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.95, 0.6],
+         "labels": [1, 1]} for name in ("img_001", "img_002", "img_003", "img_004")],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    return viz_dataset
 
-    key = sidecar_key(pred_dir, "operating_point")
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(b"{not json")
-        return
-    import sqlite3
 
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute("update records set value = ? where store = ? and parts = ?",
-                    (b"{not json", key.store, encode_parts(key.parts)))
-    finally:
-        conn.close()
+def _damage_record(project: Path) -> None:
+    """Rewrite the published bucket's record as bytes that do not decode."""
+    (project / PUBLISHED / "bucket.json").write_bytes(b"{not json")
 
 
 # ── Rendering engine tests ──────────────────────────────────────────────────
@@ -327,91 +318,90 @@ class TestVisualizeAnnotations:
 
 
 class TestVisualizePredictions:
-    def test_detect(self, viz_dataset: Path):
+    def test_detect(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        result = visualize(viz_dataset, "predictions", img, task="detect")
-        assert "error" not in result
+        img = str(viz_bucket / "images" / "img_001.jpg")
+        result = visualize(viz_bucket, "predictions", img, task="detect", predictions_dir=PUBLISHED)
+        assert "error" not in result, result
         assert Path(result["image_path"]).is_file()
         assert result["prediction_count"] == 2
 
-    def test_missing_predictions(self, viz_dataset: Path):
+    def test_missing_predictions(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
         img = Image.new("RGB", (100, 100))
-        no_pred = viz_dataset / "images" / "no_pred.jpg"
+        no_pred = viz_bucket / "images" / "no_pred.jpg"
         img.save(no_pred)
-        result = visualize(viz_dataset, "predictions", str(no_pred))
+        result = visualize(viz_bucket, "predictions", str(no_pred), predictions_dir=PUBLISHED)
         assert "error" in result
 
-    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_dataset: Path):
+    def test_no_bucket_named_refuses_naming_the_parameter(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        pred = viz_dataset / "predictions" / "live" / "img_001.json"
+        result = visualize(viz_dataset, "predictions", str(viz_dataset / "images" / "img_001.jpg"))
+        assert "predictions_dir" in result["error"]
+
+    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_bucket: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_bucket / "images" / "img_001.jpg")
+        pred = viz_bucket / PUBLISHED / "img_001.json"
         pred.write_text("not json {][", encoding="utf-8")
 
-        result = visualize(viz_dataset, "predictions", img)
-        assert "error" in result
+        result = visualize(viz_bucket, "predictions", img, predictions_dir=PUBLISHED)
         assert str(pred) in result["error"]
 
-    def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
+    def test_an_undecodable_bucket_record_refuses(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"scope": {"subject": "bud", "id_map": {"bud": 0}}})
-        _damage_sidecar(preds_dir)
+        _damage_record(viz_bucket)
 
-        result = visualize(viz_dataset, "predictions", img)
+        result = visualize(viz_bucket, "predictions", str(viz_bucket / "images" / "img_001.jpg"),
+                           predictions_dir=PUBLISHED)
         assert "error" in result
 
 
 class TestVisualizeComparison:
-    def test_basic(self, viz_dataset: Path):
+    def test_basic(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        result = visualize(viz_dataset, "comparison", img)
-        assert "error" not in result
+        img = str(viz_bucket / "images" / "img_001.jpg")
+        result = visualize(viz_bucket, "comparison", img, predictions_dir=PUBLISHED)
+        assert "error" not in result, result
         assert Path(result["image_path"]).is_file()
         assert result["gt_count"] == 2
         assert result["pred_count"] == 2
 
-    def test_an_unreadable_gt_returns_an_error_naming_the_file(self, viz_dataset: Path):
+    def test_an_unreadable_gt_returns_an_error_naming_the_file(self, viz_bucket: Path):
         """Same as the annotations source: the shared parser's own message, naming the file."""
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        label = viz_dataset / "annotations" / "img_001.json"
+        img = str(viz_bucket / "images" / "img_001.jpg")
+        label = viz_bucket / "annotations" / "img_001.json"
         label.write_text("not json {][", encoding="utf-8")
 
-        result = visualize(viz_dataset, "comparison", img)
-        assert "error" in result
+        result = visualize(viz_bucket, "comparison", img, predictions_dir=PUBLISHED)
         assert str(label) in result["error"]
         assert "does not decode as JSON" in result["error"]
 
-    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_dataset: Path):
+    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        pred = viz_dataset / "predictions" / "live" / "img_001.json"
+        img = str(viz_bucket / "images" / "img_001.jpg")
+        pred = viz_bucket / PUBLISHED / "img_001.json"
         pred.write_text("not json {][", encoding="utf-8")
 
-        result = visualize(viz_dataset, "comparison", img)
-        assert "error" in result
+        result = visualize(viz_bucket, "comparison", img, predictions_dir=PUBLISHED)
         assert str(pred) in result["error"]
 
-    def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
+    def test_an_undecodable_bucket_record_refuses(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import visualize
 
-        img = str(viz_dataset / "images" / "img_001.jpg")
-        preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"scope": {"subject": "bud", "id_map": {"bud": 0}}})
-        _damage_sidecar(preds_dir)
+        _damage_record(viz_bucket)
 
-        result = visualize(viz_dataset, "comparison", img)
+        result = visualize(viz_bucket, "comparison", str(viz_bucket / "images" / "img_001.jpg"),
+                           predictions_dir=PUBLISHED)
         assert "error" in result
 
 
@@ -541,14 +531,14 @@ class TestVisualizeDatasetSample:
 
 
 class TestVisualizeWorstPredictions:
-    def test_basic(self, viz_dataset: Path):
+    def test_basic(self, viz_bucket: Path):
         from tcip_mcp.tools.vision_tools import render_failure_cases
 
         result = render_failure_cases(
-            viz_dataset,
-            predictions_dir=str(viz_dataset / "predictions" / "live"),
-            labels_dir=str(viz_dataset / "annotations"),
-            images_dir=str(viz_dataset / "images"),
+            viz_bucket,
+            predictions_dir=str(viz_bucket / PUBLISHED),
+            labels_dir=str(viz_bucket / "annotations"),
+            images_dir=str(viz_bucket / "images"),
             top_k=3,
         )
         assert "error" not in result
@@ -962,7 +952,7 @@ class TestAcceptProposalsTool:
         # unified per-image file holding both accepted objects by subject name.
         from tcip_annotation import json_io
 
-        pred_file = viz_dataset / "predictions" / "sam" / "img_001.json"
+        pred_file = viz_dataset / "predictions" / "sam" / "img_001" / "img_001.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
@@ -1269,7 +1259,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 2
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
@@ -1300,7 +1290,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 1
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 1
@@ -1333,7 +1323,7 @@ class TestFullPipelineIntegration:
         )
         assert result["proposal_count"] == 2
 
-        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample" / "sample.json"
         anns = json_io.read_annotations(pred_file)
         # Each object is one polygon with a derivable box under the same subject: the box and mask
         # views can never diverge because they are the same annotations.
@@ -1590,7 +1580,7 @@ class TestSamPredictionStaging:
         assert "format" not in result  # fmt param dropped in the JSON cutover
         assert result["proposal_count"] == 1
 
-        pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
+        pred = format_dataset / "predictions" / "sam" / "fmt_test" / "fmt_test.json"
         assert pred.is_file()
         anns = json_io.read_annotations(pred)
         assert len(anns) == 1 and {a.subject for a in anns} == {"bud"}
@@ -1610,7 +1600,7 @@ class TestSamPredictionStaging:
             format_dataset, image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
-        pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
+        pred = format_dataset / "predictions" / "sam" / "fmt_test" / "fmt_test.json"
         data = json.loads(pred.read_text(encoding="utf-8"))
         assert data["annotations"]
         assert all(o["created_by"] == "sam" for o in data["annotations"])

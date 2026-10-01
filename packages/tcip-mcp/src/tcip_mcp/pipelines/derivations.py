@@ -227,36 +227,25 @@ def _achievable_iou(avg_size: float, jitter_px: float) -> float:
     return max(0.0, avg_size - jitter_px) / (avg_size + jitter_px)
 
 
-def derive_localization_kind(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
-    jitter_px: float = 15.0, iou_floor: float = 0.5,
-) -> str | None:
-    """Whether IoU-matching or center-matching should govern this trait's "found the object" call,
-    from the GT's own characteristic box size, or ``None`` if underivable.
+MAX_DETS_DERIVATION = "~1.5x p99 GT objects/image"
+"""The label an execution record names a cap :func:`derive_max_dets_from_counts` derived by."""
 
-    Models two same-size boxes of characteristic size ``s`` (``sqrt(w*h)``) offset by ``jitter_px``
-    along one axis: their achievable IoU is ``(s - jitter_px) / (s + jitter_px)``. When that falls
-    below ``iou_floor`` (0.5), center-match governs. No valid boxes anywhere -> ``None``.
 
-    ``jitter_px``'s default (15.0 px) is provisional, not validated against detector precision; it
-    puts the crossover at ``s = 3 * jitter_px``. A derived kind is recorded with
-    ``data_derived_at_runtime`` provenance and re-checked for divergence on later calls
-    (``resolve_match_criterion``).
+def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
+    """A generous detection cap, about 1.5 times the 99th-percentile per-image object count, never
+    below ``floor``. An empty ``counts`` refuses."""
+    import math
 
-    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
-    filtered to the trait's own class.
-    """
-    gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_localization_kind")
-    sizes = char_sizes_from_boxes(gt_boxes_per_image)
-    if not sizes:
-        return None
     import numpy as np
 
-    from tcip_mcp.traits import CENTER_MATCH, IOU_MATCH
+    if not counts:
+        raise ValueError("a detection cap is derived from the reference's own object counts, and "
+                         "this reference holds none.")
+    return max(floor, int(math.ceil(1.5 * float(np.quantile(counts, 0.99)))))
 
-    avg_size = float(np.mean(sizes))
-    return CENTER_MATCH if _achievable_iou(avg_size, jitter_px) < iou_floor else IOU_MATCH
+
+IOU_MATCH_DERIVATION = "achievable IoU under annotation jitter, minus margin (GT characteristic size)"
+"""The label a criterion names a threshold :func:`derive_iou_match_threshold` derived by."""
 
 
 def derive_iou_match_threshold(
@@ -266,10 +255,9 @@ def derive_iou_match_threshold(
     """The IoU threshold for an ``iou_match`` trait, from the GT's own characteristic box size, or
     ``None`` if underivable.
 
-    Uses the achievable-IoU-under-jitter basis :func:`derive_localization_kind` uses, less
-    ``margin``, clamped to a sane range around IoU@0.5. A recorded ``iou_match`` trait revisited
-    with small current-call GT can see an achievable IoU below the floor; the clamp bounds the
-    result then.
+    Models two same-size boxes of characteristic size ``s`` (``sqrt(w*h)``) offset by ``jitter_px``
+    along one axis, whose achievable IoU is ``(s - jitter_px) / (s + jitter_px)``; the threshold
+    is that less ``margin``, clamped to a sane range around IoU@0.5.
 
     ``jitter_px`` (15.0 px) and ``margin`` (0.1) are provisional defaults, not validated against
     detector precision.
@@ -621,51 +609,26 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
                     "tcip_mcp.pipelines.derivations.derive_cross_tile_nms"),
     "GT nearest-neighbor spacing (p10 + margin)": "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac",
     "GT characteristic-size spread (p10 / mean)": "tcip_mcp.pipelines.derivations.derive_sliver_frac",
-    "achievable IoU under annotation jitter (GT characteristic size)":
-        "tcip_mcp.pipelines.derivations.derive_localization_kind",
-    "achievable IoU under annotation jitter, minus margin (GT characteristic size)":
-        "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
-    "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
-    "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
-    "persisted training tile geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
-    "the checkpoint's own uniform untiled training frame":
-        "tcip_mcp.pipelines.inference.predictor._native_ratio_tile_size",
-    "read back from the bucket's own stamp with no accepted geometry reference behind it":
-        "placeholder",
-    "caller override": "caller-input",
-    "no GT for this dataset; unvalidated placeholder": "placeholder",
+    IOU_MATCH_DERIVATION: "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
+    MAX_DETS_DERIVATION: "tcip_mcp.pipelines.derivations.derive_max_dets_from_counts",
 }
 """The derivation labels that are authored here, everything except the count-objective ones.
 
-Every ``derived_from`` label ``resolution.derived()`` can stamp resolves through
-:data:`DERIVATION_IMPLEMENTATIONS` to the callable that computes it, or to an explicit
-non-derivation marker ("caller-input" / "placeholder") when the constructor carries a value nothing
-derived. tests/test_provenance_honesty.py enforces that, so a data-sounding label cannot be stamped
-without an implementation behind it.
+Every label an execution record's ``sources`` names for a derived value resolves through
+:data:`DERIVATION_IMPLEMENTATIONS` to the callable that computes it, so a data-sounding label
+cannot be recorded without an implementation behind it.
 """
 
-_CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.operating_point.derive_operating_point_curve"
+_CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.training.evaluation.derive_operating_point_curve"
 
 
 def _derivation_implementations() -> dict[str, object]:
-    """Every registered derivation label, the count-objective ones read from the picker registry
-    (``operating_point.COUNT_OBJECTIVE_PICKERS`` plus
-    ``operating_point.REVIEW_VERDICT_LABEL_SUFFIX``).
-
-    Resolved on access rather than at import: ``operating_point`` imports this module and pulls
-    torch in with it.
-    """
-    from tcip_mcp.pipelines.operating_point import (
-        COUNT_OBJECTIVE_PICKERS,
-        REVIEW_VERDICT_LABEL_SUFFIX,
-    )
+    """Every registered derivation label mapped to its implementation, the count-objective ones
+    read from the picker registry (``operating_point.COUNT_OBJECTIVE_PICKERS``) when called."""
+    from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
     return {
-        **{
-            label + suffix: _CURVE_IMPLEMENTATION
-            for _picker, label in COUNT_OBJECTIVE_PICKERS.values()
-            for suffix in ("", REVIEW_VERDICT_LABEL_SUFFIX)
-        },
+        **{label: _CURVE_IMPLEMENTATION for _picker, label in COUNT_OBJECTIVE_PICKERS.values()},
         **_STATIC_DERIVATION_IMPLEMENTATIONS,
     }
 

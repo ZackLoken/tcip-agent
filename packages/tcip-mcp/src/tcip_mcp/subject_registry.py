@@ -12,19 +12,9 @@ example, with ``tree`` and ``fruit`` as the subjects::
                 }}
     }
 
-A subject is the object a label set is about. A subject with no ``attributes`` is simply detected.
-An attribute is an independent axis a subject's instances carry, ``categorical`` (unordered) or
-``ordinal`` (ordered; the ``values`` order is the rank). Numeric is not an attribute type;
-measured/field values live in the plant-keyed field CSVs.
-
-Labels reference these names, never integer ids. Integer class ids exist only inside a training
-run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0-indexed ids in
-their declared order, deterministically and re-derivably. Ordering is the declared ``values`` order
-and never sorted. A run records the map it used: the producer that admitted its samples states the
-scope on the run's own data config (``data.scope``), which travels onto the checkpoint via the
-run's own config object and into the run's resolved record. Decode reads that recorded map
-(``ClassScope.of`` over the checkpoint's data section) and nothing else; a run whose ground truth
-carries its own classes records an empty scope.
+An attribute is an axis a subject's instances carry, ``categorical`` (unordered) or ``ordinal``
+(the ``values`` order is the rank). :func:`assign_class_ids` maps the names in a training scope to
+contiguous 0-indexed ids in their declared order.
 """
 
 from __future__ import annotations
@@ -515,9 +505,10 @@ def distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
     do. Refuses (``RegistryError``) when the directories span more than one: no delivery this
     platform ships mixes datasets, so that can only be a caller error.
     """
-    from tcip_mcp.dataset_layout import bucket_dataset_root
+    from tcip_mcp.dataset_layout import dataset_root_of
 
-    roots: set[Path] = {r for d in pred_dirs if d and (r := bucket_dataset_root(d)) is not None}
+    roots: set[Path] = {r for d in pred_dirs
+                        if d and (r := dataset_root_of(Path(d).resolve())) is not None}
     if len(roots) > 1:
         raise RegistryError(
             "a delivery's prediction directories resolve to more than one dataset root "

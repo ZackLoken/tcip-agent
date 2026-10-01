@@ -22,6 +22,7 @@ def _detector_pass(gt_boxes, pred_boxes):
     """A torchvision-shaped GT target and detector output over one image."""
     target = {"boxes": torch.tensor(gt_boxes, dtype=torch.float32),
               "labels": torch.ones(len(gt_boxes), dtype=torch.int64),
+              "iscrowd": torch.zeros(len(gt_boxes), dtype=torch.int64),  # every row one object
               "image_id": 1}
     output = {"boxes": torch.tensor(pred_boxes, dtype=torch.float32),
               "labels": torch.ones(len(pred_boxes), dtype=torch.int64),

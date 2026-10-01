@@ -75,8 +75,9 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
         tmp_path, image_path=str(first), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
-    anns = json_io.read_annotations(
-        tmp_path / "predictions" / "sam" / "2026-01-01" / "leaf.json")
+    assert accepted["path"] == str(
+        tmp_path / "predictions" / "sam" / "2026-01-01" / "leaf" / "leaf.json")
+    anns = json_io.read_annotations(accepted["path"])
     assert len(anns) == 1
     xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
     assert min(xs) == pytest.approx(5.0)
@@ -97,7 +98,7 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
     staged = stage_proposals(tmp_path, image_path=str(img_path), assignments=[
         {"candidate_id": 0, "subject": "bur"}, {"candidate_id": 1, "subject": ""}])
     assert staged["error"].startswith("assignment 1: ")
-    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bur.json").exists()
+    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bur").exists()
 
 
 def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_ran(
@@ -189,7 +190,8 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     pred_dir = tmp_path / "predictions" / "sam"
     if dated:
         pred_dir = pred_dir / "2026-06-01"
-    anns = json_io.read_annotations(pred_dir / "sample.json")
+    assert accepted["path"] == str(pred_dir / "sample" / "sample.json")
+    anns = json_io.read_annotations(accepted["path"])
     assert len(anns) == 1
 
 
@@ -221,7 +223,8 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         tmp_path, image_path=str(manifest), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
-    anns = json_io.read_annotations(tmp_path / "predictions" / "sam" / "capture.json")
+    assert accepted["path"] == str(tmp_path / "predictions" / "sam" / "capture" / "capture.json")
+    anns = json_io.read_annotations(accepted["path"])
     assert len(anns) == 1
 
 
@@ -257,11 +260,11 @@ def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manif
     assert ts.read(address.key, default=None) is None
 
 
-def test_a_second_accept_of_the_same_staged_run_succeeds(
+def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Accepting a second subset of one run's proposals is a legitimate second call, since the
-    record stays in place after accept."""
+    """The first accept's document is written once, so a second accept for the same image refuses
+    naming it and the first document's bytes are unchanged."""
     from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "twice.jpg"
@@ -274,10 +277,12 @@ def test_a_second_accept_of_the_same_staged_run_succeeds(
     first = stage_proposals(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in first, first
+    written = Path(first["path"]).read_bytes()
 
     second = stage_proposals(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 1, "subject": "nut"}])
-    assert "error" not in second, second
+    assert "already exists" in second["error"]
+    assert Path(first["path"]).read_bytes() == written
 
 
 def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
@@ -302,7 +307,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
         tmp_path, image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
-    anns = json_io.read_annotations(tmp_path / "predictions" / "sam" / "rerun.json")
+    anns = json_io.read_annotations(accepted["path"])
     xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
     assert min(xs) == pytest.approx(40.0)
 
@@ -363,11 +368,11 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
 def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Accepting proposals for an image whose stem is a bucket stamp name answers the staging
-    writer's refusal as an error dict, never a raise through the audited door."""
+    """Accepting proposals for an image whose stem names a bucket's own record answers the
+    encoder's refusal as an error dict, never a raise, and leaves no bucket directory at all."""
     from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
-    image = tmp_path / "images" / "2026-01-01" / "operating_point.jpg"
+    image = tmp_path / "images" / "2026-01-01" / "bucket.jpg"
     _make_image(image)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(tmp_path, image_path=str(image), engine="sam")
@@ -375,6 +380,34 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(
 
     accepted = stage_proposals(
         tmp_path, image_path=str(image), assignments=[{"candidate_id": 0, "subject": "bud"}])
-    assert "error" in accepted
-    assert "operating_point" in accepted["error"]
-    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "operating_point.json").exists()
+    assert "a prediction bucket's own record" in accepted["error"]
+    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "bucket").exists()
+
+
+def test_a_staging_is_one_publication_with_one_audit_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staging publishes through the one publication, which owns every document's write-once and
+    takes encoded documents, never a writer of the caller's; the publication's own line is the
+    staging's only one."""
+    import inspect
+
+    import tcip_store
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.buckets import Document, publish
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
+
+    assert Document._fields == ("source", "data", "dropped")
+    assert "Callable" not in str(inspect.signature(publish))
+    image = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
+    _make_image(image)
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    assert "error" not in propose_annotations(tmp_path, image_path=str(image), engine="sam")
+
+    accepted = stage_proposals(
+        tmp_path, image_path=str(image), assignments=[{"candidate_id": 0, "subject": "bud"}])
+
+    assert "error" not in accepted, accepted
+    lines = [e["tool"] for e in tcip_store.read_log(audit_log_key(tmp_path)).records
+             if e["tool"] in ("stage_proposals", "prediction_bucket_published")]
+    assert lines == ["prediction_bucket_published"]

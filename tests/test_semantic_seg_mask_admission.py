@@ -36,7 +36,7 @@ def test_a_png_mask_admits_its_image_and_serves_that_mask(tmp_path: Path) -> Non
 
     ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
 
-    assert ds.record_stems == ["img0", "img1"]
+    assert [ds.sample_of(k).member for k in ds.stems] == ["img0", "img1"]
     _img, target = ds[0]
     assert int(target["masks"].sum()) == 16
     _img, target = ds[1]
@@ -103,6 +103,6 @@ def test_an_image_with_no_mask_is_skipped_never_served_as_background(tmp_path: P
     from tests._producer_fixtures import admit_over
 
     ds = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
-    assert ds.record_stems == ["img0"]
+    assert [ds.sample_of(k).member for k in ds.stems] == ["img0"]
     assert admit_over(images_dir, masks_dir).counts == {
         "annotated": 1, "skipped_unannotated": 1}

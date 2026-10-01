@@ -50,6 +50,20 @@ def _dataset_root(tmp_path: Path) -> Path:
     return root
 
 
+def _published_prediction(tmp_path: Path, img: Path) -> Path:
+    """The one predicted box over ``img``, published as a bucket; its document."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
+        {"image": str(img), "width": IMG_W, "height": IMG_H, "boxes": [list(PREDICTED_BOX)],
+         "scores": [PREDICTED_SCORE], "labels": [1]}],
+        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    document = bucket.document(img)
+    assert document is not None
+    return document
+
+
 def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
     client: TestClient, tmp_path: Path
 ) -> None:
@@ -58,13 +72,8 @@ def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
     record reads as a prediction to every later reader of this schema."""
     img = _image(tmp_path)
     gt = tmp_path / "gt.json"
-    pred = tmp_path / "pred.json"
     write_annotations(str(gt), [], IMG_W, IMG_H, keep_empty=True)
-    write_annotations(
-        str(pred),
-        [Annotation(subject="bud", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
-        IMG_W, IMG_H,
-    )
+    pred = _published_prediction(tmp_path, img)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/action", json={
@@ -99,15 +108,10 @@ def test_editing_an_fp_with_a_stray_gt_idx_appends_rather_than_overwrites(
     exactly as it was, and the edit lands as a new record instead."""
     img = _image(tmp_path)
     gt = tmp_path / "gt.json"
-    pred = tmp_path / "pred.json"
     original = (10.0, 10.0, 50.0, 30.0)
     write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(*original))],
                       IMG_W, IMG_H)
-    write_annotations(
-        str(pred),
-        [Annotation(subject="bud", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
-        IMG_W, IMG_H,
-    )
+    pred = _published_prediction(tmp_path, img)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/action", json={

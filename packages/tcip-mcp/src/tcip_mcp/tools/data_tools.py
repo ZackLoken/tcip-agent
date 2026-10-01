@@ -30,9 +30,8 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     at the output directory; or the selection its resolved ``scope`` composes is one
     :func:`~tcip_mcp.pipelines.data.selection.write_selection` refuses.
 
-    The frozen selection's ``calibration`` side is always empty, so the calibration doors' own
-    floor refuses any calibration measurement against it by name; this tool's answer carries a
-    ``note`` saying so.
+    The frozen selection's ``calibration`` and ``holdout`` sides are always empty, so an assessment
+    against it refuses by name; this tool's answer carries a ``note`` saying so.
 
     Args:
         experiment_id: The finished run to freeze the drawn partition of.
@@ -49,8 +48,7 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     from tcip_mcp.pipelines.data.selection import (
         ClassScope, Selection, read_selection_checked, write_selection,
     )
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
-    from tcip_mcp.pipelines.resolution import moved_since_run
+    from tcip_mcp.pipelines.data.split_construction import moved_since_run, partition_samples
 
     try:
         resolved = run_resolution(experiment_id, project=project)
@@ -107,9 +105,9 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
         return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
     return {
         "selection_dir": str(out_dir), "train": n_train, "val": n_val, "calibration": 0,
-        "note": "the calibration side is empty (a training run's own drawn partition records "
-               "no calibration draw): the calibration doors' own floor refuses any calibration "
-               "measurement against this selection by name.",
+        "holdout": 0,
+        "note": "the reference sides are empty (a training run's own drawn partition records "
+               "no reference draw): an assessment against this selection refuses by name.",
     }
 
 
@@ -121,10 +119,9 @@ def _scan_dataset(root: str) -> dict:
     document.
 
     ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
-    bucket's own provenance stamp; ``reserved_name_labels`` names each one.
-    ``reserved_name_images`` names every image whose own stem is reserved the same way.
-    ``predictions`` drops every bucket under the cleared archive
-    (``tcip_mcp.dataset_layout.is_cleared_bucket``).
+    bucket's own record; ``reserved_name_labels`` names each one. ``reserved_name_images`` names
+    every image whose own stem is reserved the same way. ``predictions`` are the documents of
+    every published bucket (:func:`~tcip_mcp.buckets.bucket_dirs`).
 
     ``images`` is built per bucket through
     :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one bucket
@@ -133,12 +130,10 @@ def _scan_dataset(root: str) -> dict:
     each direct date-bucket subdirectory. Falls back to a raw walk of the whole dataset root only
     when there is no canonical ``images/`` tree.
     """
-    from tcip_annotation.json_io import is_sidecar_name, prediction_documents
+    from tcip_annotation.json_io import is_bucket_record, is_reserved_stem
     from tcip_annotation.review_engine import BASELINE_DIRNAME
-    from tcip_mcp.dataset_layout import (
-        LABEL_SUFFIX, annotation_root, image_root, is_cleared_bucket, label_filename,
-        prediction_root,
-    )
+    from tcip_mcp.buckets import bucket_dirs, read_bucket
+    from tcip_mcp.dataset_layout import LABEL_SUFFIX, annotation_root, image_root
     from tcip_mcp.pipelines.image_utils import BandGroupRef, IMAGE_EXTS, list_logical_images
 
     root_path = Path(root)
@@ -158,14 +153,14 @@ def _scan_dataset(root: str) -> dict:
             for source in list_logical_images(bucket).values():
                 f = source.manifest_path if isinstance(source, BandGroupRef) else source
                 images.append(str(f))
-                if is_sidecar_name(label_filename(f.stem)):
+                if is_reserved_stem(f.stem):
                     reserved_name_images.append(str(f))
     else:
         # No canonical images/ tree, so no bucket contract to route through this walk.
         for f in sorted(root_path.rglob("*")):
             if f.is_file() and f.suffix.lower() in image_exts:
                 images.append(str(f))
-                if is_sidecar_name(label_filename(f.stem)):
+                if is_reserved_stem(f.stem):
                     reserved_name_images.append(str(f))
 
     # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
@@ -176,18 +171,9 @@ def _scan_dataset(root: str) -> dict:
             str(f) for f in sorted(ann_dir.rglob(f"*{LABEL_SUFFIX}"))
             if f.is_file() and BASELINE_DIRNAME not in f.parts
         ]
-        reserved_name_labels = [f for f in labels if is_sidecar_name(Path(f).name)]
+        reserved_name_labels = [f for f in labels if is_bucket_record(Path(f).name)]
 
-    # Predictions: predictions/<model>/[<date>/]<stem>.json; each model/date bucket is walked on
-    # its own through prediction_documents, so the bucket's own stamps are excluded everywhere.
-    pred_dir = prediction_root(root_path)
-    if pred_dir.is_dir():
-        preds = [
-            str(f)
-            for bucket in sorted({p.parent for p in pred_dir.rglob(f"*{LABEL_SUFFIX}")})
-            if not is_cleared_bucket(bucket)
-            for f in prediction_documents(bucket)
-        ]
+    preds = [str(f) for bucket in bucket_dirs(root_path) for f in read_bucket(bucket).document_paths]
 
     return {
         "images": images, "labels": labels, "predictions": preds,
@@ -201,10 +187,10 @@ def scan_dataset(folder_path: str) -> dict:
     Reads the name-based per-image JSON labels (one file per image, all subjects).
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
-        images/<date>/  annotations/<date>/<stem>.json  predictions/<model>/<date>/<stem>.json
+        images/<date>/  annotations/<date>/<stem>.json  predictions/.../bucket.json
 
     ``reserved_name_labels`` names every label counted in ``labels_count`` whose filename is
-    reserved for a prediction bucket's own provenance stamp. ``reserved_name_images`` names every
+    reserved for a prediction bucket's own record. ``reserved_name_images`` names every
     image counted in ``image_count`` whose own stem is reserved the same way; such an image
     otherwise sits in ``unlabeled_images``.
 
@@ -281,6 +267,7 @@ def draw_splits(
     train_ratio: float = 0.8,
     val_ratio: float = DEFAULT_VAL_RATIO,
     calibration_ratio: float = 0.0,
+    holdout_ratio: float = 0.0,
     seed: int = DEFAULT_SEED,
     group_by: str = DEFAULT_GROUP_BY,
     group_key_map: dict[str, str] | None = None,
@@ -290,7 +277,7 @@ def draw_splits(
     attribute: str | None = None,
     ground_truth: str | None = None,
 ) -> dict:
-    """Compute a leakage-free, annotation-stratified train/val/calibration selection.
+    """Compute a leakage-free, annotation-stratified train/val/calibration/holdout selection.
 
     Non-destructive: it copies nothing and moves nothing. With ``output_path`` it writes a
     selection record listing, per sample, the image source, the label document, the group key and
@@ -318,23 +305,27 @@ def draw_splits(
     row, admitted when the image its key names exists. Neither takes ``subject``/``attribute``.
     Balancing by foreground count applies to label documents only.
 
-    The third side, ``calibration``, is the universe every calibration drawn under this selection
-    draws from; writing a selection has no default for any of the three ratios and refuses a zero
-    one, naming it. The draw refuses, before any write, when the tree holds fewer foreground groups
-    of ``subject`` (and ``attribute``, when scoped) than the three sides need at minimum (one each
-    for ``train``/``val``, two for ``calibration``), counted regardless of ``stratify_foreground``.
-    The answer's ``calibration_foreground_groups`` reports how many of the calibration side's own
-    groups carry a foreground annotation. Both the answer and the record also carry
-    ``realized_ratios``, each side's share of the draw actually delivered, which can diverge from
-    the ratios asked for on a tree sized at the floor.
+    The ``calibration`` and ``holdout`` sides are the reference an assessment fits an operating
+    point on and checks it against. The draw is one group-balanced split into train, val and the
+    reference, then one :func:`~tcip_mcp.pipelines.data.splits.draw_train_val` of the reference's
+    groups into calibration and holdout at the same seed; writing a selection has no default for
+    any of the four ratios and refuses a zero one, naming it. The draw refuses, before any write,
+    when the tree holds fewer foreground groups of ``subject`` (and ``attribute``, when scoped)
+    than the sides need at minimum (one each for ``train``/``val``, two for the reference). The
+    answer's ``calibration_foreground_groups`` reports how many of the reference's groups carry a
+    foreground annotation. Both the answer and the record also carry ``realized_ratios``, each
+    side's share of the draw actually delivered, which can diverge from the ratios asked for on a
+    tree sized at the floor.
 
     Args:
         folder_path: Path to the dataset root directory.
         train_ratio: Fraction for training set. Defaults to 0.8.
         val_ratio: Fraction for validation set.
-        calibration_ratio: Fraction held out as the calibration universe. Defaults to 0.0 for a
-            stats-only call. Writing a selection (``output_path`` given) refuses a zero ratio on
-            any of the three (``train_ratio``, ``val_ratio``, ``calibration_ratio``), naming it.
+        calibration_ratio: Fraction held out for an assessment to fit its operating point on.
+            Defaults to 0.0 for a stats-only call.
+        holdout_ratio: Fraction held out for an assessment to check its operating point against.
+            Defaults to 0.0 for a stats-only call. Writing a selection (``output_path`` given)
+            refuses a zero ratio on any of the four, naming it.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset) or
             ``"stem"`` (one group per member). Ignored when ``group_key_map`` is given. The
@@ -356,9 +347,10 @@ def draw_splits(
             per image. Only with ``output_path``; the images are the dataset's own ``images/`` tree
             either way.
     """
-    if abs(train_ratio + val_ratio + calibration_ratio - 1.0) > 0.01:
-        return {"error": "train_ratio, val_ratio and calibration_ratio must sum to 1.0 (got "
-                         f"{train_ratio}, {val_ratio}, {calibration_ratio})."}
+    if abs(train_ratio + val_ratio + calibration_ratio + holdout_ratio - 1.0) > 0.01:
+        return {"error": "train_ratio, val_ratio, calibration_ratio and holdout_ratio must sum to "
+                         f"1.0 (got {train_ratio}, {val_ratio}, {calibration_ratio}, "
+                         f"{holdout_ratio})."}
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
@@ -366,6 +358,7 @@ def draw_splits(
     from tcip_mcp.pipelines.data.selection import SIDES, Sample, Selection, write_selection
     from tcip_mcp.pipelines.data.splits import (
         count_label_lines,
+        draw_train_val,
         foreground_group_count,
         group_balanced_split,
         member_identity,
@@ -378,6 +371,15 @@ def draw_splits(
     from tcip_store import SchemaVersionRefused
 
     kept_splits = SIDES
+    reference_ratio = calibration_ratio + holdout_ratio
+
+    def cut(parts: dict[str, list[str]], counts: dict[str, int] | None, key_fn) -> dict:
+        """The three-way draw's reference share cut into calibration and holdout, by group."""
+        calibration, holdout = draw_train_val(
+            parts.pop("calibration"), annotation_counts=counts, group_key_fn=key_fn,
+            val_ratio=holdout_ratio / reference_ratio if reference_ratio else 0.0, seed=seed)
+        return {**parts, "calibration": calibration, "holdout": holdout}
+
     out_dir = Path(output_path) if output_path else None
     if ground_truth is not None:
         if out_dir is None:
@@ -386,14 +388,13 @@ def draw_splits(
     if out_dir is not None:
         zero_ratios = [name for name, ratio in (
             ("train_ratio", train_ratio), ("val_ratio", val_ratio),
-            ("calibration_ratio", calibration_ratio),
+            ("calibration_ratio", calibration_ratio), ("holdout_ratio", holdout_ratio),
         ) if ratio == 0]
         if zero_ratios:
-            return {"error": f"{', '.join(zero_ratios)} must be non-zero to write a selection: a "
-                             "selection's three sides are all drawn from, so writing one states "
-                             "all three ratios (train_ratio, val_ratio, calibration_ratio) as "
-                             "non-zero. Omit output_path for a stats-only call, whose ratios may "
-                             "include a zero."}
+            return {"error": f"{', '.join(zero_ratios)} must be non-zero to write a selection: "
+                             "every side of a selection is drawn from, so writing one states all "
+                             "four ratios as non-zero. Omit output_path for a stats-only call, "
+                             "whose ratios may include a zero."}
 
     if out_dir is None:
         # A stats-only call writes nothing, so the draw is a plain image/label scan: no subject
@@ -426,32 +427,13 @@ def draw_splits(
         except ValueError as exc:
             return {"error": str(exc)}
         resolved_group_by = recorded_group_by(group_by, group_key_map)
-        parts = group_balanced_split(
+        parts = cut(group_balanced_split(
             stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-            splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
-        )
-        dataset_hashes_by_date: dict[str, str] = {}
-        if label_map:
-            from tcip_mcp.dataset_layout import annotation_date
-            from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
-
-            stems_by_date: dict[str, list[str]] = {}
-            for stem in stems:
-                label_path = label_map.get(stem)
-                if label_path is None:
-                    continue
-                stems_by_date.setdefault(annotation_date(label_path) or "", []).append(stem)
-            for date_key, date_stems in stems_by_date.items():
-                labels_dir = Path(label_map[date_stems[0]]).parent
-                dataset_hashes_by_date[date_key] = _dataset_hash(labels_dir, stems=sorted(date_stems))
-        # A single dataset_hash is meaningful only over one labels directory; over more than one
-        # it would be blind to every date but the first, so it is carried only then.
-        dataset_hash = (next(iter(dataset_hashes_by_date.values()))
-                        if len(dataset_hashes_by_date) == 1 else None)
+            splits=(train_ratio, val_ratio, reference_ratio), seed=seed,
+        ), annotation_counts, group_key_fn)
         return _draw_response(
             parts, {k: len(parts[k]) for k in kept_splits}, annotation_counts, stems,
-            group_key_fn, seed=seed, group_by=resolved_group_by, dataset_hash=dataset_hash,
-            dataset_hashes_by_date=dataset_hashes_by_date, selection_dir=None)
+            group_key_fn, seed=seed, group_by=resolved_group_by, selection_dir=None)
 
     # Writing a selection: one draw, over whatever ground truth the dataset carries, through the
     # producer's own admission for that shape.
@@ -459,9 +441,8 @@ def draw_splits(
     from tcip_mcp.pipelines.data.label_queries import (
         Admission, Admitted, admit, foreground_counts, require_admitted, stated_scope,
     )
-    from tcip_mcp.pipelines.data.selection import with_sides
+    from tcip_mcp.pipelines.data.selection import ground_truth_digests, with_sides
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
-    from tcip_mcp.pipelines.resolution import ground_truth_digests
 
     date_dirs: list[tuple[str | None, Path, Path]] = []
     if ground_truth is not None:
@@ -574,25 +555,25 @@ def draw_splits(
                     "subject, or write the masks or rows that answer for them."))
     except ValueError as exc:
         return {"error": str(exc)}
-    drawn = group_balanced_split(
+    three_way = group_balanced_split(
         stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-        splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
+        splits=(train_ratio, val_ratio, reference_ratio), seed=seed,
         min_foreground_groups=min_foreground_groups, foreground_counts=counted,
     )
     calibration_foreground_groups = foreground_group_count(
-        drawn["calibration"], counted, group_key_fn)
+        three_way["calibration"], counted, group_key_fn)
+    drawn = cut(three_way, counted, group_key_fn)
 
-    # The sides the draw assigned, onto the samples already built, by each one's own identity.
-    drew = {sample_of[identity].identity: side
-            for side in kept_splits for identity in drawn[side]}
+    # The sides the draw assigned, onto the samples already built, by each one's own location.
+    drew = {sample_of[key].location: side for side in kept_splits for key in drawn[side]}
     try:
         fingerprint = dataset_fingerprint(folder_path)
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot fingerprint the dataset for the selection: {exc}"}
     try:
         written = write_selection(out_dir, with_sides(Selection(
-            samples=tuple(sample for _identity, sample in sorted(sample_of.items())
-                          if sample.identity in drew),
+            samples=tuple(sample for _key, sample in sorted(sample_of.items())
+                          if sample.location in drew),
             scope=admissions[0].scope,
             seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
         ), drew), project=project)

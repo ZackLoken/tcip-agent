@@ -57,7 +57,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     captured: dict = {}
 
-    def _fake(ckpt, model, loader, device, **kw):
+    def _fake(pass_, loader, device, **kw):
         captured["ds"] = loader.dataset
         return {"eval_regime": "tile-level"}
 

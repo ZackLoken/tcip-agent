@@ -1,5 +1,5 @@
-"""Dataset routes: what a dataset root holds (its dates, subjects and models, through
-:mod:`tcip_mcp.dataset_layout`), the ``GuiState.dataset`` selection, and the current image position
+"""Dataset routes: what a dataset root holds (its dates and subjects, through
+:mod:`tcip_mcp.dataset_layout`, and its published buckets, through :mod:`tcip_mcp.buckets`), the ``GuiState.dataset`` selection, and the current image position
 within it."""
 
 from __future__ import annotations
@@ -11,20 +11,17 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_root,
     image_root,
     list_dates,
-    list_models,
     list_subjects,
-    models_with_predictions,
-    prediction_dir,
     prediction_root,
     subjects_path,
     subjects_with_labels,
 )
-from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_mcp.web_client import selection_for
 from tcip_web.paths import allowed_path, assert_path_allowed
@@ -44,14 +41,9 @@ class DatasetTree(BaseModel):
     dates_with_images: list[str]
     # Every subject the dataset's registry (``subjects.json``) declares, e.g. ["tree", "fruit"].
     subjects: list[str]
-    model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
-    # Per-date availability: the subjects that actually have labels / models that actually
-    # have predictions on each date. The GUI's subject/model pickers filter to these so a
-    # date with no labels for a subject doesn't offer it (which would open an empty canvas).
+    # The subjects that have labels on each date, so the picker never opens an empty canvas.
     subjects_by_date: dict[str, list[str]]
-    models_by_date: dict[str, list[str]]
-    # Where each (date, model)'s predictions live, straight from dataset_layout.prediction_dir,
-    # so a client never points a delivery at a path no writer produces.
+    # Each date's published buckets: name (its path under predictions/) to directory.
     prediction_dirs: dict[str, dict[str, str]]
     # The first date whose labels would not read, naming the file (mirrors ProjectSummary's own
     # site_problem). The tree still lists every other date; a corrupt label costs one date.
@@ -59,8 +51,8 @@ class DatasetTree(BaseModel):
 
 
 # ── /tree cache ────────────────────────────────────────────────────────────
-# subjects_with_labels/models_with_predictions each re-list annotations/ or predictions/ and
-# scan every per-image label file per date, so a naive /tree is an iterdir storm on a dataset
+# subjects_with_labels and the bucket walk each re-list annotations/ or predictions/ and
+# scan every per-image file per date, so a naive /tree is an iterdir storm on a dataset
 # with many dates. Cache the built tree per dataset_root, keyed by a signature of every
 # directory the computation reads (stat-only, no listing): a write inside any of those date
 # dirs bumps its own mtime_ns and invalidates the entry. Bounded to a handful of recent roots.
@@ -101,23 +93,21 @@ def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]
     return by_date, problem
 
 
-def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
+def _tree_signature(root: Path, dates: list[str], buckets: list[Path]) -> tuple:
     sig = [
         _dir_mtime_ns(image_root(root)),
         _dir_mtime_ns(annotation_root(root)),
         _dir_mtime_ns(prediction_root(root)),
         _dir_mtime_ns(subjects_path(root)),
     ]
-    for d in dates:
-        sig.append(_dir_mtime_ns(annotation_dir(root, d)))
-        for model in models:
-            sig.append(_dir_mtime_ns(prediction_dir(root, model, d)))
+    sig.extend(_dir_mtime_ns(annotation_dir(root, d)) for d in dates)
+    sig.extend(_dir_mtime_ns(b) for b in buckets)
     return tuple(sig)
 
 
 @router.get("/tree")
 def get_dataset_tree(dataset_root: str) -> DatasetTree:
-    """Return the high-level tree (dates, subjects, models) for a dataset."""
+    """Return the high-level tree (dates, subjects, buckets) for a dataset."""
     root = allowed_path(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
@@ -126,14 +116,15 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     # Subjects come from the dataset registry, not from listing annotations/: that dir now holds
     # date buckets, not subject dirs.
     subjects = list_subjects(root)
-    model_names = list_models(root)
+    by_date = buckets_by_date(root, dates)
 
     # Read every call, not from the cache below: a label edited in place leaves the
     # directory's own mtime untouched, and label_problem must never answer from stale content.
     subjects_by_date, label_problem = _subjects_by_date(root, dates)
 
     key = str(root)
-    signature = _tree_signature(root, dates, model_names)
+    signature = _tree_signature(root, dates, [Path(p) for named in by_date.values()
+                                              for p in named.values()])
     cached = _tree_cache.get(key)
     if cached is not None and cached[0] == signature:
         _tree_cache.move_to_end(key)
@@ -145,13 +136,8 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         dataset_root=str(root),
         dates_with_images=dates,
         subjects=subjects,
-        # A model is selectable once it has a predictions bucket under this dataset.
-        model_names=model_names,
         subjects_by_date=subjects_by_date,
-        models_by_date={d: models_with_predictions(root, d) for d in dates},
-        prediction_dirs={
-            d: {m: str(prediction_dir(root, m, d)) for m in model_names} for d in dates
-        },
+        prediction_dirs=by_date,
         label_problem=label_problem,
     )
     _tree_cache[key] = (signature, tree)
@@ -165,13 +151,16 @@ class SelectionRequest(BaseModel):
     dataset_root: str
     subject: Optional[str] = None
     date: Optional[str] = None
-    model_name: Optional[str] = None
+    # The bucket to review: a directory the tree's prediction_dirs serves, or staged documents.
+    predictions_dir: Optional[str] = None
 
 
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the dataset the GUI looks at inside the open project; broadcasts a state delta.
     Answers 409 while no project is open."""
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+
     store.open_root()
     root = allowed_path(req.dataset_root)
     if not root.is_dir():
@@ -189,7 +178,8 @@ async def select_dataset(req: SelectionRequest) -> dict:
     )
     _selected_this_session = True
     try:
-        selection = selection_for(root, req.subject, req.date, req.model_name,
+        predictions_dir = str(allowed_path(req.predictions_dir)) if req.predictions_dir else None
+        selection = selection_for(root, req.subject, req.date, predictions_dir,
                                   prev.current_image_index if same_identity else 0)
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -222,9 +212,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
                 label_problem = str(exc)
         if req.subject:
             annotations_present = req.subject in labels_this_date
-    predictions_present = bool(
-        req.model_name and req.date and req.model_name in models_with_predictions(root, req.date)
-    )
+    predictions_present = bool(selection.prediction_paths)
     return {
         "status": "ok",
         "selection": selection.model_dump(mode="json"),

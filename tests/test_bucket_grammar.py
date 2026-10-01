@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp.dataset_layout import list_dates, list_models
+from tcip_mcp.dataset_layout import list_dates
 
 
 @pytest.fixture
@@ -53,13 +53,6 @@ def test_list_dates_admits_a_literal_and_the_undated_bucket(tmp_path):
     for name in ("2026-03-02", UNDATED_BUCKET, "plot_14"):
         (images / name).mkdir(parents=True)
     assert list_dates(tmp_path) == sorted(["2026-03-02", UNDATED_BUCKET, "plot_14"])
-
-
-def test_list_models_excludes_a_hidden_directory(tmp_path):
-    preds = tmp_path / "predictions"
-    (preds / "baseline").mkdir(parents=True)
-    (preds / ".trash").mkdir(parents=True)
-    assert list_models(tmp_path) == ["baseline"]
 
 
 def test_ingest_refuses_a_dot_prefixed_literal_bucket(tmp_path):
@@ -111,18 +104,23 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     assert picker.dates == ["2026-03-02"]
 
 
-def test_the_tree_and_the_project_summary_agree_on_models_over_a_hidden_directory(
+def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     client: TestClient, tmp_path: Path
 ) -> None:
+    """Both read a bucket off its own record: a published bucket lists under the date its record
+    states, and a directory of documents with no record lists nowhere."""
+    pytest.importorskip("torch")
     from tcip_web.routes.projects import _summarize
+    from tests._chain_fixtures import DATE, unassessed_bucket
 
-    root = tmp_path / "Valley_Farm"
-    (root / "images" / "2026-03-02").mkdir(parents=True)
-    (root / "predictions" / "baseline").mkdir(parents=True)
-    (root / "predictions" / ".trash").mkdir(parents=True)
+    bucket = unassessed_bucket(tmp_path, experiment_id="exp-grammar")
+    root = tmp_path / "ds"
+    (root / "predictions" / "staged" / DATE).mkdir(parents=True)
+    (root / "predictions" / "staged" / DATE / "s00.json").write_text("{}", encoding="utf-8")
+    name = bucket.relative_to(root / "predictions").as_posix()
 
     tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     picker = _summarize(root)
 
-    assert tree["model_names"] == ["baseline"]
-    assert picker.models == ["baseline"]
+    assert tree["prediction_dirs"][DATE] == {name: str(bucket)}
+    assert picker.prediction_dirs == tree["prediction_dirs"]

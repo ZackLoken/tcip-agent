@@ -44,14 +44,16 @@ def _scene(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     Image.new("RGB", (IMG_W, IMG_H), color=(120, 130, 140)).save(img)
     gt = tmp_path / "gt.json"
     write_annotations(str(gt), [], IMG_W, IMG_H, keep_empty=True)
-    pred = tmp_path / "pred.json"
-    from tcip_annotation.state import Annotation, BBox
-    write_annotations(
-        str(pred),
-        [Annotation(subject="chestnut_bud", geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
-         for p in PRED_BOXES],
-        IMG_W, IMG_H,
-    )
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
+
+    bucket = published(tmp_path, tmp_path / "predictions" / "baseline", [
+        {"image": str(img), "width": IMG_W, "height": IMG_H,
+         "boxes": [list(p[:4]) for p in PRED_BOXES], "scores": [p[4] for p in PRED_BOXES],
+         "labels": [1] * len(PRED_BOXES)}],
+        scope={"subject": "chestnut_bud", "attribute": None, "id_map": {"chestnut_bud": 0}})
+    pred = bucket.document(img)
+    assert pred is not None
     dataset_root = tmp_path / "proj"
     (dataset_root / ".tcip" / "state").mkdir(parents=True)
     return img, gt, pred, dataset_root

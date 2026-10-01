@@ -209,26 +209,6 @@ class TrainContext:
                         self.device, self.task, dims=recorded_model_dims(self.config), **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
-    def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
-        """Resolve the trait's operating point (conf/tile/max_dets) from record gate evidence. Pass
-        calibration_records/holdout_records; kwargs mirror ``resolve_operating_point``, including
-        the required ``slicing`` (the slicing record of the pass that produced your records,
-        ``None`` untiled) and ``cross_tile_nms`` (the provenance of the merge threshold it ran at,
-        ``resolution.resolve_cross_tile_nms``). ``experiment_id`` defaults to this run's own id; a
-        caller-supplied one wins. The trait is read from the project this run lies under.
-
-        ``staged_conf_floor`` (pass it, or this can never validate): the confidence threshold your
-            own inference pass floored detections to when it produced
-            ``calibration_records``/``holdout_records``, e.g. the
-            ``score_thresh``/``score_threshold`` you set on the model
-            (``set_detector_operating_point``'s own return value, if you used it). Omitting it
-            fails the reference as unstated (``conf_floor_unstated``).
-        """
-        from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-        kwargs.setdefault("experiment_id", self.run.id)
-        return resolve_operating_point(trait_name, project=self.run.project, **kwargs)
-
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.measurement import mask_geometry
 
@@ -305,7 +285,6 @@ class TrainContext:
         import copy
 
         from tcip_mcp.experiments import DATA_PATHS
-        from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path, write_checkpoint
 
         config = copy.deepcopy(self.config)
@@ -315,8 +294,8 @@ class TrainContext:
             for parent in parents:
                 node = node.get(parent) or {}
             node.pop(leaf, None)
-        payload = stamp_model_ref({**state, "config": config})
-        self.run.saved[tag] = write_checkpoint(payload, checkpoint_path(self.run_dir, tag))
+        self.run.saved[tag] = write_checkpoint({**state, "config": config},
+                                               checkpoint_path(self.run_dir, tag))
         return str(self.run.saved[tag])
 
     def record_artifact(self, name: str, path: str) -> None:

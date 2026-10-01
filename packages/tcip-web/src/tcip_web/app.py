@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from tcip_store.binding import bind_default
 
+from tcip_mcp.buckets import NotABucket
 from tcip_mcp.web_client import (
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
@@ -94,6 +95,12 @@ _state_watchers: set[WebSocket] = set()
 @app.exception_handler(GuiMutationInvalid)
 async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInvalid) -> JSONResponse:
     """Every route that mutates GUI state answers an invalid mutation with 400 and the reason."""
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(NotABucket)
+async def _not_a_bucket_handler(_request: Request, exc: NotABucket) -> JSONResponse:
+    """Every route that reads a directory as a published bucket answers 400 when it is none."""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 

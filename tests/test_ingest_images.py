@@ -278,34 +278,34 @@ def test_ingest_same_stem_in_two_different_buckets_is_admitted(project, tmp_path
     assert (project / "images" / "2026-03-01" / "foo.png").is_file()
 
 
-def test_ingest_refuses_a_stem_reserved_for_a_bucket_provenance_stamp(project, tmp_path):
-    """An image whose stem names a prediction bucket's own provenance stamp would produce a
-    label file no bucket walk can tell apart from that stamp; it is reported and not placed."""
+def test_ingest_refuses_a_stem_reserved_for_a_bucket_record(project, tmp_path):
+    """An image whose stem names a prediction bucket's own record would produce a label file no
+    bucket walk can tell apart from that record; it is reported and not placed."""
     src = tmp_path / "raw"
-    _make_image(src / "operating_point.png")
+    _make_image(src / "bucket.png")
     _make_image(src / "ordinary.png")
 
     manifest = ingest_images(project, source=str(src))
 
     assert manifest["undated"] == 1
     assert len(manifest["reserved_name_skips"]) == 1
-    assert manifest["reserved_name_skips"][0]["stem"] == "operating_point"
-    assert not (project / "images" / "undated" / "operating_point.png").is_file()
+    assert manifest["reserved_name_skips"][0]["stem"] == "bucket"
+    assert not (project / "images" / "undated" / "bucket.png").is_file()
     assert (project / "images" / "undated" / "ordinary.png").is_file()
 
 
 def test_ingest_refuses_a_case_variant_of_a_reserved_stem(project, tmp_path):
     """The reserved-name check is case-insensitive: a source stem differing only in case from a
-    bucket's own provenance stamp would still collide with it on a case-insensitive filesystem."""
+    bucket's own record would still collide with it on a case-insensitive filesystem."""
     src = tmp_path / "raw"
-    _make_image(src / "Operating_Point.png")
+    _make_image(src / "Bucket.png")
     _make_image(src / "ordinary.png")
 
     manifest = ingest_images(project, source=str(src))
 
     assert len(manifest["reserved_name_skips"]) == 1
-    assert manifest["reserved_name_skips"][0]["stem"] == "Operating_Point"
-    assert not (project / "images" / "undated" / "Operating_Point.png").is_file()
+    assert manifest["reserved_name_skips"][0]["stem"] == "Bucket"
+    assert not (project / "images" / "undated" / "Bucket.png").is_file()
     assert (project / "images" / "undated" / "ordinary.png").is_file()
 
 

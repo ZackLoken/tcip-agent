@@ -1,14 +1,6 @@
-"""What a whole-raster export promises in its sidecar has to be what the pass actually ran at.
-
-Two properties of the ``raster_path`` regime that a reader of the delivered bucket depends on:
-the full-frame detection cap recorded beside the predictions is the cap the mosaic pass applied,
-and a trait export the checkpoint's training run cannot support refuses with the audited door that
-can deliver that count named in the refusal.
-"""
+"""What a whole-raster bucket records has to be what the pass actually ran at."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
@@ -16,150 +8,28 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 pytest.importorskip("tifffile")
 
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
-
 TILE = 32
 
 
-def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, monkeypatch):
-    """Block calibration's band-scoped density cap is not transferred to the whole-mosaic pass: the
-    pass runs uncapped, and the persisted operating point records that same uncapped value, so the
-    recorded operating point and the applied one are one fact rather than two."""
-    from tests.test_block_calibration import _attest_regions_complete, _build_experiment
-
-    exp = _build_experiment(tmp_path)
-    manifest = exp["spatial_manifest"]
-    _attest_regions_complete(
-        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
-
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    real_predict_sliced = GenericPredictor.predict_sliced
-    passes: list[dict] = []
-
-    def _capture_predict_sliced(self, source, **kwargs):
-        result = real_predict_sliced(self, source, **kwargs)
-        passes.append({"max_dets": self.max_dets, "count": result.get("count")})
-        return result
-
-    monkeypatch.setattr(GenericPredictor, "predict_sliced", _capture_predict_sliced)
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    out_dir = tmp_path / "preds"
-    result = run_inference(
-        tmp_path, exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
-
-    assert "error" not in result, result
-    assert result["conf_source"] == "block_calibration"
-    # The band passes block calibration runs come first; the last one is the mosaic pass itself.
-    assert len(passes) > 1
-    mosaic_pass = passes[-1]
-
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    sidecar = read_operating_point_sidecar(out_dir)
-    stamped_cap = sidecar["operating_point"]["max_dets"]["value"]
-    assert mosaic_pass["max_dets"] == stamped_cap
-    assert stamped_cap is None
-    # The band passes did carry a cap, so an uncapped mosaic pass is a real transition, not the
-    # same state the predictor was already in.
-    assert any(p["max_dets"] is not None for p in passes[:-1])
-
-    # The raster bucket's publication and its stamp are each recorded once, by the library that
-    # made them, never the door; the raster the pass read is the stamp's fact.
-    import tcip_store as ts
-
-    from tcip_mcp.audit import audit_log_key
-
-    rows = [r for key in dict.fromkeys((audit_log_key(exp["root"]),
-                                        audit_log_key(tmp_path), audit_log_key(out_dir)))
-            for r in ts.read_log(key).records]
-    published = [r for r in rows if r["tool"] == "prediction_bucket_published"]
-    stamped = [r for r in rows if r["tool"] == "stamp_written"]
-    assert [r["arguments"]["predictions_dir"] for r in published] == [str(out_dir)]
-    from tcip_mcp.registry_paths import stored_path
-
-    assert [r["stamp"]["raster_path"] for r in stamped] == [
-        stored_path(exp["raster_path"], tmp_path)]
-    assert not [r for r in rows if r["tool"] == "run_inference"]
-
-
-def test_the_raster_door_runs_at_the_operating_point_its_prepared_pass_states(tmp_path):
+def test_the_raster_door_records_the_execution_its_prepared_pass_states(tmp_path):
     """The raster door prepares its pass through the one preparation every pass shares, so the
-    operating point it stamps is the one that preparation states for the same checkpoint and the
-    same stated values."""
+    execution record its bucket keeps is the one that preparation states for the same checkpoint
+    and the same stated values."""
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.resolution import DEFAULT_TILE_BATCH_SIZE
-    from tcip_mcp.tools.inference_tools import _prepare_pass, run_inference
-    from tests.test_block_calibration import _build_experiment
-
-    exp = _build_experiment(tmp_path)
-    result = run_inference(
-        tmp_path, exp["checkpoint_path"], output_dir=str(tmp_path / "preds"),
-        raster_path=str(exp["raster_path"]), conf_threshold=0.0, tile_size=TILE, overlap=0.2)
-    assert "error" not in result, result
-
-    prepared = _prepare_pass(
-        load_registered_checkpoint(exp["checkpoint_path"], project=tmp_path), images_dir=None, conf_threshold=0.0,
-        device=None, tile=True, tile_size=TILE, overlap=0.2, cross_tile_nms=None,
-        max_dets=None, postprocess="nms", tile_batch_size=DEFAULT_TILE_BATCH_SIZE)
-    assert not isinstance(prepared, str), prepared
-    assert result["operating_point"] == prepared.raw_result()["operating_point"]
-
-
-def test_a_redirected_raster_export_names_the_bucket_the_caller_asked_for(tmp_path):
-    """A raster export into a bucket carrying a review verdict lands in the next free variant,
-    and the response names the bucket the caller asked for beside the one written."""
-    import json
-
-    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
-    from tcip_annotation.state import Annotation, BBox
-
-    from tcip_mcp.prediction_buckets import bucket_key_of
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
     from tcip_mcp.tools.inference_tools import run_inference
     from tests.test_block_calibration import _build_experiment
 
     exp = _build_experiment(tmp_path)
-    reviewed = exp["root"] / "predictions" / "preds"
-    reviewed.mkdir(parents=True)
-    (reviewed / "mosaic.json").write_text(
-        json.dumps({"image": "mosaic", "width": 64, "height": 64, "annotations": []}),
-        encoding="utf-8")
-    engine = ReviewEngine(exp["root"] / ".tcip" / "state")
-    ctx = ReviewContext(img_name="mosaic.tif", img_width=64, img_height=64,
-                        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
-                                          score=0.9)])
-    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
-                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(bucket_key_of(reviewed), det, ctx, action="accepted")
-
+    out = tmp_path / "preds"
     result = run_inference(
-        tmp_path, exp["checkpoint_path"], output_dir=str(reviewed), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2)
-
+        tmp_path, exp["checkpoint_path"], output_dir=str(out),
+        raster_path=str(exp["raster_path"]), stated=Stated(conf=0.0, tile_size=TILE, overlap=0.2))
     assert "error" not in result, result
-    assert result["bucket_redirected"] is True
-    assert Path(result["output_dir"]).name == "preds@r2"
-    assert result["requested_output_dir"] == str(reviewed)
 
-
-def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_delivery_door(tmp_path):
-    """The refusal is the agent's only in-code pointer to the door that can still deliver a
-    calibrated per-plant count for a mosaic, so it names that tool rather than only the missing
-    training-time precondition."""
-    from tests.test_block_calibration import _build_experiment
-
-    exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_no_reserved_region")
-
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    out_dir = tmp_path / "preds"
-    result = run_inference(
-        tmp_path, exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening")
-
-    assert "error" in result
-    assert "deliver_orthomosaic_plant_counts" in result["error"]
-    assert not Path(out_dir / "operating_point.json").exists()
+    prepared = prepare_pass(
+        load_registered_checkpoint(exp["checkpoint_path"], project=tmp_path),
+        Stated(tile=True, tile_size=TILE, overlap=0.2, conf=0.0))
+    assert result["execution"] == prepared.execution.record()
+    assert read_bucket(out).execution.record() == prepared.execution.record()

@@ -152,8 +152,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "deliver_per_plant_csv",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
-        # Re-admitted count calibrator, beside its two sibling calibrators.
-        "calibrate_count_operating_point",
+        # The assessment doors every delivered number rests on.
+        "assess_checkpoint", "assess_reserved_regions", "calibrate_physical_scale",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
@@ -195,6 +195,10 @@ def test_consolidated_tools_present_and_removed_absent():
         "write_class_map",
         # Deleted: a server acts on the project it was started for, never one it switches to.
         "activate_project",
+        # Deleted: an assessment answers for every delivered number.
+        "calibrate_scalar_operating_point", "calibrate_classifier_operating_point",
+        "calibrate_count_operating_point", "redraw_calibration_holdout",
+        "clear_prediction_bucket", "supersede_delivery",
         # Merged away: list_experiments(launched_only=True) serves the launched-runs view.
         "list_training_runs",
         # Merged away: rank_registered_models(metric="") serves the listing view.

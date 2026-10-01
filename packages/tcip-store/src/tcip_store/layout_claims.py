@@ -39,9 +39,6 @@ CURATED = "curated"
 RUN = "run"
 """A run's own directory, where an evaluation of its checkpoint writes its results."""
 
-PREDICTION_BUCKET = "prediction_bucket"
-"""One prediction bucket directory, where a run's operating-point stamps sit beside its output."""
-
 NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 """A caller-chosen name's one legal shape: lowercase letters, digits, single hyphens between
 groups."""
@@ -58,7 +55,6 @@ LAYOUTS = (
     SPLITS,
     CURATED,
     RUN,
-    PREDICTION_BUCKET,
 )
 """Every kind of directory a root can be, for an operator naming one on a command line."""
 
@@ -273,26 +269,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "audit_log": Claim(ROOT, (_named(".tcip", name="audit", suffix=".jsonl"),)),
     "friction_reports": Claim(ROOT, (_rooted(".tcip", "reports", suffix=".json"),)),
     "retrospectives": Claim(ROOT, (_rooted(".tcip", "retrospectives", suffix=".md"),)),
-    "confidence_sweep": Claim(
-        ROOT,
-        (
-            (
-                Constant(".tcip"),
-                Constant("artifacts"),
-                Patterned(ANY, lead="operating_point_sweep_", tail=".json"),
-            ),
-        ),
-    ),
-    "cal_holdout_split_lock": Claim(
-        ROOT,
-        (
-            (
-                Constant(".tcip"),
-                Constant("artifacts"),
-                Patterned(ANY, lead="cal_holdout_split_", tail=".json"),
-            ),
-        ),
-    ),
     "plant_mapping": Claim(
         STATE,
         (
@@ -305,9 +281,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         STATE,
         ((Constant("plant_registries"), Patterned(PartPattern(regex=NAME_SEGMENT), tail=".json")),),
     ),
-    "delivery_supersessions": Claim(
-        STATE, ((Constant("delivery_supersessions"), Patterned(ANY, tail=".json")),)
-    ),
     "review_verdicts": Claim(
         STATE,
         (
@@ -319,25 +292,17 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "delivery_events": Claim(
         STATE, ((Constant("delivery_events"), Patterned(ANY, tail=".json")),)
     ),
+    "delivery_acknowledgments": Claim(
+        STATE, ((Constant("delivery_acknowledgments"), Patterned(ANY, tail=".json")),)
+    ),
     "selection": Claim(SPLITS, (_named(name="selection", suffix=".json"),)),
     "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
-    "operating_point_sidecar": Claim(
-        PREDICTION_BUCKET, (_named(name="operating_point", suffix=".json"),)
-    ),
-    "classifier_operating_point_sidecar": Claim(
-        PREDICTION_BUCKET, (_named(name="classifier_operating_point", suffix=".json"),)
-    ),
-    "ordinal_operating_point_sidecar": Claim(
-        PREDICTION_BUCKET, (_named(name="ordinal_operating_point", suffix=".json"),)
-    ),
-    "regression_operating_point_sidecar": Claim(
-        PREDICTION_BUCKET, (_named(name="regression_operating_point", suffix=".json"),)
-    ),
-    "resolve_scale_sidecar": Claim(
-        PREDICTION_BUCKET, (_named(name="resolve_scale", suffix=".json"),)
-    ),
     "raster_pass_progress": Claim(
-        PREDICTION_BUCKET, (_rooted(".tcip", "raster_pass_progress", suffix=".json"),)
+        ROOT,
+        (
+            (Constant(".tcip"), Constant("raster_pass_progress"),
+             Patterned(ANY), Patterned(ANY, tail=".json")),
+        ),
     ),
 }
 """One row per record and log store the platform declares, keyed by store name, derived from that
@@ -556,7 +521,6 @@ __all__ = [
     "LAYOUTS",
     "NAME_SEGMENT",
     "PLATFORM_CLAIMS",
-    "PREDICTION_BUCKET",
     "PartPattern",
     "Patterned",
     "ROOT",

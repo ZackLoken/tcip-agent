@@ -6,8 +6,7 @@ import {
   inferenceApi,
   openInferenceStream,
   resultsApi,
-  type BucketInFlightRefusal,
-  type BucketRefusal,
+  type BucketExistsRefusal,
   type InferenceJob,
   type InferenceStatus,
   type RegisteredModel,
@@ -19,76 +18,38 @@ import { selectProjectRoot } from "@/store/slices/gui";
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
 
-/** A launch refused for one date, holding what it was refused for so its own remediation
- *  action re-posts the same checkpoint and date rather than the select's current choice. */
+/** A launch refused for one date, holding what it was refused for. */
 interface RefusedLaunch {
   date: string;
-  checkpointPath: string;
-  refusal: BucketRefusal;
+  refusal: BucketExistsRefusal;
 }
 
-/** One refused-launch entry: the facts the response carried, its one remediation action (a
- *  fresh-bucket relaunch or watching the in-flight job), and a dismissal. Every accessible name
- *  below is date-qualified so two entries' controls are distinguishable. */
+/** One refused-launch entry: the facts the response carried, watching the job still writing the
+ *  bucket, and a dismissal. Every accessible name below is date-qualified. */
 function RefusedLaunchEntry({
   entry,
-  onRunSuggestion,
   onWatch,
   onDismiss,
 }: {
   entry: RefusedLaunch;
-  onRunSuggestion: (entry: RefusedLaunch, suggestedModelName: string) => void;
-  onWatch: (refusal: BucketInFlightRefusal) => void;
+  onWatch: (refusal: BucketExistsRefusal) => void;
   onDismiss: (date: string) => void;
 }) {
   const { refusal, date } = entry;
   return (
     <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[11px]">
-      {refusal.kind === "bucket_holds_documents" ? (
-        <>
-          <p>
-            {date}: {refusal.document_stem_count !== null && `${refusal.document_stem_count} `}
-            prediction document(s) already in{" "}
-            <span className="font-mono">{refusal.requested_output_dir}</span>.
-            {refusal.suggested_model_name && (
-              <>
-                {" "}
-                Nothing was written; a run into {refusal.suggested_model_name} lists under that name
-                for this date.
-              </>
-            )}
-          </p>
-          {refusal.suggested_model_name ? (
-            <button
-              className="tcip-btn text-[11px] self-start"
-              aria-label={`Run into ${refusal.suggested_model_name} instead for ${date}`}
-              onClick={() => onRunSuggestion(entry, refusal.suggested_model_name as string)}
-            >
-              {`Run into ${refusal.suggested_model_name}`}
-            </button>
-          ) : (
-            <p>
-              {`Every bucket name this app can offer for ${refusal.requested_model_name} on this date (${refusal.requested_model_name}@r2 and up) already holds a review verdict or a prediction document, so there is no fresh bucket to offer here. Ask the agent in the terminal to publish this model into a bucket you name: its run_inference door takes an output_dir.`}
-            </p>
-          )}
-        </>
-      ) : (
-        <>
-          <p>
-            {date}: {refusal.job_id && `job ${refusal.job_id} `}
-            is still writing to <span className="font-mono">{refusal.requested_output_dir}</span>.
-          </p>
-          {refusal.job_id && (
-            <button
-              className="tcip-btn text-[11px] self-start"
-              aria-label={`Watch job ${refusal.job_id} for ${date}`}
-              onClick={() => onWatch(refusal)}
-            >
-              {`Watch job ${refusal.job_id}`}
-            </button>
-          )}
-        </>
-      )}
+      <p>
+        {date}: job {refusal.job_id} is still writing the bucket at{" "}
+        <span className="font-mono">{refusal.requested_output_dir}</span>. A bucket is published
+        once, so nothing was launched; name another bucket directory to publish this run.
+      </p>
+      <button
+        className="tcip-btn text-[11px] self-start"
+        aria-label={`Watch job ${refusal.job_id} for ${date}`}
+        onClick={() => onWatch(refusal)}
+      >
+        {`Watch job ${refusal.job_id}`}
+      </button>
       <button
         className="tcip-btn text-[11px] self-start"
         aria-label={`Dismiss refusal for ${date}`}
@@ -117,13 +78,17 @@ export function InferenceTab() {
   const [dates, setDates] = useState<string[]>([]);
   const [datesError, setDatesError] = useState<string | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  // The directory the run's buckets publish under, one child per date; the breeder names it.
+  const [bucketRoot, setBucketRoot] = useState("");
+  // The assessment whose execution record the run takes and publishes under; empty for none.
+  const [assessmentId, setAssessmentId] = useState("");
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
   // Whether the watched job still appeared in the last poll: false once a job is delisted, so
   // the panel shows its last error alone rather than a status line frozen on a job that is gone.
   const [activeJobListed, setActiveJobListed] = useState(true);
-  // A bucket_holds_documents or bucket_in_flight refusal, keyed by the date it was refused for.
+  // A bucket_exists refusal, keyed by the date it was refused for.
   const [refusedLaunches, setRefusedLaunches] = useState<Record<string, RefusedLaunch>>({});
   const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
@@ -196,22 +161,6 @@ export function InferenceTab() {
         .then((r) => {
           setJobs(r.jobs);
           setJobsError(null);
-          // A bucket_in_flight entry names a job that may have finished since it was refused:
-          // drop it once that job is no longer pending/running, or no longer listed at all.
-          setRefusedLaunches((prev) => {
-            const stillLive = (jobId: string | null) => {
-              const row = jobId ? r.jobs.find((j) => j.job_id === jobId) : undefined;
-              return row !== undefined && CANCELLABLE.has(row.status);
-            };
-            const stale = Object.entries(prev).filter(
-              ([, entry]) =>
-                entry.refusal.kind === "bucket_in_flight" && !stillLive(entry.refusal.job_id),
-            );
-            if (stale.length === 0) return prev;
-            const next = { ...prev };
-            for (const [d] of stale) delete next[d];
-            return next;
-          });
           if (activeJobId) {
             const row = r.jobs.find((j) => j.job_id === activeJobId);
             setActiveJobListed(row !== undefined);
@@ -284,16 +233,17 @@ export function InferenceTab() {
     });
   }
 
-  // One date's launch body: onLaunch supplies the select's own model, a refused entry's own
-  // action its own checkpoint and the suggested model name, so the action never reads the select.
-  async function launchOne(checkpointPath: string, modelName: string, date: string) {
+  // One date's launch body: its bucket is the named directory's child for that date.
+  async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
     try {
       const res = await inferenceApi.launch({
         checkpoint_path: checkpointPath,
         dataset_root: datasetRoot,
-        model_name: modelName,
         date,
+        output_dir: `${bucketRoot.replace(/[/\\]+$/, "")}/${date}`,
+        stated: {},
+        assessment_id: assessmentId.trim() || null,
       });
       if (res.job_id) {
         const stub: InferenceJob = {
@@ -311,22 +261,11 @@ export function InferenceTab() {
         setActiveJob(stub);
         setActiveJobListed(true);
         dropRefusal(date);
-        if (res.bucket_redirected) {
-          useStore
-            .getState()
-            .pushToast(
-              `${date}: the requested bucket has review verdicts, so this run writes to ${res.output_dir}.`,
-              "info",
-            );
-        }
       }
     } catch (e) {
       const refusal = bucketRefusalOf(e);
       if (refusal) {
-        setRefusedLaunches((prev) => ({
-          ...prev,
-          [date]: { date, checkpointPath, refusal },
-        }));
+        setRefusedLaunches((prev) => ({ ...prev, [date]: { date, refusal } }));
         return;
       }
       dropRefusal(date);
@@ -340,7 +279,7 @@ export function InferenceTab() {
 
   async function onLaunch() {
     const model = models.find((m) => m.checkpoint_path === modelPath);
-    if (!model || !datasetRoot || selectedDates.length === 0) return;
+    if (!model || !datasetRoot || !bucketRoot || selectedDates.length === 0) return;
     setRefusedLaunches((prev) => {
       const next = { ...prev };
       for (const date of selectedDates) delete next[date];
@@ -350,23 +289,19 @@ export function InferenceTab() {
     try {
       // One job per date: each date is its own prediction bucket, one job row per date.
       for (const date of selectedDates) {
-        await launchOne(model.checkpoint_path, model.name, date);
+        await launchOne(model.checkpoint_path, date);
       }
     } finally {
       setLaunching(false);
     }
   }
 
-  function onRunSuggestion(entry: RefusedLaunch, suggestedModelName: string) {
-    void launchOne(entry.checkpointPath, suggestedModelName, entry.date);
-  }
-
-  function onWatchRefusedJob(refusal: BucketInFlightRefusal) {
-    const row = refusal.job_id ? jobs.find((j) => j.job_id === refusal.job_id) : undefined;
+  function onWatchRefusedJob(refusal: BucketExistsRefusal) {
+    const row = jobs.find((j) => j.job_id === refusal.job_id);
     setActiveJob(
       row ??
         ({
-          job_id: refusal.job_id ?? "",
+          job_id: refusal.job_id,
           status: "running",
           done: 0,
           total: 0,
@@ -470,19 +405,41 @@ export function InferenceTab() {
           </div>
         )}
 
+        <label className="tcip-label mb-1" htmlFor="inference-bucket-root">
+          Bucket directory
+        </label>
+        <input
+          id="inference-bucket-root"
+          className="tcip-input w-full mb-3 font-mono"
+          value={bucketRoot}
+          onChange={(e) => setBucketRoot(e.target.value)}
+          placeholder="a new directory under this project's predictions tree"
+        />
+
+        <label className="tcip-label mb-1" htmlFor="inference-assessment">
+          Assessment (optional)
+        </label>
+        <input
+          id="inference-assessment"
+          className="tcip-input w-full mb-3 font-mono"
+          value={assessmentId}
+          onChange={(e) => setAssessmentId(e.target.value)}
+          placeholder="the assessment id this checkpoint earned"
+        />
+
         <p className="text-[11px] text-tcip-muted mb-3">
-          Conf/IoU come from the platform&apos;s own defaults, and whether this run tiles (and at
-          what size/overlap) comes from this checkpoint&apos;s own training geometry, and
-          predictions land in this dataset&apos;s prediction dir for the model and date: the same
-          operating point and layout the agent-facing door resolves, so a run here and a run there
-          cannot diverge.
+          Every execution value (conf, cap, tiling, cross-tile merge) is the named assessment's own,
+          or without one is resolved from this checkpoint as the agent-facing door resolves it, so a
+          run here and a run there cannot diverge. Only predictions published under an assessment
+          can deliver validated numbers. Each date publishes once, into its own directory under the
+          one named above.
         </p>
 
         <button
           ref={launchButtonRef}
           className="tcip-btn-primary w-full"
           onClick={onLaunch}
-          disabled={launching || !modelPath || selectedDates.length === 0}
+          disabled={launching || !modelPath || !bucketRoot || selectedDates.length === 0}
         >
           ▶&nbsp;&nbsp;Launch inference
         </button>
@@ -496,7 +453,6 @@ export function InferenceTab() {
               <RefusedLaunchEntry
                 key={entry.date}
                 entry={entry}
-                onRunSuggestion={onRunSuggestion}
                 onWatch={onWatchRefusedJob}
                 onDismiss={dropRefusal}
               />

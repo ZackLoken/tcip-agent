@@ -220,14 +220,14 @@ def test_load_canopy_segments_admits_a_sam_authored_polygon_accepted_through_rev
 
     from tcip_web.app import app
 
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
     dataset_root, raster_path, _georef, identity = _setup(tmp_path)
-    pred_path = dataset_root / "predictions" / "sam" / "2024-06-01" / f"{raster_path.stem}.json"
-    pred_path.parent.mkdir(parents=True, exist_ok=True)
-    write_annotations(
-        str(pred_path),
-        [Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), score=0.9, created_by="sam")],
-        WIDTH, HEIGHT,
-    )
+    ring = [[5.0, 5.0], [20.0, 5.0], [20.0, 20.0], [5.0, 20.0]]
+    staged = stage_proposals(tmp_path, str(raster_path), model_name="sam", polygons=[
+        {"subject": "canopy", "conf": 0.9, "rings": [ring]}])
+    assert "error" not in staged, staged
+    pred_path = Path(staged["path"])
     gt_path = _doc_path(raster_path)
 
     client = TestClient(app, base_url="http://127.0.0.1")

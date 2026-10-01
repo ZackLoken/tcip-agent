@@ -24,7 +24,6 @@ function seedDataset(partial: Record<string, unknown>) {
 function selection(over: Record<string, unknown>) {
   return {
     dataset_root: "/ws/proj",
-    model_name: null,
     image_list: [],
     current_image_index: 0, // backend always resets to 0
     images_dir: null,

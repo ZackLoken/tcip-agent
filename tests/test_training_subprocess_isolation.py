@@ -134,7 +134,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     assert ctx.run.objective == resolved["objective"]
     assert ctx.run.config["data"] == resolved["data"]
     train_ds = ctx.train_loader.dataset
-    assert sorted({train_ds.member_of(key) for key in train_ds.stems}) == partition_side(
+    assert sorted({train_ds.sample_of(key).member for key in train_ds.stems}) == partition_side(
         resolved["partition"], "train")
     assert (run_dir / RUN_FILE).read_bytes() == launch_bytes
     assert sorted(p.name for p in run_dir.iterdir()) == files_before

@@ -3,10 +3,9 @@ canvas review.
 
 propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
 bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
-mask. stage_proposals lands either an engine's reviewed candidates or explicit boxes/polygons in
-the predictions tree through one staging door guarded on review state (a detection verdict or a
-bulk accept alike), for a human to accept, reject or edit on the Review canvas. It never writes
-ground truth.
+mask. stage_proposals publishes either an engine's reviewed candidates or explicit boxes/polygons
+once as a proposal bucket in the predictions tree, refusing one already published, for a human to
+accept, reject or edit on the Review canvas. It never writes ground truth.
 """
 
 from __future__ import annotations
@@ -62,17 +61,10 @@ class _StatedSubject(BaseModel):
 
 
 def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
-    """The proposals one run staged for one dataset image, for ``stage_proposals``'s assignments
-    regime to read back.
-
-    ``last_writer_wins``: a run writes the whole envelope from the candidates it just produced, so
-        a re-run replaces the previous one rather than merging into it. Scoped to the dataset root,
-        the same as the labels and predictions the proposals eventually become: a same-named image
-        in another dataset, or another date bucket of this one, addresses its own record. ``date``
-        is the image's own capture-date bucket, or ``None`` for a flat dataset's undated layout,
-        addressed under ``dataset_layout.UNDATED_BUCKET``. A flat-layout image and an image in that
-        literal bucket therefore share one key for a given stem.
-    """
+    """The candidates the latest proposal run produced for one dataset image, whole, under the
+    dataset root: ``date`` is the image's capture-date bucket, or ``None`` for a flat dataset's
+    undated layout, addressed under ``dataset_layout.UNDATED_BUCKET`` (so a flat-layout image and
+    an image in that literal bucket share one key for a given stem)."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or UNDATED_BUCKET, stem))
@@ -380,13 +372,9 @@ def propose_annotations(
 
 def _stage_assignments_regime(project: Path, image_path: str, img: Path, address: StagingAddress,
                                assignments: list[dict]) -> dict:
-    """The reviewed-candidates regime :func:`stage_proposals` runs when ``assignments`` is given.
-
-    Reads back the record ``propose_annotations`` staged for this exact image (dataset, capture
-    date and stem) and refuses if the image's content no longer matches the content identity that
-    run recorded. That check decodes sample windows of the image (the bound ``CONTENT_IDENTITY_*``
-    constants in ``raster_source.py`` set how many and how large), never the whole frame.
-    """
+    """Stage the candidates ``assignments`` names, each with its subject, from the record staged
+    at ``address`` for ``img``; refuses when that record is absent or the image's content no
+    longer matches the content identity it recorded."""
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncomplete, image_dimensions, resolve_image_source,
     )
@@ -439,20 +427,12 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
             return {"error": f"assignment {i}: {exc}"}
         n_poly += 1
 
-    # Stage into the predictions tree through the shared review-state-guarded helper: model output
-    # for a human to accept on the Review canvas, never written straight to ground truth.
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
-
+    # Model output for a human to accept on the Review canvas, never written straight to ground truth.
     try:
-        staged = stage_prediction_shapes(
-            str(address.root), engine, address.date, img.stem,
-            annotations=proposals, img_w=w, img_h=h, overwrite=False,
-        )
-    except BucketHasVerdicts as exc:
-        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
-    except ValueError as exc:
+        path = _stage_document(project, address, engine, img, annotations=proposals,
+                               img_w=w, img_h=h)
+    except (FileExistsError, ValueError) as exc:
         return {"error": str(exc)}
-    bucket = staged["bucket"]
 
     # Render final result for QA
     from tcip_mcp.tools.vision_tools import _box_dict, _display_for_path, _name_map, _subject_indexer
@@ -465,16 +445,11 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
 
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
             f"predictions (created_by={engine!r}) for review, not ground truth.")
-    if staged["redirected"]:
-        note = (f"bucket {engine!r} has {staged['verdict_count']} reviewed image(s) (a review "
-                f"verdict or a bulk accept), staged to a fresh bucket {bucket!r} instead so the "
-                "reviewed predictions stay intact. " + note)
 
     return {
         "image_path": out,
         "engine": engine,
-        "bucket": bucket,
-        "bucket_redirected": staged["redirected"],
+        "path": path,
         "summary": note,
         "proposal_count": n_poly,
     }
@@ -574,19 +549,39 @@ def segment_prompt(
     }
 
 
-def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
-                            model_name: str, boxes: list[dict], polygons: list[dict],
-                            overwrite: bool) -> dict:
-    """The explicit-shapes regime :func:`stage_proposals` runs when ``boxes``/``polygons`` is
-    given: model-/agent-proposed shapes staged to ``predictions/<model>/<date>/<stem>.json`` for
-    canvas review.
+def _stage_document(project: Path, address: StagingAddress, producer: str, image: Path, *,
+                    annotations: list[Annotation], img_w: int, img_h: int) -> str | None:
+    """Publish ``annotations`` as the bucket of one staged proposal for ``image``, at
+    ``predictions/<producer>/[<date>/]<stem>/`` (:func:`~tcip_mcp.buckets.publish`), its record
+    naming ``producer`` as what proposed them, and return its document's path; no annotations
+    publishes nothing and returns ``None``. The document is encoded before anything is created,
+    so a reserved stem refuses (``ValueError``) leaving nothing; a bucket already there refuses
+    (:class:`~tcip_mcp.buckets.BucketExists`)."""
+    from tcip_annotation import json_io
 
-    Boxes and polygons alike land in the one per-image prediction file, each carrying a ``subject``
-    name. This never writes ground truth.
-    """
+    from tcip_mcp.buckets import Document, publish
+    from tcip_mcp.dataset_layout import prediction_root
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    if not annotations:
+        return None
+    _key, data = json_io.encode_annotations(image, annotations, img_w, img_h)
+    assert data is not None, "a non-empty proposal encodes a document"
+    out = prediction_root(address.root).joinpath(
+        producer, *([address.date] if address.date else []), image.stem)
+    bucket = publish(project, out, [Document(str(image), data)],
+                     producer={"proposed_by": producer},
+                     scope=ClassScope(), execution=None, raster_path=None, raster_identity=None,
+                     assessment_id=None)
+    return str(bucket.document(image))
+
+
+def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: StagingAddress,
+                           model_name: str, boxes: list[dict], polygons: list[dict]) -> dict:
+    """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
+    ``model_name`` for the image (:func:`_stage_document`)."""
     from tcip_annotation.json_io import ring_vertex
 
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
     from tcip_mcp.workspace import is_valid_name
 
     if not is_valid_name(model_name):
@@ -612,7 +607,6 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     except (FileNotFoundError, BandGroupIncomplete) as exc:
         return {"error": str(exc)}
     img_w, img_h = image_dimensions(img_source)
-    dataset_root, date, stem = str(address.root), address.date, img.stem
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
     # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
@@ -695,37 +689,26 @@ def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
     proposals: list[Annotation] = box_proposals + polygon_proposals
 
     try:
-        staged = stage_prediction_shapes(
-            dataset_root, model_name, date, stem,
-            annotations=proposals, img_w=img_w, img_h=img_h, overwrite=overwrite,
-        )
-    except BucketHasVerdicts as exc:
-        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
-    except ValueError as exc:
+        path = _stage_document(project, address, model_name, img, annotations=proposals,
+                               img_w=img_w, img_h=img_h)
+    except (FileExistsError, ValueError) as exc:
         return {"error": str(exc)}
-    bucket = staged["bucket"]
 
     note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
             "accepts on the Review tab before it becomes GT (focus_human_attention tab='review' to "
             "send them). It is reviewed through the accept path and is never promoted to a "
-            "validation reference.")
-    if staged["redirected"]:
-        note = (f"bucket {model_name!r} has {staged['verdict_count']} reviewed image(s) (a review "
-                f"verdict or a bulk accept), staged to a fresh bucket {bucket!r} instead so the "
-                "reviewed predictions stay intact; " + note)
+            "reference.")
 
     return {
         "staged": len(proposals),
         "n_detect": len(box_proposals), "n_segment": len(polygon_proposals),
         "dropped_nonpositive_boxes": dropped_boxes,
-        "path": staged["path"],
-        "model_name": model_name, "bucket": bucket, "bucket_redirected": staged["redirected"],
-        "date": date, "stem": stem, "note": note,
+        "path": path, "model_name": model_name, "date": address.date, "stem": img.stem,
+        "note": note,
     }
 
 
 @tool()
-@audited(scope_arg="image_path")
 def stage_proposals(
     project: Path,
     image_path: str,
@@ -734,7 +717,6 @@ def stage_proposals(
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
     model_name: str | None = None,
-    overwrite: bool = False,
 ) -> dict:
     """Stage model-/agent-proposed shapes as predictions for canvas review. Never writes ground
     truth.
@@ -745,36 +727,28 @@ def stage_proposals(
       assigned a subject; a mapping from candidate id to subject, rejected candidates simply
       omitted. Reads back the record staged at this exact image (dataset, capture date and stem)
       and refuses if the image's content no longer matches the content identity that run recorded.
-      The masks land under ``predictions/<engine>/<date>/<task>`` with ``created_by=<engine>`` and
-      ``score`` = the engine's proposal score; ``model_name`` is refused alongside ``assignments``.
+      The masks are staged with ``created_by=<engine>`` and ``score`` = the engine's proposal
+      score; ``model_name`` is refused alongside ``assignments``.
     - ``boxes``/``polygons``: explicit shapes an agent or another model already has in hand, with
-      no cached record to read back. Land under ``predictions/<model_name>/<date>/<stem>.json``.
-      ``model_name`` is required, the real producer stamped as ``created_by``. ``boxes`` is
+      no cached record to read back. ``model_name`` is required, the real producer stamped as
+      ``created_by``. ``boxes`` is
       ``[{subject, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1]; ``polygons`` is
       ``[{subject, conf, points|rings}]``, exactly one of two frames per proposal: ``points``, one
       ring of ``[x, y]`` pairs normalized to [0, 1]; or ``rings``, a list of rings in pixel
       coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping, the frame
       ``segment_prompt`` returns. Both build the same ``Polygon`` through the ground-truth door's
-      own vertex parser. ``overwrite=True``, this regime alone, writes in place even into an
-      existing bucket, and is itself refused when the bucket carries review state.
+      own vertex parser.
 
-    Either regime resolves the dataset root, capture date and stem from ``image_path`` itself. Both
-    write through the one staging door guarded on review state (a verdict or a bulk accept,
-    ``prediction_buckets.stage_prediction_shapes``), so a re-run never overwrites reviewed
-    predictions or orphans their verdicts. Both redirect to the next free run-scoped variant
-    (``<engine>@r2`` for the staged regime, ``<model_name>@r2`` for the explicit one) when the
-    requested bucket carries review state, returned as ``bucket`` alongside ``bucket_redirected``;
-    the count behind that redirect (``verdict_count`` in the error dict) counts reviewed images, a
-    detection verdict or a bulk accept alike, not detection entries. So a session that stages one
-    image and completes it on the Review canvas before staging the next spreads one run's proposals
-    over ``@r2``, ``@r3`` and onward, one variant per image already finished; stage every image of
-    a run before reviewing any to avoid it. Pair with ``focus_human_attention(tab='review')`` to
-    send the human straight to the result.
+    Either regime resolves the dataset root, capture date and stem from ``image_path`` itself, and
+    publishes the image's proposal once as its own bucket at
+    ``predictions/<producer>/<date>/<stem>/``, its record naming the engine or ``model_name`` as
+    what proposed it and no checkpoint, execution record or class scope: a proposal already staged
+    for the image under the same producer refuses, so a re-run never overwrites reviewed
+    predictions or orphans their verdicts, and no delivery ships one. Pair with
+    ``focus_human_attention(tab='review')`` to send the human straight to the result.
 
-    A staged record's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named; the
-    platform validates no subject name. A staged bucket carries no ``operating_point.json`` stamp
-    and so no recorded scope, so its records are read under the caller's own statement rather than
-    a proven one.
+    A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
+    the platform validates no subject name.
 
     Args:
         image_path: Absolute path to the dataset image (same as propose_annotations, for the
@@ -783,10 +757,8 @@ def stage_proposals(
             alongside boxes/polygons or model_name.
         boxes: Explicit boxes; see above. Refused alongside assignments.
         polygons: Explicit polygons; see above. Refused alongside assignments.
-        model_name: Predictions bucket to stage the explicit regime under. Required with
+        model_name: The producer the explicit regime stages under. Required with
             boxes/polygons, refused with assignments.
-        overwrite: Explicit regime only: write in place even into an existing bucket. Refused if
-            the bucket has review state (a detection verdict or a bulk accept).
     """
     if assignments is not None and (boxes or polygons):
         return {"error": "assignments cannot be combined with boxes/polygons: pick one input "
@@ -813,5 +785,5 @@ def stage_proposals(
     if model_name is None:
         return {"error": "model_name is required with boxes/polygons: the real producer, "
                          "stamped as created_by."}
-    return _stage_explicit_regime(image_path, img, address, model_name, boxes or [],
-                                  polygons or [], overwrite)
+    return _stage_explicit_regime(project, image_path, img, address, model_name, boxes or [],
+                                  polygons or [])

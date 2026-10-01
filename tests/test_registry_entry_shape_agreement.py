@@ -15,9 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.model_registry import (
-    ModelRegistry, load_registered_checkpoint, resolve_model_identity,
-)
+from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
@@ -119,10 +117,9 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     delivered.write_bytes(trained.read_bytes())
 
     checkpoint = load_registered_checkpoint(delivered, project=root)
-    identity = resolve_model_identity(checkpoint)
-    assert identity["sha256"] == hashlib.sha256(trained.read_bytes()).hexdigest()
-    assert identity["experiment_id"] == "bud_run3"
-    assert identity["checkpoint"] == "model_copy"
+    assert checkpoint.producer == {
+        "checkpoint_sha256": hashlib.sha256(trained.read_bytes()).hexdigest(),
+        "experiment_id": "bud_run3"}
 
 
 def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_no_models(

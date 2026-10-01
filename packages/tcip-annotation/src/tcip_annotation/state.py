@@ -1,11 +1,4 @@
-"""Annotation and review data model.  No GUI dependencies.
-
-An :class:`Annotation` is the unit: *what* it is (``subject`` plus attribute values by name),
-optionally *where* (``geometry``), and its provenance.  A geometry-less annotation is an image- or
-plant-level label (e.g. a whole-plant rating).  ``score`` is set for a model prediction and ``None``
-for ground truth.  Integer class ids do not live here: a name→id assignment is a per-training-run
-artifact (see :mod:`tcip_mcp.subject_registry`), never stored on an annotation.
-"""
+"""The annotation data model: :class:`Annotation` and the geometries it carries."""
 
 from __future__ import annotations
 
@@ -70,22 +63,14 @@ class Point:
 class Annotation:
     """One annotation on an image.
 
-    ``subject`` is the object it is about (``fruit``, ``shoot``).  ``geometry`` is a box, a
-    polygon, a point, or ``None`` for an image/plant-level label.  ``attributes`` maps an attribute
-    name to its value name (e.g. ``{"thorns": "present"}``): names, never a numeric class id.
-    ``score`` set means this is a prediction, and a prediction carries the same shape ground truth
-    does: a classified prediction's ``subject`` is still the object class, with the classifier's
-    decoded call sitting under ``attributes``, never the value alone in ``subject``. Provenance
-    travels with the annotation: who authored it and, once a prediction is accepted into ground
-    truth, who accepted it. ``accepted_by_rule`` names the validation record a rule-based admission
-    was verified against (``<experiment_id>:<record_digest>``), set only by the producer that
-    verified the claim; it is never a substitute for ``accepted_by``.
-
-    ``iscrowd`` (COCO's own spelling) marks a region holding many objects of ``subject`` that were
-    not separated: it is never one instance, so it never trains as a positive box, never counts as
-    a missed object at evaluation and never counts as one object in a count.
-
-    ``subject`` must be a non-empty string, or ``ValueError``.
+    ``subject`` is the object it is about, a non-empty string or ``ValueError``. ``geometry`` is a
+    box, a polygon, a point, or ``None`` for an image/plant-level label. ``attributes`` maps an
+    attribute name to its value name. ``score`` set means this is a prediction; a classified
+    prediction's ``subject`` is the object class and its decoded call sits under ``attributes``.
+    ``created_by``/``created_at`` name who authored it and ``accepted_by``/``accepted_at`` who
+    accepted it into ground truth; ``accepted_by_rule`` names the assessment a rule-based
+    admission was verified against, beside ``accepted_by``. ``iscrowd`` marks a region of
+    unseparated objects of ``subject``, never one instance.
     """
 
     subject: str

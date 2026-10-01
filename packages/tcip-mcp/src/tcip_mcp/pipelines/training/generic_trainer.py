@@ -32,9 +32,8 @@ from tcip_mcp.pipelines.model_build import (
     build_model,
     recorded_model_dims,
     run_task,
-    stamp_model_ref,
 )
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_mcp.pipelines.execution import DEFAULT_CONF
 from tcip_mcp.pipelines.schemas import DEFAULT_BATCH_SIZE
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
@@ -290,10 +289,10 @@ def _save_checkpoint(
         "global_step": global_step,
         **capture_rng_state(),
     }
-    write_checkpoint(stamp_model_ref({
+    write_checkpoint({
         **{k: state[k] for k in _RESUME_KEYS}, "config": config, "seed": seed,
         "metrics": _checkpoint_metrics(metrics),
-    }), path)
+    }, path)
 
 
 # ====================================================================
@@ -821,7 +820,7 @@ def train(
                     val_metrics = _validate(
                         model, val_loader, device, task, dims=dims,
                         # A fixed default unless eval_cfg explicitly overrides it, not the
-                        # resolved ship-point conf (that is derived later by resolve_operating_point).
+                        # ship-point conf, which an assessment derives later.
                         conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),
                         iou_threshold=eval_cfg.get("iou_threshold", 0.5),
                         iou_type=eval_cfg.get("iou_type"),
@@ -922,14 +921,13 @@ def train(
         if not diverged:
             if best_payload is not None:
                 run.saved["model_best"] = write_checkpoint(
-                    stamp_model_ref({**best_payload, "config": config}),
-                    checkpoint_path(out_dir, "model_best"))
+                    {**best_payload, "config": config}, checkpoint_path(out_dir, "model_best"))
             last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
-            run.saved["model_final"] = write_checkpoint(stamp_model_ref({
+            run.saved["model_final"] = write_checkpoint({
                 STATE_DICT_KEY: model.state_dict(),
                 "config": config,
                 "metrics": _checkpoint_metrics(last_epoch_metrics),
-            }), checkpoint_path(out_dir, "model_final"))
+            }, checkpoint_path(out_dir, "model_final"))
 
         if diverged:
             logger.info("Training run %s stopped: %s", run.id, run.error)

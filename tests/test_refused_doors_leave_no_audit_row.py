@@ -30,7 +30,8 @@ def _register_model(tmp_path: Path):
 def _deliver_per_image_counts(tmp_path: Path):
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    return deliver_per_image_counts(tmp_path, predictions_dir=str(tmp_path / "preds"), trait="stem")
+    return deliver_per_image_counts(tmp_path, str(tmp_path / "preds"), str(tmp_path / "o.csv"),
+                                    trait="stem")
 
 
 def _import_coco(tmp_path: Path):
@@ -48,24 +49,20 @@ def _build_plant_mapping(tmp_path: Path):
                                plant_registry=str(tmp_path / "plants.csv"))
 
 
-def _redraw_calibration_holdout(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
-
-    return redraw_calibration_holdout(tmp_path, str(tmp_path), reason="")
-
-
 def _deliver_per_plant_csv(tmp_path: Path):
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
-    return deliver_per_plant_csv(tmp_path, [], str(tmp_path / "out.csv"), "cyme count")
+    return deliver_per_plant_csv(tmp_path, [], str(tmp_path / "out.csv"), "cyme count",
+                                 "per_plant_count_aggregate", ["p1"],
+                                 {"2025-09-14": str(tmp_path / "preds")})
 
 
 def _deliver_orthomosaic_plant_counts(tmp_path: Path):
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     return deliver_orthomosaic_plant_counts(
-        tmp_path, str(tmp_path / "preds"), str(tmp_path / "absent.tif"), str(tmp_path / "plants.csv"),
-        str(tmp_path / "out.csv"), "cyme count")
+        tmp_path, str(tmp_path / "preds"), "no-registry", str(tmp_path / "out.csv"),
+        "cyme count", ["p1"])
 
 
 def _deliver_phenology_milestones(tmp_path: Path):
@@ -82,46 +79,33 @@ def _save_annotations_on_a_missing_image(tmp_path: Path):
                             annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}])
 
 
-def _calibrate_count_over_an_unstamped_bucket(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
+def _assess_an_unregistered_checkpoint(tmp_path: Path):
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
 
-    bucket = tmp_path / "predictions" / "m" / "2025-09-14"
-    bucket.mkdir(parents=True)
-    return calibrate_count_operating_point(
-        tmp_path, str(tmp_path / "m.pt"), "cyme count", str(tmp_path / "labels"), str(tmp_path / "images"),
-        str(tmp_path), str(bucket))
+    return assess_checkpoint(tmp_path, str(tmp_path / "m.pt"), "cyme count", "per_image_count",
+                             str(tmp_path / "selection"))
 
 
-def _calibrate_scalar_over_an_unregistered_checkpoint(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
+def _assess_the_reserved_regions_of_an_unregistered_checkpoint(tmp_path: Path):
+    from tcip_mcp.tools.calibration_tools import assess_reserved_regions
 
-    return calibrate_scalar_operating_point(
-        tmp_path, "cyme count", str(tmp_path / "m.pt"), str(tmp_path / "images"),
-        str(tmp_path / "t.csv"), "mae", str(tmp_path / "out"), str(tmp_path))
-
-
-def _calibrate_classifier_for_no_such_trait(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import calibrate_classifier_operating_point
-
-    labels = str(tmp_path / "labels")
-    return calibrate_classifier_operating_point(
-        tmp_path, "no-such-trait", labels, labels, labels, labels, str(tmp_path / "out"), str(tmp_path),
-        subject="cyme", attribute="stage")
+    return assess_reserved_regions(tmp_path, str(tmp_path / "m.pt"), "cyme count",
+                                   "per_image_count")
 
 
 def _calibrate_scale_for_no_such_trait(tmp_path: Path):
-    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+    from tcip_mcp.tools.calibration_tools import calibrate_physical_scale
 
-    return calibrate_physical_scale(
-        tmp_path, "no-such-trait", str(tmp_path / "preds"), str(tmp_path), str(tmp_path / "images"), "mm",
-        "ruler", str(tmp_path / "labels"), str(tmp_path / "ref.csv"))
+    return calibrate_physical_scale(tmp_path, "no-such-trait", str(tmp_path / "selection"),
+                                    str(tmp_path / "ref.csv"), "mm", "ruler")
 
 
 DOORS = [_register_model, _deliver_per_image_counts, _import_coco, _build_plant_mapping,
-         _redraw_calibration_holdout, _deliver_per_plant_csv, _deliver_orthomosaic_plant_counts,
+         _deliver_per_plant_csv, _deliver_orthomosaic_plant_counts,
          _deliver_phenology_milestones, _save_annotations_on_a_missing_image,
-         _calibrate_count_over_an_unstamped_bucket, _calibrate_scalar_over_an_unregistered_checkpoint,
-         _calibrate_classifier_for_no_such_trait, _calibrate_scale_for_no_such_trait]
+         _assess_an_unregistered_checkpoint,
+         _assess_the_reserved_regions_of_an_unregistered_checkpoint,
+         _calibrate_scale_for_no_such_trait]
 
 
 @pytest.mark.parametrize("door", DOORS, ids=[d.__name__.lstrip("_") for d in DOORS])

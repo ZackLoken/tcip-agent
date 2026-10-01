@@ -1,7 +1,7 @@
 """A within-mosaic calibration rect must be positively attested as reserved, not merely un-trained.
 
-A block-calibration reference has no image identity of its own, so the only proof it was held out is
-its geometry: the rect has to sit fully inside a region the run's partition actually recorded as
+A mosaic reference band has no image identity of its own, so the only proof it was held out is its
+geometry: the rect has to sit fully inside a region the run's partition actually recorded as
 non-train (``val_region``/``test_region``/``calibration_region``) and clear of every recorded train
 region. Missing the containment obligation admits a rect that lies in no attested region at all: a
 gap between regions, or coordinates the persisted geometry never covered.
@@ -17,68 +17,31 @@ pytest.importorskip("torch")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines.operating_point import _train_disjointness  # noqa: E402
-
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
+from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
+GAPPED = {"train_region": [[0, 0, 400, 1000]], "val_region": [[600, 0, 1000, 1000]],
+          "test_region": [], "calibration_region": []}
+"""A manifest reserving x<400 for training and x>=600 for validation, silent on the strip
+between them."""
 
 
-def _write_split(tmp_path: Path, experiment_id: str, spatial: dict) -> None:
-    """A real run under the project, opened by the launcher's own producer and writer, whose
-    launch record is then set past that writer to state a within-image spatial split with
-    ``spatial`` as its manifest."""
-    from tcip_store import RECORD_JSON
-
-    from tcip_mcp.experiments import RUN_FILE, read_record
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
-
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / f"{experiment_id}-data"),
-                         experiment_id=experiment_id)
-    record = read_record(run_dir / RUN_FILE)
-    record["resolved"]["data"]["split"] = {"spatial_manifest": {
-        "train_identities": ["mosaic::strip_x_0"], **spatial}}
-    (run_dir / RUN_FILE).write_bytes(RECORD_JSON.encode(record))
-
-
-def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak(tmp_path):
-    """The manifest reserves x<400 for training and x>=600 for validation, and says nothing at all
-    about the strip between them. A rect drawn from that strip touches no train pixel, so an
-    overlap test alone reads it clean, yet nothing in the split ever attested it as held out.
-    """
-    _write_split(tmp_path, "exp_gap", {
-        "train_region": [[0, 0, 400, 1000]],
-        "val_region": [[600, 0, 1000, 1000]],
-        "test_region": [],
-        "calibration_region": [],
-    })
+def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
+    """A rect drawn from the silent strip touches no train pixel, so an overlap test alone reads it
+    clean, yet nothing in the split ever attested it as held out."""
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
 
     gap_rect = (440, 100, 560, 300)
-    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
     assert not rects_overlap((0, 0, 400, 1000), gap_rect)          # genuinely clear of train
     assert not rect_contains_rect((600, 0, 1000, 1000), gap_rect)  # and attested by nothing
 
-    res = _train_disjointness("exp_gap", {"mosaic"}, set(), cal_rects={"mosaic": gap_rect},
-                              project=tmp_path)
-    assert res["group_check"] == "spatial_strip_geometric"
-    assert res["leaked_groups"] == ["mosaic"]
+    assert spatial_disjointness(GAPPED, [gap_rect]) == ["[440, 100, 560, 300]"]
 
 
-def test_a_rect_inside_an_attested_region_is_admitted(tmp_path):
-    """The companion obligation: a rect fully inside a recorded non-train region must read clean,
-    or block calibration could never resolve at all.
-    """
-    _write_split(tmp_path, "exp_clean", {
-        "train_region": [[0, 0, 400, 1000]],
-        "val_region": [[600, 0, 1000, 1000]],
-        "test_region": [],
-        "calibration_region": [],
-    })
-
-    res = _train_disjointness("exp_clean", {"mosaic"}, set(),
-                              cal_rects={"mosaic": (650, 100, 750, 300)}, project=tmp_path)
-    assert res["leaked_groups"] == []
-    assert res["unresolvable"] is False
+def test_a_rect_inside_an_attested_region_is_admitted():
+    """The companion obligation: a rect fully inside a recorded non-train region reads clean, or
+    a mosaic reference could never be assessed at all."""
+    assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
 def _mosaic_dataset(root: Path) -> tuple[Path, Path, str]:
@@ -126,18 +89,13 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         x0, y0, x1, y1 = rect
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
-    clean = _train_disjointness("exp_four_way", {stem}, set(),
-                                cal_rects={stem: _shrunk(cal_region[0])}, project=tmp_path)
-    assert clean["group_check"] == "spatial_strip_geometric"
-    assert clean["leaked_groups"] == []
+    assert spatial_disjointness(spatial, [_shrunk(cal_region[0])]) == []
 
     beyond_extent = (MOSAIC_W + 1000, 100, MOSAIC_W + 2000, 300)
     from tcip_mcp.pipelines.raster_source import rects_overlap
     assert all(not rects_overlap(tuple(tr), beyond_extent) for tr in spatial["train_region"])
 
-    leaked = _train_disjointness("exp_four_way", set(), {stem},
-                                 hold_rects={stem: beyond_extent}, project=tmp_path)
-    assert leaked["leaked_groups"] == [stem]
+    assert spatial_disjointness(spatial, [beyond_extent]) == [str(list(beyond_extent))]
 
 
 def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):

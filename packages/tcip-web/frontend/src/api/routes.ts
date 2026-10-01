@@ -75,7 +75,6 @@ export const ROUTES = {
   postReviewMarkComplete: "/api/review/mark_complete",
   postReviewMatches: "/api/review/matches",
   postReviewQueueLaunch: "/api/review/queue/launch",
-  postReviewValidateReference: "/api/review/validate_reference",
   postSessionsEnd: "/api/sessions/end",
   postSessionsImageEvent: "/api/sessions/image_event",
   postSessionsStart: "/api/sessions/start",

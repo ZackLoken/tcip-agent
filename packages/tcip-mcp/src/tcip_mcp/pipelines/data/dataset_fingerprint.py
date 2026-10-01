@@ -12,8 +12,8 @@ from pathlib import Path
 
 
 def _labels_term(annotations_root: Path) -> str | None:
-    """Whole-dataset label identity, composed from
-    :func:`~tcip_mcp.pipelines.resolution.dataset_hash` per label dir.
+    """Whole-dataset label identity, composed from each label document's own
+    :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest` under its dir.
 
     Labels live at ``annotations/<date>/*.json`` (date-nested) or flat ``annotations/*.json``; the
     per-dir digests are combined keyed by dir name. ``None`` when no labels exist anywhere.
@@ -26,19 +26,19 @@ def _labels_term(annotations_root: Path) -> str | None:
     h = hashlib.sha256()
     any_labels = False
     from tcip_annotation.json_io import prediction_documents
-    from tcip_mcp.pipelines.resolution import dataset_hash
+    from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
     for d in label_dirs:
-        if not prediction_documents(d):
+        documents = prediction_documents(d)
+        if not documents:
             continue
         any_labels = True
-        # A real subdir name can never be empty, so the flat root keys with "" rather than its
-        # own name, otherwise a dated subdir named literally "annotations" would key identically
-        # to the flat case and collide with it.
+        # The flat root keys with "", which no real subdir name can be, so it never collides.
         key = "" if flat else d.name
         h.update(key.encode("utf-8"))
         h.update(b"\0")
-        h.update(dataset_hash(d).encode("utf-8"))  # reuse the label-byte hasher, per dir
+        for document in documents:
+            h.update(f"{document.stem}\0{ground_truth_digest(document)}\0".encode("utf-8"))
         h.update(b"\0")
     return h.hexdigest()[:16] if any_labels else None
 
@@ -93,20 +93,16 @@ def _registry_term(dataset_root: Path) -> str:
     """Digest over the canonical registry serialization in declared order (load-bearing in
     ``assign_class_ids``). Serialized via ``registry_to_dict`` rather than raw bytes, so a
     whitespace-only reformat of ``subjects.json`` does not change identity but a value
-    reorder/addition does. Empty string when the dataset has no registry, or when ``read_registry``
-    refuses it as undecodable/malformed (``OSError``/``ValueError``/``RegistryError``);
-    :class:`tcip_store.SchemaVersionRefused` propagates.
+    reorder/addition does. Empty string when the dataset has no registry; a registry
+    ``read_registry`` refuses raises as it does.
     """
-    from tcip_mcp.subject_registry import RegistryError, read_registry, registry_to_dict
+    from tcip_mcp.subject_registry import read_registry, registry_to_dict
     from tcip_mcp.dataset_layout import subjects_path
 
     cp = subjects_path(dataset_root)
     if not cp.is_file():
         return ""
-    try:
-        canonical = json.dumps(registry_to_dict(read_registry(cp)), separators=(",", ":"))
-    except (OSError, ValueError, RegistryError):
-        return ""
+    canonical = json.dumps(registry_to_dict(read_registry(cp)), separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
@@ -138,7 +134,7 @@ def _confirmations_term(dataset_root: Path) -> str:
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     """Whole-dataset content identity: labels + image files + registry + confirmed negatives.
 
-    The label term calls :func:`~tcip_mcp.pipelines.resolution.dataset_hash`; the image term hashes
+    The label term digests each label document's bytes; the image term hashes
     each file's raw bytes (walking ``image_utils.IMAGE_EXTS``, a ``.bandgroup`` manifest hashed as
     its own bytes); the registry term digests the canonical subject registry; the confirmations
     term digests the dataset-native confirmed-negative store. Content-addressed, so a moved dataset

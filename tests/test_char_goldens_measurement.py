@@ -8,13 +8,12 @@ sliding through silently. They are not aspirational: a golden turning red is the
 update it *deliberately* alongside the change that moved the number.
 
 Rails pinned here (one section each):
-  1. conf operating-point sweep + count-unbiased pick + resolve_operating_point
+  1. conf operating-point sweep + count-unbiased pick + the count criterion over a reference
   2. phenology fraction curve + milestone dates (crossing_date / plant_milestones / per_plant_phenology)
-  3. operating_point.json stamp shape + the validated flag path (calibrated vs raw)
-  4. the currently divergent NMS / max_dets defaults across the three modules
+  3. the execution record a pass runs under, with no value stated
+  4. the one set of inference operating-point defaults
   5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
      derived center-match tolerance)
-  6. deliver_phenology_milestones gate behavior (refuses without an open class; requires validated flags)
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
@@ -37,27 +35,12 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_f1_max,
     derive_operating_point_curve,
 )
-from tests._binding_fixtures import (  # noqa: E402
-    producer_checkpoint_sha256,
-    record_producing_run,
-    write_bound_sidecar,
-)
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
-from tests._regime_fixtures import tiled_regime  # noqa: E402
-
-# seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
-pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
-
-from tests._population import mapped_plants
-
-
 from tests._dense_op_fixtures import toy_records as _sweep_records  # noqa: E402
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 1. conf operating-point sweep + count-unbiased pick + resolve_operating_point
-# ══════════════════════════════════════════════════════════════════════════
+# ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
 
 def test_golden_sweep_curve_exact():
     recs = _sweep_records()
@@ -65,8 +48,8 @@ def test_golden_sweep_curve_exact():
     tol = 0.5 * gt_class_avg_size(recs)
     assert tol == pytest.approx(10.0)
 
-    sweep = derive_operating_point_curve(recs, tolerance=tol)
-    assert sweep["tolerance"] == pytest.approx(10.0)
+    sweep = derive_operating_point_curve(recs, criterion={"kind": "center_match", "tolerance": tol})
+    assert sweep["criterion"]["tolerance"] == pytest.approx(10.0)
     assert sweep["class_id"] is None
 
     # The full swept curve, pinned exactly (conf grid = {0.0} ∪ observed scores).
@@ -91,7 +74,8 @@ def test_golden_sweep_curve_exact():
 
 def test_golden_pick_count_unbiased_and_f1_max():
     recs = _sweep_records()
-    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, criterion={
+        "kind": "center_match", "tolerance": 0.5 * gt_class_avg_size(recs)})
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)
     assert pick_f1_max(sweep) == pytest.approx(0.0)
     # count bias vanishes at the count-unbiased pick, over-counts (+0.5) at the F1-max pick
@@ -100,30 +84,22 @@ def test_golden_pick_count_unbiased_and_f1_max():
     assert by_conf[0.0]["count_bias_mean"] == pytest.approx(0.5)
 
 
-def test_golden_resolve_operating_point_validated_conf(tmp_path):
-    # resolve_operating_point fails closed without an asserted staged_conf_floor, and needs a
-    # dense, realistic reference to exercise the holdout gate: a sparse 2-image fixture's
-    # per-image variance trips the equivalence criterion, which
-    # test_golden_duplicate_content_holdout_is_false below pins as a correct refusal.
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+def test_golden_count_criterion_over_a_dense_distinct_reference():
+    """The count criterion needs a dense, realistic reference: a sparse 2-image fixture's
+    per-image variance trips the equivalence test, a correct refusal."""
+    from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
+    from tcip_mcp.pipelines.operating_point import count_criterion
+    from tcip_mcp.pipelines.training.evaluation import gt_objects
+    from tests import _trait_fixtures as fx
 
     cal, hold = good_cal_holdout()
-    # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
-    # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
-                                slicing=None, staged_conf_floor=0.01)
-    conf = b.get("conf")
-    assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
-    assert conf.requires_validation is True and conf.validation_kind == "annotations"
-    assert conf.derived_from == "count-unbiased center-match curve"
-    assert conf.validated_against == "held_out_annotations"
-    assert conf.dataset_scoped is True
-    assert conf.dataset_hash == "h1"
-    assert b.is_shippable is True
-    assert b.get("max_dets")._raw == 120  # ~1.5x p99 GT/image (80/image here)
-    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout
-    assert conf.gate_evidence["failures"] == []
+    entry = fx.with_fields(BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0)
+    conf, evidence, failures = count_criterion(cal, hold, entry, staged_conf_floor=0.01,
+                                               staged_conf_floor_attribute_path=None)
+    assert conf == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
+    assert evidence["conf_derived_from"] == "count-unbiased count curve"
+    assert failures == []
+    assert derive_max_dets_from_counts([len(gt_objects(r)) for r in cal + hold]) == 120  # ~1.5x p99
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -162,42 +138,24 @@ def test_golden_plant_milestones_shape_and_values():
     assert ms["bud_majority_date"] == "2026-03-12"
 
 
-_ID_MAP = {"closed": 0, "open": 1}
-
-
-def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | None = "opening",
-                 object_subject: str = "bud") -> None:
-    d.mkdir(parents=True, exist_ok=True)
-    if attribute is None:
-        anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
-                for s in subjects]
-    else:
-        anns = [Annotation(subject=object_subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
-                           attributes={attribute: s}) for s in subjects]
-    json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
-
-
-def _write_id_map_sidecar(project: Path, d: Path, id_map: dict, *, subject: str = "bud",
-                          attribute: str | None = "opening") -> None:
-    from tcip_mcp.pipelines.resolution import write_sidecar
-
-    write_sidecar(d, {"scope": {"subject": subject, "attribute": attribute, "id_map": id_map}},
-                 "operating_point", project=project)
+_SCOPE = {"subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    _write_preds(d1, "P1_a", ["closed", "closed", "closed", "open"])  # 1/4 -> 0.25
-    _write_id_map_sidecar(tmp_path, d1, _ID_MAP)
-    _write_preds(d2, "P1_b", ["open", "open", "open", "closed"])  # 3/4 -> 0.75
-    _write_id_map_sidecar(tmp_path, d2, _ID_MAP)
+    from tests._chain_fixtures import predicted, published
+
+    def bucket(date: str, stem: str, values: list[str]):
+        return published(tmp_path, tmp_path / "ds" / "predictions" / "run" / date,
+                         [predicted(stem, values, _SCOPE["id_map"])], scope=_SCOPE)
+
+    buckets = {"2026-02-11": bucket("2026-02-11", "P1_a", ["closed", "closed", "closed", "open"]),
+               "2026-03-09": bucket("2026-03-09", "P1_b", ["open", "open", "open", "closed"])}
     mapping = {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     }
-    res = PH.per_plant_phenology(
-        mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        spec=BUD_OPENING, plants=["P1"])
+    res = PH.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
+                                 require_all_dates_complete=PH.REQUIRE_ALL_DATES_COMPLETE)
 
     # Both buckets are fully classified, so the fraction is produced and delivered.
     assert res["positive_class_assessed"] is True
@@ -216,166 +174,58 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     assert row["bud_50per_date"] == "2026-02-24"
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 3. operating_point.json stamp shape + the validated flag path
-# ══════════════════════════════════════════════════════════════════════════
-
-# raw_operating_point (no trait/dataset resolution) carries no localization_tolerance_frac; only
-# resolve_operating_point (trait-aware) derives and stamps it.
-_OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tile_size", "max_dets"}
-_RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac", "count_objective"}
-_PARAM_PROVENANCE_KEYS = {
-    "name", "value", "source", "derived_from",
-    "requires_validation", "validation_kind", "validated_against",
-    "dataset_scoped", "dataset_hash", "capture_scoped", "capture_id", "has_gate_evidence",
-}
+# ── 3. the execution record a pass runs under, with no value stated ──
 
 
-def _stamp(bundle, *, validated: bool, issues: list[str]) -> dict:
-    """The three fields of a bucket's stamp this golden pins, not the whole stamp: what a resolved
-    bundle contributes to it. The provenance and the pointer at the record behind a validated claim
-    are `operating_point_stamp`'s own, checked where that constructor is."""
-    return {"operating_point": bundle.to_provenance()["operating_point"],
-            "validated": bool(validated), "shippable_issues": issues}
+def test_golden_execution_record_of_an_untiled_pass_with_nothing_stated(tmp_path):
+    """Every value a pass runs under is recorded with where it came from; with nothing stated an
+    untiled detector pass runs at the documented defaults, each sourced ``default``."""
+    from tcip_mcp.pipelines.execution import DEFAULT_CONF, DEFAULT_MAX_DETS, Stated, prepare_pass
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
+
+    record = prepare_pass(verified_checkpoint(tmp_path), Stated(tile=False)).execution.record()
+
+    assert record["conf"] == DEFAULT_CONF == 0.5
+    assert record["max_dets"] == DEFAULT_MAX_DETS == 1000
+    assert record["sources"] == {"conf": "default", "max_dets": "default"}
+    assert record["tile_size"] is None and record["cross_tile_nms"] is None
 
 
-def test_golden_stamp_shape_calibrated_validated(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    cal, hold = good_cal_holdout()
-    # slicing=None: this golden is about conf-calibration shippability, not tiling (tile_size
-    # only gates a bundle when tiled).
-    b = resolve_operating_point("bud_opening", project=tmp_path, dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
-                                slicing=None, staged_conf_floor=0.01)
-    stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
-    assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
-    assert stamp["validated"] is True  # held-out calibration passed
-    assert stamp["shippable_issues"] == []
-    op = stamp["operating_point"]
-    assert set(op.keys()) == _RESOLVED_OP_PARAM_KEYS
-    for name, prov in op.items():
-        assert set(prov.keys()) == _PARAM_PROVENANCE_KEYS
-    conf = op["conf"]
-    assert conf["value"] == pytest.approx(0.9)
-    assert conf["source"] == "derived"
-    assert conf["requires_validation"] is True
-    assert conf["validation_kind"] == "annotations"
-    assert conf["validated_against"] == "held_out_annotations"
-    assert conf["has_gate_evidence"] is True
-
-
-def test_golden_stamp_shape_raw_uncalibrated_is_false():
-    from tcip_mcp.pipelines.inference.predictor import TileGeometry
-    from tcip_mcp.pipelines.resolution import raw_operating_point, resolve_cross_tile_nms
-
-    slicing = tiled_regime()["slicing"]
-    b = raw_operating_point(
-        conf=0.5, conf_stated=False, max_dets=1000, max_dets_stated=False,
-        geometry=TileGeometry(None, "unavailable", None, 0.2, "default", None), slicing=slicing,
-        cross_tile_nms=resolve_cross_tile_nms(0.3, slicing))
-    # Raw inference always stamps validated=False (no per-dataset held-out calibration).
-    assert b.is_shippable is False
-    stamp = _stamp(b, validated=False, issues=[])
-    assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
-    assert stamp["validated"] is False
-    op = stamp["operating_point"]
-    assert set(op.keys()) == _OP_PARAM_KEYS
-    conf = op["conf"]
-    assert conf["value"] == pytest.approx(0.5)
-    assert conf["source"] == "default"
-    assert conf["requires_validation"] is True
-    assert conf["validation_kind"] == "annotations"
-    assert conf["validated_against"] == "false"  # the firewall stamp on an uncalibrated conf
-    assert conf["has_gate_evidence"] is False
-
-
-def test_golden_validated_flag_path_calibrated_no_holdout_is_false(tmp_path):
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    # Calibrated but never held-out-measured -> validated=false, not shippable.
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                dataset_hash="h1", calibration_records=_sweep_records("c"))
-    assert b.get("conf").validated_against == "false"
-    assert b.is_shippable is False
-
-
-def test_golden_content_shared_holdout_is_false(tmp_path):
-    """A byte-identical-content holdout can't function as an
-    independent check: the same fixture pair the two goldens above use (identical GT content,
-    differing only by ``image_id`` prefix, ``_sweep_records("c")``/``_sweep_records("h")`` with no
-    ``shift``) must stamp ``false``/shippable=False, gated by the content-overlap check.
-    """
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-
-    b = resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                dataset_hash="h1", calibration_records=_sweep_records("c"),
-                                holdout_records=_sweep_records("h"))
-    conf = b.get("conf")
-    assert conf.validated_against == "false"
-    assert b.is_shippable is False
-    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(1.0)
-    assert "content_shared_with_calibration" in conf.gate_evidence["failures"]
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 4. consolidated inference operating-point defaults
-# ══════════════════════════════════════════════════════════════════════════
+# ── 4. the one set of inference operating-point defaults ──
 
 def test_golden_consolidated_operating_point_defaults(tmp_path):
-    # operating_point.py must not carry a second, divergent copy of the inference operating-point
-    # knobs (a second copy would let the same model+images give a different count by entry door).
+    # No module but the execution record's own carries a copy of the inference operating-point
+    # knobs: a second copy would let the same model and images give a different count by door.
+    from tcip_mcp.pipelines import execution as R
     from tcip_mcp.pipelines import operating_point as OP
-    from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.inference import generic_predictor as GP
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.pipelines.training import evaluation as EV
     from tcip_mcp.tools import training_tools as TT
 
-    # resolution.py: the shared inference operating-point defaults. tile_size/tiled carry no such
-    # shared fallback constant at all (a caller derives/states them explicitly), nothing to pin here.
+    # tile_size/tiled carry no shared fallback constant at all: a caller derives or states them.
     assert R.DEFAULT_CONF == 0.5
     assert R.DEFAULT_NMS_IOU == 0.3
     assert R.DEFAULT_MAX_DETS == 1000
     assert not hasattr(R, "DEFAULT_TILE_SIZE")
     assert not hasattr(R, "DEFAULT_TILED")
 
-    # operating_point.py holds no private _DEFAULT_* copies: it imports the shared constants
-    # themselves, so there is one source of truth.
-    assert not hasattr(OP, "_DEFAULT_CROSS_TILE_NMS")
-    assert not hasattr(OP, "_DEFAULT_MAX_DETS")
-    assert not hasattr(OP, "_DEFAULT_CONF_PLACEHOLDER")
-    assert not hasattr(OP, "_DEFAULT_TILE_SIZE")
-    assert not hasattr(OP, "DEFAULT_TILE_SIZE")
-    assert OP.DEFAULT_MAX_DETS is R.DEFAULT_MAX_DETS
+    for name in ("DEFAULT_CONF", "DEFAULT_MAX_DETS", "DEFAULT_NMS_IOU", "DEFAULT_OVERLAP",
+                 "_DEFAULT_CROSS_TILE_NMS", "_DEFAULT_MAX_DETS", "DEFAULT_TILE_SIZE"):
+        assert not hasattr(OP, name), name
 
-    # The consolidated fallbacks flow through a resolved bundle with no calibration/overrides.
-    # tile_size has no fallback to flow through at all here (no explicit/derived basis): None.
-    b = OP.resolve_operating_point("bud_opening", project=tmp_path, **tiled_regime(),
-                                   dataset_hash=None)
-    assert b.get("cross_tile_nms")._raw == R.DEFAULT_NMS_IOU  # 0.3, was 0.5
-    assert b.get("max_dets")._raw == R.DEFAULT_MAX_DETS        # 1000, was 300
-    assert b.get("tile_size")._raw is None
-    assert b.slicing is not None
-
-    # generic_predictor's sliced primitive defaults no slice parameter: the caller states each.
+    # generic_predictor's sliced primitive defaults nothing it runs under: the caller hands it
+    # the whole execution record.
     gp_sig = inspect.signature(GP.GenericPredictor.predict_sliced)
-    for name in ("tile_size", "overlap", "postprocess", "cross_tile_nms", "tile_batch_size",
-                 "tile_resize", "require_masks"):
+    for name in ("execution", "tile_batch_size", "require_masks"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
-    # training_tools.evaluate_model: max_dets is no longer a plain 100 default
-    # shared by both eval regimes via a rescuing ">100 else 1000" sentinel (which collided with
-    # _max_dets_from_density's own floor of exactly 100). The signature default is now the honest
-    # None sentinel; what each regime resolves it to for a
-    # no-arg caller must be pinned too, not just the unspecified shape; see the two resolved-value
-    # assertions below.
+    # evaluate_model's stated values are a None sentinel each regime resolves for itself; what
+    # each resolves to for a no-arg caller is pinned by the two goldens below.
     ev_sig = inspect.signature(TT.evaluate_model)
-    assert ev_sig.parameters["max_dets"].default is None
+    assert ev_sig.parameters["stated"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
-    # Honest None sentinels, resolved once through applied_operating_point ahead of the split.
-    assert ev_sig.parameters["cross_tile_nms"].default is None
-    assert ev_sig.parameters["conf_threshold"].default is None
+    assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(ev_sig.parameters)
 
     # evaluation.py surfaces: pinned so a metrics-default change is visible too.
     coco_sig = inspect.signature(EV.coco_detection_metrics)
@@ -383,32 +233,27 @@ def test_golden_consolidated_operating_point_defaults(tmp_path):
     assert coco_sig.parameters["iou_threshold"].default == 0.5
     assert coco_sig.parameters["max_dets"].default == 100
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
-    # Also None sentinels, resolved inside the runner itself through applied_operating_point.
-    assert ff_sig.parameters["conf_threshold"].default is None
-    assert ff_sig.parameters["cross_tile_nms"].default is None
-    assert ff_sig.parameters["max_dets"].default is None
-    # tile_size/overlap are no longer pinned constants (640/0.2): an honest None
-    # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
-    assert ff_sig.parameters["tile_size"].default is None
-    assert ff_sig.parameters["overlap"].default is None
+    # The stated execution values arrive whole and resolve inside the runner's own prepared pass.
+    assert ff_sig.parameters["stated"].default is inspect.Parameter.empty
+    assert not {"conf_threshold", "cross_tile_nms", "max_dets", "tile_size", "overlap"} & set(
+        ff_sig.parameters)
     assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
 def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path, monkeypatch):
-    """A signature-shape golden alone cannot see what a no-arg caller's max_dets actually resolves
-    to on the tile-level/diagnostic regime (100, the COCOeval maxDets convention): evaluate_model
-    still resolves this one itself, ahead of calling run_test_evaluation. The delivery-gating
-    regime's own resolution (1000) now happens inside run_full_frame_evaluation itself, pinned on
-    the runner's own record by test_gating_path_defaults_max_dets_to_1000_when_unset
-    (test_delivery_grade_eval_regime.py)."""
+    """A signature-shape golden alone cannot see what a no-arg caller's max_dets resolves to on
+    the tile-level/diagnostic regime: evaluate_model resolves none of its own and hands the
+    runner the pass the one execution resolver prepared, its cap the documented default."""
+    from tcip_mcp.pipelines.execution import DEFAULT_MAX_DETS
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as TT
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     captured: dict = {}
 
-    def _fake_diagnostic(ckpt, model, loader, device, **kw):
-        captured["diagnostic_max_dets"] = kw.get("max_dets")
+    def _fake_diagnostic(pass_, loader, device, **kw):
+        captured["diagnostic_max_dets"] = (pass_.execution.max_dets,
+                                           pass_.execution.sources["max_dets"])
         return {"eval_regime": "tile-level"}
 
     orig_diag = runners.run_test_evaluation
@@ -433,7 +278,7 @@ def test_golden_evaluate_model_resolves_diagnostic_max_dets_when_unset(tmp_path,
     finally:
         runners.run_test_evaluation = orig_diag
 
-    assert captured["diagnostic_max_dets"] == 100
+    assert captured["diagnostic_max_dets"] == (DEFAULT_MAX_DETS, "default")
 
 
 def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp_path, monkeypatch):
@@ -442,9 +287,9 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
     pass, use_tiled_inference=True for the full frame), and the discriminating case: a caller
     stating the default value explicitly (0.5) still reaches the full-frame runner's record as an
     explicit stated value, never read back as an untouched default at the same number."""
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines import resolution as R
+    from tcip_mcp.pipelines import execution as R
     from tcip_mcp.tools import training_tools as TT
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
@@ -461,7 +306,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     class _DummyModel:
         def to(self, device):
-            pass
+            return self
 
     class _StubPredictor:
         task = "detection"
@@ -470,8 +315,12 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         in_chans = 3
         model = _DummyModel()
 
+        def governed(self, execution):
+            return self.model
+
         def predict_sliced(self, path, **kw):
-            return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": []}
+            return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": [],
+                    "cap_hit": False}
 
     # Checkpoints are built (a real bespoke model, through the unpatched build_model) before the
     # model/predictor stubs below go in, so the fixture's own checkpoint save is never stubbed.
@@ -487,7 +336,7 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
 
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
+    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
 
     def _run(dataset, **kw):
         images_dir, labels_dir, ckpt = dataset
@@ -495,19 +344,19 @@ def test_golden_evaluate_model_resolves_conf_threshold_per_regime_when_unset(tmp
         assert "error" not in r, r
         return r
 
-    tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0})
-    assert tile_level["conf_threshold"] == R.DEFAULT_CONF == 0.5
+    tile_level = _run(tile_ds, tiling={"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5})
+    assert tile_level["execution"]["conf"] == R.DEFAULT_CONF == 0.5
 
     single_pass = _run(single_ds)
-    assert single_pass["conf_threshold"] == R.DEFAULT_CONF == 0.5
+    assert single_pass["execution"]["conf"] == R.DEFAULT_CONF == 0.5
 
     full_frame_default = _run(ff_default_ds, use_tiled_inference=True)
-    assert full_frame_default["conf_threshold"] == R.DEFAULT_CONF == 0.5
-    assert full_frame_default["operating_point"]["conf"]["source"] == "default"
+    assert full_frame_default["execution"]["conf"] == R.DEFAULT_CONF == 0.5
+    assert full_frame_default["execution"]["sources"]["conf"] == "default"
 
-    full_frame_stated = _run(ff_stated_ds, use_tiled_inference=True, conf_threshold=0.5)
-    assert full_frame_stated["conf_threshold"] == 0.5
-    assert full_frame_stated["operating_point"]["conf"]["source"] == "explicit"
+    full_frame_stated = _run(ff_stated_ds, use_tiled_inference=True, stated=R.Stated(conf=0.5))
+    assert full_frame_stated["execution"]["conf"] == 0.5
+    assert full_frame_stated["execution"]["sources"]["conf"] == "explicit"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -558,173 +407,3 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
     m = coco_detection_metrics(_iou_records(), iou_threshold=0.75,
                                conf_threshold=0.25, max_dets=100)
     assert (m["tp"], m["fp"], m["fn"]) == (1, 2, 2)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 6. deliver_phenology_milestones gate behavior
-# ══════════════════════════════════════════════════════════════════════════
-
-def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> None:
-    """Write a bucket's stamp through the storage seam, skipping the writer-side claim check."""
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
-    d.mkdir(parents=True, exist_ok=True)
-    key = sidecar_key(d, document)
-    with ts.transaction(key) as txn:
-        txn.write(key, stamp)
-
-
-def _write_op_sidecar(project: Path, d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
-                      id_map: dict | None = None, subject: str = "bud",
-                      attribute: str | None = None,
-                      checkpoint_sha256: str | None = None,
-                      experiment_id: str | None = "exp-golden") -> None:
-    """The operating_point.json stamp run_inference writes beside a bucket's labels: the
-    on-disk validity deliver_phenology_milestones reconciles against, including id_map and
-    producer identity (the real writer always stamps checkpoint_sha256 and experiment_id at the
-    top level, so a fixture must carry them too).
-
-    A validated bucket also gets the producing run its stamp names completed, since a delivery
-    repeats a producer identity only where a run outside the bucket corroborates the stamp's
-    claim."""
-    ref = "held_out_annotations" if validated else "false"
-    d.mkdir(parents=True, exist_ok=True)
-    if checkpoint_sha256 is None and validated and experiment_id:
-        checkpoint_sha256 = record_producing_run(project, experiment_id)
-    stamp = {
-        "validated": validated,
-        "trait": "bud_opening",
-        "operating_point": {"conf": {"value": conf, "validated_against": ref}},
-        "checkpoint_sha256": checkpoint_sha256,
-        "experiment_id": experiment_id,
-        "scope": {"subject": subject, "attribute": attribute, "id_map": id_map},
-    }
-    if validated:
-        write_bound_sidecar(project, d, stamp, dataset_root=dataset_root,
-                            experiment_id=f"exp-record-{d.name}",
-                            producing_experiment_id=experiment_id)
-    else:
-        _write_stamp_bypassing_claim_rail(d, stamp, "operating_point")
-
-
-def _write_classifier_sidecar(project: Path, d: Path, *, dataset_root: Path, validated: bool,
-                              trait: str | None = "bud_opening") -> None:
-    ref = "held_out_annotations" if validated else "false"
-    d.mkdir(parents=True, exist_ok=True)
-    stamp = {
-        "validated": validated,
-        "operating_point": {"classifier": {"value": "open", "validated_against": ref}},
-        "trait": trait,
-    }
-    if validated and trait:
-        write_bound_sidecar(project, d, stamp, document="classifier_operating_point",
-                            dataset_root=dataset_root, experiment_id=f"exp-classifier-{d.name}",
-                            producing_experiment_id="exp-golden", trait=trait)
-    else:
-        _write_stamp_bypassing_claim_rail(d, stamp, "classifier_operating_point")
-
-
-def _pheno_setup(tmp_path: Path, *, classified: bool, op_validated: bool | None = None):
-    root = tmp_path / "ds"
-    d1 = root / "predictions" / "run" / "2026-02-11"
-    d2 = root / "predictions" / "run" / "2026-03-09"
-    id_map = {"closed": 0, "open": 1} if classified else {"bud": 0}
-    attribute = "opening" if classified else None
-    _write_preds(d1, "P1_a", ["bud"] if not classified else ["closed"], attribute=attribute)
-    _write_preds(d2, "P1_b", ["open"] if classified else ["bud"], attribute=attribute)
-    if op_validated is not None:
-        _write_op_sidecar(tmp_path, d1, dataset_root=root, validated=op_validated, id_map=id_map,
-                          attribute=attribute)
-        _write_op_sidecar(tmp_path, d2, dataset_root=root, validated=op_validated, id_map=id_map,
-                          attribute=attribute)
-    else:
-        # count-operating-point sidecar still needs an id_map for the coverage rule even when its
-        # own validity isn't the thing under test: a bucket with no sidecar at all is the
-        # "no operating_point.json" case, tested separately.
-        pass
-    from tests._binding_fixtures import write_plant_mapping
-
-    mapping_name = "valley"
-    write_plant_mapping(tmp_path, mapping_name, {
-        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
-        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
-    }, dataset_root=root)
-    return mapping_name, d1, d2
-
-
-def test_golden_deliver_phenology_milestones_refuses_without_opening_class(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=False, op_validated=True)  # bare detector
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-    )
-    assert "error" in res
-    assert not out_csv.exists()
-
-
-def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True)  # no operating_point.json sidecars
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-    )
-    assert "error" in res
-    assert not out_csv.exists()
-
-
-def test_golden_deliver_phenology_milestones_refuses_on_a_present_but_unvalidated_stamp(tmp_path: Path):
-    # An on-disk stamp refuses with no caller input at all: the sidecar's own conf.validated_against
-    # is "false". The genuinely missing-sidecar case is the requires_both_validated_flags test above.
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=False)
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-    )
-    assert "error" in res
-    assert res["operating_point_validated"] == "false"
-    assert not out_csv.exists()
-
-
-def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-
-    # The positive-state fraction is now produced, so a fully-validated call (classifier + count
-    # operating point both validated on disk) delivers a real phenology CSV.
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=True)
-    _write_classifier_sidecar(tmp_path, d1, dataset_root=tmp_path / "ds", validated=True)
-    out_csv = tmp_path / "out" / "bud_phenology.csv"
-    res = deliver_phenology_milestones(
-        tmp_path, trait="bud_opening",
-        mapping_name=mapping_name, plants=mapped_plants(tmp_path, mapping_name),
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-        classifier_pred_dirs=[str(d1)],
-    )
-    assert "error" not in res, res
-    assert res["positive_class_assessed"] is True
-    assert out_csv.exists()
-
-    # A fully-validated delivery must carry real producer identity, not blank producer columns.
-    import csv as _csv
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(_csv.DictReader(f))
-    assert rows
-    assert all(row["producer_model_sha256"] == producer_checkpoint_sha256(tmp_path, "exp-golden") for row in rows)
-    assert all(row["producing_experiment_id"] == "exp-golden" for row in rows)
-    # And the record that answered for the claim, so a reader can reach the evidence from the CSV.
-    assert all(row["validation_record"] for row in rows)

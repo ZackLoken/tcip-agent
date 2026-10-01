@@ -37,7 +37,7 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                       stated={"num_channels": 5},
-                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
     assert ds.expected_channels == 5
 
     hits = [ds[i] for i in range(len(ds))]
@@ -84,24 +84,24 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     with pytest.raises(ValueError, match="the labels record a 5x40 image but it decodes as 40x24"):
         dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                      stated={"num_channels": 5},
-                     tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+                     tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
 
 
-def test_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
-    """authored_frame's per-image branch reads through the one label reader
-    (splits.label_document_extent), so a present, unreadable label raises rather than
-    silently disabling the tiled dataset's frame-mismatch check for that sample."""
+def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
+    """The tiled dataset's frame-mismatch check reads the label's authored frame through the one
+    label reader (splits.label_document_extent), so a present, unreadable label raises rather
+    than silently disabling the check for that sample."""
     import pytest
     from tcip_annotation.json_io import UnreadableLabelDocument
 
-    from tcip_mcp.pipelines.data.label_queries import authored_frame
+    from tcip_mcp.pipelines.data.splits import label_document_extent
 
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
     (labels_dir / "a.json").write_bytes(b"{not json")
 
     with pytest.raises(UnreadableLabelDocument):
-        authored_frame(labels_dir / "a.json")
+        label_document_extent(labels_dir / "a.json")
 
 
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
@@ -111,7 +111,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
     base = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                         stated={"num_channels": 5})
-    assert TiledDetectionDataset(base, tile_size=16).expected_channels == 5
+    assert TiledDetectionDataset(base, tile_size=16, sliver_frac=0.5).expected_channels == 5
 
 
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):
@@ -133,7 +133,7 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
 
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud",
                       stated={"num_channels": 5},
-                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
+                      tiling={"enabled": True, "tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5})
     with_boxes =[(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
     assert with_boxes, "the GT box did not survive tiling on a channel-first raster"
     for tile, target in with_boxes:

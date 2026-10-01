@@ -1,5 +1,5 @@
 /**
- * Drive the Review tab to a model's predictions on a specific frame/detection in response to
+ * Drive the Review tab to a bucket's predictions on a specific frame/detection in response to
  * the agent's `review_focus` event. The Review analog of `applyAnnotateFocus`: uses local store
  * setters, never the passive state snapshot (which keeps `current_image_index` / review filters
  * browser-local so a re-broadcast can't yank the user mid-review). A `review_focus` event is a
@@ -14,7 +14,7 @@ export interface ReviewFocusData {
   dataset_root?: string;
   subject?: string | null;
   date?: string | null;
-  model_name?: string | null;
+  predictions_dir?: string | null;
   image_index?: number;
   detection_idx?: number;
   filter_type?: "all" | "tp" | "fp" | "fn";
@@ -30,13 +30,13 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date ||
-      (!!d.model_name && d.model_name !== cur.model_name));
+      (!!d.predictions_dir && d.predictions_dir !== cur.predictions_dir));
   if (needsSwitch && project) {
     const res = await api.dataset.select({
       dataset_root: d.dataset_root!,
       subject: d.subject ?? null,
       date: d.date ?? null,
-      model_name: d.model_name ?? null,
+      predictions_dir: d.predictions_dir ?? null,
     });
     useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);

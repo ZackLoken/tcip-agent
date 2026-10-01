@@ -4,7 +4,7 @@ Marking an image Reviewed with no individual verdicts means one of two very diff
 If the model predicted nothing on that image, Complete is itself the confirming act and the image
 is a genuine negative whose misses have been adjudicated. If the model did predict on it, the
 breeder bulk-accepted without walking the detections, so nothing was adjudicated and the image
-must not be counted as covered when a review is promoted into a validation reference.
+must not be counted as covered.
 
 The per-image prediction file is addressed by the image's stem, so ``IMG_0007.JPG`` is answered by
 ``IMG_0007.json`` in the bucket.
@@ -20,13 +20,15 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_web.app import app
 
-_OPENING = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
+from tests._web_fixtures import open_new_project
 
+OPENING = {"subject": "bud", "attribute": "opening", "id_map": {"open": 0, "closed": 1}}
+BUD = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
+LEAF = {"subject": "leaf", "attribute": None, "id_map": {"leaf": 0}}
 IMG_W, IMG_H = 160, 100
-CHECKPOINT_SHA = "3f9c1ab27e"
+BOX = [12.0, 20.0, 52.0, 44.0]
 
 
 @pytest.fixture
@@ -34,27 +36,20 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _bucket(tmp_path: Path) -> Path:
-    """A prediction bucket: one image predicted on, one left empty, one never written."""
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(
-        str(d / "IMG_0007.json"),
-        [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H,
-    )
-    write_annotations(str(d / "IMG_0031.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "experiment_id": "exp-17"})
-    return d
+def _published(project: Path, scope: dict, detections: dict[str, int]) -> Path:
+    """The bucket ``predictions/baseline/2-11-26`` published under ``scope``, holding
+    ``detections[stem]`` boxes of its first class on each stem's document, with ``project``
+    opened in the web backend."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
-
-def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
-    """The bucket's ``operating_point.json`` stamp, through the seam the route reads it from."""
-    import tcip_store
-    from tcip_mcp.pipelines.resolution import sidecar_key
-
-    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar,
-                       expect=tcip_store.Version.ABSENT)
+    bucket = project / "predictions" / "baseline" / "2-11-26"
+    published(project, bucket, [
+        {"image": f"{stem}.JPG", "width": IMG_W, "height": IMG_H, "boxes": [BOX] * n,
+         "scores": [0.71] * n, "labels": [1] * n} for stem, n in detections.items()],
+        scope=scope)
+    open_new_project(project)
+    return bucket
 
 
 def _dataset_root(tmp_path: Path) -> Path:
@@ -74,58 +69,57 @@ def _shard(dataset_root: Path, image_name: str) -> dict:
     return tcip_store.read(found[0])["state"]
 
 
+def _complete(client: TestClient, dataset_root: Path, image_name: str, **extra):
+    resp = client.post("/api/review/mark_complete", json={
+        "dataset_root": str(dataset_root), "image_name": image_name, **extra})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 def test_bulk_complete_on_a_predicted_image_is_not_adjudication_covered(
     client: TestClient, tmp_path: Path
 ) -> None:
     """The bucket holds a detection for this image and no verdict was recorded on it, so the
     completion is a bulk accept: reviewed, but with its misses unadjudicated."""
-    bucket = _bucket(tmp_path)
+    from tcip_mcp.buckets import read_bucket
+
+    bucket = _published(tmp_path, BUD, {"IMG_0007": 1, "IMG_0031": 0})
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0007.JPG",
-        "pred_dir": str(bucket),
-    })
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
+    body = _complete(client, dataset_root, "IMG_0007.JPG", pred_dir=str(bucket))
 
+    assert body["image_status"] == "completed"
     state = _shard(dataset_root, "IMG_0007.JPG")
     assert state["adjudication_covered"] == {"*": False}
-    assert state["producer_identity"]["checkpoint_sha256"] == CHECKPOINT_SHA
+    assert state["producer_identity"]["checkpoint_sha256"] == read_bucket(
+        bucket).producer["checkpoint_sha256"]
 
 
-def test_complete_on_an_image_the_bucket_left_empty_is_a_covered_negative(
-    client: TestClient, tmp_path: Path
+def test_complete_on_an_image_the_bucket_found_nothing_on_is_a_covered_negative(
+    client: TestClient, tmp_path: Path,
 ) -> None:
-    """The bucket ran on this image and found nothing, so there was never a detection to walk and
-    Complete confirms the negative outright."""
-    bucket = _bucket(tmp_path)
+    """The bucket ran on this image and published an empty document: there was never a detection
+    to walk, and Complete confirms the negative outright."""
+    bucket = _published(tmp_path, BUD, {"IMG_0007": 1, "IMG_0031": 0})
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0031.JPG",
-        "pred_dir": str(bucket),
-    })
-    assert resp.status_code == 200
+    _complete(client, dataset_root, "IMG_0031.JPG", pred_dir=str(bucket))
+
     assert _shard(dataset_root, "IMG_0031.JPG")["adjudication_covered"] == {"*": True}
 
 
-def test_complete_on_an_image_the_bucket_never_wrote_is_a_covered_negative(
-    client: TestClient, tmp_path: Path
+def test_complete_on_an_image_the_bucket_never_predicted_records_no_negative(
+    client: TestClient, tmp_path: Path,
 ) -> None:
-    """No prediction file for this stem at all reads the same way: nothing to check."""
-    bucket = _bucket(tmp_path)
+    """A bucket whose record names no document for the image never predicted it: its absence is
+    unknown, so the Complete is recorded and no negative is claimed for it."""
+    bucket = _published(tmp_path, BUD, {"IMG_0007": 1, "IMG_0031": 0})
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0099.JPG",
-        "pred_dir": str(bucket),
-    })
-    assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0099.JPG")["adjudication_covered"] == {"*": True}
+    body = _complete(client, dataset_root, "IMG_0099.JPG", pred_dir=str(bucket))
+
+    assert body["image_status"] == "completed"
+    assert "adjudication_covered" not in _shard(dataset_root, "IMG_0099.JPG")
 
 
 def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_scoped_negative(
@@ -133,56 +127,26 @@ def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_s
 ) -> None:
     """A Complete naming 'bud' on an image whose GT holds only 'leaf' objects is a genuine
     negative of bud, not the 'complete' a whole-file (subject-blind) check would produce."""
+    open_new_project(tmp_path)
     dataset_root = _dataset_root(tmp_path)
-    gt_dir = dataset_root / "annotations" / "2-11-26"
-    gt_dir.mkdir(parents=True)
-    gt_path = gt_dir / "IMG_0050.json"
+    gt_path = dataset_root / "annotations" / "2-11-26" / "IMG_0050.json"
     write_annotations(
         str(gt_path), [Annotation(subject="leaf", geometry=BBox(5.0, 5.0, 40.0, 40.0))],
         IMG_W, IMG_H)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0050.JPG",
-        "gt_path": str(gt_path),
-        "subject": "bud",
-    })
-    assert resp.status_code == 200
-    assert resp.json()["annotation_status"] == "negative"
+    body = _complete(client, dataset_root, "IMG_0050.JPG", gt_path=str(gt_path), subject="bud")
+
+    assert body["annotation_status"] == "negative"
 
 
-def test_complete_named_subject_over_a_file_holding_only_another_subjects_predictions_is_covered(
+def test_complete_naming_a_classified_buckets_own_subject_with_nothing_found_is_covered(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A classified bucket's own subject with nothing recorded for it on this file is a genuine
-    negative, even when the same file holds another subject's boxes."""
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(
-        str(d / "IMG_0060.json"),
-        [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H,
-    )
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[], trait="bud_opening",
-        dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
-        experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
-    )
-    write_sidecar(d, stamp, project=tmp_path)
+    bucket = _published(tmp_path, OPENING, {"IMG_0060": 0})
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0060.JPG",
-        "pred_dir": str(d),
-        "subject": "bud",
-    })
-    assert resp.status_code == 200
+    _complete(client, dataset_root, "IMG_0060.JPG", pred_dir=str(bucket), subject="bud")
+
     assert _shard(dataset_root, "IMG_0060.JPG")["adjudication_covered"] == {"bud": True}
 
 
@@ -190,78 +154,31 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
     client: TestClient, tmp_path: Path
 ) -> None:
     """A subject not among a detector bucket's own recorded class map cannot be judged negative
-    or positive: the coverage entry is omitted, and the Complete and its status write still
-    proceed."""
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(
-        str(d / "IMG_0007.json"),
-        [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H,
-    )
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[], trait="leaf", dataset_hash="H", checkpoint="m",
-        checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
-        raster_path=None, produced_at="2026-01-01T00:00:00Z",
-        scope=ClassScope(subject="leaf", id_map={"leaf": 0}),
-    )
-    write_sidecar(d, stamp, project=tmp_path)
+    or positive: the coverage entry is omitted, and the Complete still proceeds."""
+    bucket = _published(tmp_path, LEAF, {"IMG_0007": 1})
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0007.JPG",
-        "pred_dir": str(d),
-        "subject": "bud",
-    })
-    assert resp.status_code == 200
-    assert resp.json()["image_status"] == "completed"
-    state = _shard(dataset_root, "IMG_0007.JPG")
-    assert "bud" not in (state.get("adjudication_covered") or {})
+    body = _complete(client, dataset_root, "IMG_0007.JPG", pred_dir=str(bucket), subject="bud")
+
+    assert body["image_status"] == "completed"
+    assert "bud" not in (_shard(dataset_root, "IMG_0007.JPG").get("adjudication_covered") or {})
 
 
 def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve_leaves_the_firsts_claim_intact(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A Complete confirming the classified bucket's own subject, and a later Complete on the same
-    image naming a subject the bucket cannot resolve (a classified stamp admits only its own
-    object class), both land: the second's unresolvable name must not overwrite the first's
-    coverage claim."""
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(str(d / "IMG_0070.json"), [], IMG_W, IMG_H, keep_empty=True)
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[], trait="bud_opening",
-        dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
-        experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", scope=_OPENING,
-    )
-    write_sidecar(d, stamp, project=tmp_path)
+    image naming a subject the bucket cannot resolve, both land: the second's unresolvable name
+    must not overwrite the first's coverage claim."""
+    bucket = _published(tmp_path, OPENING, {"IMG_0070": 0})
     dataset_root = _dataset_root(tmp_path)
 
-    first = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0070.JPG",
-        "pred_dir": str(d), "subject": "bud",
-    })
-    assert first.status_code == 200
-    assert first.json()["image_status"] == "completed"
-    second = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root), "image_name": "IMG_0070.JPG",
-        "pred_dir": str(d), "subject": "leaf",
-    })
-    assert second.status_code == 200
-    assert second.json()["image_status"] == "completed"
-    state = _shard(dataset_root, "IMG_0070.JPG")
-    assert state["adjudication_covered"] == {"bud": True}
-    assert "leaf" not in state["adjudication_covered"]
+    first = _complete(client, dataset_root, "IMG_0070.JPG", pred_dir=str(bucket), subject="bud")
+    second = _complete(client, dataset_root, "IMG_0070.JPG", pred_dir=str(bucket),
+                       subject="leaf")
+
+    assert first["image_status"] == second["image_status"] == "completed"
+    assert _shard(dataset_root, "IMG_0070.JPG")["adjudication_covered"] == {"bud": True}
 
 
 def test_complete_with_no_subject_records_completion_with_a_null_status(
@@ -269,14 +186,12 @@ def test_complete_with_no_subject_records_completion_with_a_null_status(
 ) -> None:
     """A Complete naming no subject still records the review completion, but derives and returns
     no subject-scoped status: there is nothing to scope it to."""
+    open_new_project(tmp_path)
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0080.JPG",
-    })
-    assert resp.status_code == 200
-    assert resp.json()["annotation_status"] is None
+    body = _complete(client, dataset_root, "IMG_0080.JPG")
+
+    assert body["annotation_status"] is None
     assert _shard(dataset_root, "IMG_0080.JPG")["adjudication_covered"] == {"*": True}
 
 
@@ -287,32 +202,17 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     same memo, so an in-place edit forced onto the file's prior timestamp and byte count is
     answered the same way by both, never one from a parse made before the edit and the other
     fresh."""
+    from tcip_mcp.buckets import read_bucket
     from tcip_web.routes.review import _is_negative_for_subject
 
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    pred_file = d / "IMG_0007.json"
-    write_annotations(
-        str(pred_file),
-        [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H,
-    )
+    bucket = _published(tmp_path, BUD, {"IMG_0007": 1})
+    record = read_bucket(bucket)
+    pred_file = bucket / "IMG_0007.json"
     populated = pred_file.read_bytes()
     os.utime(pred_file, (1_000_000, 1_000_000))
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 
-    stamp = operating_point_stamp(
-        {"conf": {"value": 0.5}}, slicing=None, validated=False, validated_by=None,
-        tile_size_validated=None,
-        shippable_issues=[], trait="bud", dataset_hash="H", checkpoint="m",
-        checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
-        raster_path=None, produced_at="2026-01-01T00:00:00Z",
-        scope=ClassScope(subject="bud", id_map={"bud": 0}),
-    )
-    write_sidecar(d, stamp, project=tmp_path)
-
-    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
-    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud") is False
+    assert _is_negative_for_subject("IMG_0007.JPG", None, record) is False
+    assert _is_negative_for_subject("IMG_0007.JPG", "bud", record) is False
 
     write_annotations(str(pred_file), [], IMG_W, IMG_H, keep_empty=True)
     emptied = pred_file.read_bytes()
@@ -322,8 +222,7 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     pred_file.write_bytes(emptied + b" " * (len(populated) - len(emptied)))
     os.utime(pred_file, (1_000_000, 1_000_000))  # identical mtime and byte count as the populated write
 
-    subject_less = _is_negative_for_subject(str(d), "IMG_0007.JPG", None)
-    named = _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud")
+    subject_less = _is_negative_for_subject("IMG_0007.JPG", None, record)
+    named = _is_negative_for_subject("IMG_0007.JPG", "bud", record)
     assert subject_less is True
     assert named is True
-    assert subject_less == named

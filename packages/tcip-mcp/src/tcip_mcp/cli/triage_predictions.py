@@ -9,7 +9,7 @@ model's validated confidence distribution and a breeder spot-check.
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
         --project <project> [--dataset-root <dir>] [--no-skip-reviewed] \
-        [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--bucket <name>] \
+        [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--predictions-dir <bucket>] \
         [--review-state-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project (register it with register_model
@@ -45,9 +45,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                              "Omitted refuses to auto-accept anything; derive it from the "
                              "model's validated confidence distribution and confirm with a "
                              "breeder spot-check first.")
-    parser.add_argument("--bucket", default=None,
-                        help="Which prediction bucket's completed reviews --skip-reviewed "
-                             "skips. Omitted reads the store's sole bucket, refusing if several.")
+    parser.add_argument("--predictions-dir", default=None,
+                        help="The published bucket whose completed reviews --skip-reviewed "
+                             "skips. Omitted reads a ground-truth-only review.")
     parser.add_argument("--review-state-dir", default="",
                         help="A verdict store to read instead of the dataset's own.")
     args = parser.parse_args(argv)
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     result = triage_predictions(
         project, args.checkpoint, args.images_dir, dataset_root=args.dataset_root,
         skip_reviewed=not args.no_skip_reviewed, low=args.low, high=args.high,
-        auto_threshold=args.auto_threshold, bucket=args.bucket,
+        auto_threshold=args.auto_threshold, predictions_dir=args.predictions_dir,
         review_state_dir=args.review_state_dir,
     )
     print(json.dumps(result, indent=2))

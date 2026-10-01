@@ -13,9 +13,9 @@ from tcip_annotation import Annotation, BBox
 from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
 
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import tool
 
 
@@ -71,11 +71,11 @@ def focus_human_attention(
     date: str,
     image_index: int | None = None,
     mode: str | None = None,
-    model_name: str | None = None,
+    predictions_dir: str | None = None,
     detection_idx: int = 0,
     filter_type: str = "all",
     iou_threshold: float = 0.5,
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
     """Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab.
 
@@ -94,10 +94,11 @@ def focus_human_attention(
         subject: Annotation subject (e.g. "fruit").
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list. Default: first frame labeled for
-            ``subject`` (annotate) / with a prediction of ``subject`` for the model (review).
+            ``subject`` (annotate) / with a prediction of ``subject`` in the bucket (review).
         mode: Annotate only, "box", "polygon" or "point" (default: inferred from the geometry the
             labels on that frame actually carry).
-        model_name: Review only (required when ``tab='review'``), the model whose predictions.
+        predictions_dir: Review only (required when ``tab='review'``), the bucket directory whose
+            predictions to review: a published bucket, or staged proposals.
         detection_idx: Review only, which detection to center in the Review navigator.
         filter_type: Review only, "all" | "tp" | "fp" | "fn" match filter.
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
@@ -107,10 +108,10 @@ def focus_human_attention(
         return _focus_annotate(project, workspace, dataset_root, subject, date, mode=mode,
                                image_index=image_index)
     if tab == "review":
-        if not model_name:
-            return {"error": "tab='review' requires model_name"}
+        if not predictions_dir:
+            return {"error": "tab='review' requires predictions_dir"}
         return _focus_review(
-            project, workspace, dataset_root, subject, date, model_name,
+            project, workspace, dataset_root, subject, date, predictions_dir,
             image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
             iou_threshold=iou_threshold, conf_threshold=conf_threshold,
         )
@@ -220,21 +221,23 @@ def _focus_review(
     dataset_root: str,
     subject: str,
     date: str,
-    model_name: str,
+    predictions_dir: str,
     image_index: int | None = None,
     detection_idx: int = 0,
     filter_type: str = "all",
     iou_threshold: float = 0.5,
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:
-    """Drive the live Review tab to a model's predictions of ``subject`` on a frame. Posts a
-    ``review_focus`` event the GUI honors with local setters.
+    """Drive the live Review tab to a bucket's predictions of ``subject`` on a frame, each image's
+    document the one the bucket's record names for it. Posts a ``review_focus`` event the GUI
+    honors with local setters.
 
-    Refuses only when the landed-on (or explicitly named) frame's own prediction document will
-    not read, naming that document's path in the error; every other image whose prediction will
-    not read is named instead (by image file name) in the result's ``unreadable``, the same
-    stance ``_focus_annotate`` takes."""
-    from tcip_mcp.dataset_layout import image_dir, label_filename, prediction_dir
+    Refuses a ``predictions_dir`` that is no bucket, and the landed-on (or explicitly named)
+    frame whose own prediction document will not read, naming that document's path in the error;
+    every other image whose prediction will not read is named instead (by image file name) in the
+    result's ``unreadable``, the same stance ``_focus_annotate`` takes."""
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import image_dir
     from typing import get_args
 
     from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, ReviewFilterType, post_panel_event
@@ -242,9 +245,8 @@ def _focus_review(
 
     if filter_type not in get_args(ReviewFilterType):
         return {"error": f"filter_type must be all|tp|fp|fn, got {filter_type!r}"}
-    for label, val in (("model_name", model_name), ("date", date)):
-        if not is_valid_name(val):
-            return {"error": f"{label} must be a single safe path segment (no separators/'..'), got {val!r}"}
+    if not is_valid_name(date):
+        return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
 
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
@@ -252,21 +254,23 @@ def _focus_review(
     images = sorted(_logical_image_names(idir))
     if not images:
         return {"error": f"no images on {date}"}
+    try:
+        bucket = read_bucket(predictions_dir)
+    except ValueError as exc:
+        return {"error": str(exc)}
 
-    pred_dir = Path(prediction_dir(dataset_root, model_name, date))
-
-    def _has_pred(stem: str) -> bool:
-        f = pred_dir / label_filename(stem)
-        return bool(f.is_file() and any(a.subject == subject and a.geometry is not None
-                                        for a in read_labels(str(f))))
+    def _has_pred(name: str) -> bool:
+        f = bucket.document(name)
+        return bool(f is not None and any(a.subject == subject and a.geometry is not None
+                                          for a in read_labels(str(f))))
 
     n_with_preds = 0
     first_idx: int | None = None
     unreadable: dict[str, str] = {}
     for i, name in enumerate(images):
         try:
-            has_pred = _has_pred(Path(name).stem)
-        except UnreadableLabelDocument as exc:
+            has_pred = _has_pred(name)
+        except (UnreadableLabelDocument, ValueError) as exc:
             unreadable[name] = str(exc)
             continue
         if has_pred:
@@ -284,7 +288,7 @@ def _focus_review(
 
     payload = {
         "dataset_root": dataset_root,
-        "subject": subject, "date": date, "model_name": model_name,
+        "subject": subject, "date": date, "predictions_dir": predictions_dir,
         "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
     }
@@ -292,7 +296,7 @@ def _focus_review(
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
-        "subject": subject, "date": date, "model_name": model_name,
+        "subject": subject, "date": date, "predictions_dir": predictions_dir,
         "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
         "n_images": len(images), "n_with_predictions": n_with_preds, "image": images[image_index],
         "unreadable": sorted(unreadable),

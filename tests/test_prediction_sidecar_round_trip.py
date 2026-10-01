@@ -1,225 +1,83 @@
-"""A written prediction bucket has to be readable by the readers the delivery doors use.
+"""A published prediction bucket is readable by the reader every delivery uses, and a publication
+that dies part way leaves a directory no reader takes for a bucket.
 
-``run_inference`` writes ``operating_point.json`` beside the predictions, and every door that
-later assembles a phenotype from that bucket reads its validity back out of that file rather than
-from a caller's word. These tests drive the real writer and the real readers against each other, so
-a stamp the writer produces but no reader can find is a failure here rather than downstream.
+These drive the real writer (``run_inference``'s publication) and the real reader
+(``buckets.read_bucket``) against each other, so a record the writer produces but the reader cannot
+take back whole is a failure here rather than downstream.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
-
 torch = pytest.importorskip("torch")
-pytest.importorskip("pycocotools")
-
-CONF_FROM_THE_DENSE_REFERENCE = 0.9  # every correct detection in the fixture below scores this
 
 
-class _BucketStub:
-    """A predictor returning one detection per image, enough to write a real bucket."""
+class _OneBoxPredictor:
+    task = "detection"
+    in_chans = 3
 
-    def __init__(self) -> None:
-        from types import SimpleNamespace
-
-        self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
-        self.device = "cpu"
-        self.score_threshold = 0.5
-        self.train_tile_size = None
-        self.train_overlap = None
-        self.in_chans = 3
-
-    def predict_batch(self, paths, **kw):
-        return [{"image": p, "width": 160, "height": 120,
-                 "boxes": [[10, 10, 30, 30]], "scores": [0.95], "labels": [1], "count": 1}
-                for p in paths]
+    def predict_batch(self, paths, execution=None, **kw):
+        return [{"image": str(p), "width": 160, "height": 120, "boxes": [[10, 10, 30, 30]],
+                 "scores": [0.95], "labels": [1], "count": 1, "cap_hit": False} for p in paths]
 
 
-def _export(tmp_path, monkeypatch, *, tile, tile_size=None):
-    """Run a calibrated export of a checkpoint no run of this project produced, whose calibration
-    collection is a dense held-out reference, resolved under the regime of the pass the delivery
-    prepared."""
-    import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tests._dense_op_fixtures import dense_records
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
-
+def _publish(tmp_path, monkeypatch, **stated) -> dict:
+    """``run_inference`` over one dated capture of the dataset ``dataset``, its predictor
+    stubbed."""
     from PIL import Image
 
-    dataset_root = tmp_path / "dataset"
-    images_dir = dataset_root / "images" / "2026-03-01"
+    import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import project_checkpoint
+
+    images_dir = tmp_path / "dataset" / "images" / "2026-03-01"
     images_dir.mkdir(parents=True)
     Image.new("RGB", (160, 120), color=(70, 90, 110)).save(images_dir / "capture_a.png")
+    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _OneBoxPredictor())
+    return run_inference(tmp_path, project_checkpoint(tmp_path), images_dir=str(images_dir),
+                         output_dir=str(tmp_path / "dataset" / "predictions" / "baseline"
+                                        / "2026-03-01"), device="cpu", stated=Stated(**stated))
 
-    n_images, objects_per_image = 20, 80
-    miss, fp = [0] * n_images, [1] * n_images
-    reference = {
-        side: dense_records(
-            n_images=n_images, objects_per_image=objects_per_image, id_prefix=side[0],
-            shift=shift, miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE,
-            fp_score=0.05)
-        for side, shift in (("calibration_records", 0.0), ("holdout_records", 5.0))}
 
-    def _calibrate(p, *a, project, **k):
-        inputs = {**calibration_pipeline.pass_resolver_inputs(p), **reference,
-                  "dataset_hash": "H", "staged_conf_floor": 0.01}
-        bundle = resolve_operating_point("bud_opening", experiment_id=None, project=project,
-                                         **inputs)
-        evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
-                    "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
-        return bundle, "H", 0, evidence
+def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
+    tmp_path, monkeypatch,
+):
+    from tcip_mcp.buckets import read_bucket
 
-    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _calibrate)
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    ckpt = foreign_checkpoint(tmp_path)
-    result = itools.run_inference(
-        tmp_path, str(ckpt), images_dir=str(images_dir),
-        output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
-        device="cpu", tile=tile, tile_size=tile_size, trait="bud_opening",
-        calibration_labels_dir=str(images_dir))
+    result = _publish(tmp_path, monkeypatch, tile=True, tile_size=64, conf=0.3)
+
     assert "error" not in result, result
-    return result
+    bucket = read_bucket(result["output_dir"])
+    assert bucket.execution.record() == result["execution"]
+    assert (bucket.execution.tile_size, bucket.execution.sources["tile_size"]) == (64, "explicit")
+    assert bucket.date == "2026-03-01" and bucket.documents == {"capture_a": "capture_a.png"}
+    assert bucket.producer["checkpoint_sha256"] == result["checkpoint_sha256"]
 
 
-def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp_path, monkeypatch):
-    """The conf a calibrated run resolved is recoverable from the written bucket by the same
-    reconciliation the delivery doors gate on, with its held-out reference intact."""
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_HELD_OUT, read_operating_point_sidecar, reconcile_operating_point_validity,
-    )
+def test_a_publication_that_dies_before_its_record_leaves_no_bucket(tmp_path, monkeypatch):
+    """Documents written and no ``bucket.json`` is a directory every reader refuses, with the
+    publication's failed line naming what it wrote: the safe direction."""
+    import tcip_mcp.experiments as experiments
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.buckets import read_bucket
+    from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    result = _export(tmp_path, monkeypatch, tile=False)
-    bucket = result["output_dir"]
-
-    assert read_operating_point_sidecar(bucket) is not None
-    reconciled = reconcile_operating_point_validity([bucket], trait="bud_opening",
-                                                    project=tmp_path)
-    assert reconciled["missing_sidecars"] == []
-    assert reconciled["unvalidated_buckets"] == []
-    assert reconciled["on_disk_validated"] is True
-    assert reconciled["validated"] == VALIDATED_HELD_OUT
-    assert reconciled["conf"] == pytest.approx(CONF_FROM_THE_DENSE_REFERENCE)
-
-
-def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_claim(
-    tmp_path, monkeypatch,
-):
-    """The stamp a validated export writes names a row outside the bucket, and the reader's own
-    verification of that binding passes against the bucket as it was actually written."""
-    from tcip_mcp.pipelines.resolution import (
-        read_operating_point_sidecar, verify_stamp_binding, well_formed_validated_by,
-    )
-
-    result = _export(tmp_path, monkeypatch, tile=False)
-    bucket = result["output_dir"]
-
-    stamp = read_operating_point_sidecar(bucket)
-    assert well_formed_validated_by(stamp) is not None
-    binding = verify_stamp_binding(stamp, bucket, project=tmp_path, document="operating_point",
-                                   trait="bud_opening")
-    assert binding.ok is True
-    assert binding.claimed is True
-    assert binding.note == ""
-
-
-def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_record(
-    tmp_path, monkeypatch,
-):
-    """A checkpoint registered through the register_model tool's explicit mode, with no run of
-    this project behind it, exports predictions and earns a validated count in a run directory
-    created for the calibration, which reads completed and records the checkpoint's sha256 in its
-    launch record, with the producing run recorded as absent rather than invented. An
-    unregistered checkpoint is refused before any of this runs; that refusal is
-    test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing in
-    test_checkpoint_digest_rails.py."""
-    from tcip_mcp.experiments import find_run, find_validation, observe
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    result = _export(tmp_path, monkeypatch, tile=False)
-    bucket = Path(result["output_dir"])
-
-    assert (bucket / "capture_a.json").is_file()  # written once the registered checkpoint admits
-    pointer = read_operating_point_sidecar(bucket)["validated_by"]
-    assert pointer["experiment_id"].startswith("calibration_")
-    run_dir = find_run(pointer["experiment_id"], project=tmp_path)
-    assert run_dir is not None
-    calibration = observe(run_dir)
-    assert calibration.state == "completed"
-    calibrated = calibration.record["calibrated"]
-    assert calibrated["checkpoint_sha256"] == read_operating_point_sidecar(bucket)["checkpoint_sha256"]
-    row = find_validation(calibration, pointer["record_digest"])
-    assert row["producing_experiment_id"] is None
-    assert row["trait"] == "bud_opening"
-    assert list(row["covered_buckets"]) == [str(bucket.resolve())]
-
-
-def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_path, monkeypatch):
-    """The publication order fails closed at every partial state: files written and no stamp is a
-    bucket that delivers nothing, which is the safe direction."""
-    import tcip_mcp.pipelines.resolution as resolution
-
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_operating_point_validity
+    project_checkpoint(tmp_path)  # made before the record write is broken; answered again after
 
     def _die(*a, **kw):
-        raise RuntimeError("the process died between the prediction files and the record")
+        raise RuntimeError("the process died between the documents and the record")
 
-    monkeypatch.setattr(resolution, "seal_validation", _die)
-    with pytest.raises(RuntimeError):
-        _export(tmp_path, monkeypatch, tile=False)
+    monkeypatch.setattr(experiments, "write_once", _die)
+    with pytest.raises(RuntimeError, match="the process died"):
+        _publish(tmp_path, monkeypatch, tile=False)
 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert (bucket / "capture_a.json").is_file()
-    assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity(
-        [str(bucket)], trait="bud_opening", project=tmp_path)["validated"] == VALIDATED_FALSE
-
-
-def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, monkeypatch):
-    """The other partial state: the row is appended and inert, because nothing points at it, and
-    the bucket still floors."""
-    import tcip_mcp.pipelines.resolution as resolution
-
-    from tcip_mcp.experiments import find_observation, find_validation
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_operating_point_validity
-
-    sealed: dict = {}
-    real_seal = resolution.seal_validation
-
-    def _seal_then_die(draft, **kw):
-        body = real_seal(draft, **kw)
-        sealed.update(body["validated_by"])
-        raise RuntimeError("the process died between the record and the stamp")
-
-    monkeypatch.setattr(resolution, "seal_validation", _seal_then_die)
-    with pytest.raises(RuntimeError):
-        _export(tmp_path, monkeypatch, tile=False)
-
-    bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
-    assert find_validation(find_observation(sealed["experiment_id"], project=tmp_path),
-                           sealed["record_digest"]) is not None
-    assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity(
-        [str(bucket)], trait="bud_opening", project=tmp_path)["validated"] == VALIDATED_FALSE
-
-
-def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monkeypatch):
-    """A tiled bucket's tile scale is readable back as the operative, explicitly-stated basis it
-    was written at, the dimension a multi-bucket delivery floors itself against."""
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_EXPLICIT_GEOMETRY, reconcile_tile_size_validity,
-    )
-
-    result = _export(tmp_path, monkeypatch, tile=True, tile_size=64)
-    bucket = result["output_dir"]
-
-    reconciled = reconcile_tile_size_validity([bucket], project=tmp_path)
-    assert reconciled["operative"] is True
-    assert reconciled["unvalidated_buckets"] == []
-    assert reconciled["validated"] == VALIDATED_EXPLICIT_GEOMETRY
-    assert reconciled["per_bucket"] == {str(Path(bucket)): VALIDATED_EXPLICIT_GEOMETRY}
+    with pytest.raises(ValueError, match="holds no bucket.json"):
+        read_bucket(bucket)
+    (line,) = [r for r in ts.read_log(audit_log_key(tmp_path / "dataset")).records
+               if r["tool"] == "prediction_bucket_published"]
+    assert line["status"] == "failed" and line["arguments"]["written"] == ["capture_a"]

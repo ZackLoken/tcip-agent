@@ -1,11 +1,11 @@
-"""A detection calibration reads its reference under the run's own recorded subject, or refuses.
+"""A detection assessment reads its reference under the run's own recorded subject, or refuses.
 
 A run admitted by the ground-truth shape its bespoke builder reads (mask rasters here) records no
-subject, and neither a trait nor a labels directory says which reference records its detections
-are of. The run is trained one epoch through the platform's own path and registered; asked to
-calibrate, ``run_inference`` refuses it by name before any reference is read or any split locked.
-The admitting half is the measurement chain's calibrated run
-(``test_end_to_end_measurement_chain``), which records the subject it was trained on.
+subject, so nothing says which reference records its detections are of. The run is trained one
+epoch through the platform's own path and registered; asked to assess it over a drawn document
+reference, ``assess_checkpoint`` refuses it by name before any assessment is recorded. The
+admitting half is the measurement chain's assessed run (``test_end_to_end_measurement_chain``),
+which records the subject it was trained on.
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ pytest.importorskip("pycocotools")
 
 from torch.utils.data import Dataset  # noqa: E402
 
-from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.assessment import ASSESSMENTS_DIR  # noqa: E402
 
 IMG = 48
 STEMS = ("m0", "m1", "m2", "m3")
@@ -48,19 +47,20 @@ class _MaskBoxDataset(Dataset):
         ys, xs = np.nonzero(mask)
         box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
         return pil_to_tensor(load_image(Path(sample.source), 3)), {
-            "boxes": torch.tensor([box]), "labels": torch.tensor([1]), "image_id": idx}
+            "boxes": torch.tensor([box]), "labels": torch.tensor([1]),
+            "iscrowd": torch.tensor([0]), "image_id": idx}
 
 
 def build_mask_box_ds(**kwargs) -> _MaskBoxDataset:
     return _MaskBoxDataset(**kwargs)
 
 
-def _capture(root: Path) -> tuple[Path, Path, Path]:
-    """Frames holding one bright square, its mask raster, and a reviewed per-image reference."""
+def _capture(root: Path) -> tuple[Path, Path]:
+    """Frames holding one bright square, and its mask raster."""
     from PIL import Image, ImageDraw
 
-    images, masks, reference = root / "images", root / "masks", root / "reference"
-    for d in (images, masks, reference):
+    images, masks = root / "images", root / "masks"
+    for d in (images, masks):
         d.mkdir(parents=True)
     for index, stem in enumerate(STEMS):
         shade = 30 + index
@@ -70,10 +70,7 @@ def _capture(root: Path) -> tuple[Path, Path, Path]:
         mask = Image.new("L", (IMG, IMG), 0)
         ImageDraw.Draw(mask).rectangle([BOX[0], BOX[1], BOX[2] - 1, BOX[3] - 1], fill=1)
         mask.save(masks / f"{stem}.png")
-        json_io.write_annotations(
-            reference / f"{stem}.json",
-            [Annotation(subject="bur", geometry=BBox(*BOX), created_by="user:breeder")], IMG, IMG)
-    return images, masks, reference
+    return images, masks
 
 
 def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> str:
@@ -107,29 +104,20 @@ def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> st
     return str(checkpoint)
 
 
-def _calibrate(project: Path, checkpoint: str, images: Path, reference: Path, out: Path) -> dict:
-    from tests import _trait_fixtures as fx
+def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: Path):
+    from tests import _chain_fixtures as chain
 
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    return run_inference(project, checkpoint_path=checkpoint, images_dir=str(images),
-                         output_dir=str(out), trait=fx.COUNT_TRAIT,
-                         calibration_labels_dir=str(reference))
-
-
-def test_a_run_that_recorded_no_subject_is_refused_calibration_by_name(tmp_path: Path):
-    from tests import _trait_fixtures as fx
-
-    images, masks, reference = _capture(tmp_path / "ds")
-    fx.propose(tmp_path, fx.COUNT_SPEC)
+    images, masks = _capture(tmp_path / "masks")
     data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
                 "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
     checkpoint = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
     # The producer admitted by shape and recorded an empty scope.
     assert data_cfg["scope"] == {"subject": None, "attribute": None, "id_map": None}
+    chain.synthetic_capture(tmp_path / "ds")
+    chain.draw_reference_selection(tmp_path, tmp_path / "ds", tmp_path / "selection")
+    chain.confirm_count_trait(tmp_path)
 
-    result = _calibrate(tmp_path, checkpoint, images, reference, tmp_path / "ds" / "predictions" / "a")
+    result = chain.assess(tmp_path, checkpoint, tmp_path / "selection", device="cpu")
 
     assert "records no subject" in result.get("error", ""), result
-    assert not (tmp_path / "ds" / "predictions" / "a").exists() or not any(
-        (tmp_path / "ds" / "predictions" / "a").iterdir())
+    assert not (tmp_path / ASSESSMENTS_DIR).exists()

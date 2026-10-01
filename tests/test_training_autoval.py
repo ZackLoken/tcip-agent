@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tests._clear_prediction_bucket_fixtures import write_noise_image  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
 
 IMG = 64
 
@@ -157,8 +157,8 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
         [f"img{i}" for i in range(4)]
     assert {s["ground_truth"] for s in partition["samples"]} == {str(csv_path)}
     by_row = dict(rows)
-    for key, rank in zip(train_ds.stems, train_ds._ranks):
-        assert rank == by_row[train_ds.member_of(key)]
+    for idx, key in enumerate(train_ds.stems):
+        assert train_ds[idx][1]["ranks"] == by_row[train_ds.sample_of(key).member]
 
 
 def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
@@ -593,10 +593,9 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
 
 
 def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Path):
-    """Reason 1: no width/height in the label file. Explicitly requested -> raises by name,
-    rather than the unrequested case's silent (train_ds, None) degradation. The one source is
-    admitted through the producer the run itself admits through, so the split is derived over the
-    dataset the run would build."""
+    """No width/height in the label file: the split refuses naming the document and the frame it
+    lacks. The one source is admitted through the producer the run itself admits through, so the
+    split is derived over the dataset the run would build."""
     from tcip_mcp.pipelines.data.datasets import resolve_sizes
     from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
     from tests._producer_fixtures import admit_over
@@ -613,7 +612,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
     admitted = admit_over(images_dir, labels_dir, subject="bud")
-    with pytest.raises(ValueError, match="reserve_calibration_fraction"):
+    with pytest.raises(ValueError, match="mosaic.json states no positive width and height"):
         spatial_single_source_split(
             admitted.every_sample()[0], admitted.scope, tiling, split_cfg,
             resolve_sizes("detection", {}, admitted.every_sample()))

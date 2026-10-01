@@ -83,9 +83,9 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
     what was actually persisted there as clean while still catching one drawn from train."""
     from tcip_mcp.pipelines.raster_source import rects_overlap
-    from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
-    images_dir, labels_dir, stem = _single_source_mosaic(tmp_path / "ds")
+    images_dir, labels_dir, _stem = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(images_dir, labels_dir, val_ratio=0.2, test_ratio=0.1,
                          reserve_calibration_fraction=0.15)
 
@@ -102,11 +102,6 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
         x0, y0, x1, y1 = rect
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
-    clean = _train_disjointness("exp_reserved_cal", {stem}, set(), project=tmp_path,
-                                cal_rects={stem: _shrunk(cal_region[0])})
-    assert clean["leaked_groups"] == []
-    assert clean["group_check"] == "spatial_strip_geometric"
-
-    leaked = _train_disjointness("exp_reserved_cal", {stem}, set(), project=tmp_path,
-                                 cal_rects={stem: _shrunk(train_region[0])})
-    assert leaked["leaked_groups"] == [stem]
+    assert spatial_disjointness(spatial, [_shrunk(cal_region[0])]) == []
+    leaking = _shrunk(train_region[0])
+    assert spatial_disjointness(spatial, [leaking]) == [str(list(leaking))]

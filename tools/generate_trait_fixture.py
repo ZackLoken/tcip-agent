@@ -24,9 +24,9 @@ _STEM_ENTRY = {
     "milestone_on": "", "majority_milestone": "", "phenology_prefix": "", "majority_label": "",
     "count_objective": "count_unbiased", "localization": "center_match",
     "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
-    "count_bias_tolerance_frac": None, "count_error_tolerance": None,
+    "count_bias_tolerance_frac": 0.1, "count_error_tolerance": 2,
     "classifier_agreement_floor": None, "ordinal_agreement_floor": None,
-    "regression_skill_floor": None, "scale_tolerance_frac": None,
+    "regression_skill_floor": None, "regression_criterion": "", "scale_tolerance_frac": None,
     "holdout_match_quality_floor": 0.5, "notes": "",
     "operationalizations": {"per_image_count": {
         "statement": "One stem per detected box.",

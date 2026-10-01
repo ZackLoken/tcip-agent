@@ -75,7 +75,6 @@ _EXPECTED_COUNTS = {
     "environment.linux.lock.yml": 2,
     "environment.yml": 2,
     "packages/tcip-web/README.md": 2,
-    "tools/smoke_phenology_e2e.py": 1,
     "tools/smoke_terminal_e2e.py": 1,
 }
 

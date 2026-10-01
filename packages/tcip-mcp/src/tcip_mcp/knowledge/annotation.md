@@ -9,10 +9,10 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` / `accepted_by_rule` provenance per object. `stage_proposals` writes this schema
-without reading any label document (its `assignments` regime reads back the proposal record
-`propose_annotations` staged in a prior run, not a label file); `run_inference` reads it only
-when it calibrates a confidence operating point. It is the one label document shape the platform
+`accepted_at` / `accepted_by_rule` provenance per object. `stage_proposals` publishes this schema
+as a bucket of its own per image, its record naming the engine or agent that proposed it (its
+`assignments` regime reads back the proposal record `propose_annotations` staged in a prior run,
+not a label file). It is the one label document shape the platform
 writes; object ground truth trains from it, beside the mask rasters and tables other tasks read.
 A breeder can confirm every prediction a bucket's own
 validated count operating point pre-admits in one Review action; on a false positive this writes
@@ -207,32 +207,26 @@ point pre-admits; the canvas state body carries `admitted` on that shape.
 The agent must never write ground truth the human hasn't seen. Stage proposals to the
 *predictions* tree and drive the human to review them:
 
-- `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None,
-  overwrite=False)` writes model-/agent-proposed shapes to the predictions tree, not
-  `annotations/`, so nothing here becomes ground truth before a human reviews it. Exactly one
-  input regime per call: `assignments` reads back the candidates `propose_annotations` staged
-  for this image, each a `{candidate_id, subject}` mapping, and lands them under
-  `predictions/<engine>/<date>/<task>` with `created_by=<engine>`; `model_name` is refused
+- `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None)`
+  writes model-/agent-proposed shapes to the predictions tree, not `annotations/`, so nothing here
+  becomes ground truth before a human reviews it. Exactly one input regime per call:
+  `assignments` reads back the candidates `propose_annotations` staged for this image, each a
+  `{candidate_id, subject}` mapping, stamped `created_by=<engine>`; `model_name` is refused
   alongside `assignments`, since the staged record already names the engine. `boxes`/`polygons`
   are explicit shapes an agent or another model already has in hand, with no cached record to
-  read back; they require `model_name`, stamped as each object's `created_by`, and land under
-  `predictions/<model_name>/<date>/<stem>.json`. Either way they render on the Review canvas as
-  predictions for the human to accept/reject/edit; for the explicit regime, name the real
-  producer in `model_name` (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic
-  placeholder. A bucket (the prediction directory just written to, named by the engine or by
-  `model_name`, not a score bin) that already carries review state (a detection verdict or a
-  bulk-accepted image) is immutable: a stage into it is redirected to a fresh `<engine>@r2` or
-  `<model_name>@r2` bucket (the response's `bucket` field is the one actually written), so a
-  re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place (explicit
-  regime only), which is still refused when the bucket carries review state. That reach is wider
-  than a detection verdict alone: completing an image on the Review canvas with nothing on it, the
-  far more common way an image is finished, freezes its bucket the same way, so a session that
-  interleaves staging with completing images sends each later stage into its own fresh variant
-  unless every image of a run is staged before any is reviewed.
-- `focus_human_attention(tab='review', dataset_root, subject, date, model_name, image_index,
-  detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
-  predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
-  missed catkin) without hunting. The Review analog of `focus_human_attention(tab='annotate')`.
+  read back; they require `model_name`, stamped as each object's `created_by`. Either way the
+  image's proposal is published once as its own bucket at
+  `predictions/<producer>/<date>/<stem>/`, its record naming the engine or `model_name` as what
+  proposed it and no checkpoint or execution record, and renders on the Review canvas for the
+  human to accept/reject/edit; for the explicit regime, name the real producer in `model_name`
+  (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder. A second stage of
+  the same image under the same producer refuses, since a reviewer may already have judged it, so
+  further shapes go under another `model_name`. No delivery ships a proposal.
+- `focus_human_attention(tab='review', dataset_root, subject, date, predictions_dir, image_index,
+  detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight
+  to the predictions in `predictions_dir` (a published bucket's directory, a proposal's included) on
+  a frame/detection, so the human sees exactly what you flagged (a false positive, a missed
+  object) without hunting. The Review analog of `focus_human_attention(tab='annotate')`.
   The event names this server's project by its id, and the backend delivers it only while the GUI
   has that project open: otherwise the answer is `delivered: false` with the id of the project the
   GUI does have open, and a backend that is not running answers `delivered: false` too.

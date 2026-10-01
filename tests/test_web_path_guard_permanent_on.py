@@ -28,7 +28,6 @@ from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
 from tests._web_fixtures import new_project, open_new_project
 from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
-from tests.test_tcip_web_results_routes import _phenology_fixture
 
 
 @pytest.fixture
@@ -306,7 +305,7 @@ def test_session_routes_confine_the_dataset_root_they_record(
 def test_review_routes_confine_the_dataset_root_and_the_label_files_they_read(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
-    inside = new_project(tmp_path / "proj")
+    inside = open_new_project(tmp_path / "proj")
     image = _image(inside / "images" / "2026-02-11" / "a.jpg")
     assert client.get("/api/review/image_statuses", params={
         "dataset_root": str(outside)}).status_code == 403
@@ -348,11 +347,19 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
 # ── the Results doors belong to the open project ──────────────────────────
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization")
+def _series_body(project: Path) -> dict:
+    """An assessed classified series under ``project`` (``_chain_fixtures.classified_series``);
+    the request body a phenology door takes over it."""
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import classified_series
+
+    return classified_series(project, fractions=(0.0, 1.0)).body()
+
+
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
+    body = _series_body(tmp_path)
     asyncio.run(store.close_project())
     refused = client.post("/api/results/phenology_measurement", json=body)
     assert refused.status_code == 409
@@ -362,13 +369,12 @@ def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
+    body = _series_body(tmp_path)
     b = new_project(tmp_path.parent / "b")
     propose(b, BUD_OPENING)
     seed_confirmed_crossing(b, BUD_OPENING.name, measured_subject="bud")
@@ -385,21 +391,19 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
                    for r in tcip_store.read_log(audit_log_key(b)).records)
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
     """Evidence living outside the workspace entirely, registered to the project, passes the
-    belonging rail. The evidence gate then judges the relocated buckets on its own terms, so the
+    belonging rail. The measurement then judges the relocated buckets on its own terms, so the
     proof here is that neither the belonging refusal nor the allow-set refusal answers."""
     import shutil
 
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
+    body = _series_body(tmp_path)
     copied = outside / "ds"
     shutil.copytree(tmp_path / "ds", copied)
-    relocated = {**body, "predictions_by_date": {
-        d: str(copied / Path(p).relative_to(tmp_path / "ds"))
-        for d, p in body["predictions_by_date"].items()}}
+    relocated = {**body, "buckets": [str(copied / Path(p).relative_to(tmp_path / "ds"))
+                                     for p in body["buckets"]]}
     refused = client.post("/api/results/phenology_measurement", json=relocated)
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
@@ -410,7 +414,6 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert resp.status_code not in (403, 409), resp.text
 
 
-@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
@@ -434,7 +437,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     # The breeder's plant-location file is reference data picked from wherever they keep it.
     moved_csv = outside / "plots.csv"
     moved_csv.write_text(Path(payload["csv_path"]).read_text(encoding="utf-8"), encoding="utf-8")
-    from tests._binding_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import register_plant_registry_for
 
     moved_registry = register_plant_registry_for(tmp_path, [moved_csv], name="moved-plots")
     ok = client.post("/api/results/plant_mapping/build",

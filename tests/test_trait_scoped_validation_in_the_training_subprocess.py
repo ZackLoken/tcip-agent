@@ -1,7 +1,7 @@
-"""A trait's unstated localization, derived through the real training subprocess.
+"""A trait-scoped validation through the real training subprocess.
 
-``evaluation.resolve_match_criterion`` derives the kind from the run's own validation GT when the
-trait's entry states none, and never writes the entry: a trait changes only through a proposed
+``evaluation.resolve_match_criterion`` resolves the trait's authored localization against the
+run's own validation GT and never writes the entry: a trait changes only through a proposed
 revision. This drives that through the process a training run actually executes in,
 ``subprocess_worker.run``, so the boundary is covered by the entry point itself and not only by
 in-process calls.
@@ -24,8 +24,6 @@ def _seed_dataset(root: Path) -> tuple[Path, Path, Path, Path]:
     val_images, val_labels = root / "val_images", root / "val_labels"
     for d in (images_dir, labels_dir, val_images, val_labels):
         d.mkdir(parents=True)
-    # 20 px boxes: under a 15 px jitter their achievable IoU is below 0.5, so the derivation
-    # lands on center_match, the same geometry the unit test derives from.
     box = BBox(10, 10, 30, 30)
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
@@ -49,22 +47,23 @@ def _wait_terminal(project: Path, run_id: str, seconds: float) -> str:
     pytest.fail("timed out waiting for the training subprocess to reach a terminal state")
 
 
-def test_the_subprocess_derives_an_unstated_kind_and_leaves_the_trait_entry_alone(
+def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_entry_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """The child derives the unstated kind from the validation GT and completes, and the trait's
-    record still holds the one revision the test confirmed."""
+    """The child resolves the trait's authored localization over the validation GT and
+    completes, and the trait's record still holds the one revision the test confirmed."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools import training_tools
-    from tcip_mcp.traits import read_trait
+    from tcip_mcp.traits import CENTER_MATCH, read_trait
 
     from tests._trait_fixtures import entry, propose_and_confirm
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
     images_dir, labels_dir, val_images, val_labels = _seed_dataset(tmp_path / "ds")
-    proposed = propose_and_confirm(tmp_path, entry("leaf", ("leaf_length",)))
+    proposed = propose_and_confirm(
+        tmp_path, entry("leaf", ("leaf_length",), localization=CENTER_MATCH))
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",

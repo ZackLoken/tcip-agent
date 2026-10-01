@@ -230,10 +230,12 @@ image_results = [
     for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
 ]
 
-# The final CSV is a phenotype delivery door: without pred_dirs it floors to unvalidated
-# regardless of any asserted string, and this call passes no acknowledgment, so it still refuses.
+# The final CSV is a phenotype delivery door: it clears the one gate over the published buckets
+# the counts came from, and an unvalidated bucket refuses without a breeder's recorded acknowledgment.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
-export_aggregated_csv(summaries, "phenotype_csv", delivered_phenotype="<phenotype>", pred_dirs=["stage_b_preds"])
+deliver_per_plant_csv(summaries, "phenotype.csv", delivered_phenotype="<phenotype>",
+                      delivery_kind="per_plant_count_aggregate", plants=[...],
+                      buckets=["predictions/stage-b/<date>"])
 ```
 
 How many stages there are, and what each one does, is your decomposition to derive; the chaining

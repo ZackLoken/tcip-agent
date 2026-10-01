@@ -1,4 +1,5 @@
-"""Tiled inference: GenericPredictor.predict_sliced + the verified pass at tile=True."""
+"""Tiled inference: GenericPredictor.predict_sliced under a tiled execution record, and the pass
+run_inference prepares at tile=True."""
 
 from __future__ import annotations
 
@@ -10,8 +11,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 TILE = 64
-SLICED = dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
-              tile_batch_size=8, tile_resize=None, require_masks=True)
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
@@ -32,17 +31,28 @@ def _image(tmp_path: Path, size: int = 128) -> str:
     return str(p)
 
 
-def test_predict_sliced_shape_and_bounds(tmp_path):
+def _tiled_pass(tmp_path: Path, ckpt: str):
+    """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3 and conf 0."""
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.execution import Stated, prepare_pass
 
-    ckpt = _detection_checkpoint(tmp_path)
-    img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    r = pred.predict_sliced(img, **SLICED)
+    return prepare_pass(load_registered_checkpoint(ckpt, project=tmp_path), Stated(
+        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0),
+        device="cpu")
 
-    assert {"image", "width", "height", "boxes", "scores", "labels", "count"} <= set(r)
+
+def _sliced(p, source, execution=None, **kwargs) -> dict:
+    """``predict_sliced`` under the pass's own record, or ``execution`` where one is given."""
+    return p.predictor.predict_sliced(source, execution=execution or p.execution,
+                                      tile_batch_size=8, require_masks=True, **kwargs)
+
+
+def test_predict_sliced_shape_and_bounds(tmp_path):
+    p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
+
+    r = _sliced(p, _image(tmp_path))
+
+    assert {"image", "width", "height", "boxes", "scores", "labels", "count", "cap_hit"} <= set(r)
     assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
     assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice
     for b in r["boxes"]:
@@ -51,136 +61,93 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
 
 
 def test_predict_sliced_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
-    """``predict_sliced``'s post-merge full-frame cap truncates a dense result (``self.max_dets``)
-    and stamps ``cap_hit``, computed from the pre-truncation count, so a caller building its own
-    records (block calibration's ``_band_records``) can surface cap saturation as provenance."""
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    ckpt = _detection_checkpoint(tmp_path)
+    """The post-merge full-frame cap truncates a dense result and stamps ``cap_hit`` from the
+    pre-truncation count; sitting exactly at the cap still reads as hit."""
+    p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    uncapped = pred.predict_sliced(img, **SLICED)
+    uncapped = _sliced(p, img, p.execution.with_value("max_dets", None, "explicit"))
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
         "for this test to force a real truncation, not merely assert an untested edge"
 
-    pred.max_dets = uncapped["count"] - 1
-    capped = pred.predict_sliced(img, **SLICED)
-    assert capped["cap_hit"] is True
-    assert capped["count"] == uncapped["count"] - 1
+    outcomes = {}
+    for cap in (uncapped["count"] - 1, uncapped["count"], uncapped["count"] + 1):
+        r = _sliced(p, img, p.execution.with_value("max_dets", cap, "explicit"))
+        outcomes[cap - uncapped["count"]] = (r["cap_hit"], r["count"])
 
-    # Exactly at the cap: no slicing occurs, but cap_hit still reads True (matching
-    # records_from_detector's own >= convention: sitting at the ceiling is still uncertain).
-    pred.max_dets = uncapped["count"]
-    at_cap = pred.predict_sliced(img, **SLICED)
-    assert at_cap["cap_hit"] is True
-    assert at_cap["count"] == uncapped["count"]
-
-    pred.max_dets = uncapped["count"] + 1
-    not_capped = pred.predict_sliced(img, **SLICED)
-    assert not_capped["cap_hit"] is False
-    assert not_capped["count"] == uncapped["count"]
+    assert outcomes == {-1: (True, uncapped["count"] - 1), 0: (True, uncapped["count"]),
+                        1: (False, uncapped["count"])}
 
 
 def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
     """``prior``/``progress`` only apply to the windowed-reader resume seam; a whole-decode source
-    (a plain path or ``BandGroupRef``) has no resume seam to feed them into, and silently dropping
-    them would let a caller believe a whole-decode pass resumed when it quietly started over."""
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    ckpt = _detection_checkpoint(tmp_path)
+    has no resume seam to feed them into, and silently dropping them would let a caller believe a
+    whole-decode pass resumed when it quietly started over."""
+    p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = _image(tmp_path)
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    empty_prior = {"slices": [], "boxes": [], "scores": [], "labels": []}
+    empty_prior = {"slices": [], "predictions": []}
 
     with pytest.raises(ValueError, match="resume seam"):
-        pred.predict_sliced(img, **SLICED, prior=empty_prior)
+        _sliced(p, img, prior=empty_prior)
     with pytest.raises(ValueError, match="resume seam"):
-        pred.predict_sliced(img, **SLICED, progress=lambda *a: None)
+        _sliced(p, img, progress=lambda *a: None)
 
 
-def test_run_inference_tile_flag(tmp_path, monkeypatch):
-    from tests._verified_checkpoint_fixtures import run_inference_verified
+def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
+    from tests._verified_checkpoint_fixtures import predicted_over
 
     ckpt = _detection_checkpoint(tmp_path)
-    img = _image(tmp_path)
+    images_dir = str(Path(_image(tmp_path)).parent)
 
-    r = run_inference_verified(tmp_path, ckpt, images_dir=str(Path(img).parent), tile=True, tile_size=TILE, conf_threshold=0.0)
-    assert r["slicing"] is not None
-    assert len(r["results"]) == 1
-    # the count carries a resolved-bundle operating point, unvalidated for raw inference
-    assert r["operating_point"]["conf"]["validated_against"] == "false"
+    tiled, tiled_results = predicted_over(tmp_path, ckpt, images_dir, tile=True,
+                                          tile_size=TILE, conf=0.0)
+    whole, whole_results = predicted_over(tmp_path, ckpt, images_dir, tile=False, conf=0.0)
 
-    r2 = run_inference_verified(tmp_path, ckpt, images_dir=str(Path(img).parent), tile=False, conf_threshold=0.0)
-    assert r2["slicing"] is None
-    assert len(r2["results"]) == 1  # non-tiled path still works
+    assert tiled.execution.tile_size == TILE and len(tiled_results) == 1
+    assert whole.execution.tile_size is None and len(whole_results) == 1
 
 
 def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
-    """The channel-count refusal on the whole-decode path is built on
-    ``derivations.probe_channels`` (the file's own real band count, independently probed), never on
-    ``load_image``'s output: ``load_image(path, self.in_chans)`` is told what channel count to
-    coerce toward before it returns anything, so comparing against its own output would never
-    catch a mismatch. A real 5-band ``.npy`` file against a 3-``in_chans`` predictor raises before
-    any slice is read, never silently routing or coercing the file to 3 bands."""
+    """The channel-count refusal on the whole-decode path is built on the file's own probed band
+    count, never on ``load_image``'s coerced output: a real 5-band ``.npy`` file against a
+    3-channel predictor raises before any slice is read."""
     import numpy as np
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
-    arr = np.zeros((128, 128, 5), dtype=np.uint8)
+    p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     path = tmp_path / "five_band.npy"
-    np.save(path, arr)
-
-    p = GenericPredictor.__new__(GenericPredictor)
-    p.task = "detection"
-    p.score_threshold = 0.0
-    p.max_dets = None
-    p.in_chans = 3
+    np.save(path, np.zeros((128, 128, 5), dtype=np.uint8))
 
     with pytest.raises(ValueError, match="channel"):
-        p.predict_sliced(str(path), **SLICED)
+        _sliced(p, str(path))
 
 
 def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(tmp_path):
-    """The rail must admit valid work, not only reject invalid work: an ordinary RGBA PNG (any
-    photo with an alpha channel, common) has no real 4-vs-3 mismatch, since ``load_image``'s own
-    PIL conversion coerces it to RGB before the model ever sees it, the same as the untiled
-    ``predict``/``predict_batch`` paths already do. ``probe_channels`` alone can't see that
-    coercion (it reads the file's raw, uncoerced mode), so the refusal must not fire here
-    or every alpha-channel photo would abort a tiled run that untiled inference handles fine."""
+    """An ordinary RGBA PNG has no real 4-versus-3 mismatch, since ``load_image``'s own PIL
+    conversion coerces it to RGB before the model sees it, the same as the untiled path does."""
     from PIL import Image
 
-    from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    ckpt = _detection_checkpoint(tmp_path)
+    p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     path = tmp_path / "rgba.png"
     Image.new("RGBA", (128, 128), (10, 20, 30, 255)).save(path)
 
-    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
-    result = pred.predict_sliced(str(path), **SLICED)
+    result = _sliced(p, str(path))
+
     assert result["width"] == 128 and result["height"] == 128
 
 
-def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
-    """When the checkpoint's own config carries a recorded id_map (stamped at train time by
-    subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
-    live registry, and reachable with no images_dir/subjects.json at all (proving it is not
-    falling through to the registry-derivation branch)."""
-    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
+def test_the_pass_decodes_through_the_checkpoints_own_recorded_id_map(tmp_path):
+    """A checkpoint whose config carries a recorded id_map decodes through it, reachable with no
+    subjects.json at all, never a map re-derived from a live registry."""
+    from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
 
     recorded_id_map = {"closed": 0, "open": 1}
-    ckpt_path = registered_checkpoint(
+    ckpt = registered_checkpoint(
         tmp_path,
         model_source={"builder": "tests.bespoke_models:build_bespoke_detection",
                       "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
                       "task": "detection"},
         data={"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
                                            "id_map": recorded_id_map}})
-    img = _image(tmp_path)
 
-    r = run_inference_verified(tmp_path, str(ckpt_path), images_dir=str(Path(img).parent), conf_threshold=0.0)
-    assert r["scope"].id_map == recorded_id_map  # the recorded map, not a fresh registry re-derivation
+    p, _results = predicted_over(tmp_path, ckpt, str(Path(_image(tmp_path)).parent), conf=0.0)
+
+    assert p.scope.id_map == recorded_id_map

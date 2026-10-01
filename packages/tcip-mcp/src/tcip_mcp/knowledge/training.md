@@ -200,21 +200,21 @@ table of one row per image. A mask and a row are admitted by existing beside the
 class space a run binding such a selection trains in is derived from that ground truth by the
 loader that reads it.
 
-`calibration_ratio` is a third side, held out from both training and checkpoint selection: it
-draws no loader, so `evaluate_model` and delivery calibration read it as their reference universe
-instead of the run's own `val`, keeping the checkpoint's own selection side out of the number
-that later validates it. That universe is the selection's own held-out samples whatever shape
-their ground truth is; each calibration door refuses only what its own measurement cannot do (a
-count door needs detections to compare, a scalar door needs table rows), and no door refuses a
-shape on the universe's behalf.
+`calibration_ratio` and `holdout_ratio` draw the reference, held out from both training and
+checkpoint selection: neither draws a loader, so an assessment (`assess_checkpoint`, see the
+`evaluation` skill) fits its operating point on the `calibration` side and checks it on the
+`holdout` side instead of the run's own `val`, keeping the checkpoint's own selection side out of
+the number that later validates it. That reference is the selection's own held-out samples
+whatever shape their ground truth is; an assessment refuses only what its delivery kind cannot
+measure (a count needs detections to compare, a scalar needs table rows).
 - A selection lists, per sample, the image source, the label document, a group key and a side.
   Every capture date the dataset holds enters one selection, so a trait needing examples from two
   dates trains in place: no derived folder, no copied imagery, and two dates holding a same-named
   image are two samples rather than one
 - A stats-only call (no `output_path`) defaults to `train_ratio=0.8`, `val_ratio=0.2`,
-  `calibration_ratio=0.0`; leakage-free (sibling tiles of one source image stay in the same
-  split). Writing a selection has no default for any of the three and refuses a zero one, naming
-  it: state all three ratios explicitly
+  `calibration_ratio=0.0`, `holdout_ratio=0.0`; leakage-free (sibling tiles of one source image
+  stay in the same split). Writing a selection has no default for any of the four and refuses a
+  zero one, naming it: state all four ratios explicitly
 - The draw refuses, before any write, when the tree holds fewer foreground groups of `subject`
   than the requested sides need at minimum, counted for the draw's own subject regardless of
   `stratify_foreground`

@@ -3,7 +3,7 @@
 Locks that instance_seg's masks travel end to end instead of being silently dropped:
 ``check_model_contract`` requires them for instance_seg, the predictor's one detection record
 carries them as SAHI polygons on the untiled and the sliced path alike (see
-``tests/test_sliced_inference.py``), and ``write_predictions_json`` converts each to a real
+``tests/test_sliced_inference.py``), and ``encode_predictions`` converts each to a real
 (possibly multi-ring) ``Polygon``.
 
 ``require_masks=False`` is a boxes-only opt-out for a caller that never reads masks, tested here
@@ -22,6 +22,7 @@ pytest.importorskip("torchvision")
 cv2 = pytest.importorskip("cv2")
 
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
 from tests import bespoke_models  # noqa: E402
@@ -72,13 +73,11 @@ def test_contract_detection_task_unaffected_by_mask_requirement():
     assert report["ok"], report["issues"]
 
 
-def _bare_predictor(task: str, score_threshold: float = 0.5) -> GenericPredictor:
+def _bare_predictor(task: str) -> GenericPredictor:
     """A GenericPredictor with no real checkpoint: __init__ is never called, only the attributes
     predict_sliced reads before it decodes the source are set."""
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = task
-    p.score_threshold = score_threshold
-    p.max_dets = None
     p.in_chans = 3
     return p
 
@@ -86,8 +85,11 @@ def _bare_predictor(task: str, score_threshold: float = 0.5) -> GenericPredictor
 # predict_sliced: instance_seg and detection reach one slicing path, masks or not.
 
 def _sliced_kwargs(require_masks: bool = True) -> dict:
-    return dict(tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
-                tile_batch_size=8, tile_resize=None, require_masks=require_masks)
+    """``predict_sliced``'s arguments for a tiled record at ``TILE``, overlap 0.2, NMS at 0.3."""
+    from tests._verified_checkpoint_fixtures import tiled_record
+
+    return dict(execution=tiled_record(tile_size=TILE, overlap=0.2, conf=0.5), tile_batch_size=8,
+                require_masks=require_masks)
 
 
 def test_predict_sliced_instance_seg_reaches_real_slicing_path(tmp_path):
@@ -169,36 +171,41 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
     same predictor's untiled path still carries masks (an opt-out, not a global downgrade)."""
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import prepare_pass
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
-    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
+    tiled_pass = prepare_pass(checkpoint, Stated(tile=True, tile_size=TILE, overlap=0.2,
+                                                 postprocess="nms", cross_tile_nms=0.3, conf=0.5),
+                              device="cpu")
+    pred = tiled_pass.predictor
     assert pred.task == "instance_seg"
     img = _image(tmp_path / "images")
 
-    tiled = pred.predict_sliced(img, **_sliced_kwargs(require_masks=False))
+    tiled = pred.predict_sliced(img, execution=tiled_pass.execution, tile_batch_size=8,
+                                require_masks=False)
     assert "masks" not in tiled
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(tiled)
     assert tiled["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice, i.e. it really sliced
     assert tiled["count"] == len(tiled["boxes"]) == len(tiled["scores"])
 
-    assert "masks" in pred.predict(img)
+    untiled = prepare_pass(checkpoint, Stated(tile=False, conf=0.5), device="cpu")
+    assert "masks" in untiled.predict([img])[0]
 
 
 def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
     """The fixture's own persisted training tile geometry derives an unset ``tile`` to True: instance_seg
     behaves exactly as plain detection does (sliced inference merges masks across seams), and each
     result's masks are the sliced (merged polygon) shape."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified
+    from tests._verified_checkpoint_fixtures import predicted_over
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(tmp_path, instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
-                               device="cpu", tile_size=TILE, conf_threshold=0.0)
-    assert "error" not in r
-    assert r["slicing"] is not None
-    assert r["slicing"] is not None
-    assert len(r["results"]) == 1
-    result = r["results"][0]
+    p, results = predicted_over(tmp_path, instance_seg_ckpt,
+                                str(Path(_image(tmp_path / "images")).parent), device="cpu",
+                                tile_size=TILE, conf=0.0)
+    assert p.execution.tiled
+    assert len(results) == 1
+    result = results[0]
     assert "masks" in result
     if result["count"]:
         assert set(result["masks"][0]) == {"segmentation"}
@@ -207,15 +214,15 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
 def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
     """An explicit tile=True is no longer refused for instance_seg: tiled inference threads masks
     through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
-    from tests._verified_checkpoint_fixtures import run_inference_verified
+    from tests._verified_checkpoint_fixtures import predicted_over
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference_verified(tmp_path, instance_seg_ckpt, images_dir=str(Path(_image(tmp_path / "images")).parent),
-                               device="cpu", tile=True, tile_size=TILE, conf_threshold=0.0)
-    assert "error" not in r
-    assert r["slicing"] is not None
-    assert len(r["results"]) == 1
-    assert "masks" in r["results"][0]
+    p, results = predicted_over(tmp_path, instance_seg_ckpt,
+                                str(Path(_image(tmp_path / "images")).parent), device="cpu",
+                                tile=True, tile_size=TILE, conf=0.0)
+    assert p.execution.tiled
+    assert len(results) == 1
+    assert "masks" in results[0]
 
 
 def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
@@ -225,97 +232,54 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     images_dir = tmp_path / "images"
     _image(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
-                      device="cpu", tile_size=TILE, conf_threshold=0.0)
+                      device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
     assert "error" not in r
-    assert r["slicing"] is not None
+    assert r["execution"]["tile_size"] == TILE
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
 
-def test_deliver_per_image_counts_instance_seg_refuses_a_bare_tiled_pass(instance_seg_ckpt, tmp_path):
-    """deliver_per_image_counts takes no acknowledgment for the CSV itself, so a masked tiled
-    instance_seg run with no calibration behind it refuses cleanly, the same as any other detection
-    checkpoint, now that tiled inference carries masks rather than being blocked."""
-    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
+def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckpt, tmp_path):
+    """The write-side geometry drop on the mask polygon is the only extent filter a masks-backed
+    count goes through: two deliveries of the same published masked, tiled bucket agree on every
+    count, and the door that takes no acknowledgment refuses the unassessed bucket."""
+    import csv
+
+    from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts, run_inference
+    from tests import _trait_fixtures as fx
+    from tests._chain_fixtures import acknowledged
 
     images_dir = tmp_path / "images"
     _image(images_dir)
-    out_path = tmp_path / "counts.csv"
-    from tests import _trait_fixtures as fx
-
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    r = deliver_per_image_counts(tmp_path, instance_seg_ckpt, str(images_dir), str(out_path),
-                        trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE)
-    assert "error" in r
-    assert not out_path.exists()
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    ran = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(bucket),
+                        device="cpu", stated=Stated(tile_size=TILE, conf=0.0))
+    assert "error" not in ran, ran
+
+    refused = deliver_per_image_counts(tmp_path, str(bucket), str(tmp_path / "refused.csv"),
+                                       trait=fx.COUNT_TRAIT)
+    rows = []
+    for name in ("a", "b"):
+        out = tmp_path / f"{name}.csv"
+        acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(
+            tmp_path, bucket, str(out), trait=fx.COUNT_TRAIT, acknowledgment_id=ack,
+            door="test_instance_seg"))
+        rows.append([{k: v for k, v in r.items() if k != "delivery_event_id"}
+                     for r in csv.DictReader(out.open(newline="", encoding="utf-8"))])
+
+    assert "no assessment answers" in refused["error"]
+    assert len(rows[0]) == 1 and rows[0] == rows[1]
 
 
-def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_masks(
+def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
     instance_seg_ckpt, tmp_path,
 ):
-    """The write-side geometry drop (write_predictions_json's geometry_extent_ok on the mask
-    polygon) is the only extent filter a masks-backed CSV row goes through: two independent
-    bucket-regime reads of the same promoted, masked, tiled bucket agree on every cell, so a
-    masked detection's box-based extent (irrelevant to a polygon) cannot diverge them."""
-    import csv
-    from datetime import datetime
-
-    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
-    from tests import _trait_fixtures as fx
-
-    images_dir = tmp_path / "images"
-    _image(images_dir)
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    fx.seed_confirmed_count(tmp_path)
-
-    # This door takes no acknowledgment for the CSV itself, so the live pass refuses; the raw
-    # bucket it published ahead of that refusal is what the bucket-regime reads below promote.
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    published = deliver_per_image_counts(
-        tmp_path, instance_seg_ckpt, str(images_dir), str(tmp_path / "seed.csv"), trait=fx.COUNT_TRAIT,
-        device="cpu", tile_size=TILE, predictions_dir=str(bucket))
-    assert "error" in published
-    assert bucket.is_dir()
-
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, read_operating_point_sidecar
-    from tests._binding_fixtures import write_bound_sidecar
-
-    sidecar = read_operating_point_sidecar(bucket) or {}
-    op = dict(sidecar.get("operating_point") or {})
-    op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
-    stamp = {**sidecar, "validated": True, "trait": fx.COUNT_TRAIT, "operating_point": op}
-    write_bound_sidecar(tmp_path, bucket, stamp, dataset_root=tmp_path / "ds", producing_experiment_id=None)
-
-    csv_a = tmp_path / "a.csv"
-    reread_a = deliver_per_image_counts(tmp_path, predictions_dir=str(bucket), output_path=str(csv_a),
-                             trait=fx.COUNT_TRAIT)
-    assert "error" not in reread_a, reread_a
-
-    csv_b = tmp_path / "b.csv"
-    reread_b = deliver_per_image_counts(tmp_path, predictions_dir=str(bucket), output_path=str(csv_b),
-                             trait=fx.COUNT_TRAIT)
-    assert "error" not in reread_b, reread_b
-
-    rows_a = list(csv.DictReader(csv_a.open()))
-    rows_b = list(csv.DictReader(csv_b.open()))
-    assert len(rows_a) == len(rows_b) == 1
-    for key in rows_a[0]:
-        if key == "produced_at":
-            datetime.fromisoformat(rows_a[0][key])
-            datetime.fromisoformat(rows_b[0][key])
-            continue
-        assert rows_a[0][key] == rows_b[0][key], key
-
-
-def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
-    """The unvalidated mask-binarize threshold must not be stamped into Annotation.attributes
-    (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
-    in operating_point.json, the same door tiled/tile_size/conf already use. Exercised on the
-    tiled path (the checkpoint's own default now that instance_seg tiles like any other detection
-    task), so the sliced (merged polygon) mask shape reaches export too."""
+    """Annotation.attributes is the domain trait namespace, so no pass value lands there.
+    Exercised on the tiled path, so the sliced (merged polygon) mask shape reaches export too."""
     import json
 
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
@@ -323,14 +287,8 @@ def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instan
     _image(images_dir)
     out = tmp_path / "preds"
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
-                      tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
+                      stated=Stated(tile_size=TILE, conf=0.0))  # force a (masked) detection
     assert "error" not in r
-    op = read_operating_point_sidecar(r["output_dir"])
-    # The threshold the predictor cut the masks at, carried on its own records.
-    assert op["mask_binarize"]["name"] == "mask_binarize_threshold"
-    assert op["mask_binarize"]["value"] == pytest.approx(0.5)
-    assert op["mask_binarize"]["requires_validation"] is True
-    assert op["mask_binarize"]["validated_against"] == "false"
 
     pred_json = json.loads((Path(r["output_dir"]) / "img.json").read_text())
     for ann in pred_json["annotations"]:
@@ -347,7 +305,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     _image(images_dir)
     out = tmp_path / "preds"
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
-                      tile=True, tile_size=TILE, conf_threshold=0.0)
+                      stated=Stated(tile=True, tile_size=TILE, conf=0.0))
     assert "error" not in r
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
@@ -369,7 +327,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                  tile_size=TILE, overlap=0.2)
+                                  stated=Stated(tile_size=TILE, overlap=0.2))
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
     assert r["n_gt"] == 1
@@ -380,7 +338,16 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     assert r["iou_type"] == "bbox"
 
 
-# export.py write_predictions_json: masks become a real (possibly multi-ring) Polygon.
+# export.py encode_predictions: masks become a real (possibly multi-ring) Polygon.
+
+def _encoded(result: dict) -> tuple[list, int]:
+    """``result`` encoded under :data:`LEAF` and read back, and the count it dropped."""
+    from tcip_annotation.json_io import annotations_from_bytes
+    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+
+    data, dropped = encode_predictions(result, scope=LEAF)
+    return annotations_from_bytes(data, source=result["image"]), dropped
+
 
 def _mask_record(mask: np.ndarray) -> dict:
     """``mask`` as the predictor's record carries it: the shared extractor's rings of the mask
@@ -389,14 +356,12 @@ def _mask_record(mask: np.ndarray) -> dict:
 
     from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
 
-    threshold = resolve_binarize_threshold().unvalidated_value(acknowledge_unvalidated=True)
+    threshold = resolve_binarize_threshold()["value"]
     return {"segmentation": [[c for point in ring for c in point]
                              for ring in mask_to_polygon_rings(mask, threshold=threshold)]}
 
 
-def test_export_single_component_mask_writes_polygon(tmp_path):
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
+def test_export_single_component_mask_writes_polygon():
     from tcip_annotation.state import Polygon
 
     mask = np.zeros((32, 32), dtype=np.float32)
@@ -406,9 +371,7 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
-    out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, scope=LEAF)
-    anns = json_io.read_annotations(str(out))
+    anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
     assert len(anns[0].geometry.rings) == 1
@@ -419,11 +382,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
     namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
     accepts the prediction. For a detector run (attribute=None) attributes must stay empty; a
     classified run's own decoded value would land there instead. The threshold travels once into
-    the run's operating_point.json instead (see
-    test_run_inference_stamps_mask_binarize_provenance_when_masks_present)."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
-
+    the bucket's record instead (see test_run_inference_records_the_mask_binarize_threshold_once)."""
     mask = np.zeros((32, 32), dtype=np.float32)
     mask[5:20, 5:20] = 0.9
     result = {
@@ -431,9 +390,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
-    out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, scope=LEAF)
-    anns = json_io.read_annotations(str(out))
+    anns, _dropped = _encoded(result)
     assert anns[0].attributes == {}
 
 
@@ -441,8 +398,6 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     """An occlusion-split mask must export every region as its own ring in one Polygon, never
     silently truncated to the largest component and never downgraded to a BBox that would lose
     the shape entirely."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
 
     mask = np.zeros((64, 64), dtype=np.float32)
@@ -453,17 +408,13 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
         "boxes": [[5.0, 5.0, 54.0, 54.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
-    out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, scope=LEAF)
-    anns = json_io.read_annotations(str(out))
+    anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
     assert len(anns[0].geometry.rings) == 2
 
 
-def test_export_empty_mask_falls_back_to_bbox(tmp_path):
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
+def test_export_empty_mask_falls_back_to_bbox():
     from tcip_annotation.state import BBox
 
     mask = np.zeros((16, 16), dtype=np.float32)  # binarizes to nothing at the default threshold
@@ -472,18 +423,15 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
         "boxes": [[1.0, 1.0, 5.0, 5.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
-    out = tmp_path / "img.json"
-    write_predictions_json(str(out), result, scope=LEAF)
-    anns = json_io.read_annotations(str(out))
+    anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)
 
 
-def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
-    """A mask whose contour is real but collinear carries no real extent either: the writer drops
+def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
+    """A mask whose contour is real but collinear carries no real extent either: the encoder drops
     it and reports the count, the same as a degenerate box, rather than storing a zero-area shape."""
     from tcip_mcp.pipelines.postprocessing import export
-    from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
 
     monkeypatch.setattr(
@@ -496,19 +444,17 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
         "boxes": [[5.0, 10.0, 12.0, 12.0]], "scores": [0.9], "labels": [1],
         "masks": [{"segmentation": []}],
     }
-    out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result, scope=LEAF)
+    anns, dropped = _encoded(result)
 
     assert dropped == 1
-    assert json_io.read_annotations(str(out)) == []
+    assert anns == []
 
 
-def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, monkeypatch):
+def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(monkeypatch):
     """A polygon with real raw extent that collapses to one point at the document's stored
     2-decimal grid must be dropped here, the same as an already-collinear contour: the writer
     would otherwise refuse it and abort the whole batch."""
     from tcip_mcp.pipelines.postprocessing import export
-    from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
 
     monkeypatch.setattr(
@@ -521,32 +467,21 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, 
         "boxes": [[1.0, 1.0, 2.0, 2.0]], "scores": [0.9], "labels": [1],
         "masks": [{"segmentation": []}],
     }
-    out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result, scope=LEAF)
+    anns, dropped = _encoded(result)
 
     assert dropped == 1
-    assert json_io.read_annotations(str(out)) == []
+    assert anns == []
 
 
 def test_export_no_masks_key_writes_bbox_as_before():
     """Regression guard: a plain detection result (no masks key at all) must still export BBox
     as before; masks are additive, not a behavior change for non-instance_seg."""
-    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
-    from tcip_annotation import json_io
     from tcip_annotation.state import BBox
-    import tempfile
-    import os
 
     result = {
         "image": "img.jpg", "width": 32, "height": 32,
         "boxes": [[1.0, 1.0, 5.0, 5.0]], "scores": [0.9], "labels": [1],
     }
-    fd, path = tempfile.mkstemp(suffix=".json")
-    os.close(fd)
-    try:
-        write_predictions_json(path, result, scope=LEAF)
-        anns = json_io.read_annotations(path)
-        assert len(anns) == 1
-        assert isinstance(anns[0].geometry, BBox)
-    finally:
-        os.unlink(path)
+    anns, _dropped = _encoded(result)
+    assert len(anns) == 1
+    assert isinstance(anns[0].geometry, BBox)

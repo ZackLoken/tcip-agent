@@ -35,23 +35,6 @@ def samples_over(
                       members=members).every_sample()
 
 
-def admission_of(members: list[str], *, subject: str = "bud"):
-    """The producer's own record over named members whose files are never written to disk, for a
-    test driving a door's own pass rather than the admission under it: a label-document admission
-    under ``subject``, as a document admission always reads. Every projection a door takes off it
-    (its samples, each naming the confirmation bucket it read, its counts, its scope) is the
-    producer's own."""
-    from tcip_mcp.pipelines.data.label_queries import Admission, Admitted
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, ClassScope
-
-    return Admission(
-        shape=DOCUMENT, images_dir="images", ground_truth="labels",
-        records=[Admitted(member=name, source=f"{name}.jpg", ground_truth=f"{name}.json")
-                 for name in members],
-        counts={"annotated": len(members)}, scope=ClassScope(subject=subject),
-    )
-
-
 def run_over(
     task: str, images_dir, ground_truth, *, subject: str | None = None,
     attribute: str | None = None, members: list[str] | None = None,

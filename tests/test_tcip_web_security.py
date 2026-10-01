@@ -49,8 +49,8 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
     outside = tmp_path_factory.mktemp("outside") / "evil.pt"
     outside.write_bytes(b"x")
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(outside), "dataset_root": str(tmp_path),
-        "model_name": "baseline", "date": "2026-02-11",
+        "checkpoint_path": str(outside), "dataset_root": str(tmp_path), "date": "2026-02-11",
+        "output_dir": str(tmp_path / "predictions" / "baseline" / "2026-02-11"),
     })
     assert resp.status_code == 403
 
@@ -62,7 +62,8 @@ def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
     # a missing checkpoint reaches its own 404, never a 403 from the path check.
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(tmp_path / "nope.pt"),
-        "dataset_root": str(tmp_path), "model_name": "baseline", "date": "2026-02-11",
+        "dataset_root": str(tmp_path), "date": "2026-02-11",
+        "output_dir": str(tmp_path / "predictions" / "baseline" / "2026-02-11"),
     })
     assert resp.status_code == 404
 

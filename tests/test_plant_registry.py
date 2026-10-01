@@ -15,9 +15,7 @@ import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, register_plant_registry
 
-from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_scene
-
-from tests._population import mapped_plants
+from tests.test_plant_mapping_binding import POPULATION, PLANTS, _dataset, _init, _write_scene
 
 
 def _plant_csv(path: Path, plants: list[dict] | None = None) -> Path:
@@ -163,8 +161,8 @@ def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registr
 
 def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, str]]:
     """A real, delivered phenology scene through the platform's own producers, for the registry
-    doors below to then interfere with. Returns the registered registry's own name and
-    predictions_by_date."""
+    doors below to then interfere with. Returns the registered registry's own name and each
+    date's bucket."""
     from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
     _init(tmp_path)
@@ -185,9 +183,9 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
 ) -> None:
     """Admits valid work: a registered registry that still loads and still hashes to what the
     mapping recorded is admitted by the delivery door, which resolves the mapping, runs the
-    per-plant phenology over it and reaches the measurement gate. The scene's classifier is
-    unvalidated and the MCP door takes no acknowledgment, so the gate is where this delivery
-    stops, naming the classifier rather than the registry or the mapping."""
+    per-plant phenology over it and reaches the one gate. The scene's buckets are unassessed and
+    the MCP door takes no acknowledgment, so the gate is where this delivery stops, naming the
+    missing assessment rather than the registry or the mapping."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
@@ -195,13 +193,12 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
 
     res = deliver_phenology_milestones(
         tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
+        plants=POPULATION, buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res, res
-    assert "validated positive-state classifier" in res["error"]
+    assert "no assessment answers" in res["error"]
     assert registry_name not in res["error"]
-    assert res["n_plants"] > 0
 
 
 def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapping(
@@ -218,7 +215,7 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
 
     res = deliver_phenology_milestones(
         tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
+        plants=POPULATION, buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res
@@ -243,7 +240,7 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
 
     res = deliver_phenology_milestones(
         tmp_path, trait="currant_bloom", mapping_name="valley",
-        plants=mapped_plants(tmp_path, "valley"), predictions_by_date=preds_by_date,
+        plants=POPULATION, buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv))
 
     assert "error" in res
@@ -278,8 +275,7 @@ def _call_arg_blocks(text: str, name: str) -> list[str]:
 
 
 def test_no_build_plant_mapping_call_site_names_the_retired_plant_csv_paths_argument() -> None:
-    """Collection-time guard against smoke_phenology_e2e.py's own regression: every
-    build_plant_mapping( call site under tools/ and packages/ passes plant_registry and never
+    """Every build_plant_mapping( call site under tools/ and packages/ passes plant_registry and never
     the retired plant_csv_paths keyword, so a fresh command cannot silently reintroduce it."""
     import subprocess
 

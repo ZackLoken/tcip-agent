@@ -17,21 +17,24 @@ import pytest
 
 from tcip_mcp.pipelines.postprocessing.aggregation import (
     aggregate_per_plant,
-    export_aggregated_csv,
+    deliver_per_plant_aggregate,
 )
+from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE, PER_PLANT_REGRESSION_AGGREGATE
 from tests import _trait_fixtures as fx
-from tests._binding_fixtures import validated_bucket
 
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
-    """Every export below ships under a trait whose delivered number has a confirmed meaning."""
+    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
     fx.seed_delivery_traits(tmp_path)
-    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
-    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
+    # The count measures what the chain's unassessed bucket detects.
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"],
+                                measured_subject="bud")
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
+                                delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
     fx.seed_confirmed_aggregate(tmp_path, "bark_thickness",
                                 value_keys=["principal_axis_extent_px"],
-                                measurement_document="regression_operating_point")
+                                delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
 
 
 def _identity_fn(image_name: str) -> str:
@@ -40,32 +43,15 @@ def _identity_fn(image_name: str) -> str:
     return image_name.rsplit("_", 1)[0]
 
 
-def _add_validated_scale(project: Path, bucket: str, trait: str, *, unit: str = "mm",
-                         tag: str = "a") -> str:
-    """Stamp ``bucket`` (already carrying a validated operating_point.json) with a genuine
-    physical-measurement-validated resolve_scale.json, and return its images_dir."""
-    from PIL import Image
+def _deliver(project: Path, results: list[dict], out: Path, delivered_phenotype: str, *,
+             delivery_kind: str = PER_PLANT_COUNT_AGGREGATE, buckets=None, **kwargs):
+    """The acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
+    if buckets is None:
+        pytest.importorskip("torch")
+    from tests._chain_fixtures import deliver_acknowledged
 
-    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
-    from tcip_mcp.prediction_buckets import bucket_stems
-    from tests._binding_fixtures import write_bound_sidecar
-
-    root = Path(bucket).parents[1]
-    images_dir = root / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for stem in bucket_stems(bucket):
-        Image.new("RGB", (8, 8), (120, 120, 120)).save(images_dir / f"{stem}.png")
-    stamp = {
-        "validated": True, "trait": trait,
-        "operating_point": {"scale": {
-            "value": 0.1, "unit": unit, "capture_id": None,
-            "requires_validation": True, "validation_kind": "physical",
-            "validated_against": VALIDATED_PHYSICAL_MEASUREMENT,
-        }},
-    }
-    write_bound_sidecar(project, bucket, stamp, document="resolve_scale", dataset_root=root,
-                        images_dir=images_dir, experiment_id=f"exp-scale-{tag}")
-    return str(images_dir)
+    return deliver_acknowledged(project, results, out, delivered_phenotype,
+                                delivery_kind=delivery_kind, buckets=buckets, **kwargs)
 
 
 # ── plant identity: no guessing, ever ──────────────────────
@@ -222,123 +208,77 @@ def test_unknown_strategy_raises():
 # ── CSV export ────────────────────────────────────────────────────────────
 
 
-def test_export_aggregated_csv_signature_carries_delivered_phenotype_not_trait_name():
+def test_the_per_plant_delivery_names_its_phenotype_in_the_crop_vocabulary_sense():
     """The vocabulary-sense parameter is delivered_phenotype; trait_name (the registry sense the
-    rest of the trait-facing surface keeps) is no longer a valid keyword here."""
+    rest of the trait-facing surface keeps) is no valid keyword here."""
     import inspect
 
-    params = inspect.signature(export_aggregated_csv).parameters
+    params = inspect.signature(deliver_per_plant_aggregate).parameters
     assert "delivered_phenotype" in params
     assert "trait_name" not in params
 
 
-def test_export_aggregated_csv_signature_carries_operating_point_validated_not_measurement_validated():
-    """The unified dimension key names its own parameter and column: measurement_validated is a
-    retired spelling of the same fact operating_point_validated already carries."""
-    import inspect
-
-    params = inspect.signature(export_aggregated_csv).parameters
-    assert "operating_point_validated" in params
-    assert "measurement_validated" not in params
-
-
-def test_export_aggregated_csv(tmp_path):
+def test_a_per_plant_count_delivery_writes_its_population_one_row_each(tmp_path):
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-         "plant_attribution": "image", "measurement_document": "operating_point"},
+         "plant_attribution": "image"},
         {"plant_id": "PLANT_002", "value": 4, "observations": 2, "value_key": "count",
-         "plant_attribution": "image", "measurement_document": "operating_point"},
+         "plant_attribution": "image"},
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
-    bucket = validated_bucket(tmp_path, "stem", tag="export")
-    export_aggregated_csv(
-        results, str(out_path), project=tmp_path, delivered_phenotype="stem_count", crop="currant",
-        pred_dirs=[bucket],
-    )
+    delivered = _deliver(tmp_path, results, out_path, "stem_count", crop="currant")
 
     with open(out_path, newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
         assert "trait_name" not in (reader.fieldnames or [])
-
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
     assert rows[0]["crop"] == "currant"
     assert rows[0]["delivered_phenotype"] == "stem_count"
     assert rows[0]["n_images"] == "3"
+    assert rows[0]["units"] == ""
+    assert rows[0]["value_key"] == "count"
+    assert {r["validated"] for r in rows} == {"False"}
+    assert delivered["acknowledged_by"] == "user:breeder"
 
 
-def test_export_aggregated_csv_refuses_a_record_set_with_no_plant_attribution(tmp_path):
-    results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-               "measurement_document": "operating_point"}]
-    out_path = tmp_path / "out.csv"
+@pytest.mark.parametrize("attributions", [(None,), ("image", "detection")])
+def test_a_delivery_refuses_rows_that_omit_or_disagree_on_plant_attribution(tmp_path,
+                                                                             attributions):
+    results = [{"plant_id": f"P{i}", "value": 7, "observations": 3, "value_key": "count",
+                **({} if a is None else {"plant_attribution": a})}
+               for i, a in enumerate(attributions)]
     with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
-        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count")
+        _deliver(tmp_path, results, tmp_path / "out.csv", "stem_count", buckets=[])
 
 
-def test_export_aggregated_csv_refuses_when_records_disagree_on_plant_attribution(tmp_path):
-    results = [
-        {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-         "plant_attribution": "image", "measurement_document": "operating_point"},
-        {"plant_id": "PLANT_002", "value": 4, "observations": 2, "value_key": "count",
-         "plant_attribution": "detection", "measurement_document": "operating_point"},
-    ]
-    out_path = tmp_path / "out.csv"
-    with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
-        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count")
-
-
-def test_export_aggregated_csv_header_carries_operating_point_validated_not_measurement_validated(
-    tmp_path,
-):
-    """The delivered per-plant CSV's validity column is operating_point_validated; the retired
-    spelling measurement_validated must not reappear in its header."""
-    results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-               "plant_attribution": "image", "measurement_document": "operating_point"}]
-    out_path = tmp_path / "aggregated.csv"
-    bucket = validated_bucket(tmp_path, "stem", tag="header")
-    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count",
-                          pred_dirs=[bucket])
-
-    with open(out_path, newline="") as f:
-        fieldnames = csv.DictReader(f).fieldnames or []
-    assert "operating_point_validated" in fieldnames
-    assert "measurement_validated" not in fieldnames
-
-
-def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
-    """A dimensional value_key (mask_geometry-style, area_mm2) must label the units column mm2,
+def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(tmp_path):
+    """A dimensional value_key (mask_geometry-style, area_mm2) labels the units column mm2,
     derived from the key that produced the number, never a caller-asserted string. Squared, not the
     bare linear unit: an area labeled "mm" understates its own dimensionality."""
-    results = [
-        {"plant_id": "PLANT_001", "value": 12.5, "observations": 1, "value_key": "area_mm2",
-         "plant_attribution": "image", "measurement_document": "operating_point",
-         "scale_document": "resolve_scale"},
-    ]
+    results = [{"plant_id": "PLANT_001", "value": 12.5, "observations": 1,
+                "value_key": "area_mm2", "plant_attribution": "image"}]
     out_path = tmp_path / "out.csv"
-    bucket = validated_bucket(tmp_path, "plant_surface_area", tag="units")
-    images_dir = _add_validated_scale(tmp_path, bucket, "plant_surface_area", tag="units")
-    export_aggregated_csv(
-        results, str(out_path), project=tmp_path, delivered_phenotype="plant_surface_area",
-        pred_dirs=[bucket], images_dir=images_dir,
-    )
+    _deliver(tmp_path, results, out_path, "plant_surface_area",
+             delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["units"] == "mm2"
 
 
-def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
-    results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count",
-                "plant_attribution": "image", "measurement_document": "operating_point"}]
-    out_path = tmp_path / "out.csv"
-    bucket = validated_bucket(tmp_path, "stem", tag="blank-units")
-    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="stem_count",
-                          pred_dirs=[bucket])
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["units"] == ""
+def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scale(tmp_path):
+    """A detector delivery in a physical unit names the scale assessment that answers for the
+    unit, or the gate refuses it outright, before any acknowledgment could clear it."""
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
+                                measured_subject="bud")
+    results = [{"plant_id": "PLANT_001", "value": 12.5, "observations": 1,
+                "value_key": "area_mm2", "plant_attribution": "image"}]
+    with pytest.raises(ValueError, match="calibrate_physical_scale"):
+        _deliver(tmp_path, results, tmp_path / "out.csv", "plant_surface_area")
+    assert not (tmp_path / "out.csv").exists()
 
 
-def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path):
+def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
     """A trait crops.yml declares in one unit must not ship under a different unit implied by the
     aggregated values' own key: that's the exact failure mode this column exists to prevent."""
     from tcip_mcp.traits import crops_units
@@ -352,13 +292,12 @@ def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path)
         pytest.skip("no non-mm trait found in crops.yml to construct a mismatch against")
 
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
-                "plant_attribution": "image", "measurement_document": "operating_point"}]
-    out_path = tmp_path / "out.csv"
+                "plant_attribution": "image"}]
     with pytest.raises(ValueError, match="declared units|refusing"):
-        export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype=mismatched_trait)
+        _deliver(tmp_path, results, tmp_path / "out.csv", mismatched_trait, buckets=[])
 
 
-def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
+def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
     """A px-suffixed value_key must not inherit crops.yml's declared physical unit as a fallback:
     that shipped a 124-pixel measurement labeled 'mm' under a real mm-declared trait. The units
     column must be blank, not the declared unit, whenever the value's own key implies no physical
@@ -366,16 +305,13 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
     from tcip_mcp.traits import crops_units
 
     assert crops_units()["bark_thickness"] == "mm"
-    # A scalar-head document, since operating_point refuses a unit-declared trait whose value_key
-    # implies no physical unit; a scalar head's declared unit may legitimately not appear in value.
+    # A scalar head's delivery, since a count delivery refuses a unit-declared trait whose
+    # value_key implies no physical unit; a scalar head's declared unit may legitimately not appear.
     results = [{"plant_id": "P1", "value": 124.0, "observations": 1,
-                "value_key": "principal_axis_extent_px",
-                "plant_attribution": "image", "measurement_document": "regression_operating_point"}]
+                "value_key": "principal_axis_extent_px", "plant_attribution": "image"}]
     out_path = tmp_path / "out.csv"
-    bucket = validated_bucket(tmp_path, "bark_thickness", document="regression_operating_point",
-                              tag="pixel")
-    export_aggregated_csv(results, str(out_path), project=tmp_path, delivered_phenotype="bark_thickness",
-                          pred_dirs=[bucket])
+    _deliver(tmp_path, results, out_path, "bark_thickness",
+             delivery_kind=PER_PLANT_REGRESSION_AGGREGATE)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["units"] == ""
@@ -395,7 +331,7 @@ def test_units_never_fall_back_with_no_value_key_at_all():
 
     assert crops_units()["bark_thickness"] == "mm"
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
-    assert _resolve_units("bark_thickness", results, "operating_point") == ("", None, "mm")
+    assert _resolve_units("bark_thickness", results, False) == ("", None, "mm")
 
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "open_fraction", "pct_open"])
@@ -450,13 +386,12 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm2"}]
     # no crops.yml entry -> no cross-check
-    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm2", "mm", None)
+    assert _resolve_units("__no_such_trait__", results, False) == ("mm2", "mm", None)
 
     results_linear = [{"plant_id": "P1", "value": 12.0, "observations": 1,
                        "value_key": "principal_axis_extent_mm"}]
     # non-area stays unsquared
-    assert _resolve_units("__no_such_trait__", results_linear, "operating_point") == (
-        "mm", "mm", None)
+    assert _resolve_units("__no_such_trait__", results_linear, False) == ("mm", "mm", None)
 
     # A real mm-declared trait: the cross-check compares crops.yml's linear "mm" against area_mm2's
     # own linear basis ("mm", not "mm2") and passes; the returned label is still squared.
@@ -465,7 +400,7 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     units = crops_units()
     mm_trait = next((name for name, u in units.items() if u == "mm"), None)
     if mm_trait is not None:
-        assert _resolve_units(mm_trait, results, "operating_point") == ("mm2", "mm", "mm")
+        assert _resolve_units(mm_trait, results, False) == ("mm2", "mm", "mm")
 
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
@@ -475,34 +410,17 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 14.2, "observations": 1, "value_key": "nut_diameter_mm"}]
-    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm", "mm", None)
+    assert _resolve_units("__no_such_trait__", results, False) == ("mm", "mm", None)
 
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
-    """The refusal in unit_from_value_key must reach export_aggregated_csv's own caller, not be
-    swallowed: a delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
+    """The refusal in unit_from_value_key must reach the delivery's own caller, not be swallowed: a
+    delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm"}]
     with pytest.raises(ValueError):
-        _resolve_units("__no_such_trait__", results, "operating_point")
-
-
-def test_export_aggregated_csv_writes_value_key_column(tmp_path):
-    """value_key is a real CSV column, not just an internal field: it's the one thing that lets a
-    reader independently detect a px/mm mismatch themselves."""
-    results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
-                "plant_attribution": "image", "measurement_document": "operating_point",
-                "scale_document": "resolve_scale"}]
-    out_path = tmp_path / "out.csv"
-    bucket = validated_bucket(tmp_path, "plant_surface_area", tag="value-key")
-    images_dir = _add_validated_scale(tmp_path, bucket, "plant_surface_area", tag="value-key")
-    export_aggregated_csv(results, str(out_path), project=tmp_path,
-                          delivered_phenotype="plant_surface_area",
-                          pred_dirs=[bucket], images_dir=images_dir)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["value_key"] == "area_mm2"
+        _resolve_units("__no_such_trait__", results, False)
 
 
 def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
@@ -515,11 +433,8 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     from tcip_mcp.knowledge import document_path
 
     out_path = tmp_path / "schema.csv"
-    bucket = validated_bucket(tmp_path, "stem", tag="schema")
-    export_aggregated_csv(
-        [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
-          "plant_attribution": "image", "measurement_document": "operating_point"}],
-        str(out_path), project=tmp_path, delivered_phenotype="stem_count", pred_dirs=[bucket])
+    _deliver(tmp_path, [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
+                         "plant_attribution": "image"}], out_path, "stem_count")
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
 

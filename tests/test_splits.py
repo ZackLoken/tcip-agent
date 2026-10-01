@@ -6,16 +6,12 @@ from collections import defaultdict
 
 import pytest
 
-import tcip_store as ts
 from tcip_mcp.pipelines.data.splits import (
     default_group_key,
     GROUP_KEY_FNS,
-    cal_holdout_lock_key,
-    cal_holdout_split,
     group_balanced_split,
     label_document_extent,
     resolve_group_key_fn,
-    resolve_locked_cal_holdout_split,
     spatial_strip_identity,
     spatial_strip_split,
     stem_of_spatial_identity,
@@ -125,36 +121,6 @@ def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     assert "annotate or confirm more foreground groups" in message
 
 
-def test_selection_calibration_universe_floor_remedy_names_the_ratio_and_the_directory(tmp_path):
-    """The composed refusal ends with a remedy naming a larger calibration ratio or more
-    foreground groups under the labels directory, never the whole directory scan: writing a
-    selection refuses a zero calibration_ratio by name, so that fallback names an action no
-    caller can take."""
-    from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Selection
-    from tcip_mcp.pipelines.data.splits import selection_calibration_universe
-
-    labels_dir = tmp_path / "annotations"
-    labels_dir.mkdir()
-    selection = Selection(samples=tuple(
-        Sample(member=stem, source=str(tmp_path / "images" / f"{stem}.jpg"),
-               ground_truth=str(labels_dir / f"{stem}.json"), group=stem, side=side,
-               confirmation_bucket="leaf/2026-03-01")
-        for stem, side in (("a", "train"), ("b", "val"), ("c", "calibration"))
-    ), seed=0, group_by="stem", scope=ClassScope(subject="leaf"))
-
-    # The one calibration member's document carries no foreground of the draw's own subject, so
-    # the universe holds no foreground group and the floor refuses.
-    from tcip_annotation import json_io
-
-    json_io.write_annotations(labels_dir / "c.json", [], 16, 16, keep_empty=True)
-    with pytest.raises(ValueError) as exc_info:
-        selection_calibration_universe(selection, labels_dir, selection.scope)
-    message = str(exc_info.value)
-    assert "whole directory" not in message
-    assert "calibration_ratio" in message
-    assert str(labels_dir) in message
-
-
 def test_group_split_no_foreground_fallback():
     stems = _grouped(4)
     counts = {s: 0 for s in stems}
@@ -190,97 +156,19 @@ def test_resolve_group_key_fn_named_policy_still_works():
     assert resolve_group_key_fn("stem", ["a_0_0"])("a_0_0") == "a_0_0"
 
 
-# --- cal_holdout_split ---
-
-def test_cal_holdout_split_remaps_train_val_to_calibration_holdout():
-    stems = _grouped(6)
-    parts = cal_holdout_split(stems, holdout_ratio=0.5, seed=1)
-    assert set(parts) == {"calibration", "holdout"}
-    assert sorted(parts["calibration"] + parts["holdout"]) == sorted(stems)
-
-
-# --- resolve_locked_cal_holdout_split ---
-
-def test_resolve_locked_cal_holdout_split_group_straddle(tmp_path):
-    # Group "m" has two tiles; many other stems sort alphabetically between them, so a naive
-    # lexicographic midpoint cut would split them across cal/holdout. The locked, group-aware
-    # split must not.
-    stems = ["m_0_0"] + [f"g{i}_0_0" for i in range(8)] + ["m_9_9"]
-    locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash="straddle-test", scope_root=tmp_path, seed=1)
-    cal, hold = set(locked["calibration"]), set(locked["holdout"])
-    assert ("m_0_0" in cal) == ("m_9_9" in cal)
-    assert ("m_0_0" in hold) == ("m_9_9" in hold)
-
-
-def test_resolve_locked_cal_holdout_split_stable_across_redeclared_policy(tmp_path):
-    stems = _grouped(6)
-    first = resolve_locked_cal_holdout_split(
-        stems, identity_hash="stable-test", scope_root=tmp_path, seed=1)
-    # A later call declaring a different seed/group_by, with no force_redraw, must not redraw.
-    second = resolve_locked_cal_holdout_split(
-        stems, identity_hash="stable-test", scope_root=tmp_path, seed=99, group_by="stem")
-    assert first["calibration"] == second["calibration"]
-    assert first["holdout"] == second["holdout"]
-
-
-def test_resolve_locked_cal_holdout_split_persists_lock_file(tmp_path):
-    stems = _grouped(4)
-    resolve_locked_cal_holdout_split(
-        stems, identity_hash="persist-test", scope_root=tmp_path, seed=3)
-    assert ts.exists(cal_holdout_lock_key("persist-test", scope_root=tmp_path))
-
-
-def test_resolve_locked_cal_holdout_split_group_key_map_produces_working_split(tmp_path):
-    # Rail-admits-valid-work: a valid group_key_map covering every stem still produces a usable
-    # locked split (not just a raise-on-bad-input path).
-    stems = ["p1", "p2", "p3", "p4"]
-    group_key_map = {"p1": "gA", "p2": "gA", "p3": "gB", "p4": "gB"}
-    locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash="map-test", scope_root=tmp_path, group_by="ignored",
-        group_key_map=group_key_map, seed=2)
-    cal, hold = set(locked["calibration"]), set(locked["holdout"])
-    assert ("p1" in cal) == ("p2" in cal)  # gA never straddles
-    assert ("p3" in cal) == ("p4" in cal)  # gB never straddles
-    assert cal | hold == set(stems)
-
-
-def test_resolve_locked_cal_holdout_split_force_redraw_records_history(tmp_path):
-    stems = _grouped(6)
-    first = resolve_locked_cal_holdout_split(
-        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=1)
-    assert len(first["redraw_history"]) == 1
-    assert first["redraw_history"][0]["old_content_hash"] is None  # nothing existed before it
-
-    second = resolve_locked_cal_holdout_split(
-        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=2, force_redraw=True,
-        timestamp="2026-01-01T00:00:00Z")
-    assert len(second["redraw_history"]) == 2  # the first draw + this redraw, never dropped
-    entry = second["redraw_history"][-1]
-    assert entry["timestamp"] == "2026-01-01T00:00:00Z"
-    assert entry["old_content_hash"] is not None  # the old (first) split's membership, captured
-    assert entry["policy"]["seed"] == 2
-    # The draw answers the membership it replaced, the one the door reports.
-    assert second.pop("old_membership") == {
-        "calibration": first["calibration"], "holdout": first["holdout"]}
-
-    # Re-running with the same (now-locked) policy and no force_redraw returns it unchanged.
-    third = resolve_locked_cal_holdout_split(
-        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=2)
-    assert third == second
-
-
 # --- spatial_strip_split ---
 
 def _kept_tiles(split, width, height):
-    """Every kept tile's rect, tagged with the side it was assigned to via ``split_name_for``,
-    recomputed independently of the split's own kept-tile counters."""
+    """Every kept tile's rect, tagged with the side whose region contains it, recomputed
+    independently of the split's own kept-tile counters."""
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect
+
     lattice = slice_lattice(height, width, split.tile_size, split.overlap)
     by_name: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in split.regions}
     for box in lattice:
-        name = split.split_name_for(box)
-        if name is not None:
-            by_name[name].append(box)
+        for name, rects in split.regions.items():
+            if any(rect_contains_rect(r, box) for r in rects):
+                by_name[name].append(box)
     return by_name
 
 
@@ -416,33 +304,11 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp
         [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
     )
     assert label_document_extent(labels_dir / "mosaic1.json") == (4000, 3000)
-    assert label_document_extent(labels_dir / "missing.json") is None
+    with pytest.raises(json_io.UnreadableLabelDocument, match="missing.json"):
+        label_document_extent(labels_dir / "missing.json")
 
 
 # -- scope normalization ---------------------------------------------------------
-
-
-def _leaf_dataset(root, *, date: str | None):
-    """A minimal ``leaf``-labeled tree ``draw_splits`` can draw from: a dated
-    ``images/<date>/`` + ``annotations/<date>/`` pair when ``date`` is given, a flat
-    ``images/`` + ``annotations/`` pair otherwise."""
-    from PIL import Image
-    from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject, write_registry
-
-    write_registry(root / "subjects.json", SubjectRegistry(subjects=(Subject(name="leaf"),)))
-    images_dir = root / "images" / date if date else root / "images"
-    labels_dir = root / "annotations" / date if date else root / "annotations"
-    images_dir.mkdir(parents=True)
-    labels_dir.mkdir(parents=True)
-    for stem in ("a", "b", "c", "d"):
-        Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / f"{stem}.jpg")
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject="leaf", geometry=BBox(4, 4, 20, 20))], 64, 64, keep_empty=True,
-        )
-    return images_dir, labels_dir
 
 
 def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):

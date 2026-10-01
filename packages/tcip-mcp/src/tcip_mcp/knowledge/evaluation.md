@@ -12,7 +12,7 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Detection | mAP@50 | mAP@50:95, precision, recall |
 | Instance Segmentation | mask mAP@50 | box mAP, mask mAP@50:95, precision, recall |
 | Classification | Accuracy | F1 (macro), per-class precision/recall |
-| Regression | RMSE | R², MAE, concordance correlation coefficient (a selectable regression operating-point criterion, see `operating_point`) |
+| Regression | RMSE | R², MAE, concordance correlation coefficient (the statistic a trait revision's `regression_criterion` names for its assessment) |
 | Ordinal | Quadratic weighted κ | MAE, rank accuracy |
 
 These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
@@ -38,12 +38,14 @@ measurement-agreement/method-comparison contexts specifically because of that de
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named selection's `calibration` side (`selection_dir`); returns the result and writes nothing |
+| `evaluate_model` | Evaluate a checkpoint on a held-out dataset; returns the result and writes nothing |
+| `assess_checkpoint` | Assess a checkpoint for one delivery kind of a confirmed trait against a drawn selection's calibration and holdout sides, recording the assessment a delivery rests on |
+| `assess_reserved_regions` | The same assessment over a mosaic's reserved, attested-complete regions, for a checkpoint trained on a within-image split |
 | `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (logged command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. On a classified bucket this scores the object's localization, never the classifier's own confirmed-state call |
 | `tcip render-failure-cases` (logged command) | Surface + render the N images with highest triage error |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
-| `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
+| `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a pre-created one never launched) |
 | `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
 
 `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion
@@ -58,14 +60,13 @@ a bare checkpoint path resolves to a file that must be registered in the project
 started for (`register_model`, explicit mode for a foreign or bespoke checkpoint); `evaluate_model`
 refuses before loading an unregistered one.
 
-The full-frame result records `postprocess` and an `operating_point` mapping in the vocabulary a
-bucket stamp carries: `conf`, `max_dets` and `cross_tile_nms` read `explicit` when the caller
-stated them (a stated value equal to the platform default included) and `default` otherwise;
+The full-frame result records the `execution` record the pass ran under, the one a published
+bucket's record carries: each value beside its source in `sources`, `explicit` when the caller
+stated it (a stated value equal to the platform default included) and `default` otherwise;
 `cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric `postprocess`
-compares over; `tile_size` reads whatever its own regime resolved. An
-unstated `conf_threshold` or `cross_tile_nms` resolves to the platform default and is recorded as
-one, never a silent gap. This `conf` is never validated: a fact about calibration, not about
-the metrics computed at it. The record binds to no delivery bucket, and no delivery gate reads it.
+compares over. `evaluate_model` takes what it states of that record as `stated`, as
+`run_inference` does; an unstated value resolves to the platform default and is recorded as one,
+never a silent gap. An evaluation answers for no delivery: only an assessment does.
 
 `rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
@@ -75,58 +76,36 @@ platform's own `default_train` measured them); `include_unverified=True` also ra
 `"training_source"`/`"caller"` entries, whose numbers were never measured by the platform, and
 `excluded_unverified` in the response names what a default call left out.
 
-## Calibration/Holdout Split
+## Assessment
 
-A validated operating point calibrates against a locked calibration/holdout split
-(`resolve_locked_cal_holdout_split`): the split draws once, on first use, and every later call
-reuses it, so the delivery gate can't silently pass by drawing a different, weaker holdout after
-the fact. The lock lives under the dataset root of the labels or records the split was drawn over,
-so it travels with that data and survives adopting a project mid-session. Redrawing a locked split
-is a real, audited decision, never automatic:
-`redraw_calibration_holdout(dataset_root=..., labels_dir=..., reason=...)` is the tool for it,
-and `dataset_root` is that same root, so the redraw replaces the lock the calibration reads. `reason` is
-required and non-empty; every redraw is appended to the lock's `redraw_history` with its policy,
-seed and the old/new split's content hashes (not the stems themselves); the old and new split
-membership is recorded in a dataset's audit log alongside the reason, so a redraw-until-it-passes
-pattern stays visible on review.
+A delivered number rests on an assessment: one record of what a checkpoint measured, for one
+delivery kind of a trait's confirmed revision, against a held-out reference. `assess_checkpoint`
+fits every derived value (the conf the trait's count objective picks, the detection cap, the merge
+threshold) on a drawn selection's `calibration` side alone and judges it on the `holdout` side
+against the revision's authored floors and tolerances, measuring the copy of the reference it
+retains. Every field the kind's criterion reads (its localization, tolerances, floors and,
+for a regression, the statistic) is required when the operationalization is proposed, so a
+revision that leaves one unauthored never exists to assess. `assess_reserved_regions` does the same
+over a mosaic's reserved calibration and holdout regions, refused until those regions are attested
+complete and while the recorded mosaic no longer reads at its recorded size.
 
-`run_inference` and `deliver_per_image_counts` (whose live regime forwards it to the shared
-verified pass), `redraw_calibration_holdout` and `evaluate_model` all take `selection_dir`: draw
-the calibration universe from a selection's `calibration` samples under the labels directory the
-call names, instead of every labeled stem with an image, a side `draw_splits` drew held out from
-both training and checkpoint selection (see the `training` skill's Dataset Selections section).
-`evaluate_model` is the one whose purpose is a held-out score: without `selection_dir` it scores
-the whole directory; with it, the loader's own admitted count is recorded as
-`evaluated_stem_count`, refused by name when it falls short of the universe the selection drew.
-The selection states its own subject and attribute and the scope is read from it rather than
-restated, and `selection_dir` conflicts with an explicit `group_by`/`group_key_map`, whose
-default becomes `None` for this reason (resolved to `tile_prefix` when neither was given): the
-group keys the selection recorded on its own samples govern the locked draw.
-`redraw_calibration_holdout` additionally requires `labels_dir` and `images_dir` alongside
-`selection_dir`: it refuses by name without one, since a labels-only universe can include a stem
-whose image is gone. It reads the scope off the selection, so a selection over masks or rows,
-which no subject scopes, redraws without one.
+The record states the producer (the checkpoint's digest and producing run), the execution record
+the pass ran under (each value beside its source), the reference (each sample's source digest and
+ground-truth digest, the captures it covers), the disjointness checks (the holdout shares no
+source digest with the calibration side, and neither shares a group or a source digest
+with the producing run's training or selection sides), the criterion's evidence and the failures,
+empty when it passed. It is written once. A mosaic reference region that does not lie inside a
+held-out region, or overlaps a training region, refuses the assessment.
 
-A calibration under a named selection also earns a `selection_disjointness` check: whether the
-cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)
-side, the leak these disjointness checks close (a checkpoint chosen on a side, then
-calibrated over that same side, would otherwise clear every other gate while measuring the
-operating point on exactly the data the shipped weights were picked to fit). It rides beside
-`train_disjointness` in the validation row and floors `verify_stamp_binding` when a
-selection-scoped reference carries none. The check applies when the calibration's own labels
-directory is one the run's own members live under; a calibration read from another directory the
-run never trained over answers not-applicable with that reason.
-
-For a run bound to a selection, the same check also names a calibration label that moved since
-the selection was drawn: `labels_moved_draw_to_run` (a stem whose digest at the draw differs from
-its digest when the run bound), `labels_moved_run_to_now` (differs again between the bind and
-this calibration's own read of the labels directory, `null` when the calibration named none),
-`calibration_labels_moved` (the calibration-side stems among those two lists) and
-`selection_redrawn` (the selection was written again since the run bound). This is a disclosure,
-not a floor: the row still validates with the moved stems named on it, and
-`describe_review_validation` renders one sentence when `calibration_labels_moved` is non-empty. A
-run bound before this check existed, or one calibrated with no bound run under a caller-named
-selection, seals all four keys `null`.
+A bucket is published under an assessment with `run_inference(assessment_id=...)`: the pass
+restores the execution record the assessment measured, and a value `stated` records differently
+refuses naming each. Every delivery door clears its buckets through one gate: each bucket must
+name an assessment that passed for this delivery kind under the revision delivered, was produced
+by the checkpoint and execution record that assessment measured, and lies inside the captures its
+reference covers; a reference whose ground truth or source images changed since refuses naming
+the file. A delivery that fails any of these ships only under the breeder's acknowledgment,
+recorded in the Results tab, of exactly the rows and disclosure it writes, stamped unvalidated,
+with the reason on its delivery event.
 
 ## Failure Triage
 
@@ -140,8 +119,8 @@ When metrics are poor, investigate systematically:
    (no built-in per-class breakdown for detection; use
    `annotation_tools.score_predictions(<image>, detail=True)` per image and aggregate by
    `class_id` if class-level numbers are needed). On a classified bucket the breakdown is the
-   object's localization, not the classifier's own call: use the classifier calibrator to triage
-   the confirmed-state axis instead
+   object's localization, not the classifier's own call: an assessment's classifier criterion
+   triages the confirmed-state axis instead
 4. Training dynamics: Check metrics.jsonl; is loss still decreasing? Overfitting?
 5. Architecture: Is the model appropriate for the task and data scale?
 
@@ -151,9 +130,8 @@ When comparing models:
 1. Same dataset split: draw one selection with `draw_splits` and name it from every compared run
    with `data.split.selection_dir`, so each binds to the identical membership rather than each
    redrawing its own from a shared seed
-2. Same evaluation set: the selection's own `calibration` side (`evaluate_model` with
-   `selection_dir`), never each run's own `val`, which is the side its checkpoint was chosen
-   on
+2. Same evaluation set: the selection's own held-out side, never each run's own `val`, which is
+   the side its checkpoint was chosen on
 3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
    above), not necessarily the labeled comparability metric
 4. For classification, check per-class performance; overall accuracy can hide class-specific

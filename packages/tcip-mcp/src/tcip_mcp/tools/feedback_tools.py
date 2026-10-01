@@ -5,8 +5,8 @@ dataset root the review was recorded against, or the store the caller states ins
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
@@ -53,17 +53,17 @@ def _load_or_refuse(checkpoint_path: str, project: Path):
         return None, {"error": str(exc)}
 
 
-def _calibration_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | None:
-    """The calibration-side member stems the producing run of ``checkpoint`` in ``project`` froze
-    in its partition (``experiments.run_resolution``) whose own image sits in ``images_dir``, or
-    ``None``
-    for a checkpoint no run of this project produced (``checkpoint.experiment_id``) and for a run
-    that bound no selection. A calibration sample from another directory the selection also spans
-    is not one of this queue's candidates.
+def _reference_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | None:
+    """The reference-side member stems (``selection.REFERENCE_SIDES``) the producing run of
+    ``checkpoint`` in ``project`` froze in its partition (``experiments.run_resolution``) whose own
+    image sits in ``images_dir``, or ``None`` for a checkpoint no run of this project produced
+    (``checkpoint.experiment_id``) and for a run that bound no selection. A reference sample from
+    another directory the selection also spans is not one of this queue's candidates.
     """
     if checkpoint.experiment_id is None:
         return None
     from tcip_mcp.experiments import run_resolution
+    from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
     from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
@@ -72,30 +72,28 @@ def _calibration_stems(checkpoint, images_dir: Path, project: Path) -> set[str] 
     if partition["selection"] is None:
         return None
     return {stem_of(s.source) for s in partition_samples(partition)
-            if s.side == "calibration" and same_directory(Path(s.source).parent, images_dir)}
+            if s.side in REFERENCE_SIDES and same_directory(Path(s.source).parent, images_dir)}
 
 
-def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
-    """``calibration_member`` for each of ``candidates``, in order: True iff its stem is one of the
-    bound selection's calibration-side samples under this queue's own images directory.
+def _resolve_review_bucket(engine, bucket_dir: Path | None) -> tuple[str | None, str | None]:
+    """The verdict store key to read, and the refusal when that is not one answer: the key
+    ``bucket_dir`` spells (:func:`~tcip_mcp.buckets.bucket_key_of`), or, with no bucket named,
+    the ground-truth-only review when that is all the store holds; any other store content is
+    named for the caller to choose a bucket from.
     """
-    from tcip_mcp.pipelines.image_utils import stem_of
+    from tcip_annotation.review_engine import NO_BUCKET
 
-    return [stem_of(source) in calibration_stems for source in candidates]
+    from tcip_mcp.buckets import bucket_key_of
 
-
-def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
-    """The prediction bucket to read verdicts from, and the refusal when that is not one answer:
-    the sole bucket when there is exactly one; several are named for the caller to choose among.
-    """
-    if bucket is not None:
-        return bucket, None
+    if bucket_dir is not None:
+        return bucket_key_of(bucket_dir), None
     buckets = engine.reviewed_buckets()
-    if len(buckets) == 1:
-        return buckets[0], None
+    if buckets == [NO_BUCKET]:
+        return NO_BUCKET, None
     return None, (
-        f"review state holds verdicts for {len(buckets)} prediction buckets "
-        f"({', '.join(repr(b) for b in buckets)}); pass bucket to name which one to read"
+        f"review state holds verdicts for {len(buckets)} prediction bucket(s) "
+        f"({', '.join(repr(b) for b in buckets)}); pass predictions_dir to name the bucket "
+        "whose verdicts to read"
     )
 
 
@@ -110,7 +108,7 @@ def materialize_review_dataset(
     only_completed: bool = False,
     copy_files: bool = True,
     subject: str | None = None,
-    bucket: str | None = None,
+    predictions_dir: str | None = None,
     review_state_dir: str = "",
 ) -> dict:
     """Build a curated detection dataset from human review verdicts.
@@ -120,14 +118,14 @@ def materialize_review_dataset(
     Output is the platform's ``images/`` + ``annotations/`` dataset layout, with its
     ``curated_manifest.json`` naming the review session it was built from and its source.
 
-    The reviewed bucket's scope comes from ``resolution.input_scope``: a stamped bucket's own,
-    refusing a ``subject`` stated beside it. Under a classified scope every positive is written
+    The reviewed bucket's scope is the one its record states, and a ``subject`` stated beside a
+    bucket refuses. Under a classified scope every positive is written
     with the object class in ``subject`` and the confirmed value under the scope's attribute, and
     no rejected-only image is confirmed negative, landing in
     ``unconfirmed_negatives`` instead. The source dataset's own registry is then copied over;
     refuses by name when the source names no dataset root, that root has no ``subjects.json``, or
-    the output already holds a registry. A bare directory or a detector scope, and a
-    ground-truth-only review with no prediction file, read no classified scope.
+    the output already holds a registry. A detector scope, and a ground-truth-only review with no
+    bucket, read no classified scope.
 
     Args:
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
@@ -138,15 +136,14 @@ def materialize_review_dataset(
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
-        subject: The object the review of a bucket with no stamp was about; confirmed negatives
-            are keyed under it. A stamped bucket records its own and refuses it. When neither
-            states one it is derived from every subject the verdicts name, rejections included,
-            and only when they name exactly one. A rejected image whose own rejections answer for
-            another subject, or for none, is materialized as an unconfirmed empty and reported in
+        subject: The object a ground-truth-only review was about; confirmed negatives are keyed
+            under it. A bucket records its own and refuses it. When neither states one it is
+            derived from every subject the verdicts name, rejections included, and only when they
+            name exactly one. A rejected image whose own rejections answer for another subject, or
+            for none, is materialized as an unconfirmed empty and reported in
             ``unconfirmed_negatives`` with why.
-        bucket: Which prediction bucket's verdicts to curate, as
-            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
-            and refuses, naming them, when it holds several.
+        predictions_dir: The published bucket whose verdicts to curate. Omitted reads a
+            ground-truth-only review, and refuses, naming them, when the store holds a bucket's.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim and the
             response names it. A stated store holding no shards is refused.
@@ -160,34 +157,23 @@ def materialize_review_dataset(
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
 
-    from tcip_annotation.review_engine import NO_BUCKET, ReviewEngine
+    from tcip_annotation.review_engine import ReviewEngine
+
+    from tcip_mcp.buckets import input_scope, read_bucket
+
     engine = ReviewEngine(str(store_dir))
-    resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
+    bucket_dir = Path(project, predictions_dir) if predictions_dir is not None else None
+    resolved_bucket, refusal = _resolve_review_bucket(engine, bucket_dir)
     if refusal is not None:
         return {"error": refusal}
     assert resolved_bucket is not None  # _resolve_review_bucket pairs a None refusal with a bucket
     review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
-    from tcip_mcp.pipelines.resolution import input_scope
-    from tcip_store import StoreError
-
-    scope_dir = None
-    if resolved_bucket != NO_BUCKET:
-        bucket_path = Path(resolved_bucket)
-        if bucket_path.is_absolute():
-            scope_dir = bucket_path
-        elif review_state_dir:
-            return {"error": (
-                f"{resolved_bucket!r} is a relative bucket key, meaningful only against the "
-                f"dataset root its own store recorded it under; review_state_dir names a "
-                f"different store ({store_dir}), so state an absolute bucket path instead."
-            )}
-        else:
-            scope_dir = Path(dataset_root) / resolved_bucket
     try:
-        scope, _stamped = input_scope(scope_dir, subject, None)
-    except (StoreError, ValueError) as exc:
+        scope = input_scope(read_bucket(bucket_dir) if bucket_dir is not None else None,
+                            subject, None)
+    except ValueError as exc:
         return {"error": str(exc)}
 
     try:
@@ -217,26 +203,25 @@ def _prepare_queue_sources(
     dataset_root: str,
     review_state_dir: str,
     skip_reviewed: bool,
-    bucket: str | None,
+    bucket_dir: Path | None,
 ):
     """The checkpoint-file, images-dir and reviewed-skip plumbing both review-queue doors share, in
     order: checkpoint existence, images directory, logical image enumeration, then which of them
     the dataset's own review state already covers.
 
-    Returns ``(sources, reviewed_skipped, build_predictor, error)``; ``error`` is a ready
-    ``{"error": ...}`` dict and the other three are ``None``/``0``/``None`` when it is set. A
-    torch-less environment is refused at the ``build_predictor`` import.
+    Returns ``(sources, reviewed_skipped, error)``; ``error`` is a ready ``{"error": ...}`` dict
+    and the other two are ``None``/``0`` when it is set.
     """
     if not Path(checkpoint_path).is_file():
-        return None, 0, None, {"error": f"Checkpoint not found: {checkpoint_path}"}
+        return None, 0, {"error": f"Checkpoint not found: {checkpoint_path}"}
     images_path = Path(images_dir)
     if not images_path.is_dir():
-        return None, 0, None, {"error": f"Images dir not found: {images_dir}"}
+        return None, 0, {"error": f"Images dir not found: {images_dir}"}
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 
     logical = list_logical_images(images_path)
     if not logical:
-        return None, 0, None, {"error": "No images found in images_dir"}
+        return None, 0, {"error": "No images found in images_dir"}
     # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one entry.
     sources = [logical[stem] for stem in sorted(logical)]
 
@@ -246,9 +231,9 @@ def _prepare_queue_sources(
         if _review_state_exists(str(store_dir)):
             from tcip_annotation.review_engine import ReviewEngine
             engine = ReviewEngine(str(store_dir))
-            resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
+            resolved_bucket, refusal = _resolve_review_bucket(engine, bucket_dir)
             if refusal is not None:
-                return None, 0, None, {"error": refusal}
+                return None, 0, {"error": refusal}
             # _resolve_review_bucket pairs a None refusal with a bucket
             assert resolved_bucket is not None
             reviewed = reviewed_image_names({"image": engine.image_states(resolved_bucket)})
@@ -258,13 +243,19 @@ def _prepare_queue_sources(
             kept = set(select_unreviewed(display, reviewed))
             sources = [s for s, d in zip(sources, display) if d in kept]
             reviewed_skipped = before - len(sources)
+    return sources, reviewed_skipped, None
 
+
+def _untiled_pass(checkpoint) -> tuple[Any, dict | None]:
+    """The untiled pass a review-queue door predicts through
+    (:func:`~tcip_mcp.pipelines.execution.prepare_pass`), or its refusal when torch is not
+    installed. Returns ``(pass, refusal)``."""
     try:
-        from tcip_mcp.pipelines.inference.predictor import build_predictor
-    except (ImportError, OSError) as e:
-        return None, 0, None, {"error": f"torch/torchvision unavailable: {e}"}
+        from tcip_mcp.pipelines.execution import Stated, prepare_pass
 
-    return sources, reviewed_skipped, build_predictor, None
+        return prepare_pass(checkpoint, Stated(tile=False)), None
+    except (ImportError, OSError) as e:
+        return None, {"error": f"torch/torchvision unavailable: {e}"}
 
 
 @tool()
@@ -276,7 +267,7 @@ def prioritize_review_queue(
     method: str = "combined",
     budget: int = 50,
     skip_reviewed: bool = True,
-    bucket: str | None = None,
+    predictions_dir: str | None = None,
     review_state_dir: str = "",
 ) -> dict:
     """Rank un-reviewed images by active-learning informativeness for the next review batch.
@@ -284,10 +275,10 @@ def prioritize_review_queue(
     Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
 
     When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
-    ``queue`` entry carries ``calibration_member: bool``, matched against the calibration samples
-    that run's partition froze whose own source sits in ``images_dir``: reviewing that image edits
-    a label inside the bound run's own calibration universe. An unbound run carries no mark on any
-    entry.
+    ``queue`` entry carries ``reference_member: bool``, matched against the calibration and holdout
+    samples that run's partition froze whose own source sits in ``images_dir``: reviewing that
+    image edits a label inside the bound run's own assessment reference. An unbound run carries no
+    mark on any entry.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
@@ -301,14 +292,15 @@ def prioritize_review_queue(
             unresolvable name is refused.
         budget: Number of images to return.
         skip_reviewed: Exclude already-completed images from the queue.
-        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
-            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
-            and refuses, naming them, when it holds several.
+        predictions_dir: The published bucket whose completed reviews ``skip_reviewed`` skips.
+            Omitted reads a ground-truth-only review, and refuses, naming them, when the store
+            holds a bucket's.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim.
     """
-    sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
-        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
+    sources, reviewed_skipped, error = _prepare_queue_sources(
+        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed,
+        Path(project, predictions_dir) if predictions_dir is not None else None)
     if error is not None:
         return error
 
@@ -324,15 +316,12 @@ def prioritize_review_queue(
         return {"method": method, "task": task, "total_candidates": 0,
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
-    try:
-        from tcip_mcp.pipelines.active_learning.helpers import build_scorer, require_composed_detector
-    except (ImportError, OSError) as e:
-        return {"error": f"torch/torchvision unavailable: {e}"}
+    p, refusal = _untiled_pass(checkpoint)
+    if refusal is not None:
+        return refusal
+    from tcip_mcp.pipelines.active_learning.helpers import build_scorer
 
-    predictor = build_predictor(checkpoint)
-    guard = require_composed_detector(predictor, purpose="review-queue scoring")
-    if guard:
-        return {"error": guard}
+    predictor = p.predictor
     try:
         scorer = build_scorer(method, task)
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
@@ -340,17 +329,17 @@ def prioritize_review_queue(
 
     from tcip_mcp.pipelines.image_utils import BandGroupRef
 
+    from tcip_mcp.pipelines.image_utils import stem_of
+
     scored = scorer.score(sources, predictor)[:budget]
-    calibration_stems = _calibration_stems(checkpoint, Path(images_dir), project)
-    marks: Sequence[bool | None] = [None] * len(scored)
-    if calibration_stems is not None:
-        marks = _calibration_marks([p for p, _ in scored], calibration_stems)
+    reference_stems = _reference_stems(checkpoint, Path(images_dir), project)
     queue = []
-    for (p, s), mark in zip(scored, marks):
-        entry = {"image": str(p.manifest_path) if isinstance(p, BandGroupRef) else str(p),
-                 "score": round(float(s), 6)}
-        if mark is not None:
-            entry["calibration_member"] = mark
+    for p, s in scored:
+        entry: dict[str, Any] = {
+            "image": str(p.manifest_path) if isinstance(p, BandGroupRef) else str(p),
+            "score": round(float(s), 6)}
+        if reference_stems is not None:
+            entry["reference_member"] = stem_of(p) in reference_stems
         queue.append(entry)
     result = {
         "method": method,
@@ -372,7 +361,7 @@ def triage_predictions(
     low: float = 0.3,
     high: float = 0.8,
     auto_threshold: float | None = None,
-    bucket: str | None = None,
+    predictions_dir: str | None = None,
     review_state_dir: str = "",
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and
@@ -398,14 +387,15 @@ def triage_predictions(
             returns. ``None`` (default) refuses to auto-accept. Derive it from the model's
             validated confidence distribution and confirm with a breeder spot-check; the result is
             stamped as requiring that confirmation.
-        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
-            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
-            and refuses, naming them, when it holds several.
+        predictions_dir: The published bucket whose completed reviews ``skip_reviewed`` skips.
+            Omitted reads a ground-truth-only review, and refuses, naming them, when the store
+            holds a bucket's.
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim.
     """
-    sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
-        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
+    sources, reviewed_skipped, error = _prepare_queue_sources(
+        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed,
+        Path(project, predictions_dir) if predictions_dir is not None else None)
     if error is not None:
         return error
 
@@ -418,8 +408,10 @@ def triage_predictions(
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
-    predictor = build_predictor(checkpoint)
-    predictions = predictor.predict_batch(sources)
+    p, refusal = _untiled_pass(checkpoint)
+    if refusal is not None:
+        return refusal
+    predictions = p.predict(sources)
     needs_review = review_queue(predictions, low=low, high=high)
     # A prediction with no confidence signal at all (a regression head's point estimate) is tagged unscoreable, not dropped.
     unscoreable_preds = unscoreable(predictions)

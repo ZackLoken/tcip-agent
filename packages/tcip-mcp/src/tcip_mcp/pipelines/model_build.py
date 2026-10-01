@@ -363,23 +363,3 @@ def snapshot_model_source(config: dict, run_dir: Path) -> dict | None:
         "missing": missing,
         "snapshot_errors": snapshot_errors,
     }
-
-
-def stamp_model_ref(payload: dict) -> dict:
-    """Stamp a checkpoint payload with its kind, read off the run config the payload carries under
-    ``config``, the one place its ``model_source`` is recorded. An explicit ``kind`` the caller
-    already put in ``payload`` wins. Refuses to stamp ``kind`` onto a payload with no
-    ``STATE_DICT_KEY``.
-    """
-    from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-
-    config = payload["config"]
-    if config.get(MODEL_SOURCE_KEY):
-        if STATE_DICT_KEY not in payload:
-            raise ValueError(
-                f"stamp_model_ref refuses to stamp 'kind' onto a payload with no "
-                f"{STATE_DICT_KEY!r}: a checkpoint sniffed as a loadable tcip module must carry "
-                "its weights."
-            )
-        payload.setdefault("kind", KIND_TCIP_MODULE)
-    return payload

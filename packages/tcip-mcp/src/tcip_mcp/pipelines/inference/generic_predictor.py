@@ -16,9 +16,11 @@ if TYPE_CHECKING:
     from sahi.prediction import ObjectPrediction
 
     from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
 from tcip_mcp.pipelines.derivations import probe_channels
+from tcip_mcp.pipelines.execution import DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_TILE_BATCH_SIZE
 from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
@@ -27,11 +29,6 @@ from tcip_mcp.pipelines.model_build import (
 )
 from tcip_mcp.pipelines.image_utils import (
     BandGroupRef, display_source_path, load_image, pil_to_tensor, pixel_array,
-)
-from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-from tcip_mcp.pipelines.resolution import (
-    DEFAULT_IMAGE_BATCH_SIZE, DEFAULT_NMS_IOU, DEFAULT_OVERLAP, DEFAULT_POSTPROCESS,
-    DEFAULT_TILE_BATCH_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +50,8 @@ class WindowedRasterReader(Protocol):
 
 
 class GenericPredictor:
-    """Load any bespoke ``model_source`` checkpoint and run inference.
+    """Load any bespoke ``model_source`` checkpoint and run inference under the execution record
+    each call is given, which alone decides the confidence threshold and the detection cap.
 
     The checkpoint must carry its run config, whose ``model_source`` names the builder and the
     task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
@@ -66,22 +64,13 @@ class GenericPredictor:
     those into an inference geometry.
     """
 
-    def __init__(
-        self,
-        checkpoint: "VerifiedCheckpoint",
-        device: str | None = None,
-        score_threshold: float | None = 0.5,
-        max_dets: int | None = None,
-    ) -> None:
+    def __init__(self, checkpoint: "VerifiedCheckpoint", device: str | None = None) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.score_threshold = score_threshold
-        self.max_dets = max_dets
 
         # Already read and unpickled by load_registered_checkpoint; no re-read here.
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
         ckpt = checkpoint.payload
-        self.kind = KIND_TCIP_MODULE
         self.config = ckpt.get("config", {})
         self.model_source = self.config.get(MODEL_SOURCE_KEY)
 
@@ -101,13 +90,6 @@ class GenericPredictor:
         self.model.load_state_dict(ckpt[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
-
-        # In-model thresholds, so the operating point governs which boxes exist rather than
-        # filtering ones the model already discarded; an unstated knob leaves the point as built.
-        from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-        set_detector_operating_point(self.model, score_thresh=score_threshold,
-                                     detections_per_img=max_dets)
-
         self.task = checkpoint.task
 
     def model_input(self, image_path: str | Path | BandGroupRef) -> tuple[torch.Tensor, int, int]:
@@ -118,119 +100,113 @@ class GenericPredictor:
         return pil_to_tensor(img).to(self.device), int(w), int(h)
 
     @torch.no_grad()
-    def predict(self, image_path: str | Path | BandGroupRef) -> dict:
-        """Run inference on a single image. ``image_path`` may be a plain path/string or a
-        :class:`BandGroupRef`.
-        """
+    def predict(self, image_path: str | Path | BandGroupRef, execution: Execution) -> dict:
+        """Run inference on a single image, a plain path/string or a :class:`BandGroupRef`, under
+        the untiled ``execution`` record."""
         if self.task in _DETECTION_TASKS:
-            return self._predict_whole([image_path])[0]
+            return self._predict_whole([image_path], execution)[0]
         tensor, w, h = self.model_input(image_path)
         outputs = self.model(tensor.unsqueeze(0))
         return self._format_other(outputs, display_source_path(image_path), w, h)
 
     @torch.no_grad()
     def predict_batch(
-        self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
-        tile_size: int | None = None, overlap: float = DEFAULT_OVERLAP, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
-        cross_tile_nms: float = DEFAULT_NMS_IOU, batch_size: int = DEFAULT_IMAGE_BATCH_SIZE, postprocess: str = DEFAULT_POSTPROCESS,
-        *, require_masks: bool = True, tile_resize: tuple[int, int] | None = None,
+        self, image_paths: list[str | Path | BandGroupRef], execution: Execution,
+        *, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+        batch_size: int = DEFAULT_IMAGE_BATCH_SIZE, require_masks: bool = True,
     ) -> list[dict]:
-        """Run inference on multiple images, optionally sliced.
+        """Run inference on multiple images under ``execution``, sliced when it is a tiled record.
 
         Detection runs ``batch_size`` images per forward; other heads run one image per forward.
 
         Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef` (see
-        :meth:`predict`). With ``tile=True`` every image runs through :meth:`predict_sliced` with
-        the tiled arguments unchanged, and a tiled call with no ``tile_size`` refuses; untiled, they
-        are ignored and ``instance_seg`` always carries masks.
+        :meth:`predict`). Under a tiled ``execution`` every image runs through
+        :meth:`predict_sliced`; untiled, ``instance_seg`` always carries masks.
         """
-        if tile:
-            if tile_size is None:
-                raise ValueError(
-                    "a tiled prediction needs an explicit tile_size; resolve one "
-                    "(resolve_tile_geometry) before calling.")
-            return [
-                self.predict_sliced(p, tile_size=tile_size, overlap=overlap,
-                                    postprocess=postprocess, cross_tile_nms=cross_tile_nms,
-                                    tile_batch_size=tile_batch_size, tile_resize=tile_resize,
-                                    require_masks=require_masks)
-                for p in image_paths
-            ]
-        if self.task in _DETECTION_TASKS:
-            return self._predict_batch_detection(image_paths, batch_size)
-        return [self.predict(p) for p in image_paths]
+        if execution.tiled:
+            return [self.predict_sliced(p, execution=execution, tile_batch_size=tile_batch_size,
+                                        require_masks=require_masks)
+                    for p in image_paths]
+        if self.task not in _DETECTION_TASKS:
+            return [self.predict(p, execution) for p in image_paths]
+        step = max(1, batch_size)
+        return [r for start in range(0, len(image_paths), step)
+                for r in self._predict_whole(image_paths[start:start + step], execution)]
 
-    @torch.no_grad()
-    def _predict_batch_detection(
-        self, image_paths: list[str | Path | BandGroupRef], batch_size: int,
-    ) -> list[dict]:
-        results: list[dict] = []
-        for start in range(0, len(image_paths), max(1, batch_size)):
-            results.extend(self._predict_whole(image_paths[start:start + max(1, batch_size)]))
-        return results
+    def governed(self, execution: Execution) -> torch.nn.Module:
+        """This predictor's model with ``execution``'s conf and cap set as its in-model
+        thresholds, so they govern which boxes exist."""
+        from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    def _detection_model(self, *, tile_resize: tuple[int, int] | None,
+        set_detector_operating_point(self.model, score_thresh=execution.conf,
+                                     detections_per_img=execution.max_dets)
+        return self.model
+
+    def _detection_model(self, execution: Execution, *, tile_resize: tuple[int, int] | None,
                          band_interpretations: tuple[str, ...] | None,
                          collect_masks: bool) -> "TcipDetectionModel":
         """This predictor wrapped as the SAHI detection model every detection pass runs through,
-        masks cut at the platform's binarize threshold."""
+        its in-model thresholds and its own score filter set from ``execution``, masks cut at the
+        platform's binarize threshold."""
         from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
         from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
+        self.governed(execution)
         return TcipDetectionModel(
-            self, tile_resize=tile_resize, band_interpretations=band_interpretations,
-            collect_masks=collect_masks, mask_binarize=resolve_binarize_threshold().to_provenance())
+            self, conf=execution.conf, tile_resize=tile_resize,
+            band_interpretations=band_interpretations, collect_masks=collect_masks,
+            mask_binarize=resolve_binarize_threshold())
 
-    def _predict_whole(self, sources: list[str | Path | BandGroupRef]) -> list[dict]:
-        """One forward over ``sources``, each decoded whole as one slice the size of its frame at
-        shift zero, each result built by :meth:`_detection_record`."""
-        model = self._detection_model(tile_resize=None, band_interpretations=None,
+    def _predict_whole(self, sources: list[str | Path | BandGroupRef],
+                       execution: Execution) -> list[dict]:
+        """One forward over ``sources`` under ``execution``, each decoded whole as one slice the
+        size of its frame at shift zero, each result built by :meth:`_detection_record`."""
+        model = self._detection_model(execution, tile_resize=None, band_interpretations=None,
                                       collect_masks=self.task == "instance_seg")
         arrays = [pixel_array(load_image(s, self.in_chans))[0] for s in sources]
         model.perform_batch_inference(arrays)
         model.convert_original_predictions(
             shift_amount=[[0, 0]] * len(arrays), full_shape=[list(a.shape[:2]) for a in arrays])
         return [self._detection_record(preds, display_source_path(s), a.shape[1], a.shape[0],
-                                       model=model)
+                                       model=model, max_dets=execution.max_dets)
                 for preds, s, a in zip(model.object_prediction_list_per_image, sources, arrays)]
 
     def _detection_record(self, predictions: "list[ObjectPrediction]", label: str, width: int,
-                          height: int, *, model: "TcipDetectionModel") -> dict:
+                          height: int, *, model: "TcipDetectionModel",
+                          max_dets: int | None) -> dict:
         """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, highest
         score first under the full-frame ``max_dets`` cap: ``image``, ``width``, ``height``,
         ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` and ``cap_hit``; where
         ``model`` collected masks, ``masks`` as one ``{"segmentation": [[x0, y0, x1, y1, ...],
         ...]}`` per detection, empty where the mask binarized to nothing, and ``mask_binarize``,
         the provenance of the threshold ``model`` cut them at."""
+        from tcip_mcp.pipelines.slicing import prediction_rows
+
         ranked = sorted(predictions, key=lambda p: -p.score.value)
         # cap_hit uses >=, matching records_from_detector.
-        cap_hit = bool(self.max_dets is not None and len(ranked) >= self.max_dets)
-        kept = ranked[:self.max_dets] if self.max_dets is not None else ranked
+        cap_hit = bool(max_dets is not None and len(ranked) >= max_dets)
+        kept = prediction_rows(ranked[:max_dets] if max_dets is not None else ranked)
         record = {
             "image": label, "width": int(width), "height": int(height),
-            "boxes": [[float(v) for v in p.bbox.to_xyxy()] for p in kept],
-            "scores": [float(p.score.value) for p in kept],
-            "labels": [p.category.id for p in kept],
-            "count": len(kept), "cap_hit": cap_hit,
+            "boxes": [row["bbox"] for row in kept], "scores": [row["score"] for row in kept],
+            "labels": [row["category_id"] for row in kept], "count": len(kept), "cap_hit": cap_hit,
         }
         if model.collect_masks:
-            record["masks"] = [{"segmentation": p.mask.segmentation if p.mask else []}
-                               for p in kept]
+            record["masks"] = [{"segmentation": row["segmentation"] or []} for row in kept]
             record["mask_binarize"] = model.mask_binarize
         return record
 
     @torch.no_grad()
     def predict_sliced(
-        self, source: str | Path | BandGroupRef | WindowedRasterReader, *, tile_size: int,
-        overlap: float, postprocess: str, cross_tile_nms: float, tile_batch_size: int,
-        tile_resize: tuple[int, int] | None, require_masks: bool, source_label: str = "",
+        self, source: str | Path | BandGroupRef | WindowedRasterReader, *,
+        execution: Execution, tile_batch_size: int, require_masks: bool, source_label: str = "",
         prior: dict | None = None, progress: "Callable[[int, int, dict], None] | None" = None,
     ) -> dict:
-        """Sliced detection over one source: SAHI's lattice
-        (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) over the whole frame, each slice cut by
-        array indexing and predicted through
+        """Sliced detection over one source under a tiled ``execution`` record: SAHI's lattice
+        (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) at its tile edge and overlap over the
+        whole frame, each slice cut by array indexing and predicted through
         :class:`~tcip_mcp.pipelines.slicing.TcipDetectionModel` ``tile_batch_size`` at a time with
-        its shift and the frame's shape, then one SAHI merge
+        its shift and the frame's shape, then the record's one SAHI merge
         (:func:`~tcip_mcp.pipelines.slicing.cross_tile_merge`) over every slice's shifted
         detections and a full-frame ``max_dets`` cap, highest score first.
 
@@ -240,8 +216,8 @@ class GenericPredictor:
         file's probed bands) or it refuses before any slice is read. A non-detection task falls
         back to :meth:`predict` on a decoded source and refuses on a reader.
 
-        ``tile_resize`` stretches each slice PIL represents faithfully and maps the result back.
-        ``require_masks`` on an ``instance_seg`` checkpoint adds ``masks``, one
+        The record's ``tile_resize`` stretches each slice PIL represents faithfully and maps the
+        result back. ``require_masks`` on an ``instance_seg`` checkpoint adds ``masks``, one
         ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the merged SAHI polygons
         in full-frame pixels, empty where the mask binarized to nothing.
 
@@ -266,7 +242,7 @@ class GenericPredictor:
                     f"sliced prediction over a windowed reader needs a detection or instance_seg "
                     f"task, got {self.task!r}: a raster too large to decode whole has no untiled "
                     "fallback.")
-            return self.predict(cast("str | Path | BandGroupRef", source))
+            return self.predict(cast("str | Path | BandGroupRef", source), execution)
         from tcip_mcp.pipelines.raster_source import photographic_container
 
         reader = cast("WindowedRasterReader", source)
@@ -293,16 +269,18 @@ class GenericPredictor:
             def read(x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
                 return arr[y0:y1, x0:x1]
 
+        tile_size, tile_resize = cast(int, execution.tile_size), execution.tile_resize
         model_edge = min(int(tile_resize[0]), int(tile_resize[1])) if tile_resize else tile_size
         min_size = ((self.model_source or {}).get("builder_kwargs") or {}).get("min_size")
         if min_size and abs(int(min_size) - model_edge) > model_edge:
             logger.warning("tiled inference: model min_size=%s differs greatly from the %spx tiles "
                            "it is handed (tiles will be rescaled).", min_size, model_edge)
         collect_masks = self.task == "instance_seg" and require_masks
-        merge = cross_tile_merge(postprocess, cross_tile_nms)
-        model = self._detection_model(tile_resize=tile_resize, band_interpretations=interpretations,
+        merge = cross_tile_merge(execution)
+        model = self._detection_model(execution, tile_resize=tile_resize,
+                                      band_interpretations=interpretations,
                                       collect_masks=collect_masks)
-        slices = slice_lattice(height, width, tile_size, overlap)
+        slices = slice_lattice(height, width, tile_size, cast(float, execution.overlap))
         prior = prior or {"slices": [], "predictions": []}
         done = {tuple(s) for s in prior["slices"]}
         predictions = predictions_from_rows(prior["predictions"], [height, width])
@@ -321,15 +299,9 @@ class GenericPredictor:
 
         merged = merge(predictions) if predictions else []
         # The in-model cap only caps per slice; the record's cap is the full frame's.
-        return {**self._detection_record(merged, label, width, height, model=model),
+        return {**self._detection_record(merged, label, width, height, model=model,
+                                         max_dets=execution.max_dets),
                 "tiles": len(slices)}
-
-    def _kept_by_score(self, scores: torch.Tensor) -> torch.Tensor:
-        """Which detections this predictor's own score threshold keeps; all of them when it was
-        built with none."""
-        if self.score_threshold is None:
-            return torch.ones_like(scores, dtype=torch.bool)
-        return scores >= self.score_threshold
 
     def _format_other(self, outputs: dict, image_path: str, w: int, h: int) -> dict:
         result: dict = {"image": image_path, "width": w, "height": h}

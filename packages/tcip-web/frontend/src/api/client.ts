@@ -170,11 +170,9 @@ export const api = {
         dataset_root: string;
         dates_with_images: string[];
         subjects: string[];
-        model_names: string[];
         subjects_by_date: Record<string, string[]>;
-        models_by_date: Record<string, string[]>;
-        // date -> model -> the dir that model's predictions for that date live in, resolved by
-        // the backend's own layout resolver. Index it; never reassemble the path here.
+        // date -> each published bucket's name (its path under predictions/) -> its directory.
+        // Index it; never reassemble the path here.
         prediction_dirs: Record<string, Record<string, string>>;
         // The first date's labels that would not read, naming the file; the tree still lists
         // every other date.
@@ -185,12 +183,12 @@ export const api = {
       dataset_root: string;
       subject?: string | null;
       date?: string | null;
-      model_name?: string | null;
+      predictions_dir?: string | null;
     }) =>
       call<{
         status: string;
         selection: DatasetSelection;
-        // Advisory: whether the resolved (subject,date) has labels / (model,date) has
+        // Advisory: whether the resolved (subject,date) has labels / the bucket has
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
         predictions_present?: boolean;
@@ -479,33 +477,12 @@ export const api = {
         body: JSON.stringify({ dataset_root, label_dirs }),
       }),
 
-    // Promote a completed review into a validation reference for its (model, trait, date). Runs the
-    // same disjoint + count-bias gate the backend uses and returns an honest validated / not-yet result.
-    validateReference: (body: {
-      dataset_root: string;
-      trait: string;
-      pred_dir?: string | null;
-      // The object identity this reference validates; the door refuses a request naming none.
-      subject: string;
-    }) =>
-      call<{
-        validated: boolean;
-        reference: string | null;
-        reviewed_image_count: number;
-        conf: number | null;
-        reason: string;
-        buckets_stamped: string[];
-      }>(ROUTES.postReviewValidateReference, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    // The bucket's own generation confidence and admission rule: read-only, no gate/stamp run.
-    // Lets the Review tab warn on the "Conf >=" filter and offer the confirm-admitted button.
+    // The bucket's generation confidence and the one its assessment admits at: read-only. Lets
+    // the Review tab warn on the "Conf >=" filter and offer the confirm-admitted button.
     generationConf: (pred_dir: string) =>
       call<{
         generation_conf: number | null;
-        admission_rule: { conf: number; experiment_id: string; record_digest: string } | null;
+        admission_conf: number | null;
         admission_reason: string;
       }>(`${ROUTES.getReviewGenerationConf}?${new URLSearchParams({ pred_dir }).toString()}`),
 
@@ -540,13 +517,13 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // calibration_member is present only when the run was bound to a selection.
+    // reference_member is present only when the run was bound to a selection.
     priorityQueueJob: (jobId: string) =>
       call<{
         job_id: string;
         status: JobStatus;
         error: string | null;
-        queue: { image: string; score: number; calibration_member?: boolean }[];
+        queue: { image: string; score: number; reference_member?: boolean }[];
         total_candidates: number;
         reviewed_skipped: number;
       }>(ROUTES.getReviewQueueByJobId(jobId)),

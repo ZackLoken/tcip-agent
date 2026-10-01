@@ -299,13 +299,16 @@ def test_a_group_whose_canonical_stem_is_reserved_is_not_written(tmp_path):
     """A group whose siblings' common prefix names a bucket's own provenance stamp is not written
     as a manifest: minting a logical image under that stem would make its label indistinguishable
     from the stamp everywhere a prediction bucket is walked. The members stay standalone files."""
+    from tcip_annotation.json_io import BUCKET_RECORD, is_reserved_stem
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
+    reserved = Path(BUCKET_RECORD).stem
+    assert is_reserved_stem(reserved)
     d = tmp_path / "images"
     d.mkdir()
     gid = "reserved-stem-capture"
     for band_name, wl, filename in (
-        ("Green", 560, "operating_point_G.tif"), ("NIR", 860, "operating_point_NIR.tif"),
+        ("Green", 560, f"{reserved}_G.tif"), ("NIR", 860, f"{reserved}_NIR.tif"),
     ):
         _write_band_file_with_identity(
             d / filename, gid, band_name, wl,
@@ -316,10 +319,8 @@ def test_a_group_whose_canonical_stem_is_reserved_is_not_written(tmp_path):
     assert result["formed"] == []
     assert not list(d.glob("*.bandgroup"))
     assert len(result["reserved_name_skips"]) == 1
-    assert result["reserved_name_skips"][0]["stem"] == "operating_point"
-    assert sorted(d.iterdir()) == sorted(
-        [d / "operating_point_G.tif", d / "operating_point_NIR.tif"]
-    )
+    assert result["reserved_name_skips"][0]["stem"] == reserved
+    assert sorted(d.iterdir()) == sorted([d / f"{reserved}_G.tif", d / f"{reserved}_NIR.tif"])
 
 
 def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):

@@ -123,9 +123,9 @@ def registered_entries(project_path: str | Path) -> list[dict]:
     training run whose final status names those bytes (:func:`run_entry`; the earliest to
     complete when two do), else the foreign entry of the index registering them, with
     ``experiment_id`` ``None``. Runs' entries come first, in completion order."""
-    from tcip_mcp.experiments import training_runs
+    from tcip_mcp.experiments import run_observations
 
-    runs = sorted((entry for entry in map(run_entry, training_runs(project_path))
+    runs = sorted((entry for entry in map(run_entry, run_observations(project_path))
                    if entry is not None), key=lambda entry: entry["registered_at"])
     owners: dict[str, dict] = {}
     for entry in [*runs, *({**e, "experiment_id": None} for e in read_registry_index(project_path))]:
@@ -135,8 +135,7 @@ def registered_entries(project_path: str | Path) -> list[dict]:
 
 def entry_facts(entry: dict) -> dict:
     """What ``entry``'s checkpoint says of itself, read from its payload
-    (:func:`checkpoint_payload`): its ``kind``, and the ``metrics`` a ranking reads with their
-    ``metrics_source``. A run's metrics are the ones its payload carries, sourced ``"trainer"``,
+    (:func:`checkpoint_payload`): the ``metrics`` a ranking reads with their ``metrics_source``. A run's metrics are the ones its payload carries, sourced ``"trainer"``,
     or ``"training_source"`` for a bespoke loop's; a foreign entry's are the ones its registration
     stated, sourced ``"caller"``. No metrics carry no source."""
     from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
@@ -147,8 +146,7 @@ def entry_facts(entry: dict) -> dict:
     else:
         metrics = payload.get("metrics") or {}
         source = "training_source" if entry["config"].get(TRAINING_SOURCE_KEY) else "trainer"
-    return {"kind": payload.get("kind"), "metrics": metrics,
-            "metrics_source": source if metrics else None}
+    return {"metrics": metrics, "metrics_source": source if metrics else None}
 
 
 def _sha256_of_bytes(data: bytes) -> str:
@@ -186,6 +184,12 @@ class VerifiedCheckpoint:
         return self.entry["experiment_id"]
 
     @property
+    def producer(self) -> dict[str, str | None]:
+        """The producer every record of this checkpoint's output names: its sha256 and the run
+        behind it."""
+        return {"checkpoint_sha256": self.sha256, "experiment_id": self.experiment_id}
+
+    @property
     def data_config(self) -> dict:
         """The checkpoint's own stamped ``config["data"]``, ``{}`` for a checkpoint carrying
         none (a foreign checkpoint's documented answer)."""
@@ -211,13 +215,12 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
     names the checkpoint (path and digest) in every raised message.
 
     Raises :class:`UnregisteredCheckpoint` for a payload that will not unpickle under
-    ``weights_only=True``, and a bare ``ValueError``
-    (:func:`~tcip_mcp.pipelines.inference.predictor._require_dict_payload`) for a payload that does
-    not unpickle to a dict.
+    ``weights_only=True``, and a bare ``ValueError`` for a payload that does not unpickle to a
+    dict or carries no weights under ``model_build``'s ``STATE_DICT_KEY``.
     """
     import torch  # local checkpoint an identity check already named; unpickling it is the point
 
-    from tcip_mcp.pipelines.inference.predictor import _require_dict_payload
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
 
     try:
         payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
@@ -228,7 +231,14 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
             "checkpoint's RNG/optimizer state is the trainer's own resume path to read; a bespoke "
             "loop's own arbitrary state is outside the contract)."
         ) from exc
-    return _require_dict_payload(payload, source)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{source} did not unpickle to a dict (got {type(payload).__name__}), so "
+                         "it carries none of the config and weights this platform's checkpoints "
+                         "do.")
+    if STATE_DICT_KEY not in payload:
+        raise ValueError(f"{source} carries no {STATE_DICT_KEY!r}: a checkpoint is admitted for "
+                         "the weights it loads, and this one holds none.")
+    return payload
 
 
 def admitted_digest(checkpoint_path: str | Path) -> str:
@@ -280,14 +290,6 @@ def load_registered_checkpoint(checkpoint_path: str | Path, *, project: Path) ->
     payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
     return VerifiedCheckpoint(path=str(checkpoint_path), sha256=digest, payload=payload,
                               entry=entry)
-
-
-def resolve_model_identity(checkpoint: VerifiedCheckpoint) -> dict:
-    """Producing-model identity for a verified checkpoint: ``{checkpoint, sha256,
-    experiment_id}``, each read off ``checkpoint`` as :func:`load_registered_checkpoint` resolved
-    it."""
-    return {"checkpoint": Path(checkpoint.path).stem, "sha256": checkpoint.sha256,
-            "experiment_id": checkpoint.experiment_id}
 
 
 def _write_registry_entry(txn: tcip_store.Txn, key: Key,

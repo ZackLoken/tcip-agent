@@ -212,7 +212,7 @@ def data_dir(tmp_path: Path) -> Path:
     """A minimal dataset in the canonical layout: name-based per-image labels + a registry.
 
     One file per image under ``annotations/<date>/`` holding every subject (here one detection
-    subject, ``bud``), predictions under ``predictions/<model>/<date>/``, and one nested
+    subject, ``bud``), a published bucket under ``predictions/live/<date>/``, and one nested
     ``subjects.json``. Geometry is two boxes per image on a 640x480 frame, matching the
     count/geometry expectations downstream.
     """
@@ -230,7 +230,6 @@ def data_dir(tmp_path: Path) -> Path:
     labels_dir = tmp_path / "annotations" / date
     labels_dir.mkdir(parents=True)
     preds_dir = tmp_path / "predictions" / "live" / date
-    preds_dir.mkdir(parents=True)
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
     subject_registry.write_registry(
@@ -247,12 +246,13 @@ def data_dir(tmp_path: Path) -> Path:
              Annotation(subject=subject, geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
-        # Predictions: 1 matching (TP) + 1 elsewhere (FP), the confidence in each annotation's score.
-        json_io.write_annotations(
-            preds_dir / f"{name}.json",
-            [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264), score=0.9),
-             Annotation(subject=subject, geometry=BBox(496, 372, 528, 396), score=0.7)],
-            640, 480,
-        )
+    # Predictions, published as one bucket: 1 matching (TP) + 1 elsewhere (FP) per image.
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import published
 
+    published(tmp_path, preds_dir, [
+        {"image": str(images_dir / f"{name}.jpg"), "width": 640, "height": 480,
+         "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.9, 0.7],
+         "labels": [1, 1]} for name in ("img_001", "img_002", "img_003")],
+        scope={"subject": subject, "attribute": None, "id_map": {subject: 0}})
     return tmp_path

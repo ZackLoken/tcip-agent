@@ -40,7 +40,7 @@ def test_segm_metrics_score_mask_overlap():
     mask = torch.zeros((1, 32, 32), dtype=torch.uint8)
     mask[0, 8:24, 8:24] = 1
     target = {"boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),
-              "labels": torch.tensor([1]), "masks": mask}
+              "labels": torch.tensor([1]), "iscrowd": torch.tensor([0]), "masks": mask}
     output = {"boxes": torch.tensor([[8.0, 8.0, 24.0, 24.0]]),
               "labels": torch.tensor([1]), "scores": torch.tensor([0.99]),
               "masks": mask.unsqueeze(0).float()}  # [N, 1, H, W] soft masks
