@@ -139,12 +139,6 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
-    "learning_capture": {
-      "kind": "log",
-      "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": null
-    },
     "model_registry": {
       "kind": "record",
       "frozen": true,

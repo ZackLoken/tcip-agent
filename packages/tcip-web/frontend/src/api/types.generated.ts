@@ -144,6 +144,39 @@ export interface TerminalResizeFrame {
   cols: number;
 }
 
+export interface CreateSessionRequest {
+  provider: string;
+  rows?: number;
+  cols?: number;
+}
+
+export interface LaunchedProgram {
+  provider: string;
+  executable: string;
+  version: string | null;
+}
+
+export interface TerminalLaunch {
+  session_id: string;
+  existing: boolean;
+  launched: LaunchedProgram;
+  ritual: string;
+}
+
+export interface ProviderStatus {
+  id: string;
+  name: string;
+  unavailable_reason: string | null;
+}
+
+export interface TerminalStatus {
+  providers: ProviderStatus[];
+}
+
+export interface SubmitRequest {
+  text: string;
+}
+
 export interface ProjectSummary {
   id: string | null;
   display_name: string | null;
@@ -410,11 +443,11 @@ export interface ConfirmRevisionPayload {
 
 export interface GuiState {
   active_tab: "setup" | "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
-  dataset: DatasetSelection;
   view: ViewState;
   mode: "box" | "polygon" | "point" | "map";
   active_subject: string | null;
   review: ReviewFilters;
+  dataset: DatasetSelection;
 }
 
 export interface DatasetSelection {
@@ -447,19 +480,6 @@ export interface ReviewFilters {
 
 export const GUI_STATE_DEFAULTS: GuiState = {
   "active_tab": "annotate",
-  "dataset": {
-    "dataset_root": null,
-    "subject": null,
-    "date": null,
-    "model_name": null,
-    "image_list": [],
-    "current_image_index": 0,
-    "images_dir": null,
-    "annotations_dir": null,
-    "predictions_dir": null,
-    "label_paths": {},
-    "prediction_paths": {}
-  },
   "view": {
     "scale": 1.0,
     "offset_x": 0.0,
@@ -473,5 +493,18 @@ export const GUI_STATE_DEFAULTS: GuiState = {
     "filter_type": "all",
     "filter_class": "all",
     "detection_idx": 0
+  },
+  "dataset": {
+    "dataset_root": null,
+    "subject": null,
+    "date": null,
+    "model_name": null,
+    "image_list": [],
+    "current_image_index": 0,
+    "images_dir": null,
+    "annotations_dir": null,
+    "predictions_dir": null,
+    "label_paths": {},
+    "prediction_paths": {}
   }
 };

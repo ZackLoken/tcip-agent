@@ -2,7 +2,9 @@
 
 ``routes/_coverage_models.py`` and ``routes/coverage.py`` declare the view-coverage record's
 shape once, in Python; ``routes/review.py`` declares the review verdict's action vocabulary;
-``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies;
+``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies, and
+``routes/terminal.py`` the provider status, the session launch request and answer and the
+submitted request;
 ``routes/projects.py`` declares the project summary and the open, removal and rename request
 shapes; ``routes/results.py`` declares
 the phenology and count export request shapes and the revision confirmation;
@@ -78,13 +80,17 @@ def declared_models() -> list[type[BaseModel]]:
         SegmentTieDisclosure, UnattributedDetectionsBySource,
     )
     from tcip_web.routes.review import ActionPayload
-    from tcip_web.routes.terminal import TerminalInputFrame, TerminalResizeFrame
+    from tcip_web.routes.terminal import (
+        CreateSessionRequest, LaunchedProgram, ProviderStatus, SubmitRequest, TerminalInputFrame,
+        TerminalLaunch, TerminalResizeFrame, TerminalStatus,
+    )
     from tcip_web.routes.training import TrainingMetricFrame, TrainingStatusFrame
 
     return [GridGeometry, StatsSource, WorkingScale, CoverageViewing, CoverageRecord,
             CoveragePayload, CompletenessSetPayload, GridZoomPayload, ActionPayload,
             TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame,
-            TerminalResizeFrame, ProjectSummary, OpenRequest, RemovalRequest, RenameRequest,
+            TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
+            ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest, RemovalRequest, RenameRequest,
             PhenologyPayload,
             AcknowledgmentPayload, ExportCsvPayload, PerImageCountDelivery,
             OrthomosaicPlantCountsDelivery, ExportCountCsvPayload, MatchTolerance,

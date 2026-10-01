@@ -5,11 +5,14 @@ beside a developer's real projects never opens or audits into one.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from tcip_web import terminal as pty_host
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
@@ -39,11 +42,13 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     live_project = new_project(tmp_path)
     workspace.write_last_opened(tmp_path.parent, read_record(live_project)["id"])
     live_lines = len(tcip_store.read_log(audit_log_key(live_project)).records)
-    monkeypatch.setenv("TCIP_TERMINAL_CLI", "tcip-smoke-test-nonexistent-cli")
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
+    row = dataclasses.replace(pty_host.PROVIDERS[0], executable="tcip-smoke-test-nonexistent-cli")
+    monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
 
     scratch_ws = tmp_path.parent.parent / "scratch-workspace"
     mod = _load()
-    result = mod.main(workspace=str(scratch_ws))
+    result = mod.main(row.id, workspace=str(scratch_ws))
 
     assert result == 1
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
@@ -53,8 +58,7 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, monkeypatch):
-    """Coverage: asserts the URL terminal_ws_url builds for a TestClient is absolute and names
-    the same host the client's own base_url does. Never runs the live smoke."""
+    """``terminal_ws_url`` is absolute and names the client's own host."""
     from fastapi.testclient import TestClient
 
     from tcip_web.app import app

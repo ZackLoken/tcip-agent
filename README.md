@@ -109,8 +109,7 @@ python tools/gate_baseline.py --out <dir>
 
 # End-to-end smokes (tools/smoke_*_e2e.py)
 python tools/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)
-python tools/smoke_terminal_e2e.py    # in-app agent terminal (costs one model turn)
-python tools/smoke_fence_e2e.py       # agent permission fence (costs one model turn)
+python tools/smoke_terminal_e2e.py claude   # in-app agent terminal, one provider row (costs one model turn)
 ```
 
 The MCP server starts automatically when an MCP client connects (see `.mcp.json`).
@@ -267,9 +266,9 @@ Not built yet (contributions/experiments welcome):
   georeferencing. Today per-plant identity rests on geolocated capture (`build_plant_mapping`,
   GPS EXIF plus a plant-locations CSV) or a georeferenced orthomosaic; an ungeoreferenced
   dataset has no per-plant path today.
-- Provider/LLM-agnostic support. The platform is built against Claude specifically today (the MCP
-  server plus Claude Code as the driving agent); supporting other providers/agents (Gemini, Codex,
-  open models) alongside it is future work, not a config flag.
+- Provider/LLM-agnostic support. The in-app agent terminal launches rows of a provider table that
+  ships with Claude Code's row alone; a row for another harness (Gemini, Codex, open models) is
+  future work, added once its real flags are read from the installed CLI and one live smoke passes.
 - Cloud storage for centralized data. Project state and imagery live in a local `.tcip/`
   directory and local project folders today; centralized or cloud-backed storage for multi-machine
   or multi-user access is future work.

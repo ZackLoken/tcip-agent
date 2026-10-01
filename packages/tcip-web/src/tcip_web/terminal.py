@@ -1,7 +1,6 @@
-"""Embedded agent terminal: the ``claude`` CLI spawned fenced and directly in a pseudo-terminal
-(ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and
-keystrokes streamed in. ``TCIP_TERMINAL_CMD`` overrides the spawn command; with no override and
-no ``claude`` on PATH the terminal reports unavailable.
+"""Embedded agent terminal: an agent harness from :data:`PROVIDERS` spawned directly in a
+pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes
+streamed out and keystrokes streamed in. ``TCIP_TERMINAL_CMD`` overrides the spawn command.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ import codecs
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -26,9 +27,7 @@ from tcip_mcp.project_paths import repo_root_from_here
 logger = logging.getLogger(__name__)
 
 TERMINAL_CMD_ENV = "TCIP_TERMINAL_CMD"
-TERMINAL_CLI_ENV = "TCIP_TERMINAL_CLI"
 TERMINAL_CWD_ENV = "TCIP_TERMINAL_CWD"
-DEFAULT_CLI = "claude"
 
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
@@ -37,152 +36,147 @@ DEFAULT_COLS = 100
 # isalive() after taskkill returns; the POSIX path bounds its wait() calls with it.
 TERMINATE_WAIT_S = 5
 
-# The committed permission fence for the in-app (breeder-lane) agent. Passed via --settings, which merges its allow/deny lists
-# (union) with the repo's and the user's own settings; a `claude` session with none (this one) is unaffected by the fence file.
-_FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
+WORKSPACE_ARG = "{workspace}"
+MCP_CONFIG_ARG = "{mcp_config}"
 
-_UNAVAILABLE_REASON = (
-    "Claude Code is not available. Install the `claude` CLI and sign in "
-    "(subscription or ANTHROPIC_API_KEY) to enable the in-app agent terminal."
+CLAUDE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
+"""The settings file Claude Code's row passes: its permission lists."""
+
+
+@dataclass(frozen=True)
+class Provider:
+    """One agent harness the terminal launches: the id a session names it by, its display name,
+    the executable looked up on ``PATH``, and the arguments after it, in which an argument equal
+    to :data:`WORKSPACE_ARG` or :data:`MCP_CONFIG_ARG` stands for the backend's workspace or the
+    path of the MCP configuration :func:`write_mcp_config` writes for the session's project.
+
+    A row is listed only for a harness that turns bracketed paste on, since the session-start
+    ritual and staged requests reach the agent only as a :func:`paste` once it has."""
+
+    id: str
+    name: str
+    executable: str
+    args: tuple[str, ...]
+
+    @property
+    def unavailable_reason(self) -> str:
+        """Why this row cannot launch when its executable is not on ``PATH``."""
+        return (f"{self.name} is not available: no `{self.executable}` executable is on PATH. "
+                "Install it and sign in to enable the agent terminal.")
+
+
+PROVIDERS: tuple[Provider, ...] = (
+    Provider(
+        id="claude",
+        name="Claude Code",
+        executable="claude",
+        args=(
+            "--settings", str(CLAUDE_SETTINGS),
+            "--add-dir", WORKSPACE_ARG,
+            "--permission-mode", "default",
+            "--mcp-config", MCP_CONFIG_ARG, "--strict-mcp-config",
+        ),
+    ),
 )
 
 
-def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
-    """Rewrite ``python <path>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
-
-    Matches on basename alone (an ``agent_`` prefix, a ``.py`` suffix); a match is rewritten to
-    ``guard_dir/<basename>`` regardless of the directory the original token pointed at. Anything
-    that doesn't match is returned unchanged. Quoted, forward-slashed paths parse under both
-    cmd.exe and POSIX sh.
-    """
-    for tok in command.split():
-        name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if name.startswith("agent_") and name.endswith(".py"):
-            return f'"{python}" "{guard_dir}/{name}"'
-    return command
-
-
-_PROJECT_HOOKS = frozenset({"agent_session_start.py", "agent_learning_capture.py"})
-"""The hook scripts that act on the session's project, launched with ``--project``."""
-
-
-def _materialize_fence_settings(project: Optional[Path]) -> Optional[Path]:
-    """Write a spawn-time copy of the fence settings with absolute hook commands.
-
-    Rewrites each guard command to an absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this
-    process's ``sys.executable`` + the guard directory), so a hook runs whatever the tool's current
-    cwd; a :data:`_PROJECT_HOOKS` script is also passed ``--project`` naming ``project`` when one
-    is given.
-
-    Returns the materialized file, or ``None`` if the template is missing/unreadable.
-    """
-    if not _FENCE_SETTINGS.is_file():
+def _override_argv() -> Optional[list[str]]:
+    """``TCIP_TERMINAL_CMD`` split into an argv, or ``None`` when it is unset or blank."""
+    override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
+    if not override:
         return None
-    try:
-        cfg = json.loads(_FENCE_SETTINGS.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    if os.name == "nt":
+        return [tok.strip('"') for tok in shlex.split(override, posix=False)]
+    return shlex.split(override)
+
+
+def resolve_terminal_command(provider: Provider) -> Optional[tuple[list[str], bool]]:
+    """The command that launches ``provider`` and whether it is the ``TCIP_TERMINAL_CMD``
+    override: the override's argv when one is set, else the row's executable resolved on ``PATH``
+    followed by its arguments with their placeholders unrendered (see :func:`render_argv`).
+    ``None`` when the executable is not on ``PATH``."""
+    override = _override_argv()
+    if override is not None:
+        return override, True
+    executable = shutil.which(provider.executable)
+    if executable is None:
         return None
-    guard_dir = _FENCE_SETTINGS.parent.as_posix()
-    python = Path(sys.executable).as_posix()
-    # Absolutize every agent_*.py hook across all events (PreToolUse guards, SessionEnd capture,
-    # SessionStart ritual injection): none should depend on cwd, same as the guards themselves.
-    for event_groups in cfg.get("hooks", {}).values():
-        for group in event_groups:
-            for hook in group.get("hooks", []):
-                command = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
-                if project is not None and any(name in command for name in _PROJECT_HOOKS):
-                    command += f' --project "{project.as_posix()}"'
-                hook["command"] = command
-    # A process-private directory (mkdtemp, mode 0700 on POSIX), not a fixed shared-temp name, so the
-    # live fence cannot be pre-created or race-written by another local process before the CLI reads it.
-    try:
-        dest = Path(tempfile.mkdtemp(prefix="tcip_fence_")) / "tcip_agent_fence.settings.json"
-        dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    except OSError:
-        return None
+    return [executable, *provider.args], False
+
+
+def write_mcp_config(project: Optional[Path]) -> Path:
+    """Write a spawn-time MCP configuration that starts this interpreter's ``tcip_mcp`` for
+    ``project`` (for no project when ``None``) and return its path."""
+    args = ["-m", "tcip_mcp", *(["--project", project.as_posix()] if project else [])]
+    config = {"mcpServers": {"tcip": {"command": Path(sys.executable).as_posix(), "args": args}}}
+    dest = Path(tempfile.mkdtemp(prefix="tcip_mcp_")) / "tcip.mcp.json"
+    dest.write_text(json.dumps(config, indent=2), encoding="utf-8")
     return dest
 
 
-def _resolve_fence(project: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
-    """The fenced flags' values: ``(settings_path, workspace_dir)``, or ``(None, None)`` if no
-    fence.
-
-    ``--settings`` applies the committed breeder-lane permission profile, materialized with
-    absolute hook paths; ``--add-dir`` grants the out-of-repo workspace.
-    """
-    if not _FENCE_SETTINGS.is_file():
-        return None, None
+def render_argv(argv: list[str], project: Optional[Path]) -> list[str]:
+    """``argv`` with each :data:`WORKSPACE_ARG` replaced by the backend's workspace and each
+    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes for ``project``."""
     from tcip_web.state import store
 
-    materialized = _materialize_fence_settings(project)
-    if materialized is None:
-        logger.warning(
-            "Could not materialize absolute fence hook paths; falling back to the committed "
-            "template. Its relative hook paths over-deny after a shell cd (fail-safe, but "
-            "friction), check temp-dir writability."
-        )
-    settings_path = materialized or _FENCE_SETTINGS
-    return str(settings_path), str(store.workspace)
+    values = {WORKSPACE_ARG: lambda: str(store.workspace),
+              MCP_CONFIG_ARG: lambda: str(write_mcp_config(project))}
+    return [values[arg]() if arg in values else arg for arg in argv]
 
 
-def _mcp_config(project: Path) -> list[str]:
-    """The flags that start the session's MCP server for ``project`` alone: a spawn-time
-    configuration naming this interpreter's ``tcip_mcp --project <project>``, and
-    ``--strict-mcp-config`` so the repository's own configuration, which names no project, is not
-    loaded beside it."""
-    config = {"mcpServers": {"tcip": {
-        "command": Path(sys.executable).as_posix(),
-        "args": ["-m", "tcip_mcp", "--project", project.as_posix()],
-    }}}
-    dest = Path(tempfile.mkdtemp(prefix="tcip_mcp_")) / "tcip.mcp.json"
-    dest.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    return ["--mcp-config", str(dest), "--strict-mcp-config"]
+_PRIVATE_MODE = re.compile(r"\x1b\[\?([0-9;]*)([hl])")
+_BRACKETED_PASTE = "2004"
 
 
-def resolve_terminal_command(project: Optional[Path]) -> Optional[list[str]]:
-    """Argv for the agent terminal acting on ``project``, or ``None`` when unavailable.
+def bracketed_paste(output: str, enabled: bool) -> bool:
+    """Whether the agent has bracketed paste on after writing ``output``, from ``enabled``."""
+    for params, final in _PRIVATE_MODE.findall(output):
+        if _BRACKETED_PASTE in params.split(";"):
+            enabled = final == "h"
+    return enabled
 
-    Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the ``claude``
-    CLI on PATH. The real CLI is spawned fenced and directly (no wrapping shell), so
-    ``/exit`` ends the process cleanly: ``--settings`` applies the breeder-lane profile (absolute
-    hook paths), ``--add-dir`` grants the workspace, ``--permission-mode default`` surfaces
-    un-allowed actions for approval, and with a ``project`` the MCP server starts for it
-    (:func:`_mcp_config`). With none, the repository's configuration starts a server for no
-    project.
-    """
-    override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
-    if override:
-        if os.name == "nt":
-            return [tok.strip('"') for tok in shlex.split(override, posix=False)]
-        return shlex.split(override)
-    cli = os.environ.get(TERMINAL_CLI_ENV, DEFAULT_CLI)
-    exe = shutil.which(cli)
-    if exe is None:
-        return None
-    argv = [exe]
-    settings_path, ws = _resolve_fence(project)
-    if settings_path:
-        argv += ["--settings", settings_path, "--add-dir", ws or "", "--permission-mode", "default"]
-    if project is not None:
-        argv += _mcp_config(project)
-    return argv
+
+def paste(text: str) -> str:
+    """``text`` as the agent's input: a bracketed paste followed by Enter."""
+    return f"\x1b[200~{text}\x1b[201~\r"
+
+
+_RITUAL_HEADER = "[TCIP session-start ritual] "
+_RITUAL_FRICTION = ("If any mandated action is blocked or errors, that itself is a report_friction, "
+                    "never a silent skip.")
+
+
+def session_ritual(project: Optional[Path]) -> str:
+    """The session-start directive for an agent launched for ``project``, as one line: the
+    project's display name and the ritual to run first when its record reads, the reason when it
+    does not, and what a session with no project can do when ``project`` is ``None``."""
+    from tcip_mcp.project_record import record_fields
+
+    if project is None:
+        return (f"{_RITUAL_HEADER}This session has no project: the GUI had none open when the "
+                "terminal started, so every tool that acts on a project refuses. Create one with "
+                "initialize_project, or open one in the GUI, then restart the terminal to work on "
+                f"it. {_RITUAL_FRICTION}")
+    record = record_fields(project)
+    if record["display_name"] is None:
+        return (f"{_RITUAL_HEADER}This session's project ({project}) has no readable record: "
+                f"{record['record_problem']} File this with report_friction before any project "
+                f"work. {_RITUAL_FRICTION}")
+    return (f"{_RITUAL_HEADER}Project: {record['display_name']} ({project}). Run the ritual "
+            "first: load_project_memory (kind='reports' and kind='retrospectives'), "
+            f"inspect_project, then tcip doctor {project}. {_RITUAL_FRICTION}")
 
 
 _CLI_VERSIONS: dict[str, Optional[str]] = {}
 VERSION_PROBE_TIMEOUT_S = 15
 
 
-def launched_program(argv: list[str]) -> dict:
-    """What the terminal launches: ``{"executable", "version"}``, the executable being ``argv[0]``
-    and the version what that executable declares to ``--version``.
-
-    Only the resolved CLI (no ``TCIP_TERMINAL_CMD`` override in force) is probed; an override is
-    recorded as launched with no version. The bare executable is probed, not the fenced argv.
-    Probed once per executable per process with stdin closed and a time bound, ``None`` when it
-    does not answer cleanly.
-    """
+def launched_program(argv: list[str], override: bool) -> dict:
+    """``{"executable", "version"}`` for ``argv``: its first element, and what that executable
+    declares to ``--version`` (probed once per executable per process, stdin closed, time
+    bounded), ``None`` for an ``override`` or an executable that does not answer cleanly."""
     executable = argv[0]
-    if os.environ.get(TERMINAL_CMD_ENV, "").strip():
+    if override:
         return {"executable": executable, "version": None}
     if executable not in _CLI_VERSIONS:
         version: Optional[str] = None
@@ -205,32 +199,18 @@ def launched_program(argv: list[str]) -> dict:
 
 
 def spawn_env(session_id: str) -> dict[str, str]:
-    """The child's environment: this process's own (Claude Code auth included) plus the terminal
-    session id.
-    """
+    """The child's environment: this process's own plus the terminal session id."""
     return {**os.environ, TERMINAL_SESSION_ENV: session_id}
 
 
 def _prewarm_blocking() -> None:
-    """Warm the controllable part of the cold first-spawn into the OS cache (see ``prewarm``)."""
+    """Import the MCP server's tool graph so the first spawn's server starts from a warm cache."""
     try:
         import importlib
 
-        importlib.import_module("tcip_mcp.server")  # the tool graph the MCP server loads at launch
+        importlib.import_module("tcip_mcp.server")
     except Exception:
         logger.debug("prewarm: tcip_mcp import failed", exc_info=True)
-    if os.name == "nt":
-        try:
-            shell = shutil.which("powershell.exe") or "powershell.exe"
-            # Throwaway PowerShell to warm PowerShell + .NET; output discarded, bounded, best-effort.
-            subprocess.run(
-                [shell, "-NoProfile", "-Command", "$null"],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-        except Exception:
-            logger.debug("prewarm: powershell warm failed", exc_info=True)
 
 
 def prewarm() -> None:
@@ -240,25 +220,15 @@ def prewarm() -> None:
     threading.Thread(target=_prewarm_blocking, name="terminal-prewarm", daemon=True).start()
 
 
-def _pty_backend_available() -> tuple[bool, str]:
+def launch_problem(provider: Provider) -> Optional[str]:
+    """Why ``provider`` cannot launch here (no PTY backend, or its executable is not on
+    ``PATH``), or ``None`` when it can."""
     if os.name == "nt":
         try:
             import winpty  # noqa: F401
-
-            return True, ""
         except ImportError:
-            return False, "pywinpty is not installed (pip install pywinpty)"
-    return True, ""
-
-
-def terminal_status() -> dict:
-    """Preflight for ``GET /api/terminal/status``: ``{available, reason?}``."""
-    ok, why = _pty_backend_available()
-    if not ok:
-        return {"available": False, "reason": why}
-    if resolve_terminal_command(None) is None:
-        return {"available": False, "reason": _UNAVAILABLE_REASON}
-    return {"available": True}
+            return "pywinpty is not installed (pip install pywinpty)"
+    return provider.unavailable_reason if resolve_terminal_command(provider) is None else None
 
 
 def terminal_cwd() -> str:
@@ -295,7 +265,7 @@ class _WinPty:
         # process now owns it (Windows recycles pids aggressively).
         if not self._p.isalive():
             return
-        # /T tree-kill: claude spawns children (its MCP servers) that must not orphan.
+        # /T tree-kill: the agent spawns children (its MCP servers) that must not orphan.
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(self.pid)], capture_output=True, check=False
         )
@@ -309,8 +279,19 @@ class _WinPty:
         """Reader-owned cleanup after EOF (winpty frees its handles internally)."""
 
 
+def _set_winsize(fd: int, rows: int, cols: int) -> None:
+    """Set the POSIX terminal on ``fd`` to ``rows`` by ``cols``."""
+    if sys.platform == "win32":
+        raise AssertionError("_set_winsize is POSIX-only")
+    import fcntl
+    import struct
+    import termios
+
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
 class _PosixPty:
-    """stdlib pty + subprocess (used on Linux CI and any POSIX deployment)."""
+    """The stdlib ``pty`` plus a subprocess."""
 
     # __init__'s body is unreachable to a Windows-targeted mypy run (its sys.platform guard),
     # so these are declared here rather than left to its own inference.
@@ -323,14 +304,10 @@ class _PosixPty:
         # the guard also tells mypy the POSIX-only stdlib members below are never checked there.
         if sys.platform == "win32":
             raise AssertionError("_PosixPty is POSIX-only")
-        import fcntl
         import pty
-        import struct
-        import termios
 
         self._master, slave = pty.openpty()
-        winsz = struct.pack("HHHH", rows, cols, 0, 0)
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, winsz)
+        _set_winsize(slave, rows, cols)
         self._proc = subprocess.Popen(
             argv,
             cwd=cwd,
@@ -355,14 +332,7 @@ class _PosixPty:
         os.write(self._master, data.encode("utf-8"))
 
     def resize(self, rows: int, cols: int) -> None:
-        if sys.platform == "win32":
-            raise AssertionError("_PosixPty is POSIX-only")
-        import fcntl
-        import struct
-        import termios
-
-        winsz = struct.pack("HHHH", rows, cols, 0, 0)
-        fcntl.ioctl(self._master, termios.TIOCSWINSZ, winsz)
+        _set_winsize(self._master, rows, cols)
 
     def isalive(self) -> bool:
         return self._proc.poll() is None

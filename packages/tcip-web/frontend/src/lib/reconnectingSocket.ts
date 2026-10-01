@@ -1,28 +1,22 @@
 /**
- * One reconnecting-WebSocket shape, shared by every socket this app opens: capped exponential
- * backoff on an unexpected close, a guard against stacking a second attempt while one is already
- * open or connecting, supersession so a replaced socket's late events are no-ops, and a
- * restartable start/stop pair. A caller keeps only what differs: its own URL, its own frame
- * handling (raw text here; JSON parsing, if any, is the caller's job), and whether/when a frame
- * marks the stream terminal.
+ * A reconnecting WebSocket: capped exponential backoff on an unexpected close, at most one
+ * attempt open or connecting, a replaced socket's late events ignored, and a restartable
+ * start/stop pair. Frames arrive as raw text.
  */
 
 export const MAX_BACKOFF_MS = 15_000;
 
 export interface ReconnectingSocketOptions {
-  /** A fixed URL, or a provider called before each attempt (including each reconnect); async so
-   *  a caller can create a server-side session first and open the socket only once it resolves. */
+  /** A fixed URL, or a provider, possibly async, called before each attempt and reconnect. */
   url: string | (() => string | Promise<string>);
   onMessage: (data: string) => void;
   /** True once a frame marks the stream over; the helper then stops reconnecting. */
   isTerminal?: (data: string) => boolean;
-  /** True when a frame counts as the stream working, resetting the backoff to its floor. A
-   *  socket with no such hook resets it on open alone, the default every other socket uses. */
+  /** True when a frame resets the backoff to its floor; without it, opening resets it. */
   resetsBackoff?: (data: string) => boolean;
   onConnecting?: () => void;
   onOpen?: () => void;
-  /** `opened` is whether this attempt ever reached onopen, so a caller can tell a close-before-
-   *  open (or a code like 1008) apart from a drop mid-session. */
+  /** `opened` is whether this attempt ever reached onopen. */
   onClose?: (event: CloseEvent, opened: boolean) => void;
   onError?: () => void;
   maxBackoffMs?: number;
@@ -36,11 +30,7 @@ export interface ReconnectingSocket {
   send(data: string): void;
 }
 
-/**
- * Builds the `isTerminal`/`onMessage` pair for a caller whose frames are JSON and whose
- * terminal check reads the same parsed frame the handler does, so a frame is parsed once
- * instead of once per hook.
- */
+/** The `onMessage`/`isTerminal`/`resetsBackoff` hooks for JSON frames, each frame parsed once. */
 export function jsonFrameHandlers<T>(
   onMessage: (frame: T) => void,
   isTerminal?: (frame: T) => boolean,

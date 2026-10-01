@@ -87,6 +87,8 @@ export const ROUTES = {
   postTerminalSessions: "/api/terminal/sessions",
   postTerminalSessionsBySessionIdRestart: (sessionId: string) =>
     `/api/terminal/sessions/${encodeURIComponent(sessionId)}/restart`,
+  postTerminalSessionsBySessionIdSubmit: (sessionId: string) =>
+    `/api/terminal/sessions/${encodeURIComponent(sessionId)}/submit`,
   postTrainingCompare: "/api/training/compare",
   postTrainingCompareBest: "/api/training/compare/best",
   postTrainingRuns: "/api/training/runs",

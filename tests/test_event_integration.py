@@ -1,8 +1,5 @@
-"""Integration tests for the push_panel_event HTTP bridge and tool output schemas.
-
-``push_panel_event`` POSTs to the tcip-web FastAPI backend, which broadcasts to any
-subscribed WebSocket clients. No file bridge under ``.tcip/events/`` is involved.
-"""
+"""``push_panel_event`` posting to the backend, which broadcasts to subscribed WebSocket clients,
+and the output shapes of the tools that push."""
 
 from __future__ import annotations
 
@@ -70,9 +67,7 @@ class TestPostPanelEventRoute:
         self, client: TestClient, project_id: str
     ) -> None:
         """A subscriber connected to a panel receives events pushed after it joined, in the
-        order they were posted: the live half of what the deleted recent-events route served
-        over HTTP to a reconnecting browser. The project was just opened, so nothing is retained
-        to replay first."""
+        order they were posted."""
         with client.websocket_connect("ws://127.0.0.1/ws/panel/tuning") as ws:
             client.post(
                 "/api/events/tuning",
@@ -90,10 +85,8 @@ class TestPostPanelEventRoute:
     def test_events_posted_before_connecting_are_replayed_on_connect(
         self, client: TestClient, project_id: str
     ) -> None:
-        """The ring buffer's whole reason to exist: a browser that connects after events
-        already landed still sees them, in the order they were posted, replayed on the
-        connection itself (the deleted GET recent-events route's job, now served by the
-        on-connect loop at connect time rather than over a separate HTTP call)."""
+        """A browser that connects after events landed receives them on connect, in the order
+        they were posted."""
         panel = "results"
         client.post("/api/events/results",
                     json={"project_id": project_id, "event_type": "count_ready", "data": {"count": 11}})
@@ -181,13 +174,8 @@ class TestPostPanelEventRoute:
         self, client: TestClient, opened_project: Path, project_id: str, data_dir: Path,
         monkeypatch,
     ) -> None:
-        """The state an agent reads back is driven by the event the focus_human_attention tool
-        really posts.
-
-        The payload is taken from the producer rather than written here, so the two halves of the
-        bridge are held to the same key names: a producer and a consumer that stop agreeing on
-        what a field is called cannot both keep passing.
-        """
+        """The event ``focus_human_attention`` posts, delivered to the backend, sets the
+        advisory state it names."""
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
 
@@ -216,7 +204,7 @@ class TestPostPanelEventRoute:
 
 
 class TestPushPanelDataTool:
-    """Verify the MCP tool posts via HTTP and aliases legacy panel names."""
+    """``push_panel_event`` posts over HTTP and answers without raising."""
 
     def test_no_subscribers_when_backend_down(self, project: Path, monkeypatch) -> None:
         """Backend not running → graceful 'no_subscribers' status."""
@@ -288,12 +276,7 @@ class TestPortDiscovery:
             resolve_web_port(tmp_path.parent)
 
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(self) -> None:
-        """The reader owns the declaration and the backend imports it.
-
-        The reader is in the MCP package and cannot import the web package, so a declaration on
-        each side would be two stores wearing one name and whichever imported first would decide
-        where the handoff lands.
-        """
+        """The port store is declared in ``web_client`` and the backend addresses it there."""
         import tcip_store as ts
         from tcip_mcp import web_client
         from tcip_web import __main__ as web_main
@@ -310,12 +293,7 @@ class TestPortDiscovery:
 
 
 class TestSharedWebStateDeclarations:
-    """Every document both packages touch is declared once, where the MCP side can import it.
-
-    An MCP tool reads each of these and cannot import ``tcip_web``, so a declaration on each
-    side would be two stores wearing one name and whichever imported first would decide where
-    the document lands.
-    """
+    """Every document both packages touch is declared once, in ``web_client``."""
 
     def test_the_gui_snapshot_is_one_declaration_that_both_packages_reach(self) -> None:
         import tcip_store as ts
@@ -338,32 +316,26 @@ class TestSharedWebStateDeclarations:
             assert ts.get_descriptor(store).declared_in == web_client.__name__
 
     def test_the_web_only_stores_are_declared_where_the_catalog_reaches_them(self) -> None:
-        """The stores only the web package reads are declared beside the shared ones, so the
-        catalog names them without importing the web package, and each web-side reader addresses
-        the same declaration rather than one of its own."""
+        """The web-only stores are declared in ``web_client`` and the web routes address them
+        there."""
         import tcip_store as ts
         from tcip_mcp import web_client
         from tcip_web.routes import sessions
 
         assert sessions.annotation_stats_key is web_client.annotation_stats_key
-        for store in (web_client.LEARNING_CAPTURE_STORE, web_client.ANNOTATION_STATS_STORE):
-            assert ts.get_descriptor(store).declared_in == web_client.__name__
+        assert ts.get_descriptor(web_client.ANNOTATION_STATS_STORE).declared_in == (
+            web_client.__name__)
 
 
-# ── Tool output schemas (unchanged from pre-HTTP migration) ─────────────
+# ── Tool output schemas ─────────────────────────────────────────────────
 
 
 class TestTrainingToolOutputSchema:
     def test_launch_training_returns_the_experiment_id_its_artifacts_are_nested_under(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
-        """The identifier a launch hands back is the run the platform registered, and the
-        directory that run writes into is that identifier's own.
-
-        A caller holds one string afterwards; polling status with it and reading metrics under it
-        have to reach the same run, so the two are checked against the registry rather than
-        against each other.
-        """
+        """The identifier a launch answers is the registered run, and its output directory is
+        that run's own."""
         pytest.importorskip("torchvision")
         monkeypatch.chdir(tmp_path)
 
@@ -389,8 +361,7 @@ class TestTrainingToolOutputSchema:
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
         class _NoChild:
-            """Stands in for the training subprocess: this test is about what the launch reports,
-            not about the training body, so no child is spawned."""
+            """Stands in for the training subprocess; no child is spawned."""
 
             pid = 4242
 
@@ -420,10 +391,8 @@ class TestTrainingToolOutputSchema:
     def test_monitor_training_answers_for_the_run_it_was_asked_about(
         self, tmp_path: Path,
     ) -> None:
-        """A status read carries the identifier of the run it describes, plus that run's own
-        progress, so a caller tracking several runs at once can tell the answers apart. An
-        identifier that names no run is refused rather than answered for some other run.
-        """
+        """A status read names the run it describes and that run's own progress; an identifier
+        naming no run is refused."""
         from tcip_mcp.tools import training_tools
         from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
@@ -447,12 +416,7 @@ class TestInferenceToolOutputSchema:
     def test_run_inference_reports_back_the_operating_point_it_was_handed(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
-        """A dry run reports the operating point a real pass would measure at, each dimension as
-        the caller named it.
-
-        Every value here is distinct, so a dimension reported in another's place is visible rather
-        than hidden behind two fields that happen to share a default.
-        """
+        """A dry run reports each operating-point dimension as the caller named it."""
         from tcip_mcp.tools.inference_tools import run_inference
         from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -478,13 +442,8 @@ class TestInferenceToolOutputSchema:
     def test_run_inference_writes_one_file_per_image_carrying_that_images_detections(
         self, tmp_path: Path, monkeypatch, seed_bud_trait_spec,
     ) -> None:
-        """A prediction bucket holds one file per image the pass saw, named for that image's own
-        stem and holding that image's own detections.
-
-        The three images here have three different detection counts, one of them zero, so a bucket
-        that pairs a file to the wrong image, or drops the image that found nothing, does not read
-        as correct.
-        """
+        """A prediction bucket holds one file per image the pass saw, named for its stem and
+        holding its own detections, an image with none included."""
         import tcip_mcp.tools.inference_tools as itools
         from tests._binding_fixtures import calibrated_run_fields, run_result
         from tests._verified_checkpoint_fixtures import project_checkpoint
@@ -587,9 +546,7 @@ def test_post_panel_event_opt_in_bypasses_suppression(project, monkeypatch):
 
 
 def test_post_panel_event_returns_the_backends_response_body(opened_project, monkeypatch):
-    """``post_panel_event`` reads the real HTTP response rather than discarding it: a
-    ``urllib`` round trip against a live backend, since the discarded read this guards is
-    specific to that transport, not the ASGI test client the rest of this file uses."""
+    """``post_panel_event`` against a served backend answers with the backend's response body."""
     import socket
     import threading
     import time

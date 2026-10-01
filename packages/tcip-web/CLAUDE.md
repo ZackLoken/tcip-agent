@@ -10,9 +10,9 @@ src/tcip_web/
   routes/          # annotate, canvas, coverage, dataset, fs, images, inference, meta,
                     # projects, results, review, sessions, subjects, terminal, training, tuning, validation
   app.py, state.py, jobstore.py, paths.py, identity.py, __main__.py
-  terminal.py + agent_fence_rules.py + agent_bash_guard.py + agent_powershell_guard.py
-    + agent_session_start.py
-                    # the breeder-facing in-app agent terminal and its permission fence
+  terminal.py + agent_terminal.settings.json
+                    # the breeder-facing in-app agent terminal, its provider table and the
+                    # Claude row's permission lists
 frontend/src/
   api/  components/  hooks/  lib/  store/  tabs/  test/
 ```
@@ -28,47 +28,33 @@ npm run format:check && npm run lint && npm run typecheck && npm test && npm run
 
 Use the `frontend-design` skill for IA/visual work.
 
-## The in-app agent terminal is a separate, already-hardened fence
+## The in-app agent terminal launches a provider row
 
-`terminal.py` spawns a real `claude` process for the browser-facing "Agent" terminal, with
-`--settings` pointing at a spawn-time materialized copy of the committed
-`packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (absolute hook paths; the
-committed file itself only if materialization fails), a permission fence (an explicit deny list
-over platform internals plus a narrow allowlist, `Bash`/`PowerShell` guards, a `SessionStart`
-ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-facing session; a
-write that is neither denied nor allow-listed reaches a human approval prompt rather than being
-auto-denied. `--settings` merges its permission lists (union) with the repo root's own,
-gitignored, developer-local `.claude/settings.json` and the user's own settings rather than
-replacing them: list-valued settings keys merge across sources
-(code.claude.com/docs/en/configuration). A broad allow entry in the developer's own user
-settings therefore widens the breeder-lane fence too. The fence is
-deny-list first. A `claude` session launched without `--settings` is unaffected by the fence
-file. Don't extend or edit that fence file without calling it out explicitly.
+`terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch.
+Session create and restart name a row by its exact id; the status route lists every row with the
+reason it cannot launch, if any. A row is added only after its harness's real flags are read from
+the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes.
 
-Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
-the version it declares to `--version`, probed once per process on the resolved CLI only and never
-on a `TCIP_TERMINAL_CMD` override) on the create and restart routes, with one
+Claude's row passes `CLAUDE_SETTINGS`: an explicit deny list over platform internals plus a narrow
+allowlist, which Claude Code's own permission system enforces, its academic WebFetch grants
+generated from the `cv-research` document by `tools/generate_harness_discovery.py`. Those
+permission lists merge (union) with the repo root's own, gitignored, developer-local `.claude/settings.json` and
+the user's own settings rather than replacing them: list-valued settings keys merge across sources
+(code.claude.com/docs/en/configuration). A broad allow entry in the developer's own user settings
+therefore widens the breeder lane too. Don't extend or edit that file without calling it out
+explicitly.
+
+Each launch records what it ran: create and restart answer a `TerminalLaunch` (the provider id,
+the executable and the version it declares, never probed on a `TCIP_TERMINAL_CMD` override, and
+the session-start ritual `session_ritual` builds for the open project), with one
 `agent_terminal_started` line in the open project's audit log per launch (none when no project is
-open). The MCP server that terminal starts is started for the open project. Which agent harness that program is comes
-from the harness's own MCP handshake, not from here. The child is spawned with
-`TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads it and stamps
-it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside the harness name
-and version the handshake declared. Declarations, all of them; nothing refuses on them.
-
-That file's `Edit(...)` deny rules are the one declaration of the platform-protected set: both shell
-guards classify each write target through `agent_fence_rules.classify()`, which derives the protected
-directories, single files, and project-data segments from those deny rules
-(`_declared_targets()`), so a path added there fences both shells and neither guard carries a path
-list to keep in step. A guard that cannot read the declaration denies rather than falling through.
-
-The classifier normalizes a target (strips shell quotes, unifies separators, collapses `..`,
-handles Windows drive-relative forms) and anchors the repo rules to the repo root, so a breeder's own
-same-named project file (their `README.md`) is not caught by basename. The protected set is a
-function of deployment mode (`fence_mode()`): dev protects the repo tree plus breeder data;
-production, an installed package behind an OS sandbox, protects only breeder data. Mode defaults to
-dev unless `TCIP_FENCE_MODE=prod`. The guard is airtight only on the one no-prompt path (a redirect
-riding an allow-listed read prefix); its in-place-writer coverage is defense-in-depth behind the
-human approval prompt, and a `cd`-then-relative write is an accepted residual of a cwd-blind guard.
+open). The rail prints the ritual; the session delivers it, then the requests the rail submits,
+to the agent under the condition `Provider` states. Which agent harness
+the program is comes from the harness's own MCP handshake, not from here. The child is spawned
+with `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads it and
+stamps it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside the
+harness name and version the handshake declared. Declarations, all of them; nothing refuses on
+them.
 
 ## Conventions specific to this package
 

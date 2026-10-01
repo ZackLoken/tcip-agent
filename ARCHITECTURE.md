@@ -240,11 +240,6 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 |---|---|---|---|
 | packages/tcip-web/src/tcip_web/__init__.py | TCIP Web: FastAPI server for the ML pipeline. | 0 | 0 |
 | packages/tcip-web/src/tcip_web/__main__.py | Entry point: ``python -m tcip_web``. | 7 | 0 |
-| packages/tcip-web/src/tcip_web/agent_bash_guard.py | PreToolUse Bash guard for the fenced in-app agent terminal. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/agent_fence_rules.py | The protected set, target normalization and refusal text both in-app agent shell guards share. | 0 | 2 |
-| packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: appends a session-boundary record to the session's project, ``<project>/.tcip/learning_capture.jsonl``. | 3 | 0 |
-| packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the session's project. | 2 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built frontend and the health probe; every domain route is mounted from ``tcip_web.routes``. | 10 | 6 |
 | packages/tcip-web/src/tcip_web/cli/__init__.py | ``tcip``: the operator console command, dispatching to one subcommand per operator command. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/cli/__main__.py | Entry point for ``python -m tcip_web.cli``. | 1 | 0 |
@@ -276,7 +271,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: relaunch, cancel, list and per-trial visibility, each read off the sweep's own directory under ``.tcip/hpo`` (``training_tools.sweep_record`` and ``read_sweep``). | 10 | 1 |
 | packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 14 | 1 |
 | packages/tcip-web/src/tcip_web/state.py | The web backend's own state: the workspace it serves, the project it has open, that project's live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's ``.tcip/state/gui.json`` on every change) and the panel events it retains for a browser that connects late. | 2 | 21 |
-| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: the ``claude`` CLI spawned fenced and directly in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and keystrokes streamed in. | 3 | 3 |
+| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: an agent harness from :data:`PROVIDERS` spawned directly in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and keystrokes streamed in. | 3 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 2 |
 
 ## tcip-web-frontend
@@ -298,7 +293,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/api/streams.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/subjects.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/subjects.ts | Dataset subject-registry + per-image-status API helpers. | 3 | 22 |
-| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (the real Claude Code CLI in a PTY). | 2 | 2 |
+| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (a provider row's harness in a PTY). | 2 | 2 |
 | packages/tcip-web/frontend/src/api/training.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 4 | 12 |
 | packages/tcip-web/frontend/src/api/tuning.test.ts | (none found) | 1 | 0 |
@@ -348,7 +343,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TabBanner.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TabHeading.tsx | (none found) | 2 | 8 |
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 5 | 2 |
+| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: a real agent harness from the backend's provider table, embedded. | 5 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TopBar.test.tsx | (none found) | 2 | 0 |
@@ -520,9 +515,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
 | tools/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | tools/serve_capture_app.py | Start or stop the served web app under a scratch environment, for a GUI capture harness. | 0 | 0 |
-| tools/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 5 | 0 |
 | tools/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 12 | 0 |
-| tools/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 4 | 0 |
+| tools/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against one provider row's real harness. | 4 | 0 |
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 | tools/worktree_gate.py | Run ruff, mypy and pytest inside a worktree, its own editable-install resolution proven first. | 0 | 0 |
@@ -596,10 +590,6 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-mcp | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/__init__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/__main__.py |
-| tcip-web | packages/tcip-web/src/tcip_web/agent_bash_guard.py |
-| tcip-web | packages/tcip-web/src/tcip_web/agent_learning_capture.py |
-| tcip-web | packages/tcip-web/src/tcip_web/agent_powershell_guard.py |
-| tcip-web | packages/tcip-web/src/tcip_web/agent_session_start.py |
 | tcip-web | packages/tcip-web/src/tcip_web/cli/__main__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/cli/distill_learnings.py |
 | tcip-web-frontend | packages/tcip-web/frontend/src/App.test.tsx |
@@ -706,7 +696,6 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tools | tools/list_tools.py |
 | tools | tools/prove_test_fails_before.py |
 | tools | tools/serve_capture_app.py |
-| tools | tools/smoke_fence_e2e.py |
 | tools | tools/smoke_phenology_e2e.py |
 | tools | tools/smoke_terminal_e2e.py |
 | tools | tools/verify_skill_tools.py |
@@ -794,11 +783,11 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `report_friction` | `meta_tools.py:214` | yes | Log structured friction when you get stuck, confused, or surprised. |
-| `load_project_memory` | `meta_tools.py:269` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `read_audit_log` | `meta_tools.py:332` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
-| `write_retrospective` | `meta_tools.py:497` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:594` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `report_friction` | `meta_tools.py:196` | yes | Log structured friction when you get stuck, confused, or surprised. |
+| `load_project_memory` | `meta_tools.py:251` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
+| `read_audit_log` | `meta_tools.py:314` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
+| `write_retrospective` | `meta_tools.py:476` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:573` | yes | Record that this project's friction reports and retrospectives were reviewed, resetting |
 
 ### knowledge_tools.py (1 tool)
 
@@ -1057,10 +1046,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/status` | `get_status` | `routes/terminal.py:282` |
-| POST | `/sessions` | `create_session` | `routes/terminal.py:311` |
-| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:338` |
-| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:366` |
+| GET | `/status` | `get_status` | `routes/terminal.py:357` |
+| POST | `/sessions` | `create_session` | `routes/terminal.py:404` |
+| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:433` |
+| POST | `/sessions/{session_id}/submit` | `submit_to_session` | `routes/terminal.py:458` |
+| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:477` |
 
 ### routes/training.py, prefix `/api/training` (10 HTTP + 1 WS)
 
@@ -1202,7 +1192,7 @@ binds the requested host and port; whether an arrival through a non-loopback add
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
 296`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
 `trust_boundary.py:135`). The same middleware applies one Origin policy
-(`origin_allowed`, `trust_boundary.py:263`) to every WebSocket scope and to every HTTP scope
+(`origin_allowed`, `trust_boundary.py:267`) to every WebSocket scope and to every HTTP scope
 whose method is state-changing (`STATE_CHANGING_METHODS`, `trust_boundary.py:41`), rather than
 leaving each handler to call it for itself.
 
@@ -1488,7 +1478,7 @@ Project-scoped: the training envelope's open/close events
 (`pipelines/training/envelope.py`), the model registry's write event (`model_registered`,
 `model_registry.py`), a calibration curve's
 first write (`calibration_curve_written`, `tools/inference_tools.py`'s `keep_calibration_curve`),
-and `routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:76`). The `@audited(scope_arg=...)`
+and `routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:99`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: two GUI route writers passing the dataset root their own guard resolved
@@ -1797,14 +1787,14 @@ every declared document (`test_declared_stamp_filenames_cover_every_declared_doc
 ## 19. `.tcip/state/gui.json`, live GUI state snapshot
 
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
-`packages/tcip-mcp/src/tcip_mcp/web_client.py:83`.
+`packages/tcip-mcp/src/tcip_mcp/web_client.py:65`.
 
-Writer: `write_gui_snapshot`, `tcip_mcp/web_client.py:334`, called by `StateStore.mutate`
+Writer: `write_gui_snapshot`, `tcip_mcp/web_client.py:284`, called by `StateStore.mutate`
 (`tcip_web/state.py:170`) for the project open when the change is made, before the change is
 held; a write that fails raises and the change is not held. The store is declared
 `durable=False`: losing the last snapshot costs a re-selection, not history.
 
-Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py:347`, run by `StateStore.open_project`
+Reader: `read_gui_snapshot`, `tcip_mcp/web_client.py:297`, run by `StateStore.open_project`
 (`tcip_web/state.py:101`) each time a project is opened and by the MCP `view_gui_state` tool; a
 snapshot that does not decode as its whole shape raises.
 
@@ -2107,14 +2097,14 @@ end.
 ## S03. Backend port discovery file .tcip/state/web_port.txt
 
 Must agree: the MCP process finds the port the web backend actually bound.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:39` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:54`, is the one address, read at `web_client.py:346`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:26` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:41`, is the one address, read at `web_client.py:342`).
 Side B: `packages/tcip-web/src/tcip_web/__main__.py:51` (`replace(backend_port_key(workspace), str(port))`, publishing through that same key under the workspace `main` resolved once, and raising rather than swallowing a failure, since the fallback silently misses an OS-picked port).
 Phase 3 verdict: single.
 
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:367` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:317` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:27` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
@@ -2185,19 +2175,19 @@ Phase 3 verdict: single. An HPO trial is a run directory, so its log is the same
 ## S10. Live GUI state .tcip/state/gui.json  <!-- queued: P5-284 unify -->
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:334` (`def write_gui_snapshot(`, the one writer, through the one address `gui_snapshot_key`, which `StateStore.mutate` in `tcip_web/state.py` calls).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:284` (`def write_gui_snapshot(`, the one writer, through the one address `gui_snapshot_key`, which `StateStore.mutate` in `tcip_web/state.py` calls).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:213` (`state = read_gui_snapshot(project)`, the one reader, which the backend's own `open_project` also calls).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json, under the backend's open project
 
-Must agree: the push route writes canvas_live.json/canvas_shapes.json under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the documents through one locator pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:117`; `canvas_geometry_key`, `web_client.py:126`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
+Must agree: the push route writes canvas_live.json/canvas_shapes.json under the project the backend has open, and capture_live_canvas reads them from the project its MCP server was started for, so a capture reads the GUI's live canvas only while the two are the same project. Both sides address the documents through one locator pair (`canvas_meta_key`, `packages/tcip-mcp/src/tcip_mcp/web_client.py:95`; `canvas_geometry_key`, `web_client.py:100`). The push carries the project id the browser drew for (`packages/tcip-web/src/tcip_web/routes/canvas.py:57`, `def push_canvas_state(`), compared with the open project's own id (`StateStore.project_id`, `packages/tcip-web/src/tcip_web/state.py:108`) before anything is written, and a panel event from the MCP side carries its project's id the same way (`web_client.py:286`), delivered only when that project is open.
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
 
 Must agree: the GUI reader finds, decodes and orders what the MCP writer produced.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:169` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, `meta_tools.py:202`, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:151` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, `meta_tools.py:184`, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
 Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:20` (`get_reports`) and `routes/meta.py:42` (`get_retrospectives`), both routes importing those MCP-side enumerators directly and presenting the rows they return, rather than walking a directory of their own.
 Phase 3 verdict: single.
 
@@ -2457,8 +2447,8 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:242` (`class GuiState(BaseModel):`).
-Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:411` (`export interface GuiState {`), generated from Side A by `tools/generate_frontend_types.py` and re-exported by `store/types.ts`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:202` (`class GuiState(_GuiFields):`).
+Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:444` (`export interface GuiState {`), generated from Side A by `tools/generate_frontend_types.py` and re-exported by `store/types.ts`.
 Phase 3 verdict: single.
 
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
@@ -2471,8 +2461,8 @@ Phase 3 verdict: duplicated.
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
-Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:365` (`@router.websocket("/ws/{session_id}")`).
-Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:318` (`send({ type: "input", data });`).
+Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:476` (`@router.websocket("/ws/{session_id}")`).
+Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:302` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
@@ -2520,7 +2510,7 @@ Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:177` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:127` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:17` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
@@ -2545,27 +2535,6 @@ Side A: `packages/tcip-web/src/tcip_web/paths.py:41`
 (`def allowed_roots() -> list[Path]:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:76` (`p = allowed_path(path)`, the one adapter every route shares, `paths.py:147`).
 Phase 3 verdict: single.
-
-## S61. Bash guard and PowerShell guard protected-path sets
-
-Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:313` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
-Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:147` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
-Phase 3 verdict: single.
-
-## S62. Guard hooks against the fence settings deny list
-
-Must agree: what the tool-level deny list blocks and what the shell guards block cover the same paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (`permissions.deny` lists `Edit(packages/**)` and similar).
-Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:128` (`def _declared_targets() -> "tuple[list[str], list[str], list[str]]":`, which splits those deny rules into the sets `classify` fences).
-Phase 3 verdict: single.
-
-## S63. Fence settings materialization for the spawned terminal  <!-- queued: P5-328 unify -->
-
-Must agree: the hook command strings in the committed profile resolve to real guard files from whatever cwd the terminal starts in.
-Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (hook commands are repo-relative).
-Side B: `packages/tcip-web/src/tcip_web/terminal.py:69` (`def _materialize_fence_settings(project: Optional[Path]) -> Optional[Path]:`).
-Phase 3 verdict: duplicated.
 
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
@@ -2599,14 +2568,12 @@ Phase 3 verdict: duplicated.
 
 ## Totals
 
-64 of the 67 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict;
-S01, S02 and S60 were retired, S01 and S02 with the process-wide state root and the workspace
-marker they compared. By verdict:
+61 seams are listed above. By verdict:
 
-- `duplicated`: 22 seams.
-- `single`: 40 seams (S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,
+- `duplicated`: 21 seams.
+- `single`: 38 seams (S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,
   S21, S22, S23, S26, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S39, S40, S44,
-  S45, S46, S53, S58, S59, S61, S62, S66).
+  S45, S46, S53, S58, S59, S66).
 - `restated-in-test`: 2 seams (S25, S57).
 
-40 of 64 seams (63%) hold their agreement in a single implementation.
+38 of 61 seams (62%) hold their agreement in a single implementation.

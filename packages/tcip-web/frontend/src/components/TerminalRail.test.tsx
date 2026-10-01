@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-// xterm renders into canvas/DOM measurement APIs jsdom doesn't have; mock the
-// emulator and its addons; the rail's own logic (status gate, session wiring,
-// open/close) is what these tests pin. vi.hoisted so the class exists when the
-// hoisted vi.mock factories run.
+// jsdom lacks xterm's canvas and measurement APIs, so the emulator and its addons are mocked;
+// vi.hoisted makes the class exist when the hoisted vi.mock factories run.
 const { termInstances, MockTerminal } = vi.hoisted(() => {
   class MockTerminal {
     static instances: MockTerminal[] = [];
@@ -21,9 +19,6 @@ const { termInstances, MockTerminal } = vi.hoisted(() => {
     getSelection = vi.fn(() => "");
     hasSelection = vi.fn(() => false);
     clearSelection = vi.fn();
-    scrollLines = vi.fn();
-    input = vi.fn();
-    parser = { registerCsiHandler: vi.fn(() => ({ dispose: vi.fn() })) };
     attachCustomKeyEventHandler = vi.fn();
     onData = vi.fn((_cb: (data: string) => void) => ({ dispose: vi.fn() }));
     onResize = vi.fn(() => ({ dispose: vi.fn() }));
@@ -47,7 +42,8 @@ vi.mock("@/api/terminal", () => ({
   terminalApi: {
     status: vi.fn(),
     createSession: vi.fn(),
-    restart: vi.fn().mockResolvedValue({ session_id: "t1", alive: true }),
+    restart: vi.fn(),
+    submit: vi.fn(),
   },
   terminalWsUrl: (id: string) => `ws://test/api/terminal/ws/${id}`,
 }));
@@ -86,14 +82,42 @@ vi.stubGlobal(
   },
 );
 
+const RITUAL = "[TCIP session-start ritual] Project: Demo. Run the ritual first.";
+const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
+const LAUNCHED = { provider: "harness", executable: "/bin/harness", version: null };
+const LAUNCH = { session_id: "t1", existing: false, launched: LAUNCHED, ritual: RITUAL };
+
 afterEach(cleanup);
 beforeEach(() => {
   termInstances.length = 0;
   MockWebSocket.instances.length = 0;
+  useStore.setState({ pendingTerminalMessages: [] });
   useStore.getState().setTerminalOpen(true);
-  vi.mocked(terminalApi.status).mockResolvedValue({ available: true });
-  vi.mocked(terminalApi.createSession).mockResolvedValue({ session_id: "t1", existing: false });
+  vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER] });
+  vi.mocked(terminalApi.createSession).mockResolvedValue(LAUNCH);
+  vi.mocked(terminalApi.restart).mockResolvedValue(LAUNCH);
+  vi.mocked(terminalApi.submit).mockReset().mockResolvedValue({});
 });
+
+function submitted(): [string, string][] {
+  return vi.mocked(terminalApi.submit).mock.calls.map(([id, { text }]) => [id, text]);
+}
+
+/** A promise and the function that settles it, for an answer the test releases itself. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((settle) => (resolve = settle));
+  return { promise, resolve };
+}
+
+/** Wait for the rail's `index`th socket and open it the way a live connection opens. */
+async function openSocket(index = 0): Promise<MockWebSocket> {
+  await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(index));
+  const ws = MockWebSocket.instances[index];
+  ws.readyState = MockWebSocket.OPEN;
+  act(() => ws.onopen?.());
+  return ws;
+}
 
 describe("TerminalRail", () => {
   it("renders nothing when the rail is closed", () => {
@@ -102,13 +126,12 @@ describe("TerminalRail", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the unconfigured state when Claude Code is unavailable", async () => {
+  it("shows the row's own reason when its harness is unavailable", async () => {
     vi.mocked(terminalApi.status).mockResolvedValue({
-      available: false,
-      reason: "Claude Code is not available.",
+      providers: [{ ...PROVIDER, unavailable_reason: "A harness is not available: no `h`." }],
     });
     render(<TerminalRail />);
-    expect(await screen.findByText(/Claude Code is not available/)).toBeInTheDocument();
+    expect(await screen.findByText(/A harness is not available/)).toBeInTheDocument();
     expect(terminalApi.createSession).not.toHaveBeenCalled();
   });
 
@@ -117,7 +140,7 @@ describe("TerminalRail", () => {
     render(<TerminalRail />);
     expect(await screen.findByText(/Couldn't reach the TCIP backend/)).toBeInTheDocument();
     // Backend comes back; Retry re-probes and the terminal mounts.
-    vi.mocked(terminalApi.status).mockResolvedValue({ available: true });
+    vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER] });
     fireEvent.click(screen.getByText("Retry"));
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
   });
@@ -125,7 +148,13 @@ describe("TerminalRail", () => {
   it("creates a session and attaches the terminal when available", async () => {
     render(<TerminalRail />);
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
-    await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(terminalApi.createSession).toHaveBeenCalledWith({
+        provider: "harness",
+        rows: 30,
+        cols: 100,
+      }),
+    );
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     expect(MockWebSocket.instances[0].url).toContain("/api/terminal/ws/t1");
     // The emulator was mounted into the host.
@@ -165,140 +194,133 @@ describe("TerminalRail", () => {
     expect(writeText).toHaveBeenCalledWith("selected transcript text");
   });
 
-  it("forwards the wheel as SGR mouse-scroll events so Claude scrolls its conversation", async () => {
-    render(<TerminalRail />);
-    const host = await screen.findByTestId("terminal-host");
-    await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
-    host.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
-    // wheel-up encodes SGR button 64; Claude receives it as a scroll, not a cursor key
-    expect(termInstances[0].input).toHaveBeenCalledWith(expect.stringContaining("<64;"));
-  });
-
   it("exposes a resize separator", async () => {
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     expect(screen.getByLabelText("Resize agent terminal")).toBeInTheDocument();
   });
 
-  it("restart calls the API and resets the emulator", async () => {
+  it("restart calls the API with the terminal's dimensions and resets the emulator", async () => {
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
+    termInstances[0].rows = 41;
+    termInstances[0].cols = 133;
     fireEvent.click(screen.getByLabelText("Restart the agent"));
-    await waitFor(() => expect(terminalApi.restart).toHaveBeenCalledWith("t1", 30, 100));
+    await waitFor(() =>
+      expect(terminalApi.restart).toHaveBeenCalledWith("t1", {
+        provider: "harness",
+        rows: 41,
+        cols: 133,
+      }),
+    );
     expect(termInstances[0].reset).toHaveBeenCalled();
   });
 
   describe("control frames sent to the PTY", () => {
-    async function openSocket() {
-      render(<TerminalRail />);
-      await screen.findByTestId("terminal-host");
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-      const ws = MockWebSocket.instances[0];
-      ws.readyState = MockWebSocket.OPEN;
-      ws.onopen?.();
-      return ws;
-    }
-
     it("reports the emulator's rows and columns on attach, in that order", async () => {
+      render(<TerminalRail />);
       const ws = await openSocket();
       // Rows and columns differ, so a frame that transposes them cannot still read correct.
       expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "resize", rows: 30, cols: 100 }));
     });
 
     it("forwards a keystroke as an input frame carrying the typed characters", async () => {
+      render(<TerminalRail />);
       const ws = await openSocket();
       termInstances[0].onData.mock.calls[0][0]("ls\r");
       expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "input", data: "ls\r" }));
     });
   });
 
-  describe("sendToAgentTerminal hand-off", () => {
-    it("sends a staged message as terminal input once the socket is open, then clears it", async () => {
+  describe("staged requests", () => {
+    it("submits a staged request to the session, then clears it", async () => {
       render(<TerminalRail />);
-      await screen.findByTestId("terminal-host");
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-      const ws = MockWebSocket.instances[0];
-      ws.readyState = MockWebSocket.OPEN;
-      ws.onopen?.();
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
 
-      useStore.getState().sendToAgentTerminal("run a sweep over lr and batch size");
+      act(() => useStore.getState().sendToAgentTerminal("run a sweep over lr and batch size"));
       await waitFor(() =>
-        expect(ws.send).toHaveBeenCalledWith(
-          JSON.stringify({ type: "input", data: "run a sweep over lr and batch size\r" }),
-        ),
+        expect(submitted()).toEqual([["t1", "run a sweep over lr and batch size"]]),
       );
-      expect(useStore.getState().pendingTerminalMessage).toBeNull();
+      expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
 
-    it("opens a closed rail and delivers the message once it connects, instead of dropping it", async () => {
+    it("opens a closed rail and submits the request once its session exists", async () => {
       useStore.getState().setTerminalOpen(false);
       render(<TerminalRail />);
       expect(screen.queryByTestId("terminal-host")).not.toBeInTheDocument();
 
-      useStore.getState().sendToAgentTerminal("run a sweep");
+      act(() => useStore.getState().sendToAgentTerminal("run a sweep"));
       expect(useStore.getState().terminalOpen).toBe(true);
+      await waitFor(() => expect(submitted()).toEqual([["t1", "run a sweep"]]));
+      expect(useStore.getState().pendingTerminalMessages).toEqual([]);
+    });
 
-      await screen.findByTestId("terminal-host");
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-      const ws = MockWebSocket.instances[0];
-      // Not open yet: the message must still be staged, not silently lost.
-      expect(useStore.getState().pendingTerminalMessage).toBe("run a sweep");
+    it("keeps a request staged until the backend takes it", async () => {
+      const answer = deferred<Record<string, never>>();
+      vi.mocked(terminalApi.submit).mockReturnValueOnce(answer.promise);
+      render(<TerminalRail />);
+      act(() => useStore.getState().sendToAgentTerminal("after reopen"));
+      await waitFor(() => expect(submitted()).toHaveLength(1));
+      expect(useStore.getState().pendingTerminalMessages).toEqual(["after reopen"]);
 
-      ws.readyState = MockWebSocket.OPEN;
-      ws.onopen?.();
-      await waitFor(() =>
-        expect(ws.send).toHaveBeenCalledWith(
-          JSON.stringify({ type: "input", data: "run a sweep\r" }),
-        ),
-      );
-      expect(useStore.getState().pendingTerminalMessage).toBeNull();
+      await act(async () => answer.resolve({}));
+      expect(useStore.getState().pendingTerminalMessages).toEqual([]);
+    });
+
+    it("holds a request staged during a restart until the restart answers", async () => {
+      const answer = deferred<typeof LAUNCH>();
+      vi.mocked(terminalApi.restart).mockReturnValueOnce(answer.promise);
+      render(<TerminalRail />);
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByLabelText("Restart the agent"));
+      act(() => useStore.getState().sendToAgentTerminal("after restart"));
+      await act(async () => {});
+      expect(submitted()).toEqual([]);
+
+      await act(async () => answer.resolve(LAUNCH));
+      await waitFor(() => expect(submitted()).toEqual([["t1", "after restart"]]));
+    });
+
+    it("submits a request once to the session two overlapping creates across a reopen share", async () => {
+      const first = deferred<typeof LAUNCH>();
+      const second = deferred<typeof LAUNCH>();
+      vi.mocked(terminalApi.createSession)
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      render(<TerminalRail />);
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(1));
+      act(() => useStore.getState().setTerminalOpen(false));
+      act(() => useStore.getState().sendToAgentTerminal("tab request"));
+      await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
+
+      await act(async () => first.resolve(LAUNCH));
+      expect(submitted()).toEqual([]);
+      await act(async () => second.resolve({ ...LAUNCH, existing: true }));
+      await waitFor(() => expect(submitted()).toEqual([["t1", "tab request"]]));
     });
   });
 
-  describe("starter hint", () => {
-    it("shows a starter hint when no project is open", async () => {
+  describe("session-start ritual", () => {
+    it("prints the launch's ritual and hides it once the breeder types", async () => {
       render(<TerminalRail />);
-      await screen.findByTestId("terminal-host");
-      expect(await screen.findByTestId("terminal-starter-hint")).toBeInTheDocument();
+      expect(await screen.findByTestId("terminal-ritual")).toHaveTextContent(RITUAL);
+      await waitFor(() => expect(termInstances[0].onData).toHaveBeenCalled());
+
+      act(() => termInstances[0].onData.mock.calls[0][0]("h"));
+      await waitFor(() => expect(screen.queryByTestId("terminal-ritual")).not.toBeInTheDocument());
     });
 
-    it("hides the starter hint once the breeder sends input", async () => {
+    it("prints a restart's ritual", async () => {
+      vi.mocked(terminalApi.restart).mockResolvedValue({ ...LAUNCH, ritual: "restarted ritual" });
       render(<TerminalRail />);
-      await screen.findByTestId("terminal-host");
-      await screen.findByTestId("terminal-starter-hint");
-      termInstances[0].onData.mock.calls[0][0]("h");
+      await screen.findByTestId("terminal-ritual");
+
+      fireEvent.click(screen.getByLabelText("Restart the agent"));
       await waitFor(() =>
-        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument(),
+        expect(screen.getByTestId("terminal-ritual")).toHaveTextContent("restarted ritual"),
       );
-    });
-
-    it("does not show the starter hint when a project is already open", async () => {
-      const dataset = useStore.getState().gui.dataset;
-      useStore.setState({ openProject: { id: "a1", path: "/workspace/demo_trait_site" } });
-      useStore.getState().patchGui({
-        dataset: { ...dataset, dataset_root: "/workspace/demo_trait_site", date: "2026-05-01" },
-      });
-      try {
-        render(<TerminalRail />);
-        await screen.findByTestId("terminal-host");
-        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
-      } finally {
-        // Restore, so a later test in this file can't inherit "a project is open".
-        useStore.setState({ openProject: null });
-        useStore.getState().patchGui({ dataset });
-      }
-    });
-
-    it("does not show the starter hint for a project open with no dated images yet", async () => {
-      useStore.setState({ openProject: { id: "a1", path: "/workspace/demo_trait_site" } });
-      try {
-        render(<TerminalRail />);
-        await screen.findByTestId("terminal-host");
-        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
-      } finally {
-        useStore.setState({ openProject: null });
-      }
     });
   });
 
@@ -307,11 +329,7 @@ describe("TerminalRail", () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       try {
         render(<TerminalRail />);
-        await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-        const first = MockWebSocket.instances[0];
-        first.readyState = MockWebSocket.OPEN;
-        first.onopen?.();
-
+        const first = await openSocket();
         first.drop(1006);
         await act(async () => {
           await vi.advanceTimersByTimeAsync(500);

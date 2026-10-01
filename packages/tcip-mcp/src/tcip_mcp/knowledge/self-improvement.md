@@ -16,7 +16,7 @@ This document is itself one of the platform's domain knowledge documents. Claude
 as a generated skill; a client without generated skills reaches the identical text through the
 `serve_domain_knowledge` tool.
 
-The loop is three live, audited tools, no separate journal file:
+The loop is three live tools, no separate journal file; the two that write are audited:
 
 | When | Tool | Lands |
 |---|---|---|
@@ -40,8 +40,8 @@ Call `report_friction` when you notice any of these. One line is enough in the m
 - Missing / hard tool: a capability that should exist but is buried in a web route, a script,
   or nowhere.
 - Environment / setup friction: a missing dependency, a stale path, a slow default.
-- A blocked or failed mandated action: a ritual call that errored, a guard that denied a
-  read-only command, `tcip doctor` refusing to run. Never skip one silently.
+- A blocked or failed mandated action: a ritual call that errored, a permission rule that denied
+  a read-only command, `tcip doctor` refusing to run. Never skip one silently.
 
 Over-report.
 

@@ -176,7 +176,8 @@ def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus
         expect=ts.Version.ABSENT,
     )
 
-    assert meta_tools._report_path(str(tmp_path), REPORT_ID).read_bytes() == REPORT_BYTES
+    path = meta_tools._document_path(meta_tools._REPORT_DOC, str(tmp_path), REPORT_ID)
+    assert path.read_bytes() == REPORT_BYTES
 
 
 def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_path):
@@ -190,5 +191,6 @@ def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_pa
     stored = ts.read_versioned(key, default=None)
     ts.replace(key, f"# {RETROSPECTIVE_ID}\n\n{RETROSPECTIVE_BODY}", expect=stored.version)
 
-    path = meta_tools._retrospective_path(str(tmp_path), RETROSPECTIVE_ID)
+    path = meta_tools._document_path(meta_tools._RETROSPECTIVE_DOC, str(tmp_path),
+                                     RETROSPECTIVE_ID)
     assert path.read_bytes() == RETROSPECTIVE_BYTES
