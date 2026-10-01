@@ -25,22 +25,22 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 452e37b2.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 68eb3af3.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 452e37b2 has 437 modules across the six scanned roots (123385 total lines):
+HEAD 68eb3af3 has 431 modules across the six scanned roots (122221 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 49205 |
+| tcip-mcp | 134 | 49115 |
 | tcip-annotation | 12 | 3751 |
-| tcip-web | 40 | 10459 |
-| tcip-store | 13 | 4723 |
-| tcip-web-frontend | 216 | 49220 |
-| tools | 22 | 6027 |
+| tcip-web | 35 | 9468 |
+| tcip-store | 13 | 4722 |
+| tcip-web-frontend | 216 | 49224 |
+| tools | 21 | 5941 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `tools` is `tools/` at the repo root (not an installed package);
@@ -194,8 +194,8 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 21 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | A trait: one entry holding its spec fields and the operationalization text for each delivery kind it delivers, kept per project as an appended list of revisions: ``propose_trait`` appends one, ``confirm_revision`` confirms or withdraws one by its number and content hash. | 10 | 28 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the declarations of the stores, the GUI state shape and the tab vocabulary (``ActiveTab``) the web package owns. | 7 | 14 |
-| packages/tcip-mcp/src/tcip_mcp/workspace.py | The workspace: the folder whose child directories are the projects the GUI lists. | 6 | 13 |
+| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the declarations of the stores, the GUI state shape and the tab vocabulary (``ActiveTab``) the web package owns. | 7 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/workspace.py | The workspace: the folder whose child directories are the projects the GUI lists. | 6 | 12 |
 
 ## tcip-annotation
 
@@ -220,9 +220,9 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 62 |
+| packages/tcip-store/src/tcip_store/__init__.py | TCIP's storage seam: one interface for the platform's mutable records, logs, and blobs. | 6 | 60 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, atomically or not at all. | 6 | 3 |
-| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 18 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds, decided once at its entry point. | 3 | 16 |
 | packages/tcip-store/src/tcip_store/errors.py | Every refusal the storage seam raises. | 1 | 17 |
 | packages/tcip-store/src/tcip_store/export.py | Writing one root's database back out as the file layout, and saying when it is stale. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, logs, and blobs. | 5 | 31 |
@@ -240,10 +240,10 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 |---|---|---|---|
 | packages/tcip-web/src/tcip_web/__init__.py | TCIP Web: FastAPI server for the ML pipeline. | 0 | 0 |
 | packages/tcip-web/src/tcip_web/__main__.py | Entry point: ``python -m tcip_web``. | 7 | 0 |
-| packages/tcip-web/src/tcip_web/app.py | FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built frontend and the health probe; every domain route is mounted from ``tcip_web.routes``. | 10 | 6 |
+| packages/tcip-web/src/tcip_web/app.py | FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built frontend and the health probe; every domain route is mounted from ``tcip_web.routes``. | 10 | 5 |
 | packages/tcip-web/src/tcip_web/cli/__init__.py | ``tcip``: the operator console command, dispatching to one subcommand per operator command. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/cli/__main__.py | Entry point for ``python -m tcip_web.cli``. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/cli/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 6 | 0 |
+| packages/tcip-web/src/tcip_web/cli/distill_learnings.py | Distill worksheet: one project's friction reports and retrospectives, or every workspace project's, printed as Markdown with their recurring themes; writes nothing. | 4 | 0 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 6 | <!-- queued: P5-329 unwired -->
 | packages/tcip-web/src/tcip_web/jobstore.py | The web's in-memory async job registry and its memory cap. | 1 | 4 |
 | packages/tcip-web/src/tcip_web/label_annotations_cache.py | The content-digest-keyed label-document parse memo shared by every scan of per-image label files. | 1 | 3 |
@@ -266,12 +266,12 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording (compute matches, walk detections, record actions, save GT) plus the image-status group (mark_complete, backup_labels, image_statuses, generation_conf) and the priority queue. | 21 | 4 |
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 6 | 1 |
 | packages/tcip-web/src/tcip_web/routes/subjects.py | Subject registry routes. | 10 | 1 |
-| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 4 | 5 |
+| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: provider status, session launch, restart and submitted requests over HTTP, and per session a WebSocket carrying raw PTY output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. | 4 | 4 |
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: launchable configs, launch/relaunch, list runs, live metrics stream. | 10 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: relaunch, cancel, list and per-trial visibility, each read off the sweep's own directory under ``.tcip/hpo`` (``training_tools.sweep_record`` and ``read_sweep``). | 10 | 1 |
 | packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 14 | 1 |
-| packages/tcip-web/src/tcip_web/state.py | The web backend's own state: the workspace it serves, the project it has open, that project's live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's ``.tcip/state/gui.json`` on every change) and the panel events it retains for a browser that connects late. | 2 | 21 |
-| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: an agent harness from :data:`PROVIDERS` spawned directly in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and keystrokes streamed in. | 3 | 3 |
+| packages/tcip-web/src/tcip_web/state.py | The web backend's own state: the workspace it serves, the project it has open, that project's live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's ``.tcip/state/gui.json`` on every change) and the panel events it retains for a browser that connects late. | 2 | 20 |
+| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: an agent harness from :data:`PROVIDERS` spawned directly in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the stdlib ``pty`` on POSIX), its raw bytes streamed out and keystrokes streamed in. | 4 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 2 |
 
 ## tcip-web-frontend
@@ -287,18 +287,18 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 38 |
 | packages/tcip-web/frontend/src/api/inference.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 4 | 14 |
-| packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: Claude's friction reports and retrospectives. | 2 | 2 |
+| packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: the agent's friction reports and retrospectives. | 2 | 2 |
 | packages/tcip-web/frontend/src/api/routes.ts | Every backend path the browser calls, named for its method and its route. | 0 | 10 |
 | packages/tcip-web/frontend/src/api/sessions.ts | Session-tracking API helpers (annotation_stats.json on disk). | 2 | 5 |
 | packages/tcip-web/frontend/src/api/streams.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/subjects.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/subjects.ts | Dataset subject-registry + per-image-status API helpers. | 3 | 22 |
-| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (a provider row's harness in a PTY). | 2 | 2 |
+| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal's provider status, launches and requests. | 3 | 2 |
 | packages/tcip-web/frontend/src/api/training.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 4 | 12 |
 | packages/tcip-web/frontend/src/api/tuning.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/tuning.ts | Tuning (HPO) API helpers for the Tuning tab. | 3 | 3 |
-| packages/tcip-web/frontend/src/api/types.generated.ts | Types generated by tools/generate_frontend_types.py from the pydantic models that declare them (routes/_coverage_models.py, routes/coverage.py, routes/review.py, routes/training.py, routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a handful of runtime constants (routes/images.py, tcip_mcp.web_client, tcip_mcp.experiments, tcip_web.jobstore). | 0 | 27 |
+| packages/tcip-web/frontend/src/api/types.generated.ts | Types generated by tools/generate_frontend_types.py from the pydantic models that declare them (routes/_coverage_models.py, routes/coverage.py, routes/review.py, routes/training.py, routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a handful of runtime constants (routes/images.py, tcip_mcp.web_client, tcip_mcp.experiments, tcip_web.jobstore). | 0 | 28 |
 | packages/tcip-web/frontend/src/api/ws.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/ws.ts | WebSocket client that subscribes to GuiState snapshots + panel events. | 5 | 4 |
 | packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 9 | 0 |
@@ -343,7 +343,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TabBanner.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TabHeading.tsx | (none found) | 2 | 8 |
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: a real agent harness from the backend's provider table, embedded. | 5 | 2 |
+| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: a real agent harness from the backend's provider table, embedded. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TopBar.test.tsx | (none found) | 2 | 0 |
@@ -432,7 +432,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/polygonGeometry.ts | Pure hit-testing and structural-edit helpers for the annotate canvas' polygon geometry. | 1 | 7 |
 | packages/tcip-web/frontend/src/lib/recentProjects.ts | The ids of the last few projects the user opened, most recent first, for the status-bar fast-track; each is named through the current project listing. | 0 | 3 |
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | One reconnecting-WebSocket shape, shared by every socket this app opens: capped exponential backoff on an unexpected close, a guard against stacking a second attempt while one is already open or connecting, supersession so a replaced socket's late events are no-ops, and a restartable start/stop pair. | 0 | 5 |
+| packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | A reconnecting WebSocket: capped exponential backoff on an unexpected close, at most one attempt open or connecting, a replaced socket's late events ignored, and a restartable start/stop pair. | 0 | 5 |
 | packages/tcip-web/frontend/src/lib/registrySweep.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/registrySweep.ts | (none found) | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/reviewColors.ts | (none found) | 0 | 6 |
@@ -458,7 +458,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/slices/bandSelection.ts | (none found) | 2 | 2 |
 | packages/tcip-web/frontend/src/store/slices/banners.ts | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/canvas.ts | (none found) | 3 | 3 |
-| packages/tcip-web/frontend/src/store/slices/gui.ts | (none found) | 5 | 11 |
+| packages/tcip-web/frontend/src/store/slices/gui.ts | (none found) | 5 | 10 |
 | packages/tcip-web/frontend/src/store/slices/pendingTerminalMessage.ts | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/registryStatus.ts | (none found) | 3 | 3 |
 | packages/tcip-web/frontend/src/store/slices/review.ts | (none found) | 3 | 2 |
@@ -508,7 +508,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/generate_frontend_routes.py | Generate the browser's route-path module and the dev server's proxy from the backend's registered routes. | 1 | 0 |
 | tools/generate_frontend_types.py | Generate the browser's backend-declared types from the pydantic models that declare them. | 13 | 0 |
 | tools/generate_frozen_manifest.py | Generate frozen-formats.json, the shipped freeze commitment, from the store registry. | 2 | 0 |
-| tools/generate_harness_discovery.py | Generate per-harness discovery files from the canonical domain-knowledge documents. | 1 | 0 |
+| tools/generate_harness_discovery.py | Generate the files that project the domain-knowledge documents (`tcip_mcp.knowledge.list_documents()`): a `SKILL.md` per document under `.claude/skills/` and `.agents/skills/`, the generated block of `AGENTS.md`, and the `WebFetch(domain:...)` grants of Claude Code's row settings file from the hosts the `cv-research` document's source list names. | 2 | 0 |
 | tools/generate_trait_fixture.py | Write the trait listings the frontend tests read, produced by the platform itself. | 6 | 0 |
 | tools/line_delta.py | Sum a change's insertions and deletions by area: package code, tests, everything else. | 0 | 0 |
 | tools/list_store_consumers.py | List every registered store's writers and readers, from the import graph plus a symbol scan. | 2 | 0 |
@@ -516,7 +516,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | tools/serve_capture_app.py | Start or stop the served web app under a scratch environment, for a GUI capture harness. | 0 | 0 |
 | tools/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 12 | 0 |
-| tools/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against one provider row's real harness. | 4 | 0 |
+| tools/smoke_terminal_e2e.py | Live smoke of one provider row's real harness through the embedded agent terminal. | 4 | 0 |
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 | tools/worktree_gate.py | Run ruff, mypy and pytest inside a worktree, its own editable-install resolution proven first. | 0 | 0 |
@@ -548,7 +548,7 @@ job registries before calling it, so the package holds no edge into the layer ab
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (152)
+## Modules with zero importers (147)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `tools/` invoked as processes, package `cli/` command modules invoked by name through the `tcip` dispatcher rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
