@@ -18,6 +18,8 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
+from tcip_store.file_backend import _is_bookkeeping  # noqa: E402
+
 from tests.test_orthomosaic_tools import (  # noqa: E402
     TILE, _bespoke_detection_checkpoint, _write_geo_raster,
 )
@@ -215,7 +217,8 @@ def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass
     monkeypatch.undo()
 
     def files() -> dict[str, bytes]:
-        return {p.name: p.read_bytes() for p in sorted(out.iterdir())}
+        return {p.name: p.read_bytes() for p in sorted(out.iterdir())
+                if not _is_bookkeeping(p.name)}
 
     published = files()
     assert set(published) == {"bucket.json", "mosaic.json"}
