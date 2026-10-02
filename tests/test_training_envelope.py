@@ -34,13 +34,12 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
     """A context over a run directory the launcher's own writer opened over ``config``, its run
     training under the data section the launch resolved, as the child's own entry trains it."""
     from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
     from tests._verified_checkpoint_fixtures import opened_run
 
     run_dir = opened_run(tmp_path, config, resume_from=kwargs.get("resume_from"))
     record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name,
-                   config={**record["config"], "data": record["resolved"]["data"]},
+    run = TrainRun(id=run_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=tmp_path,
                    output_dir=str(run_dir))
     return TrainContext(run=run, **{"train_loader": None, **kwargs}), run_dir

@@ -77,7 +77,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
 
     from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, read_record, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
     from tests._verified_checkpoint_fixtures import opened_run
 
     images_dir, csv_path = write_regression_dataset(
@@ -87,7 +87,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
                       "labels_dir": str(csv_path)}
     out_dir = opened_run(tmp_path, config)
     record = read_record(out_dir / RUN_FILE)
-    run = TrainRun(id=out_dir.name, config=record["config"],
+    run = TrainRun(id=out_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=tmp_path,
                    output_dir=str(out_dir))
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it

@@ -63,7 +63,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     ``metrics.jsonl`` line and the callback payload all carry ``run.best_metric``."""
     from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, read_record, read_rows
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
     from tests._verified_checkpoint_fixtures import opened_run
 
     train_loader, val_loader = _loaders()
@@ -75,7 +75,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
                       "labels_dir": str(csv_path)}
     out_dir = opened_run(tmp_path, config)
     record = read_record(out_dir / RUN_FILE)
-    run = TrainRun(id=out_dir.name, config=record["config"],
+    run = TrainRun(id=out_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=tmp_path,
                    output_dir=str(out_dir))
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
