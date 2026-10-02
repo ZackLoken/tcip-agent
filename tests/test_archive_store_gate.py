@@ -69,8 +69,8 @@ def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
     """The confirmed negative lives in a row no operator has exported yet; the door exports it
     itself before bundling, so a project the doors create archives without that step run by
     hand and the negative is not simply absent from the restored files."""
-    root = _project(tmp_path)
     with bound(SqliteBackend()):
+        root = _project(tmp_path)
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         result = archive_project(root, str(tmp_path / "bundle.zip"))
 
@@ -85,8 +85,8 @@ def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
 def test_a_project_whose_files_are_current_archives(tmp_path):
     """The partner of the refusal: the gate is about state the files are missing, and an
     exported project is not missing any."""
-    root = _project(tmp_path)
     with bound(SqliteBackend()):
+        root = _project(tmp_path)
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
         result = archive_project(root, str(tmp_path / "bundle.zip"))
@@ -98,8 +98,8 @@ def test_a_project_whose_files_are_current_archives(tmp_path):
 def test_a_project_written_during_the_copy_takes_its_own_output_back(tmp_path, monkeypatch):
     """The counters are re-read after the copy, so the bundle reported is the bundle verified
     rather than a mix of before and after."""
-    root = _project(tmp_path)
     with bound(SqliteBackend()) as backend:
+        root = _project(tmp_path)
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
         original = project_tools._database_counters
@@ -145,8 +145,8 @@ def test_a_file_that_is_not_a_database_refuses_the_archive_rather_than_traceback
 def test_no_database_file_travels_in_the_bundle(tmp_path):
     """A bundle is a file layout: carrying the database too would give the restored project two
     authorities and no way to tell which one a reader is looking at."""
-    root = _project(tmp_path)
     with bound(SqliteBackend()):
+        root = _project(tmp_path)
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
         archive_project(root, str(tmp_path / "bundle.zip"))
@@ -167,9 +167,8 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
     from tcip_store.adoption import adopt_root
     from tcip_store.layout_claims import ROOT
 
-    root = _project(tmp_path)
-
     with bound(SqliteBackend()):
+        root = _project(tmp_path)
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
         archive_project(root, str(tmp_path / "bundle.zip"))
