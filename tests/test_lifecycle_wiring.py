@@ -15,7 +15,7 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
     from tests.tiny_trainer_fixtures import ConstantImageDataset, write_regression_dataset
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
@@ -33,8 +33,7 @@ def _stock_run(root: Path, builder: dict, epochs: int, experiment_id: str) -> Pa
     }
     run_dir = opened_run(root, config, experiment_id=experiment_id)
     record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name,
-                   config={**record["config"], "data": record["resolved"]["data"]},
+    run = TrainRun(id=run_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=root,
                    output_dir=str(run_dir))
     run_training_envelope(TrainContext(

@@ -80,7 +80,7 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     read and its next observation."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
 
     run_id = "exp-023-walnut-shell-det"
     run_dir = opened_run(tmp_path, detection_config(
@@ -95,7 +95,7 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
         calls["n"] += 1
         if calls["n"] == 2:
             record = real_observe(directory).record
-            run = TrainRun(id=run_id, config=record["config"],
+            run = TrainRun(id=run_id, config=trained_config(record),
                            objective=record["resolved"]["objective"], project=tmp_path,
                            output_dir=str(run_dir))
             run_training_envelope(TrainContext(run=run, train_loader=None))

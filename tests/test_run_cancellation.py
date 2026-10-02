@@ -10,13 +10,13 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
     """A cancel requested by id is the one record the run's own poll reads; an id naming no run
     refuses."""
     from tcip_mcp.experiments import RUN_FILE, read_record
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
     from tcip_mcp.tools.training_tools import cancel_training
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="cancel-run-1")
     record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=record["config"],
+    run = TrainRun(id=run_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=tmp_path,
                    output_dir=str(run_dir))
     assert not run.should_cancel()

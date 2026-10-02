@@ -38,12 +38,12 @@ def prepare_run_context(
     from tcip_mcp.pipelines.model_build import run_task
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, run_transforms
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
 
     run_dir = observation.directory
     run_record = observation.record
     resolved = run_record["resolved"]
-    config = {**run_record["config"], "data": resolved["data"]}
+    config = trained_config(run_record)
     run_obj = TrainRun(id=run_dir.name, config=config, objective=resolved["objective"],
                        project=project_of_run(run_dir), output_dir=str(run_dir), origin=origin)
     if run_record["max_wall_clock_seconds"] is not None:

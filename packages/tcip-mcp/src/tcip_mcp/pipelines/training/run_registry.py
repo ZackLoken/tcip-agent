@@ -61,6 +61,12 @@ class TrainRun:
         return any(cancel_requested(d) for d in directories)
 
 
+def trained_config(record: dict) -> dict:
+    """The config a run's body trains under, from its launch record: the launch ``config`` with
+    the ``data`` section its launch ``resolved`` laid over it."""
+    return {**record["config"], "data": record["resolved"]["data"]}
+
+
 def draw_seed_if_unset(config: dict) -> None:
     """Draw a seed from OS entropy into ``config`` in place, unless the caller already set one.
     Never start an unseeded run.
