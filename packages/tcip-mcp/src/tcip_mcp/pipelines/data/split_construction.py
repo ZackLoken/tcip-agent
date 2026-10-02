@@ -106,15 +106,16 @@ def admitted_membership(
     group_key_map: "Mapping[str, str] | None",
 ) -> Membership:
     """Admit each place ``(name, images_dir, ground_truth)``
-    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, stated against that
-    place when it carries no class-id map) and group every admitted member
+    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, read from that place's
+    registry when it carries no attributes yet,
+    :func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`) and group every admitted member
     (:func:`~tcip_mcp.pipelines.data.splits.resolve_group_key_fn` over the identities).
 
     Raises ``ValueError`` when nothing is admitted (the admission's own reason, naming every
     place searched and the tallies) and for a grouping policy that does not cover the members;
     the admissions' own refusals propagate.
     """
-    from tcip_mcp.pipelines.data.label_queries import admit, require_admitted, stated_scope
+    from tcip_mcp.pipelines.data.label_queries import admit, registry_scope, require_admitted
     from tcip_mcp.pipelines.data.selection import ground_truth_digests
     from tcip_mcp.pipelines.data.splits import (
         member_identity, recorded_group_by, resolve_group_key_fn,
@@ -124,8 +125,8 @@ def admitted_membership(
     tallies: dict[str, int] = {}
     for _name, images_dir, ground_truth in places:
         admitted = admit(images_dir, ground_truth,
-                         scope=scope if scope.id_map is not None
-                         else stated_scope(ground_truth, scope.subject, scope.attribute))
+                         scope=scope if scope.attributes is not None
+                         else registry_scope(ground_truth, scope.subject))
         admissions.append(admitted)
         for key, value in admitted.tallies.items():
             tallies[key] = tallies.get(key, 0) + value

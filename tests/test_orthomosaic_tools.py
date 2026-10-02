@@ -25,7 +25,7 @@ PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 TILE = 32
 RASTER_PASS = Stated(conf=0.0, tile_size=TILE, overlap=0.2)
 """The execution values every raster pass here states."""
-SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+SCOPE = {"subject": fx.COUNT_SUBJECT, "attributes": []}
 
 
 @pytest.fixture(autouse=True)

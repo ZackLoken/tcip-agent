@@ -2,8 +2,8 @@
 is dropped was dropped.
 
 Covers the one shape read over a place (``ground_truth_shape``), the label store's own
-subject-scoped admission and its completion marks, the attribute-completeness rail, and the
-targets the loaders read off each admitted sample's own document."""
+subject-scoped admission and its completion marks, and the targets the loaders read off each
+admitted sample's own document, an unassessed attribute among them."""
 
 import json
 
@@ -15,16 +15,13 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
-from tcip_mcp.subject_registry import (  # noqa: E402
-    Attribute, SubjectRegistry, Subject, assign_class_ids,
-)
+from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject  # noqa: E402
 
 from tests._producer_fixtures import (  # noqa: E402
     admit_over, dataset_over, mark_complete, registry_over,
 )
 
 BUD = "bud"
-BUD_SCOPE = ClassScope(subject=BUD, id_map={BUD: 0})
 
 
 def _make_images(images_dir, stems):
@@ -47,14 +44,6 @@ def _poly(points, *, subject=BUD, **attrs):
 def _multi_poly(rings, *, subject=BUD, **attrs):
     """One occlusion-split instance: several disjoint rings, still a single annotation."""
     return Annotation(subject=subject, geometry=Polygon(list(rings)), attributes=dict(attrs))
-
-
-def _reg_id_map(subject=BUD, attribute=None, values=()):
-    """A registry + its ``assign_class_ids`` map (the single name→id map) for a training scope."""
-    attrs = ((Attribute(name=attribute, type="categorical", values=tuple(values)),)
-             if attribute else ())
-    reg = SubjectRegistry(subjects=(Subject(name=subject, attributes=attrs),))
-    return reg, assign_class_ids(reg, subject, attribute)
 
 
 # ── the one shape read ──────────────────────────────────────────────────────
@@ -139,8 +128,10 @@ def test_a_dataset_level_coco_at_a_label_path_is_refused_by_the_one_reader(tmp_p
     json_io.write_annotations(labels / "img1.json", [_box(10, 10, 50, 50)], 100, 100)
     _subject_bearing_coco(labels / "img0.json")
 
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
     with pytest.raises(json_io.UnreadableLabelDocument, match="import_coco"):
-        json_det_targets(str(labels / "img0.json"), BUD_SCOPE)
+        json_det_targets(str(labels / "img0.json"), registry_scope(labels, BUD))
     with pytest.raises(json_io.UnreadableLabelDocument, match="dataset-level COCO"):
         auto_train_val(tmp_path, "detection", {"images_dir": str(images), "labels_dir": str(labels),
                                      "scope": {"subject": BUD}}, None)
@@ -434,9 +425,9 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
     assert [ds.sample_of(k).member for k in ds.stems] == ["ann"]
 
 
-def test_instance_seg_excludes_a_partially_labeled_stem_from_training(tmp_path):
-    """An image with any instance never assessed for ``attribute`` is held out whole, never
-    trained on its labeled subset."""
+def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(tmp_path):
+    """An image with an instance never assessed for an attribute is admitted on its subject's
+    marks alone, every attribute of the registry read into the scope."""
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "annotations"
     _make_images(images_dir, ["complete", "partial"])
@@ -446,23 +437,23 @@ def test_instance_seg_excludes_a_partially_labeled_stem_from_training(tmp_path):
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
         _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="closed"),
-        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled: no opening attribute
+        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unassessed: no opening value
     ], 100, 100)
-    _reg, id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
-    _write_registry_for(root, attribute="opening", values=("open", "closed"))
+    reg = _write_registry_for(root, attribute="opening", values=("open", "closed"))
 
-    admitted = admit_over(images_dir, labels_dir, subject=BUD, attribute="opening")
+    admitted = admit_over(images_dir, labels_dir, subject=BUD)
 
-    assert [r.member for r in admitted.records] == ["complete"]
-    assert admitted.scope.id_map == id_map
-    assert admitted.tallies["skipped_incomplete_attribute"] == 1
-    assert admitted.tallies["annotated"] == 1
+    assert [r.member for r in admitted.records] == ["complete", "partial"]
+    assert admitted.scope.attributes == reg.subjects[0].attributes
+    assert admitted.tallies["annotated"] == 2
 
 
 def _write_registry_for(root, *, attribute=None, values=()):
-    """The dataset's own subjects.json, which an attribute-scoped admission reads its class order
-    from."""
-    reg, _ = _reg_id_map(attribute=attribute, values=values)
+    """The dataset's own subjects.json declaring ``attribute`` over ``values`` on :data:`BUD`
+    (no attribute when ``None``), which an admission reads its attributes from."""
+    attrs = ((Attribute(name=attribute, type="categorical", values=tuple(values)),)
+             if attribute else ())
+    reg = SubjectRegistry(subjects=(Subject(name=BUD, attributes=attrs),))
     registry_over(root, reg)
     return reg
 
@@ -489,7 +480,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     images, labels = _rail_fixture(tmp_path)
     admitted = admit_over(images, labels, subject=BUD)
     assert admitted.tallies == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
-                               "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0}
+                               "skipped_unconfirmed_empty": 1}
 
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
@@ -524,38 +515,41 @@ def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
     assert (tallies["annotated"], tallies["confirmed_negative"]) == (2, 0)
 
 
-def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
-    """The loader's own per-image target reader accepts partially-attributed data: an unlabeled
-    instance is excluded, not a hard abort, while an undecodable value still raises."""
-    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_value(tmp_path):
+    """The loader's own per-image target reader keeps an unassessed instance as a row whose
+    attribute column carries the unassessed mark, while a value its attribute does not declare
+    refuses."""
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets, registry_scope
 
-    path = tmp_path / "IMG_A.json"
+    root = tmp_path / "ds"
+    labels = root / "annotations"
+    labels.mkdir(parents=True)
+    _write_registry_for(root, attribute="opening", values=("open", "closed"))
+    path = labels / "IMG_A.json"
     json_io.write_annotations(path, [
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
                   attributes={"opening": "closed"}),
-        Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
+        Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unassessed
     ], 100, 100)
 
-    scope = ClassScope(subject="bud", attribute="opening", id_map={"open": 0, "closed": 1})
-    target, n_unlabeled = json_det_targets(str(path), scope)
-    # 0-indexed 1 ("closed") + 1 for background
-    assert len(target["boxes"]) == 1 and target["labels"] == [2] and target["iscrowd"] == [False]
-    assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
+    scope = registry_scope(labels, BUD)
+    target = json_det_targets(str(path), scope)
+    assert len(target["boxes"]) == 2 and target["labels"] == [1, 1]
+    assert target["attributes"].tolist() == [[1], [json_io.UNASSESSED]]
 
-    undecodable = tmp_path / "IMG_B.json"
-    json_io.write_annotations(undecodable, [
+    undeclared = labels / "IMG_B.json"
+    json_io.write_annotations(undeclared, [
         Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
                   attributes={"opening": "not-a-real-value"}),
     ], 100, 100)
-    with pytest.raises(ValueError):
-        json_det_targets(str(undecodable), scope)
+    with pytest.raises(json_io.UndeclaredValue):
+        json_det_targets(str(undeclared), scope)
 
 
-def test_detection_excludes_a_partially_labeled_stem_from_training(tmp_path):
-    """A stem with any instance unlabeled for ``attribute`` never reaches the loader: a fixed-length
-    dataset cannot act on this per ``__getitem__`` call, so the exclusion happens at admission,
-    matching the delivery-gating paths that already exclude the whole image rather than silently
-    training on its labeled subset."""
+def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
+    """A stem with an instance unassessed for an attribute reaches the loader and the tiler whole,
+    its unassessed row carried in step with its box through every row filter, so no real object
+    trains as background."""
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "annotations"
     _make_images(images_dir, ["complete", "partial"])
@@ -566,40 +560,18 @@ def test_detection_excludes_a_partially_labeled_stem_from_training(tmp_path):
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
         _box(10, 10, 30, 30, opening="closed"),
-        _box(40, 40, 60, 60),  # unlabeled: no opening attribute at all
+        _box(40, 40, 60, 60),  # unassessed: no opening value at all
     ], 100, 100)
 
-    admitted = admit_over(images_dir, labels_dir, subject=BUD, attribute="opening")
-    assert [r.member for r in admitted.records] == ["complete"]
-    # The drop is recorded under its real reason, never one its absence downstream resembles.
-    assert admitted.tallies["skipped_incomplete_attribute"] == 1
-    assert admitted.tallies["annotated"] == 1
-    assert admitted.tallies["skipped_unconfirmed_empty"] == 0
+    ds = dataset_over("detection", images_dir, labels_dir, subject=BUD)
+    _image, target = ds[ds.stems.index(next(k for k in ds.stems
+                                            if ds.sample_of(k).member == "partial"))]
+    assert target["attributes"].tolist() == [[1], [json_io.UNASSESSED]]
 
-    ds = dataset_over("detection", images_dir, labels_dir, subject=BUD, attribute="opening")
-    assert len(ds.det_targets(ds.stems[0])["boxes"]) == 1
-
-
-def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_path):
-    """The tiler expands the admitted samples into one training sample per tile, so an image the
-    attribute-completeness rail held out contributes no tile at all. Asserting on the tile index,
-    not on the admitted members, is what pins that: a tile carrying the image's real but unlabeled
-    objects would train them as background, one tile at a time."""
-    root = tmp_path / "ds"
-    images_dir, labels_dir = root / "images", root / "annotations"
-    _make_images(images_dir, ["complete", "partial"])
-    labels_dir.mkdir(parents=True)
-    _write_registry_for(root, attribute="opening", values=("open", "closed"))
-    json_io.write_annotations(labels_dir / "complete.json", [
-        _box(10, 10, 30, 30, opening="open")], 100, 100)
-    json_io.write_annotations(labels_dir / "partial.json", [
-        _box(10, 10, 30, 30, opening="closed"),
-        _box(40, 40, 60, 60),  # unlabeled
-    ], 100, 100)
-
-    tiled = dataset_over("detection", images_dir, labels_dir, subject=BUD, attribute="opening",
+    tiled = dataset_over("detection", images_dir, labels_dir, subject=BUD,
                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.0,
                                  "sliver_frac": 0.5})  # stated: one box derives no spread
-
-    assert {tiled.sample_of(k).member for k in tiled.stems} == {"complete"}  # tiles are per-index, so this is every tile
-    assert len(tiled) > 0  # the rail admits the fully-attributed image's tiles
+    assert {tiled.sample_of(k).member for k in tiled.stems} == {"complete", "partial"}
+    for index in range(len(tiled)):
+        _tile, rows = tiled[index]
+        assert rows["attributes"].shape == (len(rows["boxes"]), 1)

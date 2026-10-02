@@ -293,6 +293,7 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
 def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import assignment_is_attributed
+    from tcip_mcp.traits import PositiveState
 
     blank = Assignment(image="a.jpg", stem="a", date_folder=DATE, plot_name="",
                        accession_name=None, source="unmapped", distance_m=None)
@@ -312,7 +313,8 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert build.unattributed() == 1
 
     per_plant = phenology.per_plant_series(
-        {DATE: [blank, named]}, {}, positive_value="open", plants=["P1"])
+        {DATE: [blank, named]}, {}, state=PositiveState(attribute="state", value="open"),
+        plants=["P1"])
     assert list(per_plant) == ["P1"]
 
 

@@ -32,7 +32,7 @@ src/tcip_mcp/
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
                           # labels/predictions live on disk, and the one label save. The frontend cannot import it: the label suffix and the completion-state vocabulary reach it through the generated types
-  subject_registry.py    # subjects.json: subjects, attributes, the name<->id assignment
+  subject_registry.py    # subjects.json: subjects and the attributes each declares, in declared order
   traits.py               # one record per trait: its entry (spec fields and what each delivered
                             # number means) as appended revisions the breeder confirms
   operationalization.py    # the check every delivery door runs on the latest confirmed revision

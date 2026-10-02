@@ -29,7 +29,7 @@ TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 ROUTES_MODULE = REPO_ROOT / "packages" / "tcip-web" / "src" / "tcip_web" / "routes" / "results.py"
 TRAITS_ROUTE = "/api/results/traits"
 CONFIRM_ROUTE = "/api/results/traits/confirm"
-_SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+_SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 @pytest.fixture
@@ -51,8 +51,7 @@ def _bucket(root: Path) -> Path:
 
     bucket = root / "ds" / "predictions" / "counts" / "2026-02-11"
     if not (bucket / "bucket.json").exists():
-        published(root, bucket, [predicted("a", [fx.COUNT_SUBJECT] * 3, _SCOPE["id_map"])],
-                  scope=_SCOPE)
+        published(root, bucket, [predicted("a", [fx.COUNT_SUBJECT] * 3)], scope=_SCOPE)
     return bucket
 
 
@@ -302,17 +301,18 @@ def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
     assert confirmed.confirmed_by == "user:grüne" and confirmed.confirmed_at.endswith("+00:00")
 
 
-def test_a_crossing_proposal_checks_its_positive_class_against_the_registry(tmp_path: Path) -> None:
+def test_a_crossing_proposal_checks_its_positive_state_against_the_registry(tmp_path: Path) -> None:
     crossing = fx.with_operationalization(
         fx.CROSSING_SPEC, traits.STATE_CROSSING_DATES, measured_subject="flower",
         delivered_phenotypes=fx.CROSSING_SPEC.delivers)
-    fx.seed_positive_class(tmp_path, "flower", "shed")
+    fx.seed_positive_class(tmp_path, "flower", traits.PositiveState(attribute="state",
+                                                                     value="shed"))
 
     with pytest.raises(ValueError, match="'open'"):
         fx.propose(tmp_path, crossing)
     assert traits.trait_names(tmp_path) == []
 
-    fx.seed_positive_class(tmp_path, "flower", "open")
+    fx.seed_positive_class(tmp_path, "flower", fx.CROSSING_SPEC.positive_state)
     assert fx.propose(tmp_path, crossing).number == 1
 
 

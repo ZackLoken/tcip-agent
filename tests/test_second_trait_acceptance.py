@@ -18,9 +18,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp import subject_registry as cr
 from tcip_web.app import app
 
-_ID_MAP = {"closed": 0, "open": 1}
+BLOOM_STATE = cr.Attribute("bloom_state", "categorical", ("closed", "open"))
+"""The attribute of ``flower`` the second trait's positive state names."""
+FLOWERS = cr.SubjectRegistry(subjects=(cr.Subject(name="flower", attributes=(BLOOM_STATE,)),))
 
 
 @pytest.fixture
@@ -33,7 +36,8 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
 
     propose(tmp_path, entry(
         "currant_bloom", ("bloom_05per_date", "bloom_50per_date", "bloom_95per_date"),
-        count_objective="count_unbiased", localization="center_match", positive_value="open",
+        count_objective="count_unbiased", localization="center_match",
+        positive_state={"attribute": BLOOM_STATE.name, "value": "open"},
         milestone_fractions=(0.05, 0.50, 0.95), milestone_on="positive_fraction",
         # No majority alias: crops.yml names no single "most blooms open" date for currant,
         # unlike bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
@@ -46,8 +50,8 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
 
 
 def _currant_bloom_body(tmp_path: Path) -> dict:
-    """A registered dataset of geolocated captures over two dates, one unassessed classified bucket
-    per date, the mapping over them, and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
+    """A registered dataset of geolocated captures over two dates, one unassessed bucket per date
+    whose scope declares the positive state's attribute, the mapping over them, and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
     web backend; the request body a phenology door takes."""
     import asyncio
 

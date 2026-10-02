@@ -138,15 +138,17 @@ def test_golden_plant_milestones_shape_and_values():
     assert ms["bud_majority_date"] == "2026-03-12"
 
 
-_SCOPE = {"subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
-
-
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
+    from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
+
+    opening = cr.Attribute("opening", "categorical", ("closed", "open"))
+    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(opening,)),))
 
     def bucket(date: str, stem: str, values: list[str]):
         return published(tmp_path, tmp_path / "ds" / "predictions" / "run" / date,
-                         [predicted(stem, values, _SCOPE["id_map"])], scope=_SCOPE)
+                         [predicted(stem, values, (opening,))], scope={"subject": "bud"},
+                         registry=registry)
 
     buckets = {"2026-02-11": bucket("2026-02-11", "P1_a", ["closed", "closed", "closed", "open"]),
                "2026-03-09": bucket("2026-03-09", "P1_b", ["open", "open", "open", "closed"])}
@@ -157,7 +159,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     res = PH.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
                                  require_all_dates_complete=PH.REQUIRE_ALL_DATES_COMPLETE)
 
-    # Both buckets are fully classified, so the fraction is produced and delivered.
+    # Both buckets carry the state's attribute on every detection, so the fraction is delivered.
     assert res["positive_class_assessed"] is True
     assert len(res["rows"]) == 1
     row = res["rows"][0]

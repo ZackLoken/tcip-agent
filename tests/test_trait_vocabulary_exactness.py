@@ -20,10 +20,12 @@ from tests._trait_fixtures import entry, latest, propose, with_fields
 def _two_traits_with_different_semantics(root: Path) -> None:
     """Two traits whose measurement semantics differ in every field a caller reads, so serving one
     where the other was asked for is observable rather than harmless."""
-    propose(root, entry("bud", ("leaf_out_50per_date",), positive_value="open",
+    propose(root, entry("bud", ("leaf_out_50per_date",),
+                        positive_state={"attribute": "opening", "value": "open"},
                         count_bias_tolerance_frac=0.02, milestone_fractions=(0.05, 0.5, 0.95),
                         phenology_prefix="bud"))
-    propose(root, entry("leaf", ("leaf_length",), positive_value="expanded",
+    propose(root, entry("leaf", ("leaf_length",),
+                        positive_state={"attribute": "stage", "value": "expanded"},
                         count_bias_tolerance_frac=0.25, milestone_fractions=(0.5,),
                         phenology_prefix="leaf"))
 
@@ -46,9 +48,11 @@ def test_the_exact_name_resolves_its_own_entry(tmp_path: Path):
     _two_traits_with_different_semantics(tmp_path)
 
     assert latest("bud", tmp_path).count_bias_tolerance_frac == 0.02
-    assert latest("bud", tmp_path).positive_value == "open"
+    assert latest("bud", tmp_path).positive_state == traits.PositiveState(
+        attribute="opening", value="open")
     assert latest("leaf", tmp_path).count_bias_tolerance_frac == 0.25
-    assert latest("leaf", tmp_path).positive_value == "expanded"
+    assert latest("leaf", tmp_path).positive_state == traits.PositiveState(
+        attribute="stage", value="expanded")
 
 
 def test_unknown_trait_refusal_lists_what_the_project_holds(tmp_path: Path):

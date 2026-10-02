@@ -119,9 +119,9 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    scope = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
     bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "m" / "2026-01-01",
-                       [predicted("a", [fx.COUNT_SUBJECT] * 3, scope["id_map"])], scope=scope).path
+                       [predicted("a", [fx.COUNT_SUBJECT] * 3)],
+                       scope={"subject": fx.COUNT_SUBJECT}).path
     out = tmp_path / "counts.csv"
 
     acknowledged(tmp_path, lambda ack: deliver_per_image_counts_csv(

@@ -76,9 +76,9 @@ def test_plant_mapping_load_of_an_unstored_name_answers_404_naming_it(
 
 def _series(tmp_path: Path, **kwargs):
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    return classified_series(tmp_path, **kwargs)
+    return attributed_series(tmp_path, **kwargs)
 
 
 def _export(client: TestClient, body: dict, payload: str = "milestones", headers=None, **extra):
@@ -308,8 +308,7 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
 
     open_new_project(tmp_path)
     bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "live" / "2026-02-11",
-                       [predicted("PLANT_A", ["bud"], {"bud": 0})],
-                       scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
+                       [predicted("PLANT_A", ["bud"])], scope={"subject": "bud"}).path
 
     resp = client.post("/api/results/phenology_measurement", json={
         "mapping_name": "valley",
@@ -323,7 +322,7 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
 
 # ── Count CSV export: per-image kind ──────────────────────────────────────
 
-COUNT_SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+COUNT_SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE) -> Path:
@@ -336,7 +335,7 @@ def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE) -> Pat
     fx.seed_confirmed_count(project, measured_subject=fx.COUNT_SUBJECT)
     subject = scope["subject"]
     bucket = published(project, project / "ds" / "predictions" / "live" / "counts",
-                       [predicted(f"img{i}", [subject] * 3, scope["id_map"]) for i in range(2)],
+                       [predicted(f"img{i}", [subject] * 3) for i in range(2)],
                        scope=scope).path
     open_new_project(project)
     return bucket
@@ -468,7 +467,7 @@ def test_export_count_csv_refuses_a_trait_that_states_no_per_image_count(
 def test_export_count_csv_refuses_a_bucket_whose_scope_omits_the_confirmed_subject(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    other = {"subject": "other", "attribute": None, "id_map": {"other": 0}}
+    other = {"subject": "other"}
     bucket = _unassessed_count_bucket(tmp_path, scope=other)
 
     resp = _export_count(client, _per_image(bucket))

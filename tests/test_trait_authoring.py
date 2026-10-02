@@ -1,5 +1,5 @@
 """Trait entries: what the schema and a proposal admit, how the calibration path reads an entry,
-and the derived class id."""
+and the positive state a bucket's scope classifies."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from tcip_mcp import subject_registry as cr
 from tcip_mcp import traits
 from tcip_mcp.operationalization import latest_confirmed
 from tcip_mcp.pipelines.postprocessing import phenology
@@ -162,7 +163,7 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
 def test_bud_opening_reads_back_as_the_reference_fixture(tmp_path: Path):
     t = latest_confirmed("bud_opening", tmp_path).entry
     assert t == BUD_OPENING
-    assert t.positive_value == "open"
+    assert t.positive_state == traits.PositiveState(attribute="opening", value="open")
     assert t.localization_tolerance_frac == 0.5
     assert t.majority_milestone == "95per"
     assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
@@ -182,55 +183,91 @@ def test_the_file_backend_places_a_trait_record_at_the_state_traits_path(tmp_pat
     assert traits.trait_names(project_root) == ["leaf"]
 
 
-# ── positive class id resolved from a prediction bucket's own recorded id_map ───────
+# ── the positive state, one attribute and one of its values ──────────────────
 
-def _bucket(project: Path, date: str, id_map: dict, *, attribute: str | None,
+OPENING = cr.Attribute("opening", "categorical", ("closed", "open"))
+"""The attribute :data:`BUD_OPENING`'s positive state names."""
+GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
+
+
+def _crossing(**state: str) -> TraitEntry:
+    """:data:`BUD_OPENING` stating ``state`` as its positive state and a crossing
+    operationalization over ``bud``, every field that kind rests on authored."""
+    from tests._trait_fixtures import with_fields, with_operationalization
+
+    return with_operationalization(
+        with_fields(BUD_OPENING, positive_state=state, count_bias_tolerance_frac=0.1,
+                    count_error_tolerance=1.0, classifier_agreement_floor=0.6),
+        traits.STATE_CROSSING_DATES, measured_subject="bud",
+        delivered_phenotypes=BUD_OPENING.delivers)
+
+
+def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(tmp_path: Path):
+    """The positive state names its attribute and its value as one fact, each held to the
+    registry: a value the attribute does not list refuses, an attribute the subject does not
+    declare refuses, and a value of the subject's second attribute is admitted."""
+    from tests._producer_fixtures import registry_over
+
+    registry_over(tmp_path, cr.SubjectRegistry(subjects=(
+        cr.Subject(name="bud", attributes=(OPENING, GRADE)),)))
+
+    with pytest.raises(ValueError, match="attribute 'opening' of 'bud' declares no value 'shed'"):
+        propose(tmp_path, _crossing(attribute="opening", value="shed"))
+    with pytest.raises(ValueError, match="subject 'bud' declares no attribute 'color'"):
+        propose(tmp_path, _crossing(attribute="color", value="open"))
+
+    admitted = propose(tmp_path, _crossing(attribute="grade", value="high"))
+    assert admitted.entry.positive_state == traits.PositiveState(attribute="grade", value="high")
+
+
+# ── the positive state resolved from a prediction bucket's own recorded scope ──
+
+def _bucket(project: Path, date: str, *, attributes: tuple,
             images: list[Path] | None = None) -> Path:
-    """Each of ``images`` (by default one frame ``P1.png``) holding one detection of ``id_map``'s
-    last class, published as the bucket ``ds/predictions/run/<date>``
+    """Each of ``images`` (by default one frame ``P1.png``) holding one ``bud`` detection
+    carrying the last value of each of ``attributes``, published as the bucket
+    ``ds/predictions/run/<date>`` from a checkpoint whose scope declares them
     (``_chain_fixtures.published``)."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
     bucket = project / "ds" / "predictions" / "run" / date
+    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),))
     published(project, bucket, [{"image": str(image), "width": 8, "height": 8,
                                  "boxes": [[1.0, 1.0, 3.0, 3.0]], "scores": [0.9],
-                                 "labels": [max(id_map.values()) + 1]}
+                                 "labels": [1],
+                                 **({"attributes": [[len(a.values) - 1 for a in attributes]]}
+                                    if attributes else {})}
                                 for image in images or [Path("P1.png")]],
-              scope={"subject": "bud", "attribute": attribute, "id_map": id_map})
+              scope={"subject": "bud"}, registry=registry)
     return bucket
 
 
-def test_the_positive_class_id_resolves_by_name_from_the_buckets_own_map(tmp_path: Path):
-    from tcip_annotation.json_io import ClassKeyUnknown, class_id
-
+def test_the_positive_state_resolves_by_name_from_the_buckets_own_scope(tmp_path: Path):
     from tcip_mcp.buckets import read_bucket
 
-    named = read_bucket(_bucket(tmp_path, "2026-02-11", {"closed": 0, "open": 1},
-                                attribute="opening"))
-    absent = read_bucket(_bucket(tmp_path, "2026-02-25", {"closed": 0, "bud": 1},
-                                 attribute="opening"))
+    named = read_bucket(_bucket(tmp_path, "2026-02-11", attributes=(OPENING,)))
+    absent = read_bucket(_bucket(tmp_path, "2026-02-25", attributes=(
+        cr.Attribute("opening", "categorical", ("closed", "bud")),)))
 
-    assert class_id(BUD_OPENING.positive_value, named.scope.value_ids) == 1
-    with pytest.raises(ClassKeyUnknown, match=repr(BUD_OPENING.positive_value)):
-        class_id(BUD_OPENING.positive_value, absent.scope.value_ids)
+    assert named.scope.state_ids(BUD_OPENING.positive_state) == (0, OPENING.values.index("open"))
+    assert absent.scope.state_ids(BUD_OPENING.positive_state) is None
 
 
 # ── end-to-end through the phenology delivery ─────────────────────────────────
 
-def _deliver_series(tmp_path: Path, *, classified: bool) -> dict:
-    """Two dated buckets over two mapped plots, classified for the positive value or bare
-    detector output, delivered through the mapping over them under a breeder's acknowledgment; a
-    refusal answers ``{"error": ...}``."""
+def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
+    """Two dated buckets over two mapped plots, whose scope declares the positive state's
+    attribute (``attributed``) or no attribute, delivered through the mapping over them under a
+    breeder's acknowledgment; a refusal answers ``{"error": ...}``."""
     from tests._chain_fixtures import acknowledged
     from tests._mapping_fixtures import PLOTS, map_captures
     from tests._trait_fixtures import seed_positive_class
 
-    id_map = {"closed": 0, "open": 1} if classified else {"bud": 0}
     captures = map_captures(tmp_path, tmp_path / "ds", ["2026-02-11", "2026-03-09"])
-    buckets = [str(_bucket(tmp_path, d, id_map, attribute="opening" if classified else None,
+    buckets = [str(_bucket(tmp_path, d, attributes=(OPENING,) if attributed else (),
                            images=images)) for d, images in captures.items()]
-    seed_positive_class(tmp_path / "ds", "bud", "open")
+    seed_positive_class(tmp_path / "ds", "bud", BUD_OPENING.positive_state)
     try:
         measurement = phenology.measure_phenology(
             tmp_path, trait="bud_opening", mapping_name="valley", buckets=buckets,
@@ -244,16 +281,16 @@ def _deliver_series(tmp_path: Path, *, classified: bool) -> dict:
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_a_classified_series_derives_its_class_id_and_delivers(tmp_path: Path):
-    res = _deliver_series(tmp_path, classified=True)
+def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
+    res = _deliver_series(tmp_path, attributed=True)
 
     assert "error" not in res, res
     assert (tmp_path / "out.csv").exists()
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_a_series_that_never_classified_the_positive_value_refuses(tmp_path: Path):
-    res = _deliver_series(tmp_path, classified=False)
+def test_a_series_that_never_classified_the_positive_state_refuses(tmp_path: Path):
+    res = _deliver_series(tmp_path, attributed=False)
 
-    assert "classify no 'open'" in res["error"]
+    assert "classify no opening='open'" in res["error"]
     assert not (tmp_path / "out.csv").exists()

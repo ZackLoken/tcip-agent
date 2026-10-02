@@ -11,7 +11,7 @@
               "delivers": [
                 "stem_count"
               ],
-              "positive_value": "",
+              "positive_state": null,
               "milestone_fractions": [],
               "milestone_on": "",
               "majority_milestone": "",
@@ -40,7 +40,7 @@
                 }
               }
             },
-            "entry_sha256": "95d615f2e0785791fcef2a0224fb8c670377a546d9d921ac3192933d5292ad16",
+            "entry_sha256": "d05b74f50481996c7a6344346fd38e1e0259d7e8bdcf7c0a00d77e5e513640e5",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
@@ -57,7 +57,7 @@
               "delivers": [
                 "stem_count"
               ],
-              "positive_value": "",
+              "positive_state": null,
               "milestone_fractions": [],
               "milestone_on": "",
               "majority_milestone": "",
@@ -86,7 +86,7 @@
                 }
               }
             },
-            "entry_sha256": "c189acb1f66b6be6121e636f42c82aa6476c62c92376dc8015dd3a537a6fd908",
+            "entry_sha256": "d51df0cb6f492652d4bc7e9d8615db31b19e742802d3ce5b3f0ee6976542415e",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
@@ -117,7 +117,7 @@
               "delivers": [
                 "stem_count"
               ],
-              "positive_value": "",
+              "positive_state": null,
               "milestone_fractions": [
                 0.5,
                 0.95
@@ -141,7 +141,7 @@
               "notes": "",
               "operationalizations": {}
             },
-            "entry_sha256": "5d15afa7a54d623c41b76621a19ca7e43d2887efae676405f3f7eb66adad8005",
+            "entry_sha256": "057e1e907810f324f38618dbd4722e9d638724c1d887bd5a8ba0c06ff06a3171",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",
@@ -172,7 +172,7 @@
               "delivers": [
                 "stem_count"
               ],
-              "positive_value": "",
+              "positive_state": null,
               "milestone_fractions": [
                 0.5,
                 0.95
@@ -196,7 +196,7 @@
               "notes": "",
               "operationalizations": {}
             },
-            "entry_sha256": "5d15afa7a54d623c41b76621a19ca7e43d2887efae676405f3f7eb66adad8005",
+            "entry_sha256": "057e1e907810f324f38618dbd4722e9d638724c1d887bd5a8ba0c06ff06a3171",
             "rationale": "The breeder counts every stem.",
             "relayed_note": "",
             "proposed_at": "1970-01-01T00:00:00+00:00",

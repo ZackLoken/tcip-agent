@@ -27,7 +27,7 @@ def _model_source() -> dict:
             "task": "detection", "source_files": [__file__]}
 
 
-_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
+_DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 """The data section a one-subject, three-band run records, which its checkpoint carries."""
 
 _DIMS = {"in_chans": 3, "num_classes": 1}

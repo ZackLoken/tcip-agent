@@ -14,8 +14,8 @@ Bloom is the fraction of a plant's detected catkins that are _elongated_.
 "Elongated" is an expert-defined, visible morphological stage: a *validated* per-catkin
 elongation call learned from the imagery. It's a *state*, not a dimension: judge it from the
 object, not off a bbox's height. (See the CLAUDE.md measurement-integrity invariant.) How that
-call is produced (a single multi-class detector, detect-then-classify, …) is a pipeline-design
-choice; the trait definition does not fix it.
+call is produced (a detector carrying a per-instance head for the state's attribute,
+detect-then-classify, …) is a pipeline-design choice; the trait definition does not fix it.
 
 Milestones, per plant, from that plant's elongated-fraction time series:
 
@@ -84,7 +84,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 |-------|-------|------|
 | `register_plant_registry` (MCP tool) | `tools/phenology_tools.py` | names a plant-locations CSV set once (`{path, sha256, n_plants}` per file, `crop`, `site`, a content digest), so `build_plant_mapping` and `deliver_orthomosaic_plant_counts` read the same registered version instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + a `plant_registry` name → a named mapping persisted under the project. A same-name rebuild a delivery event still cites refuses by name unless `supersede=True`, which archives the cited record first (readable by digest, never enumerated) |
-| `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + one classified bucket per date (each at the date its own record states) → delivered `catkin_phenology.csv`; the gate refuses buckets that classify no positive value |
+| `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + one bucket per date (each at the date its own record states) → delivered `catkin_phenology.csv`; the gate refuses buckets whose scope classifies no positive state |
 | `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, `measure_phenology` and the gated delivery door `deliver_phenology` (it writes under the trait's confirmed revision and names it on the delivery event). Every population plant has a point on every mapped date; a date the mapping assigns it no capture on counts against its completeness |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`, `register_plant_registry_record`, `load_registry`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs (read through the named registry) at delivery time |
 | Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (the traits and their revision confirmation, delivery events, registered models) not enumerated here |
@@ -98,10 +98,10 @@ definition, change it there; never fork a second copy. So the agent composes too
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
 count objective exists for this trait, record it with `propose_trait(entry,
 rationale)`, the one write path for a trait: it takes the complete entry (the spec fields, such as
-`count_objective`, `localization` and `positive_value`, and the operationalization per delivery
-kind) and appends it as a new, unconfirmed revision. The positive value must be a value one of
-the measured subject's attributes declares in the delivered dataset's own subject registry,
-checked when the revision is proposed and again at every delivery. The breeder confirms the whole
+`count_objective`, `localization` and `positive_state`, and the operationalization per delivery
+kind) and appends it as a new, unconfirmed revision. The positive state names one attribute of
+the measured subject and one of its values, each declared in the delivered dataset's own subject
+registry, checked when the revision is proposed and again at every delivery. The breeder confirms the whole
 revision, spec fields and operationalizations together, in the Setup tab; a delivery ships under
 the latest confirmed revision and names it on its event. Never hand-write the trait's record.
 

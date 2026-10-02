@@ -49,7 +49,7 @@ def _write_pred(dataset_root: Path, preds: dict[str, list[tuple]], *, w: int = 1
         {"image": str(dataset_root / "images" / "2-11-26" / image), "width": w, "height": h,
          "boxes": [list(p[:4]) for p in boxes], "scores": [p[4] for p in boxes],
          "labels": [1] * len(boxes)} for image, boxes in preds.items()],
-        scope={"subject": subject, "attribute": None, "id_map": {subject: 0}}).path
+        scope={"subject": subject}).path
 
 
 def _pred_doc(dataset_root: Path, boxes: list[tuple], **kwargs) -> Path:
@@ -183,7 +183,7 @@ def test_dataset_tree_per_date_reflects_actual_labels(
     _write_gt(det / "IMG_1.json", [(1, 1, 3, 3)], w=8, h=8)
     pdet = _published_bucket(opened_project, root / "predictions" / "baseline" / "2026-02-11",
                              root / "images" / "2026-02-11" / "IMG_1.JPG", [1],
-                             scope={"subject": "bud", "id_map": {"bud": 0}})
+                             scope={"subject": "bud"})
 
     body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     assert body["subjects_by_date"]["2026-02-11"] == ["bud"]
@@ -302,7 +302,7 @@ def test_dataset_select_advisory_reflects_actual_labels(
     ann.mkdir(parents=True, exist_ok=True)
     _write_gt(ann / "IMG_0000.json", [(40, 32, 60, 48)])
     _published_bucket(opened_project, bucket, dataset_root / "images" / "2-11-26" / "IMG_0000.JPG",
-                      [1], scope={"subject": "bud", "id_map": {"bud": 0}})
+                      [1], scope={"subject": "bud"})
     r2 = client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True

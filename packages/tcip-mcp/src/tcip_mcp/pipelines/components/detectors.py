@@ -16,6 +16,10 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 
+ROI_OUTPUT_SIZE = 7
+"""The edge, in feature cells, every box's pooled features are resampled to: torchvision's own
+box-head pool edge, the value these builders' RoI pools already used."""
+
 
 class BackboneNeckAdapter(nn.Module):
     """Wrap a backbone+neck so a torchvision detector can consume it as its backbone."""
@@ -125,7 +129,8 @@ def _build_faster_rcnn(
     # object class (~1:3-1:6) needs a tall ratio the default (0.5,1,2) can't match.
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
-    roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
+    roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
+                                  sampling_ratio=2)
     return FasterRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
         rpn_anchor_generator=anchor_generator, box_roi_pool=roi_pool,
@@ -187,7 +192,8 @@ def _build_mask_rcnn(
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
-    box_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
+    box_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
+                                      sampling_ratio=2)
     mask_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=14, sampling_ratio=2)
     return MaskRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
@@ -243,8 +249,97 @@ def _accepted_kwargs(name: str) -> set[str]:
     } - _BUILDER_SUPPLIED
 
 
-def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
-    """Instantiate a detector builder by name.
+def _held(name: str) -> property:
+    """A property reading and writing ``name`` on the detector an :class:`AttributeDetector`
+    holds."""
+    return property(lambda self: getattr(self.detector, name),
+                    lambda self, value: setattr(self.detector, name, value))
+
+
+class AttributeDetector(nn.Module):
+    """A torchvision detector with one per-instance head per attribute of its subject, each over
+    the channel means of the features :class:`~torchvision.ops.MultiScaleRoIAlign` pools at a box.
+
+    ``attributes`` are the scope's attribute records, each carrying ``name``, ``type`` and
+    ``values``: a categorical one gets a :class:`~tcip_mcp.pipelines.components.heads.
+    ClassificationHead` trained by cross-entropy, an ordinal one an :class:`~tcip_mcp.pipelines.
+    components.heads.OrdinalHead` trained by its CORN loss. Forward hooks on the detector's
+    ``backbone`` and ``transform`` hold the feature maps, resized images and resized targets of
+    the one forward. In train mode each head pools at the resized target boxes and its loss,
+    masked to the rows its target column assesses (``attributes`` other than
+    :data:`~tcip_annotation.json_io.UNASSESSED`), joins the detector's losses; in eval mode each
+    head pools at the detector's output boxes in the resized frame and every output dict carries
+    ``attributes``, boxes by attributes in declared order, int64. ``roi_heads``, ``score_thresh``
+    and ``detections_per_img`` read and write the held detector's.
+    """
+
+    roi_heads = _held("roi_heads")
+    score_thresh = _held("score_thresh")
+    detections_per_img = _held("detections_per_img")
+
+    def __init__(self, detector: nn.Module, attributes: Any, *, featmap_names: list[str],
+                 in_channels: int) -> None:
+        from torchvision.ops import MultiScaleRoIAlign
+
+        from tcip_mcp.pipelines.components.heads import ClassificationHead, OrdinalHead
+
+        super().__init__()
+        self.detector = detector
+        self.attributes = tuple(attributes)
+        self.pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=ROI_OUTPUT_SIZE,
+                                       sampling_ratio=2)
+        head_of = {"categorical": ClassificationHead, "ordinal": OrdinalHead}
+        self.attribute_heads = nn.ModuleList(
+            head_of[a.type](in_channels, len(a.values)) for a in self.attributes)
+        self._seen: dict[str, Any] = {}
+        cast(Any, detector).backbone.register_forward_hook(self._hold("features"))
+        cast(Any, detector).transform.register_forward_hook(self._hold("transformed"))
+
+    def _hold(self, key: str) -> Any:
+        def hook(_module: nn.Module, _inputs: Any, output: Any) -> None:
+            self._seen[key] = output
+        return hook
+
+    def _pooled(self, boxes: list[torch.Tensor]) -> torch.Tensor:
+        image_list = self._seen["transformed"][0]
+        return self.pool(self._seen["features"], boxes, image_list.image_sizes).mean(dim=(2, 3))
+
+    def forward(self, images: list[torch.Tensor], targets: list[dict] | None = None) -> Any:
+        from tcip_annotation.json_io import UNASSESSED
+
+        out = self.detector(images, targets)
+        if self.training:
+            resized = self._seen["transformed"][1]
+            pooled = self._pooled([t["boxes"] for t in resized])
+            truth = torch.cat([t["attributes"] for t in resized]).reshape(-1, len(self.attributes))
+            losses = {}
+            for i, (attribute, head) in enumerate(zip(self.attributes,
+                                                      cast(Any, self.attribute_heads))):
+                logits = head(pooled)["logits"]
+                assessed = truth[:, i] != UNASSESSED
+                losses[f"attribute_loss_{attribute.name}"] = (
+                    sum(head.compute_loss({"logits": logits[assessed]},
+                                          {head.target_key: truth[assessed, i]}).values())
+                    if assessed.any() else logits.sum() * 0.0)
+            return {**out, **losses}
+        sizes = self._seen["transformed"][0].image_sizes
+        boxes = []
+        for image, (h, w), result in zip(images, sizes, out):
+            scale = result["boxes"].new_tensor([w / image.shape[-1], h / image.shape[-2]] * 2)
+            boxes.append(result["boxes"] * scale)
+        pooled = self._pooled(boxes)
+        columns = [head.decode(head(pooled))[head.target_key]
+                   for head in cast(Any, self.attribute_heads)]
+        ids = torch.stack(columns, dim=1).long()
+        for result, rows in zip(out, ids.split([len(r["boxes"]) for r in out])):
+            result["attributes"] = rows
+        return out
+
+
+def build_detector(name: str, adapter: Any, num_classes: int, *, attributes: Any = (),
+                   **kwargs: Any) -> Any:
+    """Instantiate a detector builder by name, held by an :class:`AttributeDetector` carrying one
+    head per record of ``attributes`` when it names any.
 
     Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg. Accepted
     keys are the builder's own plus the torchvision detector class's, which the builder forwards.
@@ -276,4 +371,8 @@ def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> 
             f"build_detector('{name}', ...) got unexpected keyword argument(s) {unknown}. "
             f"Accepted by '{name}': {sorted(accepted)}. {detail}."
         )
-    return fn(adapter, num_classes, **kwargs)
+    detector = fn(adapter, num_classes, **kwargs)
+    if not attributes:
+        return detector
+    return AttributeDetector(detector, attributes, featmap_names=kwargs["featmap_names"],
+                             in_channels=adapter.out_channels)

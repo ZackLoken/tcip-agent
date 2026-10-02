@@ -43,11 +43,6 @@ def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
     return kept
 
 
-def _run_class_id(label: int) -> int:
-    """The 0-indexed run class id a 1-indexed torchvision label (background 0) stands for."""
-    return max(int(label) - 1, 0)
-
-
 def encode_predictions(
     result: dict, created_by: str | None = None, *, scope: "ClassScope",
 ) -> tuple[bytes, int]:
@@ -55,26 +50,30 @@ def encode_predictions(
     (:func:`~tcip_annotation.json_io.encode_annotations`), and the number of detections dropped.
 
     ``result`` carries its source ``image``, pixel-xyxy ``boxes``, 1-indexed ``labels``
-    (background=0), ``scores``, and image ``width``/``height``; a result missing one of them, or
-    whose boxes, scores and labels differ in length, refuses (``ValueError``) naming it, and so
-    does an image of a reserved stem. Each label is decoded via ``scope``'s map; the first it
-    cannot decode refuses naming the id and the map's ids. Under a classified scope the decoded
-    name lands in ``attributes[attribute]`` and ``subject`` carries the object class, otherwise
-    ``subject`` carries the name. An image with no detection encodes ``{"annotations": []}``.
-    ``created_by`` stamps every prediction.
+    (background=0), ``scores``, image ``width``/``height``, and, when ``scope`` declares
+    attributes, ``attributes``, one id row per detection; a result missing one of the first six,
+    or whose boxes, scores and labels differ in length, refuses (``ValueError``) naming it, and so does an
+    image of a reserved stem and a ``scope`` naming no subject or attributes
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`). Every prediction's
+    ``subject`` is ``scope``'s, and its ``attributes`` each attribute's value its row names
+    (:func:`~tcip_annotation.json_io.attribute_values`), none for a scope declaring none. An
+    image with no detection encodes ``{"annotations": []}``. ``created_by`` stamps every
+    prediction.
 
     ``masks`` (``instance_seg``), one ``{"segmentation"}`` of flat full-image polygons per
     detection, become one ``Polygon`` ring per polygon; a mask that binarized to nothing stores the
     detection's ``BBox`` (logged). A detection whose stored geometry has no extent is dropped, and
-    the same entries are dropped from ``result``'s ``boxes``/``scores``/``labels``/``masks``/
-    ``count`` in place.
+    the same entries are dropped from ``result``'s ``boxes``/``scores``/``labels``/
+    ``attributes``/``masks``/``count`` in place.
     """
     from datetime import datetime, timezone
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation
-    from tcip_mcp.subject_registry import decode_class_ids
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
+    from tcip_mcp.pipelines.inference.generic_predictor import DETECTION_ROWS
 
+    attributes = cast(tuple, scope.admitted_for(DOCUMENT, "this bucket's scope").attributes)
     missing = [k for k in ("image", "width", "height", "boxes", "scores", "labels")
                if k not in result]
     if missing:
@@ -86,45 +85,31 @@ def encode_predictions(
     if not len(boxes) == len(scores) == len(labels):
         raise ValueError(f"{p.name}: the result carries {len(boxes)} boxes, {len(scores)} scores "
                          f"and {len(labels)} labels, which name no one set of detections.")
-    attribute = scope.attribute
+    rows = result["attributes"] if attributes else [()] * len(boxes)
     w, h = result["width"], result["height"]
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
-    id_to_name = decode_class_ids(scope.id_map or {})
-    masks = result.get("masks")
     stored = stored_geometries(result)
     preds: list[Annotation] = []
     kept_indices: list[int] = []
     dropped = 0
-    for i, (score, label) in enumerate(zip(scores, labels, strict=True)):
-        cid = _run_class_id(label)
-        if cid not in id_to_name:
-            raise ValueError(
-                f"{p.name}: detection {i} decoded to id {cid}, not a key of this run's recorded "
-                f"id_map ({sorted(id_to_name)}); a name no admitted class map declares cannot be "
-                "written."
-            )
-        name = id_to_name[cid]
+    for i, (score, ids) in enumerate(zip(scores, rows, strict=True)):
         geometry = stored.get(i)
         if geometry is None:
             dropped += 1
             continue
-        # A classified scope names its subject (ClassScope's own admission).
-        pred_subject = cast(str, scope.subject) if attribute is not None else name
-        pred_attributes = {attribute: name} if attribute is not None else {}
-        preds.append(Annotation(subject=pred_subject, geometry=geometry, score=float(score),
-                                attributes=pred_attributes,
+        preds.append(Annotation(subject=cast(str, scope.subject), geometry=geometry,
+                                score=float(score),
+                                attributes=json_io.attribute_values(ids, attributes),
                                 created_by=created_by, created_at=created_at))
         kept_indices.append(i)
     _key, data = json_io.encode_annotations(p, preds, int(w), int(h), keep_empty=True)
     assert data is not None, "keep_empty encodes every document"
     if dropped:
         kept = set(kept_indices)
-        result["boxes"] = [b for i, b in enumerate(boxes) if i in kept]
-        result["scores"] = [s for i, s in enumerate(scores) if i in kept]
-        result["labels"] = [l for i, l in enumerate(labels) if i in kept]
+        for key in DETECTION_ROWS:
+            if result.get(key) is not None:
+                result[key] = [v for i, v in enumerate(result[key]) if i in kept]
         result["count"] = len(kept_indices)
-        if masks is not None:
-            result["masks"] = [m for i, m in enumerate(masks) if i in kept]
     return data, dropped
 
 

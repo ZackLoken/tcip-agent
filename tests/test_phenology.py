@@ -7,9 +7,9 @@ tests pin the authoritative trait definitions:
     bud_05/50/95per_date  = dates the open fraction crosses 5/50/95%
     bud_majority_date     = date most buds are open (the majority-label alias) = the 95% crossing
 
-and the id_map-key-membership coverage rule that decides whether a prediction
-bucket ever assessed the trait's positive class at all, and the per-detection membership check
-within it.
+and the coverage rule that decides whether a prediction bucket ever assessed the trait's positive
+state at all, read off the attribute the state names in the bucket's own scope, and the
+per-detection decode within it.
 """
 
 from __future__ import annotations
@@ -20,24 +20,45 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._trait_fixtures import BUD_OPENING, entry
 
-CLASSIFIED = {"subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
+OPENING = cr.Attribute("opening", "categorical", ("closed", "open"))
+"""The attribute :data:`BUD_OPENING`'s positive state names."""
+OPENED = BUD_OPENING.positive_state
 COMPLETE = phenology.REQUIRE_ALL_DATES_COMPLETE
-DETECTOR ={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
 
 
-def _bucket(project: Path, date: str, documents: dict[str, list[str]], scope: dict = CLASSIFIED):
+def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
+    return cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),))
+
+
+def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
+    """The class space the admission reads for ``bud`` over a dataset at ``root`` declaring
+    ``attributes`` on it."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tests._producer_fixtures import registry_over
+
+    registry_over(root, _registry(*attributes))
+    (root / "annotations").mkdir(parents=True, exist_ok=True)
+    return registry_scope(root / "annotations", "bud")
+
+
+def _bucket(project: Path, date: str, documents: dict[str, list[str]], *,
+            attributed: bool = True):
     """A bucket published for ``date`` holding one document per stem of ``documents``, each
-    detection named by its class under ``scope``'s map (``_chain_fixtures.published``)."""
+    detection carrying its value under :data:`OPENING`, from a checkpoint whose scope declares it,
+    or none from one whose scope declares no attribute (``_chain_fixtures.published``)."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
-    out = project / "ds" / "predictions" / f"m-{scope['attribute'] or 'bare'}" / date
-    return published(project, out, [predicted(stem, names, scope["id_map"])
-                                    for stem, names in documents.items()], scope=scope)
+    attributes = (OPENING,) if attributed else ()
+    out = project / "ds" / "predictions" / f"m-{'attributed' if attributed else 'bare'}" / date
+    return published(project, out, [predicted(stem, values, attributes)
+                                    for stem, values in documents.items()],
+                     scope={"subject": "bud"}, registry=_registry(*attributes))
 
 
 # ── date helpers ──────────────────────────────────────────────
@@ -168,45 +189,32 @@ def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns
 
 
 def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_path):
-    # A single-class detector's id_map ({"bud": 0}) has no attribute axis at all: "bud" is not
-    # the trait's positive value, so this must not be scored classified.
+    # A detector whose scope declares no attribute at all has no call of the positive state, so
+    # none of its detections counts as assessed for it.
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9),
             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    scope = ClassScope(subject="bud", id_map={"bud": 0})
-    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
+    total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=_scope(tmp_path))
     assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
 
 
 def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
-    # A run classified on a different attribute of the same subject (e.g. damage severity); its
-    # value set doesn't include the trait's positive value, so it must refuse, not be miscounted.
+    # A run whose scope declares a different attribute of the same subject (damage severity); it
+    # never called the positive state's attribute, so it must refuse, not be miscounted.
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                        attributes={"damage": "mild"})], 8, 8,
     )
-    scope = ClassScope(subject="bud", attribute="damage",
-                       id_map={"none": 0, "mild": 1, "severe": 2})
-    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
+    scope = _scope(tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe")))
+    total, positive, unclassified = phenology.count_by_class(p, OPENED, scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
-def test_count_by_class_absent_id_map_refuses(tmp_path):
-    p = tmp_path / "img.json"
-    json_io.write_annotations(
-        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"opening": "open"})], 8, 8,
-    )
-    scope = ClassScope(subject="bud", attribute="opening")
-    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
-    assert (total, positive, unclassified) == (1, 0, 1)
-
-
-def test_count_by_class_classified_bucket_splits_positive_negative(tmp_path):
+def test_count_by_class_attributed_bucket_splits_positive_negative(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
@@ -217,16 +225,14 @@ def test_count_by_class_classified_bucket_splits_positive_negative(tmp_path):
                        attributes={"opening": "open"})],
         8, 8,
     )
-    scope = ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "open": 1})
-    total, positive, unclassified = phenology.count_by_class(p, "open", scope=scope)
+    total, positive, unclassified = phenology.count_by_class(p, OPENED,
+                                                             scope=_scope(tmp_path, OPENING))
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
-def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path):
-    # A record carrying no value under the classified attribute (a stale bare-detector document)
-    # refuses by name rather than reading as a classified negative.
-    from tcip_annotation.json_io import ClassifiedRecordRefused
-
+def test_count_by_class_foreign_record_within_attributed_bucket_refuses(tmp_path):
+    # A record carrying no value under the state's attribute (a stale bare-detector document)
+    # refuses by name rather than reading as a negative.
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
@@ -234,9 +240,8 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
             Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    scope = ClassScope(subject="bud", attribute="opening", id_map={"closed": 0, "open": 1})
-    with pytest.raises(ClassifiedRecordRefused, match="carries no value under attribute"):
-        phenology.count_by_class(p, "open", scope=scope)
+    with pytest.raises(json_io.UndeclaredValue, match="with a value under 'opening'"):
+        phenology.count_by_class(p, OPENED, scope=_scope(tmp_path, OPENING))
 
 
 # ── per_plant_series / per_plant_phenology: bucket-level + expected-coverage ────────────────────
@@ -249,7 +254,7 @@ class _Assignment:
         self.accession_name = accession_name
 
 
-def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
+def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(tmp_path):
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["closed", "closed"]}),
                "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["open", "open"]})}
     mapping = {
@@ -272,7 +277,8 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
 
 
 def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_path):
-    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["bud"]}, DETECTOR)}
+    buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["bud"]},
+                                     attributed=False)}
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
 
     out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1"],
@@ -286,7 +292,7 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_pat
 
 def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     # A stem the mapping names with no prediction document must not read as an observed zero
-    # (which would count as "classified, 0/0" and silently pass coverage).
+    # (which would count as an assessed 0/0 and silently pass coverage).
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {})}
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
 
@@ -297,15 +303,16 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     assert row["series"][0]["n_missing"] == 1
     assert row["series"][0]["ratio"] is None
     assert row["n_dates_missing_images"] == 1
-    assert out["positive_class_assessed"] is False  # nothing anywhere was actually classified
+    assert out["positive_class_assessed"] is False  # no date anywhere was complete
     assert row["bud_50per_date"] is None
 
 
 def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp_path):
-    # One unclassified date excludes the whole plant's milestones, disclosed, rather than
+    # One date whose bucket declares no attribute excludes the whole plant's milestones, disclosed, rather than
     # computing them from the dates that happened to be usable.
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]}),
-               "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["bud"]}, DETECTOR)}
+               "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["bud"]},
+                                     attributed=False)}
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
@@ -319,7 +326,7 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     assert row["n_dates_unclassified"] == 1
     assert row["bud_05per_date"] is None
     assert row["bud_95per_date"] is None
-    # At least one date elsewhere was classified, so the delivery-level flag is still True,
+    # At least one date elsewhere was complete, so the delivery-level flag is still True,
     # distinguishing "wired, some gaps" from "never wired at all".
     assert out["positive_class_assessed"] is True
 
@@ -350,27 +357,22 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]})}
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
-    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
+    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
 
 
-# ── the positive class id ─────────────────────────────────────────
+# ── the positive state's attribute ────────────────────────────────
 
 
-def test_the_positive_class_id_reads_the_bucket_records_map(tmp_path):
-    from tcip_annotation.json_io import class_id
-
+def test_the_positive_states_ids_read_the_bucket_records_scope(tmp_path):
     bucket = _bucket(tmp_path, "2024-05-01", {})
-    assert class_id(BUD_OPENING.positive_value, bucket.scope.value_ids) == 1
+    assert bucket.scope.state_ids(OPENED) == (0, OPENING.values.index(OPENED.value))
 
 
-def test_the_positive_class_id_refuses_for_a_bucket_that_classifies_nothing(tmp_path):
-    from tcip_annotation.json_io import ClassKeyUnknown, class_id
-
-    bucket = _bucket(tmp_path, "2024-05-01", {}, DETECTOR)
-    with pytest.raises(ClassKeyUnknown, match=repr(BUD_OPENING.positive_value)):
-        class_id(BUD_OPENING.positive_value, bucket.scope.value_ids)
+def test_the_positive_states_ids_are_none_for_a_bucket_declaring_no_attribute(tmp_path):
+    bucket = _bucket(tmp_path, "2024-05-01", {}, attributed=False)
+    assert bucket.scope.state_ids(OPENED) is None
 
 
 _SPEC_SHAPES = [
@@ -437,7 +439,7 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
                                      {f"IMG{i}": ["open", "closed"] for i in range(3)})}
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction document
-    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
+    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
     (_date, total, positive, unclassified, missing, n_images) = per_plant["P1"]["series"][0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
     # 4 images named for this (plant, date), of which one is missing, not the 3 documents that
@@ -454,7 +456,7 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_pa
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
     ]}
-    per_plant = phenology.per_plant_series(mapping, buckets, "open", ["P1"])
+    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
     assert list(per_plant) == ["P1"]
 
 

@@ -118,9 +118,10 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   configure your builder and may not restate `samples`, `scope`, `task` or `transforms`; a
   builder that did would train on membership or a class space the run's own record does not
   describe, so the seam refuses it by name, as it refuses any kwarg beyond those four. `scope` is
-  a `ClassScope` (`subject`, `attribute`, `id_map`), every field `None` where the ground truth
-  carries its own classes (a mask raster, a table row): derive the class space from the ground
-  truth you were handed. A task with no
+  a `ClassScope`: its `subject` and `attributes`, every attribute the registry declares for that
+  subject (name, type, values in declared order, a value's id its position there), both `None`
+  where the ground truth carries its own classes (a mask raster, a table row): derive the class
+  space from the ground truth you were handed. A task with no
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
   truth `data.labels_dir` points at, whatever the task, so your builder receives the same samples
   a built-in loader would. Registry-free, imported like any module, never `exec`'d.
@@ -128,17 +129,19 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
   "source_files": [...], "task": "detection"}`). It is imported, never `exec`'d. The platform
   hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
-  sources carry) and the count its ground truth derives, as `num_classes` (the admitted class map's
-  length, or the class count the ground truth carries) or `num_ranks` for ordinal ground truth;
-  a regression run carries no count. Your builder accepts those keywords, and `builder_kwargs`
-  restating one refuses by name. A bespoke `dataset_source` whose loader composes its own bands
+  sources carry) and its head sizes: over label documents, `num_classes`, the subjects the scope
+  isolates, and `attributes`, the scope's attribute records when it declares any, one
+  per-instance head per record sized by its values (`build_detector` takes them and adds those
+  heads over its boxes); over ground truth carrying its own classes, `num_classes` or `num_ranks`
+  as that ground truth derives them; a regression run carries no count. Your builder accepts
+  those keywords, and `builder_kwargs` restating one refuses by name. A bespoke `dataset_source` whose loader composes its own bands
   states `data.num_channels` for the width it hands the model, and one over ground truth that
   carries its own classes states `data.num_classes` or `data.num_ranks`.
   `pipelines.model_contract`
   states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
   contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
-  in_chans/num_classes/img_size before the training subprocess spawns, so a broken builder fails the
+  dims and img_size, every attribute head included, before the training subprocess spawns, so a broken builder fails the
   launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
   demand; `launch_training(overfit_check=True)` runs `ctx.overfit_check`'s own diagnostic at
   launch, on the contract's batch, and records the result on the run's `model_contract`, never

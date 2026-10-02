@@ -3,15 +3,16 @@ of whether its operationalization binds what a delivery door is about to write."
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from tcip_mcp.subject_registry import SubjectRegistry, positive_value_problem
+from tcip_mcp.subject_registry import SubjectRegistry, positive_state_problem
 from tcip_mcp.traits import (
     PHENOTYPE_NAMING_KINDS,
     STATE_CROSSING_DATES,
     VALUE_KEY_KINDS,
+    PositiveState,
     TraitRevision,
     crops_definitions,
     read_trait,
@@ -75,14 +76,14 @@ def bind(
     *,
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
-    buckets: Mapping[str, Collection[str]] | None = None,
+    buckets: Mapping[str, str | None] | None = None,
     registry: SubjectRegistry | None = None,
 ) -> None:
     """Refuse (:class:`OperationalizationRefused`) a delivery ``revision``'s ``delivery_kind``
     operationalization does not bind: a delivered phenotype it does not cover, a row value key
-    outside its set or missing, a bucket (``buckets``: path to the object classes its detections
-    are of) not counting its measured subject, or, with ``registry`` given, a positive class the
-    delivered dataset's registry no longer declares."""
+    outside its set or missing, a bucket (``buckets``: path to the subject its detections are of)
+    not counting its measured subject, or, with ``registry`` given, a positive state the delivered
+    dataset's registry no longer declares."""
     entry = revision.entry
     stated = entry.operationalizations[delivery_kind]
 
@@ -95,10 +96,11 @@ def bind(
         )
 
     if delivery_kind == STATE_CROSSING_DATES and registry is not None:
-        problem = positive_value_problem(registry, stated.measured_subject, entry.positive_value)
+        problem = positive_state_problem(registry, stated.measured_subject,
+                                         cast(PositiveState, entry.positive_state))
         if problem is not None:
             raise refuse(
-                f"names positive class {entry.positive_value!r} for {stated.measured_subject!r}, "
+                f"names positive state {entry.positive_state} for {stated.measured_subject!r}, "
                 f"which the delivered dataset's registry no longer declares: {problem}")
     if (delivered_phenotype is not None and delivery_kind in PHENOTYPE_NAMING_KINDS
             and delivered_phenotype not in stated.delivered_phenotypes):
@@ -112,10 +114,10 @@ def bind(
         if offending:
             raise refuse(f"covers value keys {list(stated.delivered_value_keys)}, and these "
                          f"rows carry {offending}")
-    for bucket, subjects in (buckets or {}).items():
-        if stated.measured_subject not in subjects:
+    for bucket, subject in (buckets or {}).items():
+        if stated.measured_subject != subject:
             raise refuse(f"measures {stated.measured_subject!r}, and bucket {bucket} counted "
-                         f"{sorted(subjects)}")
+                         f"{subject!r}")
 
 
 def _revision_delivering(delivered_phenotype: str, project: str | Path) -> TraitRevision:

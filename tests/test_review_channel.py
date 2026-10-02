@@ -69,7 +69,7 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> Path:
         {"image": str(Path(image_dir(root, date)) / name), "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores), "scores": scores,
          "labels": [1] * len(scores)} for name, scores in preds.items()],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
+        scope={"subject": "bud"}).path
 
 
 def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)) -> None:

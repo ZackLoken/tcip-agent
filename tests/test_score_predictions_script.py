@@ -38,7 +38,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     preds = published(tmp_path, tmp_path / "predictions" / "baseline", [
         {"image": str(img), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 40.0, 30.0]],
          "scores": [0.9], "labels": [1]}],
-        scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}}).path
+        scope={"subject": "bud"}).path
     return img, preds
 
 

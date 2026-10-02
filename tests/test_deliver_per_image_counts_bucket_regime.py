@@ -18,7 +18,7 @@ from tests import _trait_fixtures as fx
 
 pytest.importorskip("torch")
 
-SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 def _images(images_dir: Path) -> list[Path]:
@@ -46,8 +46,7 @@ def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> Path:
     name = scope["subject"] or "raster"
     bucket = project / "ds" / "predictions" / name / "2026-01-01"
     names = [scope["subject"]] * 2 if scope["subject"] else []
-    return published(project, bucket, [predicted("a", names, scope["id_map"] or {})],
-                     scope=scope, **published_kw).path
+    return published(project, bucket, [predicted("a", names)], scope=scope, **published_kw).path
 
 
 def test_a_directory_holding_no_bucket_record_refuses(tmp_path):
@@ -77,7 +76,7 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
     from tests._chain_fixtures import predicted, published
 
     bucket = published(tmp_path, tmp_path / "ds" / "predictions" / "mosaic" / "run",
-                       [{**predicted("mosaic", [fx.COUNT_SUBJECT], SCOPE["id_map"]),
+                       [{**predicted("mosaic", [fx.COUNT_SUBJECT]),
                          "image": str(raster)}], scope=SCOPE, raster_path=raster).path
 
     res = _deliver(tmp_path, bucket)
@@ -88,10 +87,10 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
 def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitted_to_the_gate(
     tmp_path,
 ):
-    """The measured-subject check reads the bucket's recorded map: a bucket counting another
+    """The measured-subject check reads the bucket's recorded subject: a bucket counting another
     subject refuses before the gate, while the confirmed subject's bucket reaches the gate (and,
     unassessed, refuses there instead)."""
-    other = _bucket(tmp_path, {"subject": "leaf", "attribute": None, "id_map": {"leaf": 0}})
+    other = _bucket(tmp_path, {"subject": "leaf"})
     own = _bucket(tmp_path)
 
     refused = _deliver(tmp_path, other)

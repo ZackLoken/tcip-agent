@@ -355,12 +355,12 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
 
 
 def _series_body(project: Path) -> dict:
-    """An assessed classified series under ``project`` (``_chain_fixtures.classified_series``);
+    """An assessed attributed series under ``project`` (``_chain_fixtures.attributed_series``);
     the request body a phenology door takes over it."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    return classified_series(project, fractions=(0.0, 1.0)).body()
+    return attributed_series(project, fractions=(0.0, 1.0)).body()
 
 
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(

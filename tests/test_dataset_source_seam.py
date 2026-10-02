@@ -103,10 +103,11 @@ def _admitted_samples(root: Path):
 
 
 def _scope():
-    """The class space :func:`_admitted_samples` admits its samples under."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    """The class space :func:`_admitted_samples` admits its samples under, a registry declaring
+    no attribute on its subject."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
 
-    return ClassScope(subject="leaf", id_map={"leaf": 0})
+    return registry_scope(Path(__file__).parent, "leaf")
 
 
 def test_build_dataset_routes_to_dataset_source(tmp_path: Path):

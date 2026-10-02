@@ -9,12 +9,14 @@ second one. Both facts decide what any reader counting a project's models can ho
 from __future__ import annotations
 
 import hashlib
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
 import tcip_store as ts
 from tcip_mcp.model_registry import ModelRegistry, registry_index_key
+from tcip_mcp.pipelines.data.label_queries import registry_scope
 
 pytest.importorskip("torch")
 
@@ -40,7 +42,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         run_dir = root / ".tcip" / "experiments" / name / "artifacts"
         run_dir.mkdir(parents=True)
         ckpt = checkpoint_file(run_dir / "model_best.pt", content)
-        reg.register_model(name, str(ckpt), {"data": {"scope": {"subject": "bud"}}},
+        reg.register_model(name, str(ckpt), {"data": {"scope": asdict(registry_scope(root, "bud"))}},
                            metrics={"val_map50": 0.42})
 
     models_dir = root / ".tcip" / "models"

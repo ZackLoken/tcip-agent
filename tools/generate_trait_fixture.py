@@ -20,7 +20,7 @@ GENERATED_PATH = (
     _REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src" / "test" / "traitListings.json")
 
 _STEM_ENTRY = {
-    "name": "stem", "delivers": ["stem_count"], "positive_value": "", "milestone_fractions": [],
+    "name": "stem", "delivers": ["stem_count"], "positive_state": None, "milestone_fractions": [],
     "milestone_on": "", "majority_milestone": "", "phenology_prefix": "", "majority_label": "",
     "count_objective": "count_unbiased", "localization": "center_match",
     "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,

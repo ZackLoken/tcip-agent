@@ -90,8 +90,8 @@ def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
 
 
 def _registry_term(dataset_root: Path) -> str:
-    """Digest over the canonical registry serialization in declared order (load-bearing in
-    ``assign_class_ids``). Serialized via ``registry_to_dict`` rather than raw bytes, so a
+    """Digest over the canonical registry serialization in declared order (a value's id is its
+    position there). Serialized via ``registry_to_dict`` rather than raw bytes, so a
     whitespace-only reformat of ``subjects.json`` does not change identity but a value
     reorder/addition does. Empty string when the dataset has no registry; a registry
     ``read_registry`` refuses raises as it does.

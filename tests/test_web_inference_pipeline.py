@@ -15,23 +15,20 @@ def _checkpoint(project: Path, **kwargs) -> Path:
     return Path(project_checkpoint(project, **kwargs))
 
 
-def test_encode_predictions_roundtrip_and_negative():
+def test_encode_predictions_roundtrip_and_negative(tmp_path):
     import json
 
     from tcip_annotation import json_io
-    from tcip_mcp import subject_registry
-    from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-    id_map = subject_registry.assign_class_ids(
-        SubjectRegistry(subjects=(Subject(name="bud"),)), "bud")  # {bud: 0}
+    scope = registry_scope(tmp_path, "bud")
     encoded, _dropped = encode_predictions({
         "image": "img.jpg", "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, scope=ClassScope(subject="bud", id_map=id_map))
+    }, scope=scope)
     ann = json.loads(encoded)["annotations"][0]
-    assert ann["subject"] == "bud"                       # 1-indexed label 1 -> id 0 -> "bud"
+    assert ann["subject"] == "bud"                       # the scope's one subject
     assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
     assert ann["score"] == pytest.approx(0.9)
     preds = json_io.annotations_from_bytes(encoded, source="img.json")  # symmetric read
@@ -40,7 +37,7 @@ def test_encode_predictions_roundtrip_and_negative():
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions({"image": "empty.jpg", "width": 100, "height": 100,
                                           "boxes": [], "scores": [], "labels": [], "count": 0},
-                                         scope=ClassScope(subject="bud"))
+                                         scope=scope)
     assert json.loads(empty)["annotations"] == []
 
 
@@ -99,21 +96,23 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert obj["created_by"] == f"model:{ckpt.stem}@{digest}"
 
 
-def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
-    """The GUI inference worker decodes through the checkpoint's own recorded scope, never a map
-    re-derived from a live registry: no subjects.json exists under images_dir at all."""
+def test_web_worker_prefers_the_checkpoints_own_recorded_scope(tmp_path, monkeypatch):
+    """The GUI inference worker decodes through the checkpoint's own recorded scope, never an
+    order re-read from a live registry: no subjects.json exists under images_dir at all."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
+    from tcip_mcp import subject_registry as cr
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    classified = {"num_channels": 3, "scope": {"subject": "bud", "attribute": "opening",
-                                               "id_map": {"closed": 0, "open": 1}}}
+    opening = cr.Attribute("opening", "categorical", ("closed", "open"))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
     out_dir = tmp_path / "out"
-    ckpt = _checkpoint(tmp_path, data=classified)
+    ckpt = _checkpoint(tmp_path, data={"num_channels": 3, "scope": {"subject": "bud"}},
+                       registry=cr.SubjectRegistry(subjects=(
+                           cr.Subject(name="bud", attributes=(opening,)),)))
 
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):
@@ -121,8 +120,8 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
 
         def predict_batch(self, paths, execution=None, **kw):
             return [{"image": p, "width": 100, "height": 100,
-                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [2],
-                     "count": 1, "cap_hit": False} for p in paths]
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                     "attributes": [[1]], "count": 1, "cap_hit": False} for p in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
@@ -137,17 +136,13 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     assert job.status == "completed"
     import json
 
-    from dataclasses import asdict
-
     from tcip_mcp.buckets import read_bucket
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    # label 2 -> 0-indexed 1 -> the recorded map's "open"; a classified run's decoded name
-    # lands under attributes[attribute], with subject carrying the object class.
+    # id 1 of the recorded "opening" is "open", under attributes; subject carries the object.
     assert obj["subject"] == "bud"
     assert obj["attributes"] == {"opening": "open"}
-    assert asdict(read_bucket(out_dir).scope) == {
-        "subject": "bud", "attribute": "opening", "id_map": {"closed": 0, "open": 1}}
+    assert read_bucket(out_dir).scope.attributes == (opening,)
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):

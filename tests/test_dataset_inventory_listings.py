@@ -38,14 +38,14 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
-    scope = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
+    scope = {"subject": "bud"}
     _write(prediction_root(root) / "baseline" / "2026-02-11" / "overlay.png", "not a label")
     _write(prediction_root(root) / "baseline" / "2026-02-11" / "IMG_1.json",
            '{"annotations": []}')
     for model, date, stem in (("candidate", "2026-02-11", "IMG_1"),
                               ("baseline", "2026-03-02", "IMG_2")):
         published(root, prediction_root(root) / model / date,
-                  [{**predicted(stem, ["bud"], scope["id_map"]),
+                  [{**predicted(stem, ["bud"]),
                     "image": str(root / "images" / date / f"{stem}.png")}], scope=scope)
 
     listed = buckets_by_date(root, ["2026-02-11", "2026-03-02"])

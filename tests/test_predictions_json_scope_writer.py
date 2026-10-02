@@ -1,26 +1,45 @@
-"""``encode_predictions``: the run's own scope decides where a decoded label lands. With an
-attribute, the decoded value lands under ``attributes[attribute]`` and ``subject`` carries the
-object class; without one, the output is a detector run's. Every label decodes through the run's
-admitted map, and a run that cannot be decoded honestly encodes no document at all.
+"""``encode_predictions``: the run's own scope decides what a prediction document says. Every
+prediction's ``subject`` is the scope's, and each attribute the scope declares lands under
+``attributes`` decoded through its own declared values; a scope declaring none writes none, and a
+run that cannot be decoded honestly encodes no document at all.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tcip_annotation.json_io import annotations_from_bytes
+from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
-SUBJECT = "bud"
-ATTRIBUTE = "bud_opening"
-ID_MAP = {"open": 0, "closed": 1}
-CLASSIFIED = ClassScope(subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP)
+SUBJECT = "object"
 
 
-def _result(*, boxes, scores, labels, width=100, height=80) -> dict:
-    return {"image": "img1.jpg", "boxes": boxes, "scores": scores, "labels": labels,
-            "width": width, "height": height}
+def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
+    """The class space the admission reads for :data:`SUBJECT` over a dataset declaring
+    ``attributes`` on it."""
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+    from tests._producer_fixtures import registry_over
+
+    registry_over(tmp_path, cr.SubjectRegistry(subjects=(
+        cr.Subject(name=SUBJECT, attributes=attributes),)))
+    (tmp_path / "annotations").mkdir(exist_ok=True)
+    return registry_scope(tmp_path / "annotations", SUBJECT)
+
+
+COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
+GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
+
+
+def _result(*, boxes, scores, labels, attributes=None, width=100, height=80) -> dict:
+    result = {"image": "img1.jpg", "boxes": boxes, "scores": scores, "labels": labels,
+              "width": width, "height": height}
+    if attributes is not None:
+        result["attributes"] = attributes
+    return result
 
 
 def _decoded(result: dict, scope: ClassScope) -> list:
@@ -28,67 +47,43 @@ def _decoded(result: dict, scope: ClassScope) -> list:
     return annotations_from_bytes(data, source="img1.json")
 
 
-def test_a_classified_run_decodes_the_value_under_the_attribute() -> None:
-    (written,) = _decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]), CLASSIFIED)
-    assert written.subject == SUBJECT
-    assert written.attributes == {ATTRIBUTE: "open"}
-    assert written.score == 0.9
+def test_an_attributed_run_writes_every_attributes_value_on_every_box(tmp_path) -> None:
+    scope = _scope(tmp_path, COLOR, GRADE)
+    first, second = _decoded(_result(boxes=[[1, 1, 5, 5], [10, 10, 20, 20]], scores=[0.9, 0.8],
+                                     labels=[1, 1], attributes=[[1, 2], [0, 0]]), scope)
+    assert (first.subject, first.attributes) == (SUBJECT, {"color": "blue", "grade": "high"})
+    assert (second.subject, second.attributes) == (SUBJECT, {"color": "red", "grade": "low"})
+    assert first.score == 0.9
 
 
-def test_a_classified_result_carrying_a_label_outside_the_map_refuses_naming_id_and_map() -> None:
-    # label 3 decodes to 0-indexed id 2, not a key of ID_MAP (which only has ids 0 and 1).
-    result = _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[3])
-
-    with pytest.raises(ValueError, match=r"detection 0 decoded to id 2") as excinfo:
-        encode_predictions(result, scope=CLASSIFIED)
-
-    assert "[0, 1]" in str(excinfo.value)
-
-
-def test_a_classified_run_refuses_the_whole_result_at_its_first_unmapped_detection() -> None:
-    """The refusal fires per-detection, and nothing is encoded for the whole result: the
-    decodable detection ahead of the unmapped one is not either."""
-    result = _result(boxes=[[1, 1, 5, 5], [10, 10, 20, 20]], scores=[0.9, 0.8], labels=[1, 3])
-
-    with pytest.raises(ValueError):
-        encode_predictions(result, scope=CLASSIFIED)
-
-
-def test_a_detector_run_with_no_id_map_publishes_no_name_it_cannot_decode() -> None:
-    """A run with no admitted map has no name to publish a label under; a raw index written as a
-    subject would read as a class no vocabulary declares."""
-    with pytest.raises(ValueError, match=r"detection 0 decoded to id 0"):
+def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
+    """A run with no admitted subject has no name to publish a detection under; a raw index
+    written as a subject would read as a class no vocabulary declares."""
+    with pytest.raises(ValueError, match="records no subject"):
         encode_predictions(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
                            scope=ClassScope())
 
 
-def test_a_detector_run_with_a_recorded_map_decodes_the_name_into_subject() -> None:
+def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(tmp_path) -> None:
     (written,) = _decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-                          ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}))
+                          _scope(tmp_path))
     assert written.subject == SUBJECT
     assert written.attributes == {}
 
 
-def test_a_detector_result_carrying_a_label_outside_the_map_refuses() -> None:
-    """A detector run's labels are decoded through its admitted map as a classified run's are, so
-    a label outside it refuses by name rather than publishing its raw index."""
-    with pytest.raises(ValueError, match=r"detection 0 decoded to id 8"):
-        encode_predictions(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[9]),
-                           scope=ClassScope(subject=SUBJECT, id_map={SUBJECT: 0}))
-
-
 @pytest.mark.parametrize("dropped", ["image", "scores", "labels", "width"])
-def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(dropped):
+def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(tmp_path, dropped):
     """No stored value stands in for one the head did not give: a result without its source
     image, scores, labels or frame size encodes nothing, rather than a document of defaults."""
-    result = _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1])
+    scope = _scope(tmp_path, COLOR)
+    result = _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]])
     del result[dropped]
 
     with pytest.raises(ValueError, match=f"carries no \\['{dropped}'\\]"):
-        encode_predictions(result, scope=CLASSIFIED)
+        encode_predictions(result, scope=scope)
 
-    assert len(_decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-                        CLASSIFIED)) == 1
+    assert len(_decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1],
+                                attributes=[[0]]), scope)) == 1
 
 
 def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp_path):

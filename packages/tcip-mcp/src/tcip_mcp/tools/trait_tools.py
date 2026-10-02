@@ -25,7 +25,7 @@ def propose_trait(
         rationale: Why this entry, from the breeder's own words. Prose, read by the breeder.
         relayed_note: What the breeder said away from the GUI, relayed by you; never a confirmation.
         dataset_root: The dataset whose subject registry a ``state_crossing_dates``
-            operationalization's positive class is checked against. Empty resolves the project's
+            operationalization's positive state is checked against. Empty resolves the project's
             own registry when the project has one dataset; otherwise this refuses naming them.
 
     Returns the revision as written (its ``number`` and ``entry_sha256`` among it), or

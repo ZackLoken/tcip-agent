@@ -483,8 +483,9 @@ def save_label_document(
     The document holds every annotation parsed from ``payloads``, provenance stamped
     (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
     own, any other is ``author``'s at the save's time. Each accepted proposal of ``gestures``
-    pairing no annotation (:func:`proposal_pairs`) joins it as ground truth, authored by its
-    producer and accepted by ``author``; one that pairs confirms that annotation and adds nothing.
+    pairing no annotation (:func:`proposal_pairs`) joins it as ground truth, its geometry and
+    subject only, every attribute unassessed, authored by its producer and accepted by
+    ``author``; one that pairs confirms that annotation and adds nothing.
     The document's completion marks still live over the new annotations stay, beside the marks
     ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
     proposal appends one entry to the image's verdict shard under that bucket, before the
@@ -542,8 +543,8 @@ def save_label_document(
                     raise ValueError(f"{bucket.path} holds {len(proposals)} proposals for "
                                      f"{Path(image_path).name}, not one at index {i}")
                 if action == "accepted" and i not in paired:
-                    annotations.append(replace(proposals[i], score=None, accepted_by=author,
-                                               accepted_at=now))
+                    annotations.append(replace(proposals[i], score=None, attributes={},
+                                               accepted_by=author, accepted_at=now))
                 verdicts.append(Verdict(proposal=i, action=action, by=cast(str, author), at=now))
     marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
     for subject in (s for s, made in gestures.complete.items() if made):

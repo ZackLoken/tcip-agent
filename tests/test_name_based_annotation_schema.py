@@ -1,9 +1,9 @@
 """The name-based annotation schema: subjects, never integer class ids, on disk or in memory.
 
 The measurement-critical invariants of name-based labels: the registry decodes its own labels, a
-geometry-less annotation round-trips without collapsing to a negative, every id consumer rests
-on one ``assign_class_ids`` map, negatives key through a threaded subject, the loader filters by
-subject and geometry, decode inverts the recorded map, and authoring refuses a subjectless
+geometry-less annotation round-trips without collapsing to a negative, every attribute id rests
+on the registry's declared order, negatives key through a threaded subject, the loader filters by
+subject and geometry, decode inverts the recorded scope, and authoring refuses a subjectless
 label. Each test builds its own dataset, sharing no fixture with another.
 """
 
@@ -16,9 +16,8 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp import subject_registry
 from tcip_mcp.subject_registry import SubjectRegistry, Subject
-from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 
@@ -44,16 +43,14 @@ def test_registry_decodes_its_own_labels(tmp_path):
         labels_dir / "img_001.json",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = subject_registry.assign_class_ids(registry, "bud")
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
     _img, target = ds[0]
 
-    # The loader's class ids are the assign_class_ids map, and the target decodes back to the name
-    # its label carried: the registry reads its own labels without guessing.
-    assert ds.scope.id_map == id_map
-    inv = subject_registry.decode_class_ids(id_map)
+    # The loader's scope is the registry's own subject, and every row of the target is that one
+    # subject: the registry reads its own labels without guessing.
+    assert ds.scope.subject == registry.subjects[0].name == "bud"
+    assert ds.scope.attributes == ()
     assert target["labels"].tolist() == [1], "the labeled image produced no target"
-    assert all(inv[int(label) - 1] == "bud" for label in target["labels"].tolist())
 
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
@@ -74,16 +71,21 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
     # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
-    records, counts = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"))
+    records, counts = admitted_documents(labels_dir, images_dir,
+                                         scope=registry_scope(labels_dir, "bud"))
     assert [record.member for record in records] == ["img_001"]
     assert counts["annotated"] == 1
     assert counts["skipped_unannotated"] == 0
     assert counts["skipped_unconfirmed_empty"] == 0
 
 
-# (c) the admitted map's length == subject_registry.num_classes, one map.
-def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
-    registry = _write_registry(tmp_path, Subject(name="bud"))
+# (c) the admitted scope carries every attribute the registry declares, in declared order.
+def test_the_admitted_scope_carries_the_registrys_attributes(tmp_path):
+    from tcip_mcp.subject_registry import Attribute
+
+    registry = _write_registry(tmp_path, Subject(name="bud", attributes=(
+        Attribute("color", "categorical", ("red", "blue")),
+        Attribute("grade", "ordinal", ("low", "high")))))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     for stem in ("a", "b"):
@@ -94,11 +96,9 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
             labels_dir / f"{stem}.json",
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = subject_registry.assign_class_ids(registry, "bud")
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
 
-    assert ds.scope.id_map == id_map
-    assert len(id_map) == subject_registry.num_classes(registry, "bud") == 1
+    assert ds.scope.attributes == registry.subjects[0].attributes
 
 
 # (d) a confirmed negative is scoped to the subject its mark names.
@@ -140,30 +140,29 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
         640, 480)
 
     ds = dataset_over("detection", str(images_dir), str(labels_dir), subject="bud")
-    assert len(ds.scope.id_map) == 1
+    assert ds.scope.subject == "bud"
     _img, target = ds[0]
     # Only the one legitimate bud box survives; the wrong-subject and geometry-less rows are gone.
     assert target["boxes"].shape[0] == 1
     assert torch.equal(target["labels"], torch.tensor([1], dtype=torch.int64))  # 0-idx bud +1 bg
 
 
-# (f) the loader's assign_class_ids map == decode_class_ids of the recorded operating_point map.
-def test_decode_inverts_the_recorded_map(tmp_path):
+# (f) the encoder decodes a prediction's attribute ids through the scope the loader read under.
+def test_decode_inverts_the_recorded_scope(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.subject_registry import Attribute
 
-    registry = _write_registry(tmp_path, Subject(name="bud"))
-    id_map = subject_registry.assign_class_ids(registry, "bud")  # the run's single map
+    _write_registry(tmp_path, Subject(name="bud", attributes=(
+        Attribute("color", "categorical", ("red", "blue")),)))
+    (tmp_path / "annotations").mkdir()
+    scope = registry_scope(tmp_path / "annotations", "bud")
 
-    # A prediction with a 1-indexed detector label decodes to its name through the recorded map.
     data, _dropped = encode_predictions(
         {"image": "pred.jpg", "boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1],
-         "width": 640, "height": 480},
-        created_by="model:x", scope=ClassScope(subject="bud", id_map=id_map))
+         "attributes": [[1]], "width": 640, "height": 480},
+        created_by="model:x", scope=scope)
     preds = json_io.annotations_from_bytes(data, source="pred.json")
-    assert len(preds) == 1
-    inv = subject_registry.decode_class_ids(id_map)
-    # loader-side map (id_map) inverted == the name the recorded-map decode wrote on disk.
-    assert preds[0].subject == inv[0] == "bud"
+    assert [(p.subject, p.attributes) for p in preds] == [("bud", {"color": "blue"})]
 
 
 # (g) save_annotations refuses a missing subject.
@@ -312,7 +311,8 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    records, _ = admitted_documents(labels_dir, images_dir, scope=ClassScope(subject="bud"))
+    records, _ = admitted_documents(labels_dir, images_dir,
+                                    scope=registry_scope(labels_dir, "bud"))
     assert [record.member for record in records] == ["boxed", "geomless"]
 
     with pytest.raises(ValueError, match="only in geometries a detection loader does not read"):

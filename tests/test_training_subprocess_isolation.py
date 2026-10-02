@@ -11,7 +11,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.data.selection import ClassScope
 
 
-# ── persist the training run's class id_map ──────────────────────────
+# ── persist the training run's class space ───────────────────────────
 
 
 def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None):
@@ -61,30 +61,32 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
                 "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val(tmp_path, "detection", data_cfg, None)
 
-    assert ClassScope.of(data_cfg) == ClassScope("bud", None, {"bud": 0})
+    assert ClassScope.of(data_cfg) == ClassScope("bud", ())
 
     _write_classes_json(root, subject="bud", attribute="opening", values=["open", "closed"])
-    assert ClassScope.of(data_cfg) == ClassScope("bud", None, {"bud": 0})
+    assert ClassScope.of(data_cfg) == ClassScope("bud", ())
 
 
-def test_an_attribute_scoped_run_records_the_attributes_own_map(tmp_path):
-    """An attribute-scoped run's class space is its values, in declared order, admitted once."""
+def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(tmp_path):
+    """A run's class space is its subject and every attribute the registry declares for it, its
+    values in declared order, admitted once."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.subject_registry import Attribute
 
     images_dir, labels_dir = _document_dataset(
         tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "scope": {"subject": "bud", "attribute": "opening"},
-                "split": {"val_ratio": 0.5, "seed": 1}}
+                "scope": {"subject": "bud"}, "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val(tmp_path, "detection", data_cfg, None)
 
     assert ClassScope.of(data_cfg) == ClassScope(
-        "bud", "opening", {"closed": 0, "open": 1})
+        "bud", (Attribute("opening", "categorical", ("closed", "open")),))
 
 
-def test_a_run_whose_ground_truth_carries_its_own_classes_records_no_map(tmp_path):
-    """A mask raster scopes no class space and no registry answers for one, so nothing is
-    stamped and decode falls through to its own derivation rather than to a fabricated map."""
+def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(tmp_path):
+    """A mask raster scopes no class space and no registry answers for one, so the empty scope is
+    stamped and decode falls through to its own derivation rather than to fabricated
+    attributes."""
     from PIL import Image
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
@@ -100,7 +102,7 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_no_map(tmp_pat
                 "split": {"val_ratio": 0.5, "seed": 1}}
     auto_train_val(tmp_path, "semantic_seg", data_cfg, None)
 
-    assert ClassScope.of(data_cfg).id_map is None
+    assert ClassScope.of(data_cfg) == ClassScope()
 
 
 def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(tmp_path,

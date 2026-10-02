@@ -85,8 +85,8 @@ config = {
         # where this run's ground truth lives, whatever shape it is: a directory of per-image
         # label documents, a directory of <stem>.png masks, or a .csv table of one row per image
         "labels_dir": "data/labels/detect",
-        # the class space it is admitted under; admission adds the id_map it assigns
-        "scope": {"subject": "fruit", "attribute": None},
+        # the subject it is admitted for; admission adds every attribute the registry declares
+        "scope": {"subject": "fruit"},
     },
     "batch_size": 4,
     "stages": [...],
@@ -192,8 +192,8 @@ parameter at all, no launch path honors a held-out test list (a separate, within
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
 where the dataset's ground truth lives. A draw over the per-image label tree (no `ground_truth`)
-requires `subject`, since that admission is subject-scoped, and takes `attribute` when the run is
-attribute-scoped. `ground_truth` names a
+requires `subject`, since that admission is subject-scoped; the selection's scope then carries
+every attribute the dataset's registry declares for it. `ground_truth` names a
 place explicitly instead of walking that tree, and the producer reads what is there: a directory
 of label documents (subject-scoped the same way), a directory of `<stem>.png` masks, or a `.csv`
 table of one row per image. A mask and a row are admitted by existing beside their image, and the
@@ -230,8 +230,8 @@ truth that task reads: a per-image label document for detection and instance_seg
 mask for semantic_seg, one table row for classification, ordinal and regression. A selection
 naming another shape refuses by name when the run's loader is built over its samples: which
 ground truth a loader reads is that loader's own fact. A selection of label
-documents states its own subject, attribute and class-id map, and the run reads them from it
-rather than restating them; a mask or table selection states none, and the class space its run
+documents states its own subject and that subject's attributes, each with its values in
+declared order, and the run reads them from it rather than restating them; a mask or table selection states none, and the class space its run
 trains in is derived from the ground truth the run was handed, once for the run, so both its
 loaders are built in one vocabulary.
 A caller wanting a fixed validation side draws a selection for it rather than naming a second

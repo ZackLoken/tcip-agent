@@ -126,7 +126,8 @@ export interface PerPlantRow {
   n_positive: number;
   n_unclassified: number;
   n_missing: number;
-  // null when this date was not fully classified/observed, never a fabricated ratio.
+  // null when a detection of this date lacks the state's attribute or an image is missing, never
+  // a fabricated ratio.
   ratio: number | null;
 }
 
@@ -140,7 +141,8 @@ export interface OnsetRow {
   n_dates_missing_images: number;
   // Dates with a non-zero-detection observation; a complete plant may still have none.
   n_observed_dates: number;
-  // Whether every one of the plant's dates is fully classified and fully observed.
+  // Whether every one of the plant's dates carries the state's attribute on every detection and is
+  // fully observed.
   complete: boolean;
   [milestoneColumn: string]: string | number | boolean | null;
 }
@@ -175,8 +177,8 @@ export interface PhenologyMeasurementResponse {
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
-  // False when nothing was ever classified along the trait's positive-class axis: the ratios are
-  // then not a valid phenology measurement.
+  // False when no bucket's scope declares the positive state's attribute: the ratios are then not
+  // a valid phenology measurement.
   positive_class_assessed: boolean;
   // What this delivery could not verify, not merely what it did not read: a bare date omitted,
   // absent, or archived (predictions still counted), or "date/name" for one uncheckable capture.

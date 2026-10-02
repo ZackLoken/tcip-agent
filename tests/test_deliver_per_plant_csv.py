@@ -15,7 +15,7 @@ from tests import _trait_fixtures as fx
 torch = pytest.importorskip("torch")
 
 KIND = "per_plant_count_aggregate"
-SCOPE = {"subject": fx.COUNT_SUBJECT, "attribute": None, "id_map": {fx.COUNT_SUBJECT: 0}}
+SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 @pytest.fixture(autouse=True)

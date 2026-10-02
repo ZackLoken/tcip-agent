@@ -346,7 +346,7 @@ def assess(
 
     Refuses before any inference when the selection holds no calibration or no holdout side, when
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
-    checkpoint classifies no positive value (:class:`AssessmentRefused`); and before any inference
+    checkpoint classifies no positive state (:class:`AssessmentRefused`); and before any inference
     over it, a reference the admission would not admit or only the model stands behind
     (:func:`_admit_reference`).
     """
@@ -356,15 +356,11 @@ def assess(
                             delivery_kind=delivery_kind, stated=stated, device=device,
                             tile_batch_size=tile_batch_size)
     _selection, cal, hold = _reference_sides(project, selection_dir)
-    if delivery_kind == STATE_CROSSING_DATES:
-        from tcip_annotation.json_io import ClassKeyUnknown, class_id
-
-        try:
-            class_id(revision.entry.positive_value, p.scope.value_ids)
-        except ClassKeyUnknown as exc:
-            raise AssessmentRefused(
-                f"{checkpoint_path} classifies no {revision.entry.positive_value!r}: a state "
-                "fraction is measured off a classifier of the trait's positive value.") from exc
+    state = revision.entry.positive_state
+    if delivery_kind == STATE_CROSSING_DATES and p.scope.state_ids(state) is None:
+        raise AssessmentRefused(
+            f"{checkpoint_path} classifies no {state}: a state fraction is measured off a "
+            "classifier of the trait's positive state.")
     _admit_reference(cal + hold, p.scope)
     digest_of = source_digests(cal + hold)
     disjointness, failures = _disjointness(digest_of, cal, hold,
@@ -459,41 +455,32 @@ def _detection(p: Pass, cal: list[Sample], hold: list[Sample], entry: TraitEntry
                            _records(p, hold_ds, digest_of, execution)))
     measured: dict[str, Any] = {"count": evidence}
     if delivery_kind == STATE_CROSSING_DATES:
-        from tcip_annotation.json_io import class_id
-
         from tcip_mcp.pipelines.operating_point import classifier_criterion
 
-        positive = class_id(entry.positive_value, p.scope.value_ids) + 1
         classifier, classifier_failures = classifier_criterion(
-            _classification_items(cal_records, positive, evidence["localization"],
+            _classification_items(cal_records, p.scope, entry, evidence["localization"],
                                   evidence["conf"]),
-            _classification_items(hold_records, positive, evidence["localization"],
+            _classification_items(hold_records, p.scope, entry, evidence["localization"],
                                   evidence["conf"]), entry)
         measured["classifier"] = classifier
         failures = [*failures, *classifier_failures]
     return measured, failures
 
 
-def _classification_items(records: list[dict], positive: int, criterion: dict,
+def _classification_items(records: list[dict], scope: Any, entry: TraitEntry, criterion: dict,
                           conf: float) -> list[dict]:
-    """One item per reference instance matched to one detection at ``conf``, on geometry alone
-    under the trait's localization ``criterion`` scaled to ``records``: whether the reference's and
-    the model's call are the positive category ``positive``."""
-    from tcip_annotation.matching import match_pairs
+    """One item per reference instance assessed for the positive state's attribute and matched
+    to one detection at ``conf`` (:func:`~tcip_mcp.pipelines.training.evaluation.attribute_pairs`
+    under the trait's localization ``criterion``): whether the reference's and the model's value
+    id of that attribute is the positive state's (:meth:`~tcip_mcp.pipelines.data.selection.
+    ClassScope.state_ids`)."""
+    from tcip_mcp.pipelines.training.evaluation import attribute_pairs
 
-    from tcip_mcp.pipelines.training.evaluation import gt_objects, scaled_to
-
-    scaled = scaled_to(criterion, records)
-    items: list[dict] = []
-    for rec in records:
-        gt = gt_objects(rec)
-        dt = [d for d in rec["dt"] if d["score"] >= conf]
-        pairs = match_pairs([g["bbox"] for g in gt], [d["bbox"] for d in dt], scaled,
-                            policy="distance_first")
-        items.extend({"image_id": rec["image_id"],
-                      "is_true_positive": gt[gi]["category_id"] == positive,
-                      "is_pred_positive": dt[di]["category_id"] == positive} for gi, di in pairs)
-    return items
+    column, positive = cast(tuple, scope.state_ids(entry.positive_state))
+    return [{"image_id": image_id, "is_true_positive": truth == positive,
+             "is_pred_positive": predicted == positive}
+            for image_id, truth, predicted in attribute_pairs(records, criterion, conf=conf,
+                                                              column=column)]
 
 
 def _scalar(p: Pass, hold: list[Sample], entry: TraitEntry,
@@ -556,7 +543,7 @@ def assess_reserved_regions(
     mosaic, its region named. The reference's scope is the training mosaic's recorded content
     identity. Refuses (:class:`AssessmentRefused`) a delivery that is not a count, a checkpoint no
     run of this project produced, a run with no reserved regions, a stated tile edge other than the
-    split's, instances unlabeled for the run's attribute, regions not attested complete, too few
+    split's, regions not attested complete, too few
     bands carrying ground truth, a band not held out from the run's training regions, a mosaic that
     changed since the split, and a mosaic label document only the model stands behind.
     """
@@ -566,7 +553,7 @@ def assess_reserved_regions(
     from tcip_mcp.dataset_layout import label_filename
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines import block_calibration as blocks
-    from tcip_mcp.pipelines.data.datasets import object_rows
+    from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_rows
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.data.selection import DOCUMENT, Sample, source_digests
     from tcip_mcp.pipelines.derivations import derive_block_scale_px
@@ -610,15 +597,9 @@ def assess_reserved_regions(
     run_dir = _open_run(project)
     retained, (measured,) = _retained(run_dir, [Sample(
         member=stem, source=str(source), ground_truth=gt_path, group=stem, side="calibration")])
-    target, n_unlabeled = json_det_targets(measured.ground_truth, scope)
-    if n_unlabeled:
-        raise AssessmentRefused(
-            f"{n_unlabeled} instance(s) in {stem!r} are unlabeled for attribute "
-            f"{scope.attribute!r}, and the mosaic is one image with no partial-image exclusion. "
-            "Label every instance for this attribute in the reserved regions.")
-    gt = {"boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
-          "labels": np.asarray(target["labels"], dtype=np.int64),
-          "iscrowd": np.asarray(target["iscrowd"], dtype=bool)}
+    target = json_det_targets(measured.ground_truth, scope)
+    gt = {k: np.asarray(target[k]) for k in PER_BOX_KEYS if k in target}
+    gt["boxes"] = gt["boxes"].astype(np.float32).reshape(-1, 4)
     objects = gt["boxes"][object_rows(gt["iscrowd"])]
     calibration_objects = objects[blocks.centered_in(objects, cal_rect)]
     plants = None
@@ -701,6 +682,7 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
 
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.inference.generic_predictor import DETECTION_ROWS
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import gt_records, prediction_record
@@ -720,11 +702,11 @@ def _band_records(reader: Any, bands: dict[str, tuple[int, int, int, int]], p: P
             tile_batch_size=p.tile_batch_size, require_masks=False, source_label=name)
         boxes = np.asarray(result["boxes"], dtype=np.float64).reshape(-1, 4) + [hx0, hy0, hx0, hy0]
         kept = blocks.centered_in(boxes, inner)
+        rows = {key: [v for v, k in zip(result[key], kept) if k]
+                for key in DETECTION_ROWS if key in result}
         records.append(prediction_record(
-            {**result, "width": ix1 - ix0, "height": iy1 - iy0,
-             "boxes": (boxes[kept] - [ix0, iy0, ix0, iy0]).tolist(),
-             "scores": [s for s, k in zip(result["scores"], kept) if k],
-             "labels": [lab for lab, k in zip(result["labels"], kept) if k]},
+            {**result, **rows, "width": ix1 - ix0, "height": iy1 - iy0,
+             "boxes": (boxes[kept] - [ix0, iy0, ix0, iy0]).tolist()},
             gt_records(blocks.select_gt_for_band(gt, inner)), image_id=digest_of[location]))
     return records
 

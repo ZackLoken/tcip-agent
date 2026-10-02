@@ -1,10 +1,11 @@
-"""A state trait's positive class is a class the delivered dataset's registry declares.
+"""A state trait's positive state is an attribute and a value the delivered dataset's registry
+declares.
 
-A crossing operationalization names a subject and a positive class the delivered dataset never
+A crossing operationalization names a subject and a positive state the delivered dataset never
 chose for itself; the registry is where the dataset says what a subject's instances can be called.
-These cases pin the predicate that answers whether a class is declared, the proposal's registry
+These cases pin the predicate that answers whether a state is declared, the proposal's registry
 check with the tool's ``dataset_root`` resolution, and the delivery-time refusal a registry that
-stops declaring the class produces.
+stops declaring the state produces.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import pytest
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.operationalization import OperationalizationRefused, confirmed_revision
 from tcip_mcp.tools.trait_tools import propose_trait
-from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES
+from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, PositiveState
 from tests._producer_fixtures import registry_over
 from tests import _trait_fixtures as fx
 
@@ -33,7 +34,7 @@ _WITHOUT_OPEN = cr.SubjectRegistry(subjects=(
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     root = tmp_path / "project"
-    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_value)
+    fx.seed_positive_class(root, "flower", fx.CROSSING_SPEC.positive_state)
     return root
 
 
@@ -41,32 +42,38 @@ def _propose(project: Path, **kwargs) -> dict:
     return propose_trait(project, _CROSSING, rationale="the breeder's words", **kwargs)
 
 
+OPEN = PositiveState(attribute="state", value="open")
+
+
 # ── the predicate ─────────────────────────────────────────────────────────────
 
 
-def test_positive_value_problem_is_none_when_the_registry_declares_it(project: Path) -> None:
+def test_positive_state_problem_is_none_when_the_registry_declares_it(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
     assert registry is not None
-    assert cr.positive_value_problem(registry, "flower", "open") is None
+    assert cr.positive_state_problem(registry, "flower", OPEN) is None
 
 
-def test_positive_value_problem_names_an_unknown_subject(project: Path) -> None:
+def test_positive_state_problem_names_an_unknown_subject(project: Path) -> None:
     registry = cr.registry_for_dataset_root(project)
     assert registry is not None
-    problem = cr.positive_value_problem(registry, "no_such_subject", "open")
+    problem = cr.positive_state_problem(registry, "no_such_subject", OPEN)
     assert problem is not None and "no subject" in problem
 
 
-def test_positive_value_problem_names_a_subject_with_no_attributes() -> None:
+def test_positive_state_problem_names_a_subject_declaring_no_such_attribute() -> None:
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bush"),))
-    problem = cr.positive_value_problem(registry, "bush", "open")
-    assert problem is not None and "no attributes" in problem
+    problem = cr.positive_state_problem(registry, "bush", OPEN)
+    assert problem is not None and "declares no attribute 'state'" in problem
 
 
-def test_positive_value_problem_names_the_value_not_among_the_attributes(project: Path) -> None:
+def test_positive_state_problem_names_the_value_its_attribute_does_not_list(
+    project: Path,
+) -> None:
     registry = cr.registry_for_dataset_root(project)
     assert registry is not None
-    problem = cr.positive_value_problem(registry, "flower", "shed")
+    problem = cr.positive_state_problem(registry, "flower",
+                                        PositiveState(attribute="state", value="shed"))
     assert problem is not None and "'shed'" in problem and "'flower'" in problem
 
 
@@ -114,11 +121,11 @@ def test_the_tool_resolves_an_explicit_dataset_root_over_the_project_roots_own(
 ) -> None:
     other_dataset = tmp_path / "other_dataset"
     other_dataset.mkdir()
-    fx.seed_positive_class(other_dataset, "flower", "shed")
+    fx.seed_positive_class(other_dataset, "flower", PositiveState(attribute="state", value="shed"))
 
     result = _propose(project, dataset_root=str(other_dataset))
 
-    assert "is not among subject 'flower'" in result["error"]
+    assert "declares no value 'open'" in result["error"]
 
 
 def test_the_tool_refuses_an_explicit_dataset_root_with_no_registry_by_name(
@@ -145,7 +152,7 @@ def test_a_confirmed_crossing_whose_delivered_registry_lost_the_class_refuses_wi
         confirmed_revision(STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT,
                            registry=_WITHOUT_OPEN)
 
-    problem = cr.positive_value_problem(_WITHOUT_OPEN, "flower", "open")
+    problem = cr.positive_state_problem(_WITHOUT_OPEN, "flower", OPEN)
     assert problem is not None and problem in str(excinfo.value)
 
 
@@ -191,9 +198,9 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_
     delivery's positive-class check reads."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
-    from tests._chain_fixtures import ATTRIBUTE, PLANTS, SUBJECT, classified_series
+    from tests._chain_fixtures import ATTRIBUTE, PLANTS, SUBJECT, attributed_series
 
-    series = classified_series(tmp_path, assessed=False)
+    series = attributed_series(tmp_path, assessed=False)
 
     def deliver(out: str) -> dict:
         return deliver_phenology_milestones(

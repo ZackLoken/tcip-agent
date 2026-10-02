@@ -503,18 +503,18 @@ def build_bright_region_detector(*, in_chans: int = 3, num_classes: int = 1, bri
 
 
 class BrightBlobDetector(nn.Module):
-    """One detection per connected bright blob of a frame, scored by the fraction of the frame the
-    blob covers, with the blob's own soft mask when ``with_masks``. A blob is bright where the band
-    mean exceeds 0.5 and is class 1; with ``classes_by_channel`` it is bright where one band
-    exceeds 0.5 and is that band's 1-based index. Every forward records each input's channel count
+    """One detection per connected bright blob of a frame, labeled the one subject and scored by
+    the fraction of the frame the blob covers, with the blob's own soft mask when ``with_masks``.
+    A blob is bright where the band mean exceeds 0.5; with ``attributes`` (the count of attributes
+    it is built at) it is bright where one band exceeds 0.5, and carries that band's index as its
+    first attribute's id and 0 for every other. Every forward records each input's channel count
     in ``seen_channels`` and its per-band peak value in ``seen_band_peaks``."""
 
-    def __init__(self, in_chans: int = 3, with_masks: bool = False,
-                 classes_by_channel: bool = False) -> None:
+    def __init__(self, in_chans: int = 3, with_masks: bool = False, attributes: int = 0) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_chans, 1, 1)
         self.with_masks = with_masks
-        self.classes_by_channel = classes_by_channel
+        self.attributes = attributes
         self.score_thresh = 0.0
         self.nms_thresh = 0.45  # the builder's own in-model NMS, which inference never sets
         self.seen_channels: list[int] = []
@@ -531,10 +531,10 @@ class BrightBlobDetector(nn.Module):
             self.seen_channels.append(int(image.shape[0]))
             self.seen_band_peaks.append(image.amax(dim=(1, 2)).tolist())
             h, w = int(image.shape[-2]), int(image.shape[-1])
-            planes = ([(c + 1, image[c] > 0.5) for c in range(image.shape[0])]
-                      if self.classes_by_channel else [(1, image.mean(dim=0) > 0.5)])
-            boxes, scores, masks, classes = [], [], [], []
-            for cls, plane in planes:
+            planes = ([(c, image[c] > 0.5) for c in range(image.shape[0])]
+                      if self.attributes else [(0, image.mean(dim=0) > 0.5)])
+            boxes, scores, masks, values = [], [], [], []
+            for value, plane in planes:
                 bright = plane.cpu().numpy().astype(np.uint8)
                 n, labels, stats, _ = cv2.connectedComponentsWithStats(bright, connectivity=4)
                 for k in range(1, n):
@@ -542,10 +542,14 @@ class BrightBlobDetector(nn.Module):
                     boxes.append([float(x), float(y), float(x + bw), float(y + bh)])
                     scores.append(min(1.0, 0.5 + area / float(h * w)))
                     masks.append(torch.from_numpy((labels == k).astype(np.float32))[None])
-                    classes.append(cls)
+                    values.append(value)
             out = {"boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
                    "scores": torch.tensor(scores, dtype=torch.float32),
-                   "labels": torch.tensor(classes, dtype=torch.int64)}
+                   "labels": torch.ones(len(boxes), dtype=torch.int64)}
+            if self.attributes:
+                out["attributes"] = torch.tensor(
+                    [[v] + [0] * (self.attributes - 1) for v in values],
+                    dtype=torch.int64).reshape(-1, self.attributes)
             if self.with_masks:
                 out["masks"] = (torch.stack(masks) if masks
                                 else torch.zeros((0, 1, h, w), dtype=torch.float32))
@@ -554,7 +558,31 @@ class BrightBlobDetector(nn.Module):
 
 
 def build_bright_blob_detector(*, in_chans: int = 3, num_classes: int = 1, with_masks: bool = False,
-                               classes_by_channel: bool = False) -> BrightBlobDetector:
-    """``model_source`` builder for :class:`BrightBlobDetector`."""
+                               attributes: tuple = ()) -> BrightBlobDetector:
+    """``model_source`` builder for :class:`BrightBlobDetector`, at the attributes the platform
+    hands it."""
     return BrightBlobDetector(in_chans=in_chans, with_masks=with_masks,
-                              classes_by_channel=classes_by_channel)
+                              attributes=len(attributes))
+
+
+class WholeBlobDetector(BrightBlobDetector):
+    """A :class:`BrightBlobDetector` whose first attribute's id says whether the frame holds the
+    blob whole: 1 for a blob clear of every border, 0 for one a border cuts."""
+
+    def forward(self, images, targets=None):
+        results = super().forward(images, targets)
+        if self.training:
+            return results
+        for image, out in zip(images, results):
+            h, w = image.shape[-2:]
+            b = out["boxes"]
+            out["attributes"][:, 0] = ((b[:, 0] > 0) & (b[:, 1] > 0) & (b[:, 2] < w)
+                                       & (b[:, 3] < h)).long()
+        return results
+
+
+def build_whole_blob_detector(*, in_chans: int = 3, num_classes: int = 1,
+                              attributes: tuple = ()) -> WholeBlobDetector:
+    """``model_source`` builder for :class:`WholeBlobDetector`, at the attributes the platform
+    hands it."""
+    return WholeBlobDetector(in_chans=in_chans, attributes=len(attributes))

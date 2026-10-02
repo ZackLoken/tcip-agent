@@ -100,7 +100,7 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     pd = prediction_root(proj) / "baseline" / "2026-02-11"
     published(proj, pd, [{"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8,
                           "height": 8, "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9],
-                          "labels": [1]}], scope={"subject": "bud", "id_map": {"bud": 0}})
+                          "labels": [1]}], scope={"subject": "bud"})
 
     hz = _listed(client)["currant_bud_valley-farm"]
     # Flat lists still list everything present anywhere.

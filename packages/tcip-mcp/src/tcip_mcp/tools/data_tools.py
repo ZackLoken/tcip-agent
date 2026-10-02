@@ -238,7 +238,6 @@ def draw_splits(
     stratify_foreground: bool = True,
     output_path: str | None = None,
     subject: str | None = None,
-    attribute: str | None = None,
     ground_truth: str | None = None,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/calibration/holdout selection.
@@ -256,23 +255,23 @@ def draw_splits(
     :func:`~tcip_mcp.pipelines.data.split_construction.draw_sides`.
 
     Without ``ground_truth``, the ground truth is the dataset's per-image label tree: for each
-    capture date the dataset holds, every image carrying an annotation of ``subject`` (with every
-    instance assessed for ``attribute``, when one is given) or a human's negative confirmation for
-    it, so ``subject`` is required. Every admitted date enters one draw: a sample names its own
+    capture date the dataset holds, every image carrying an annotation of ``subject`` or a human's
+    negative confirmation for it, so ``subject`` is required; the selection's scope carries every
+    attribute the dataset's registry declares for it. Every admitted date enters one draw: a sample names its own
     source and its own label, and two dates holding a same-named image are two samples.
     ``stratify_foreground`` only toggles the annotation-count balancing.
 
     With ``ground_truth`` naming a directory of ``<stem>.png`` rasters, the ground truth is a
     per-image mask and a sample is admitted when its mask sits there beside its image; with
     ``ground_truth`` naming a ``.csv`` file, the ground truth is that table and a sample is one
-    row, admitted when the image its key names exists. Neither takes ``subject``/``attribute``.
+    row, admitted when the image its key names exists. Neither takes ``subject``.
     Balancing by foreground count applies to label documents only.
 
     The ``calibration`` and ``holdout`` sides are the reference an assessment fits an operating
     point on and checks it against, drawn as one share and cut between the two at the same seed;
     a side whose ratio is zero is not drawn, and a negative ratio refuses. The draw refuses,
-    before any write, when the tree holds fewer foreground groups of ``subject`` (and
-    ``attribute``, when scoped) than one per requested side. The answer's
+    before any write, when the tree holds fewer foreground groups of ``subject`` than one per
+    requested side. The answer's
     ``calibration_foreground_groups`` reports how many of the reference's groups carry a
     foreground annotation, and ``realized_ratios`` each side's share of the draw actually
     delivered, which can diverge from the ratios asked for on a tree sized at the floor.
@@ -295,9 +294,6 @@ def draw_splits(
             the draw's statistics only.
         subject: The object class the selection is drawn for. Required over label documents,
             the dataset's own per-image label tree or a ``ground_truth`` naming them.
-        attribute: Scope the draw to instances already assessed for this attribute of ``subject``;
-            an image carrying an instance never assessed for it is excluded entirely. ``None``
-            draws over every instance of ``subject`` regardless of attribute state.
         ground_truth: Where this dataset's ground truth lives, named explicitly: a directory of
             label documents, a directory of ``<stem>.png`` masks, or a ``.csv`` table of one row
             per image; the images are the dataset's own ``images/`` tree either way.
@@ -351,7 +347,7 @@ def draw_splits(
               "holdout": holdout_ratio}
     try:
         membership = admitted_membership(
-            places, scope=ClassScope(subject=subject, attribute=attribute), group_by=group_by,
+            places, scope=ClassScope(subject=subject), group_by=group_by,
             group_key_map=group_key_map)
         drawn, counted = draw_sides(
             membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,

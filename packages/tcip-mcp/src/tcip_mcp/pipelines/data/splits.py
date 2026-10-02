@@ -47,9 +47,7 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 
 def count_label_lines(label_path: str | Path, scope: "ClassScope") -> int:
     """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
-    label document carries, narrowed to those already assessed for the scope's attribute when one
-    is named. A missing document raises
-    ``FileNotFoundError``, an unreadable one
+    label document carries. A missing document raises ``FileNotFoundError``, an unreadable one
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`.
     """
     from tcip_annotation import json_io
@@ -59,10 +57,8 @@ def count_label_lines(label_path: str | Path, scope: "ClassScope") -> int:
         raise FileNotFoundError(f"no label document at {label_path} to count foreground in")
     # A crowd region is never one object, so it is never counted as one.
     records = instances(json_io.read_annotations(str(label_path)))
-    if scope.subject is None:
-        return len(records)
-    return sum(1 for a in records
-               if json_io.assessed_key(a, scope.subject, scope.attribute) is not None)
+    return sum(1 for a in records if scope.subject is None
+               or json_io.attribute_ids(a, scope.subject, ()) is not None)
 
 
 def label_document_extent(label_path: str | Path) -> tuple[int, int]:

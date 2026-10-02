@@ -21,7 +21,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 cv2 = pytest.importorskip("cv2")
 
-from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
@@ -29,7 +29,7 @@ from tests import bespoke_models  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 _SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
-LEAF = ClassScope(subject="leaf", id_map={"leaf": 0})
+LEAF = registry_scope(Path(__file__).parent, "leaf")
 
 
 # --------------------------------------------------------------------------
@@ -142,7 +142,7 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
                     "task": "instance_seg"}
     config = {"model_source": model_source,
               "data": {"tiling": {"tile_size": TILE, "overlap": 0.2}, "num_channels": 3,
-                       "scope": {"subject": "stem", "id_map": {"stem": 0}}}}
+                       "scope": {"subject": "stem", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
     torch.save({"model_state_dict": model.state_dict(), "config": config}, str(ckpt))
@@ -380,8 +380,8 @@ def test_export_single_component_mask_writes_polygon():
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(tmp_path):
     """Stamping the mask-binarize threshold into Annotation.attributes (the domain trait
     namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
-    accepts the prediction. For a detector run (attribute=None) attributes must stay empty; a
-    classified run's own decoded value would land there instead. The threshold travels once into
+    accepts the prediction. Under a scope declaring no attribute, attributes must stay empty; an
+    attribute head's own decoded value would land there instead. The threshold travels once into
     the bucket's record instead (see test_run_inference_records_the_mask_binarize_threshold_once)."""
     mask = np.zeros((32, 32), dtype=np.float32)
     mask[5:20, 5:20] = 0.9

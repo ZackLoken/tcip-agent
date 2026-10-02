@@ -75,8 +75,7 @@ def project_dir(tmp_path: Path) -> Path:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    published(root, preds_dir, results,
-              scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+    published(root, preds_dir, results, scope={"subject": "bud"})
     return root
 
 

@@ -1,7 +1,7 @@
-"""``run_inference``'s images regime, publishing a classified bucket end to end: the checkpoint's
-own recorded ``scope`` decodes every detection into the ground-truth shape and the bucket's record
-states the same scope, read back through ``read_bucket``. A detector run (no attribute) decodes
-through its own one-subject map the same way.
+"""``run_inference``'s images regime, publishing a bucket end to end: the checkpoint's own recorded
+``scope`` decodes every detection's attribute ids into the ground-truth shape and the bucket's
+record states the same scope, read back through ``read_bucket``. A detector whose scope declares
+no attribute writes its subject alone the same way.
 """
 
 from __future__ import annotations
@@ -13,27 +13,26 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
+from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 SUBJECT = "bud"
-ATTRIBUTE = "opening"
-ID_MAP = {"open": 0, "closed": 1}
-CLASSIFIED = ClassScope(SUBJECT, ATTRIBUTE, ID_MAP)
-DETECTOR = ClassScope(SUBJECT, None, {SUBJECT: 0})
+COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
+GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
-def _checkpoint(tmp_path: Path, scope: ClassScope) -> str:
-    """A registered checkpoint whose completing run recorded ``scope``."""
-    from dataclasses import asdict
-
+def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
+    """A registered checkpoint whose completing run's dataset declares ``attributes`` on
+    :data:`SUBJECT`."""
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    return foreign_checkpoint(tmp_path, data={"num_channels": 3, "scope": asdict(scope)})
+    return foreign_checkpoint(
+        tmp_path, data={"num_channels": 3, "scope": {"subject": SUBJECT}},
+        registry=cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)))
 
 
-class _ClassifiedPredictor:
-    """A classified run's predictor: two detections, one of each value."""
+class _AttributedPredictor:
+    """A predictor over :data:`COLOR` and :data:`GRADE`: two detections, different values."""
 
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
@@ -41,12 +40,13 @@ class _ClassifiedPredictor:
     def predict_batch(self, paths, execution=None, **kw):
         return [{"image": p, "width": 100, "height": 100,
                  "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 40.0, 60.0, 60.0]],
-                 "scores": [0.9, 0.8], "labels": [1, 2], "count": 2, "cap_hit": False}
+                 "scores": [0.9, 0.8], "labels": [1, 1], "attributes": [[0, 2], [1, 0]],
+                 "count": 2, "cap_hit": False}
                 for p in paths]
 
 
 class _DetectorPredictor:
-    """A detector run's predictor: one detection of its one class."""
+    """A detector run's predictor: one detection of its one subject."""
 
     def __init__(self, checkpoint_path=None, **kwargs):
         pass
@@ -65,16 +65,16 @@ def _one_image(images_dir: Path) -> None:
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
 
 
-def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pair(
+def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
     from tcip_mcp.buckets import read_bucket
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
-    checkpoint = _checkpoint(tmp_path, CLASSIFIED)
+    checkpoint = _checkpoint(tmp_path, COLOR, GRADE)
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _ClassifiedPredictor)
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _AttributedPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
@@ -82,24 +82,22 @@ def test_a_classifier_scoped_run_writes_the_ground_truth_shape_and_stamps_the_pa
                            stated=Stated(tile=False))
 
     assert "error" not in result, result
-    data = json.loads((out / "img.json").read_text())
-    anns = data["annotations"]
-    assert len(anns) == 2
-    by_value = {a["attributes"][ATTRIBUTE]: a for a in anns}
-    assert set(by_value) == {"open", "closed"}
+    anns = json.loads((out / "img.json").read_text())["annotations"]
+    assert [a["attributes"] for a in anns] == [{"color": "red", "grade": "high"},
+                                               {"color": "blue", "grade": "low"}]
     assert all(a["subject"] == SUBJECT for a in anns)
 
-    assert read_bucket(out).scope == CLASSIFIED
+    assert read_bucket(out).scope.attributes == (COLOR, GRADE)
 
 
-def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_stamps_the_pair(
+def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_stamps_its_scope(
     tmp_path: Path, monkeypatch,
 ) -> None:
     from tcip_mcp.buckets import read_bucket
 
     images_dir = tmp_path / "images"
     _one_image(images_dir)
-    checkpoint = _checkpoint(tmp_path, DETECTOR)
+    checkpoint = _checkpoint(tmp_path)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _DetectorPredictor)
     from tcip_mcp.tools.inference_tools import run_inference
@@ -109,10 +107,9 @@ def test_a_detector_run_with_a_decoded_detection_writes_the_ordinary_shape_and_s
                            stated=Stated(tile=False))
 
     assert "error" not in result, result
-    data = json.loads((out / "img.json").read_text())
-    anns = data["annotations"]
+    anns = json.loads((out / "img.json").read_text())["annotations"]
     assert len(anns) == 1
-    assert anns[0]["subject"] == SUBJECT  # decoded through the run's own one-subject map
+    assert anns[0]["subject"] == SUBJECT
     assert not anns[0].get("attributes")
 
-    assert read_bucket(out).scope == DETECTOR
+    assert read_bucket(out).scope.attributes == ()

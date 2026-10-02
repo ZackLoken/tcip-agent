@@ -10,6 +10,7 @@ from tcip_annotation.state import Annotation, BBox
 from pathlib import Path
 
 from tcip_mcp.cli import doctor
+from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tcip_mcp.pipelines.data.selection import (
     ClassScope, Sample, Selection, read_selection, selection_key, write_selection,
 )
@@ -92,8 +93,7 @@ def test_scan_dataset_counts_only_the_documents_of_published_buckets(tmp_path: P
 
     root = tmp_path / "ds"
     published(tmp_path, root / "predictions" / "modelA" / "2-11-26",
-              [predicted("imgA", ["bud"], {"bud": 0})],
-              scope={"subject": "bud", "attribute": None, "id_map": {"bud": 0}})
+              [predicted("imgA", ["bud"])], scope={"subject": "bud"})
     staged = root / "predictions" / "modelB" / "2-11-26"
     staged.mkdir(parents=True)
     json_io.write_annotations(
@@ -139,7 +139,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     assert drawn.counts() == {k: v for k, v in result["splits"].items()}
     assert all(drawn.counts()[side] for side in ("train", "val", "calibration"))
     assert drawn.scope.subject == "bud"
-    assert drawn.scope.attribute is None
+    assert drawn.scope.attributes == ()
     assert drawn.dataset_fingerprint is not None
     for sample in drawn.samples:
         assert Path(sample.source).is_file()
@@ -844,9 +844,8 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Pa
 
 
 def _attribute_scoped_dataset(root: Path) -> Path:
-    """Five stems on one date, one subject: four have their instance assessed for ``condition``
-    (clearing an attribute-scoped draw's foreground floor), one carries an instance never
-    assessed for it."""
+    """Five stems on one date, one subject declaring ``condition``: four have their instance
+    assessed for it, one carries an instance never assessed for it."""
     from PIL import Image
 
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
@@ -879,17 +878,19 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     return root
 
 
-def test_draw_splits_attribute_scoped_selection_holds_only_assessed_samples(tmp_path: Path):
+def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sample(
+    tmp_path: Path,
+):
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf", attribute="condition",
+    result = draw_splits(tmp_path, str(root), output_path=str(out), subject="leaf",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125, seed=1)
     assert "error" not in result, result
-    assert result["total_stems"] == 4
+    assert result["total_stems"] == 5
     drawn = read_selection(out, project=tmp_path)
-    assert drawn.scope.attribute == "condition"
+    assert [a.name for a in drawn.scope.attributes] == ["condition"]
     assert {Path(s.ground_truth).stem for s in drawn.samples} == {
-        "assessed_a", "assessed_b", "assessed_c", "assessed_d"}
+        "assessed_a", "assessed_b", "assessed_c", "assessed_d", "unassessed"}
 
 
 def _two_date_flat_images_dataset(root: Path, subject: str) -> Path:
@@ -1124,7 +1125,7 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
         samples=(Sample(member="a", source=str(root / "images" / "a.jpg"),
                         ground_truth=str(root / "annotations" / "a.json"), group="a",
                         side="train"),),
-        scope=ClassScope(subject="leaf", id_map={"leaf": 0}), seed=1, group_by="stem",
+        scope=registry_scope(root, "leaf"), seed=1, group_by="stem",
     ), project=root)
 
 
@@ -1137,7 +1138,7 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
     assert ts.read(selection_key(out))["samples"][0]["source"] == "images/a.jpg"
     drawn = read_selection(out, project=tmp_path)
 
-    assert drawn.scope == ClassScope(subject="leaf", id_map={"leaf": 0})
+    assert drawn.scope == registry_scope(tmp_path, "leaf")
     assert drawn.seed == 1
     assert [s.location for s in drawn.samples] == [str(tmp_path.resolve() / "images" / "a.jpg")]
 

@@ -75,10 +75,10 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(tmp_path: Pat
     fx.propose(tmp_path, fx.entry("fruit", ("leaf_length",)))
     key = traits.trait_key(tmp_path, "fruit")
     stored = ts.read_versioned(key)
-    del stored.value["revisions"][0]["entry"]["positive_value"]
+    del stored.value["revisions"][0]["entry"]["positive_state"]
     ts.replace(key, stored.value, expect=stored.version)
 
-    with pytest.raises(ValidationError, match="positive_value"):
+    with pytest.raises(ValidationError, match="positive_state"):
         traits.read_trait("fruit", tmp_path)
 
 

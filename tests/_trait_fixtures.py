@@ -18,7 +18,7 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
     """A complete fixture entry: ``fields`` over an entry that authors nothing beyond its name and
     what it delivers."""
     return TraitEntry.model_validate({
-        "name": name, "delivers": tuple(delivers), "positive_value": "",
+        "name": name, "delivers": tuple(delivers), "positive_state": None,
         "milestone_fractions": (), "milestone_on": "", "majority_milestone": "",
         "phenology_prefix": "", "majority_label": "",
         "count_objective": "", "localization": "", "localization_tolerance": "half_class_avg_size",
@@ -40,7 +40,7 @@ BUD_OPENING = entry(
     count_objective=COUNT_UNBIASED,
     localization=CENTER_MATCH,
     holdout_match_quality_floor=0.5,  # fixture value: loose enough for the synthetic dense references to clear
-    positive_value="open",
+    positive_state={"attribute": "opening", "value": "open"},
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
@@ -78,7 +78,8 @@ def with_floors(base: TraitEntry) -> TraitEntry:
 
 CROSSING_SPEC = with_floors(entry(
     CROSSING_TRAIT, ("bloom_05per_date", "bloom_50per_date"),
-    positive_value="open", milestone_fractions=(0.05, 0.50), milestone_on="positive_fraction",
+    positive_state={"attribute": "state", "value": "open"}, milestone_fractions=(0.05, 0.50),
+    milestone_on="positive_fraction",
     phenology_prefix="bloom",
 ))
 
@@ -149,25 +150,26 @@ def with_operationalization(base: TraitEntry, kind: str, **fields: Any) -> Trait
     return with_fields(base, operationalizations=stated)
 
 
-def seed_positive_class(project_root: Path, subject_name: str, positive_value: str) -> cr.SubjectRegistry:
-    """Ensure the project's subject registry declares ``positive_value`` as a value of
-    ``subject_name``'s own attribute, adding both the subject and the value on first mention and
+def seed_positive_class(project_root: Path, subject_name: str,
+                        state: traits.PositiveState | None) -> cr.SubjectRegistry:
+    """Ensure the project's subject registry declares ``state``'s attribute on ``subject_name``,
+    listing ``state``'s value, adding the subject, the attribute and the value on first mention and
     leaving an existing declaration alone; returns the registry as stored."""
     from tests._producer_fixtures import registry_over
 
     registry = cr.registry_for_dataset_root(project_root) or cr.SubjectRegistry()
     subjects = {s.name: s for s in registry.subjects}
     existing = subjects.get(subject_name)
-    attrs = list(existing.attributes) if existing else []
-    if positive_value:
-        if attrs:
-            attr = attrs[0]
-            if positive_value not in attr.values:
-                attrs[0] = cr.Attribute(name=attr.name, type=attr.type,
-                                        values=(*attr.values, positive_value))
-        else:
-            attrs = [cr.Attribute(name="state", type="categorical", values=(positive_value,))]
-    subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
+    attrs = {a.name: a for a in (existing.attributes if existing else ())}
+    if state is not None:
+        attr = attrs.get(state.attribute)
+        if attr is None:
+            attrs[state.attribute] = cr.Attribute(name=state.attribute, type="categorical",
+                                                  values=(state.value,))
+        elif state.value not in attr.values:
+            attrs[state.attribute] = cr.Attribute(name=attr.name, type=attr.type,
+                                                  values=(*attr.values, state.value))
+    subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs.values()))
     updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
     registry_over(project_root, updated)
     return updated
@@ -175,14 +177,14 @@ def seed_positive_class(project_root: Path, subject_name: str, positive_value: s
 
 def seed_confirmed_crossing(project_root: Path, trait: str, **fields: Any) -> TraitRevision:
     """Confirm a revision of ``trait`` (already proposed at this root) stating a crossing
-    operationalization, declaring its positive class for the measured subject in the project's
+    operationalization, declaring its positive state for the measured subject in the project's
     own subject registry first. ``fields`` override the operationalization's defaults: the
     measured subject is the trait's own name and the phenotypes are everything it delivers."""
     base = with_floors(latest(trait, project_root))
     stated = {"statement": f"the date each plant reached the state {trait} scores in the field",
-              "mechanism": f"the calibrated {base.positive_value} classifier over one plant's objects",
+              "mechanism": "the calibrated attribute head over one plant's objects",
               "measured_subject": trait, "delivered_phenotypes": base.delivers, **fields}
-    seed_positive_class(project_root, stated["measured_subject"], base.positive_value)
+    seed_positive_class(project_root, stated["measured_subject"], base.positive_state)
     return propose_and_confirm(
         project_root, with_operationalization(base, traits.STATE_CROSSING_DATES, **stated))
 

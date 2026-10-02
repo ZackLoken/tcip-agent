@@ -31,7 +31,7 @@ BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 def _real_drawn_experiment(
     project: Path, root: Path, experiment_id: str, *, date: str = DATES[0],
-    subject: str = SUBJECT, attribute: str | None = None, auto_val: bool = True,
+    subject: str = SUBJECT, auto_val: bool = True,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
     own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
@@ -41,7 +41,7 @@ def _real_drawn_experiment(
     opened_run(project, {
         "model_source": {"task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "scope": {"subject": subject, "attribute": attribute}, "auto_val": auto_val},
+                 "scope": {"subject": subject}, "auto_val": auto_val},
         **({} if auto_val else {"evaluation": {"selection_metric": "loss"}}),
     }, experiment_id=experiment_id)
     return run_resolution(experiment_id, project=project)["data"]
@@ -123,32 +123,6 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(tm
     assert frozen.samples
     for sample in frozen.samples:
         assert Path(sample.source).parent == trained_images
-
-
-def test_freeze_selection_from_an_empty_string_attribute_run_binds(tmp_path: Path):
-    """A run whose data section carries ``data.attribute=""`` (an explicit empty string, not
-    ``None``) freezes a selection a later, attribute-unscoped run still binds to: the frozen
-    ``attribute`` is normalized on write, so no reader has to read one form as the other."""
-    from tcip_mcp.pipelines.data.split_construction import selection_compatibility
-    from tcip_mcp.tools.data_tools import freeze_selection
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(tmp_path, root, "exp-empty-attribute", attribute="")
-
-    result = freeze_selection(tmp_path, "exp-empty-attribute")
-    assert "error" not in result, result
-
-    frozen = read_selection(result["selection_dir"], project=tmp_path)
-    assert frozen.scope.attribute is None
-
-    second_cfg: dict[str, Any] = {
-        "model_source": {"builder": BUILDER, "task": "detection"},
-        "data": {"split": {"selection_dir": result["selection_dir"]}},
-    }
-    assert selection_compatibility(second_cfg["data"], frozen, result["selection_dir"]) == []
-
-    resolution = resolve_run(second_cfg, project=tmp_path)
-    assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 
 def test_freeze_selection_keeps_two_scopes_same_named_members_apart(tmp_path: Path):
@@ -329,18 +303,18 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
     assert "error" in result and "validation" in result["error"]
 
 
-def test_freeze_selection_refuses_a_resolved_scope_missing_id_map(tmp_path: Path):
-    """A resolved record edited past its writer to drop its scope's map composes a selection the
-    selection writer refuses, and the door answers with that refusal."""
+def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(tmp_path: Path):
+    """A resolved record edited past its writer to drop its scope's attributes composes a
+    selection the selection writer refuses, and the door answers with that refusal."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(tmp_path, root, "exp-no-id-map")
-    _damage_resolved(tmp_path, "exp-no-id-map",
-                     lambda resolved: resolved["data"]["scope"].update(id_map=None))
+    _real_drawn_experiment(tmp_path, root, "exp-no-attributes")
+    _damage_resolved(tmp_path, "exp-no-attributes",
+                     lambda resolved: resolved["data"]["scope"].update(attributes=None))
 
-    result = freeze_selection(tmp_path, "exp-no-id-map")
-    assert "error" in result and "id_map" in result["error"]
+    result = freeze_selection(tmp_path, "exp-no-attributes")
+    assert "error" in result and "records no attributes" in result["error"]
 
 
 def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):

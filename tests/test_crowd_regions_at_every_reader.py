@@ -85,7 +85,7 @@ def test_the_instance_loader_carries_each_polygons_crowd_flag(tmp_path: Path):
 def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decision(
         tmp_path: Path):
     """Another subject's polygon beside the run's own is no instance of the run: the loader's
-    class decision is ``target_class_id``'s, the one every target reader makes."""
+    subject decision is ``attribute_ids``', the one every target reader makes."""
     from tests._producer_fixtures import dataset_over
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -131,7 +131,7 @@ def _train_config(root: Path) -> dict:
     return {
         "model_source": {"builder": f"{__name__}:build_recording_detector", "builder_kwargs": {},
                          "task": "detection"},
-        "data": {"num_channels": 3, "scope": {"subject": SUBJECT, "id_map": {SUBJECT: 0}}},
+        "data": {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}},
         "batch_size": 2, "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False, "device": "cpu", "checkpoint_every_n_epochs": 1,
         "early_stopping": {"enabled": False},
@@ -208,7 +208,7 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
 def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
     """The cap derives from each reference document's foreground count, which a crowd region
     beside the objects leaves unchanged."""
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
     from tcip_mcp.pipelines.derivations import derive_max_dets_from_counts
 
@@ -218,7 +218,7 @@ def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)] + (
             [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3 if crowd else [])
         json_io.write_annotations(path, anns, IMG, IMG)
-        counts[crowd] = count_label_lines(path, ClassScope(subject=SUBJECT))
+        counts[crowd] = count_label_lines(path, registry_scope(tmp_path, SUBJECT))
     assert counts[True] == counts[False] == 1
     assert derive_max_dets_from_counts([counts[True]]) == 100
 
@@ -341,7 +341,7 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path:
     published(tmp_path, preds, [{"image": "a.png", "width": IMG, "height": IMG,
                                  "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]],
                                  "scores": [0.9], "labels": [1]}],
-              scope={"subject": SUBJECT, "attribute": None, "id_map": {SUBJECT: 0}})
+              scope={"subject": SUBJECT})
     # Crowd regions beside the detection, as an edit in place would leave them.
     json_io.write_annotations(preds / "a.json", [
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),

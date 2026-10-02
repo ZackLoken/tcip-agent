@@ -2,11 +2,11 @@
 
 The tools are the agent-facing surface for the per-plant phenology pipeline. These tests pin:
 (1) build_plant_mapping wraps build + persist and reports a compact summary + error paths;
-(2) deliver_phenology_milestones writes the canonical column schema from classified buckets and a
-persisted plant mapping, validated when every bucket was published under an assessment that
-answers for the delivery and refused otherwise (the tool takes no acknowledgment); and (3) its
-measurement-integrity guard refuses to deliver a CSV when no bucket ever classified along the
-trait's positive-class axis.
+(2) deliver_phenology_milestones writes the canonical column schema from buckets whose scope
+declares the positive state's attribute and a persisted plant mapping, validated when every
+bucket was published under an assessment that answers for the delivery and refused otherwise (the
+tool takes no acknowledgment); and (3) its measurement-integrity guard refuses to deliver a CSV
+when no bucket's scope declares the positive state's attribute.
 """
 
 from __future__ import annotations
@@ -125,9 +125,9 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(tmp
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path)
+    series = attributed_series(tmp_path)
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = _deliver(tmp_path, series.body(), out_csv)
@@ -154,9 +154,9 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(tm
     pytest.importorskip("torch")
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.delivery import read_delivery_events
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     res = _deliver(tmp_path, series.body(), tmp_path / "out" / "bud.csv")
     assert "error" not in res, res
 
@@ -170,9 +170,9 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(tm
 
 def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(tmp_path: Path):
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
+    body = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = _deliver(tmp_path, body, out_csv)
@@ -185,9 +185,9 @@ def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
     """A present, unreadable document is an error naming the file, never a raise through the tool
     boundary and never read as this plant's date contributing nothing."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     date = sorted(series.buckets)[1]
     bad = Path(series.buckets[date]) / f"PLANT_A_{date}_0.json"
     bad.write_text("not json {][", encoding="utf-8")
@@ -201,22 +201,20 @@ def test_predictions_that_never_classified_the_positive_state_refuse(tmp_path: P
     """Detector buckets over the same captures carry no opening axis at all: the delivery refuses
     rather than reporting full coverage."""
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series, predicted, published
+    from tests._chain_fixtures import attributed_series, predicted, published
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0), assessed=False)
-    detector = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False)
     bare = []
     for date in series.buckets:
         images = sorted((series.root / "images" / date).iterdir())
-        results = [{**predicted(p.stem, ["bud", "bud"], detector["id_map"]), "image": str(p)}
-                   for p in images]
+        results = [{**predicted(p.stem, ["bud", "bud"]), "image": str(p)} for p in images]
         bare.append(str(published(tmp_path, series.root / "predictions" / "bare" / date,
-                                  results, scope=detector).path))
+                                  results, scope={"subject": "bud"}).path))
     out_csv = tmp_path / "out" / "bud.csv"
 
     res = _deliver(tmp_path, series.body(), out_csv, buckets=bare)
 
-    assert "classify no 'open'" in res["error"], res
+    assert "classify no opening='open'" in res["error"], res
     assert not out_csv.exists()
 
 
@@ -228,9 +226,9 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
     date, and two buckets recording one date refuse naming both."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     first, second = sorted(series.buckets)
     misnamed = series.root / "predictions" / "misnamed" / "2099-12-31"
     published = run_inference(tmp_path, checkpoint_path=series.checkpoint_path,
@@ -253,9 +251,9 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
 
 def test_a_missing_mapping_and_an_unknown_trait_each_refuse(tmp_path: Path):
     pytest.importorskip("torch")
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    body = classified_series(tmp_path, fractions=(0.0, 1.0)).body()
+    body = attributed_series(tmp_path, fractions=(0.0, 1.0)).body()
 
     missing = _deliver(tmp_path, body, tmp_path / "a.csv", mapping_name="nope")
     unknown = _deliver(tmp_path, body, tmp_path / "b.csv", trait="not-a-real-trait")

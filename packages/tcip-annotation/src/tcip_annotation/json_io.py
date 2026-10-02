@@ -34,7 +34,7 @@ import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 import tcip_store
 from tcip_store import (
@@ -916,90 +916,49 @@ def write_annotations(target, annotations, img_w: int, img_h: int, *,
     return tcip_store.put_blob(key, data, expect=expect)
 
 
-# ── the one target-membership decision (shared by assembly and the loader) ───
+# ── attribute values as ids ──────────────────────────────────────────────────
 
 
-UNLABELED = "unlabeled"  # a real target this scope covers, but not yet assessed for `attribute`
+UNASSESSED = -1
+"""The id an attribute column carries for an instance nobody assessed for that attribute."""
 
 
-def assessed_key(a: Annotation, subject: str, attribute: str | None) -> str | None:
-    """The class key ``a`` carries for ``(subject, attribute)``: its value under ``attribute``,
-    or ``subject`` itself when ``attribute`` is ``None``; ``None`` for a record of another subject
-    or one not yet assessed for ``attribute``."""
+class AttributeRecord(Protocol):
+    """An attribute as a scope declares it: its ``name`` and its ``values`` in declared order, a
+    value's id being its position there."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def values(self) -> tuple[str, ...]: ...
+
+
+class UndeclaredValue(ValueError):
+    """A record carries a value its attribute does not declare."""
+
+
+def attribute_ids(a: Annotation, subject: str,
+                  attributes: Iterable[AttributeRecord]) -> list[int] | None:
+    """The id of ``a``'s value under each of ``attributes``, in their order, :data:`UNASSESSED`
+    where ``a`` carries no value for one; ``None`` for a record of a subject other than
+    ``subject``. Refuses (:class:`UndeclaredValue`) a value its attribute does not declare, naming
+    both."""
     if a.subject != subject:
         return None
-    return a.attributes.get(attribute) if attribute else subject
+    row = []
+    for attribute in attributes:
+        value = a.attributes.get(attribute.name)
+        if value is not None and value not in attribute.values:
+            raise UndeclaredValue(
+                f"a record of {subject!r} carries {attribute.name}={value!r}, which that "
+                f"attribute does not declare (it declares {list(attribute.values)}).")
+        row.append(UNASSESSED if value is None else attribute.values.index(value))
+    return row
 
 
-class ClassKeyUnknown(ValueError):
-    """A class key the id map in hand does not decode."""
-
-
-def class_id(key: str, id_map: Mapping[str, int]) -> int:
-    """The 0-indexed class id ``id_map`` decodes the class key ``key`` under. Refuses
-    (:class:`ClassKeyUnknown`) a key the map does not hold, naming it and the keys it does."""
-    if key not in id_map:
-        raise ClassKeyUnknown(f"class key {key!r} is not in the id map (known: {sorted(id_map)})")
-    return id_map[key]
-
-
-def target_class_id(a: Annotation, subject: str, attribute: str | None,
-                    id_map: dict[str, int], *, allow_unlabeled: bool = False
-                    ) -> int | None | str:
-    """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``: its
-    :func:`assessed_key` decoded by :func:`class_id`.
-
-    Returns ``None`` if ``a`` is of a different subject. For a genuine target, an instance never
-    assessed for ``attribute`` (``a.attributes.get(attribute) is None``) returns the sentinel
-    ``UNLABELED`` when ``allow_unlabeled=True`` and raises otherwise; an instance assessed with a
-    value the registry cannot decode always raises.
-    """
-    if a.subject != subject:
-        return None
-    key = assessed_key(a, subject, attribute)
-    if key is None:
-        if allow_unlabeled:
-            return UNLABELED
-        raise ValueError(
-            f"annotation of subject {subject!r} has no value for attribute {attribute!r}: "
-            "the registry cannot decode its own labels")
-    try:
-        return class_id(key, id_map)
-    except ClassKeyUnknown as exc:
-        raise ClassKeyUnknown(f"annotation of subject {subject!r}: {exc}: the registry cannot "
-                              "decode its own labels") from exc
-
-
-class ClassifiedRecordRefused(ValueError):
-    """A record under a classified scope carries no usable value: not the object class, no value
-    under the attribute, or a value outside the bucket's own vocabulary. Named for one prediction
-    document and record index (``source``).
-    """
-
-
-def require_classified_record(
-    a: Annotation, *, subject: str, attribute: str, vocabulary, source: str,
-) -> str:
-    """The value ``a`` carries under ``(subject, attribute)``, held to ``vocabulary`` (the keys of
-    the bucket's own recorded ``id_map``).
-
-    Raises :class:`ClassifiedRecordRefused`, naming ``source`` (the document and record index),
-    when ``a.subject`` is not ``subject``, the record carries no value under ``attribute``, or the
-    value is not a member of ``vocabulary``.
-    """
-    if a.subject != subject:
-        raise ClassifiedRecordRefused(
-            f"{source}: record's subject is {a.subject!r}, not {subject!r}, the object class "
-            "this classified bucket's every record is of."
-        )
-    value = a.attributes.get(attribute)
-    if value is None:
-        raise ClassifiedRecordRefused(
-            f"{source}: record of {subject!r} carries no value under attribute {attribute!r}."
-        )
-    if value not in vocabulary:
-        raise ClassifiedRecordRefused(
-            f"{source}: record's value {value!r} is not a member of this bucket's own vocabulary "
-            f"({sorted(vocabulary)})."
-        )
-    return value
+def attribute_values(ids: Iterable[int], attributes: Iterable[AttributeRecord]) -> dict[str, str]:
+    """``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses, the inverse of
+    :func:`attribute_ids`."""
+    return {attribute.name: attribute.values[int(i)]
+            for attribute, i in zip(attributes, ids, strict=True) if int(i) != UNASSESSED}

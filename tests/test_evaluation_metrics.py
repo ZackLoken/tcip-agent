@@ -17,6 +17,7 @@ torch = pytest.importorskip("torch")  # evaluation.py imports torch at module lo
 pytest.importorskip("pycocotools")
 
 from tcip_annotation.matching import match_pairs  # noqa: E402
+from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
@@ -917,7 +918,7 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     json_io.write_annotations(label, [
         Annotation(subject="bur", geometry=BBox(1.25, 2.5, 30.75, 40.5)),
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
+    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
     arrays = {k: np.asarray(v) for k, v in listed.items()}
     off_grid = {**listed, "boxes": [[1.2504, 2.5, 30.7496, 40.5], [50.0, 50.0, 90.0, 90.0]]}
 
@@ -942,7 +943,7 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
     json_io.write_annotations(label, [
         Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3)),
         Annotation(subject="bur", geometry=BBox(50.0, 50.0, 90.0, 90.0), iscrowd=True)], 100, 100)
-    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
+    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
     _, record = records_from_annotation(json_io.read_annotations(label), [], width=100,
                                         height=100, name_id={"bur": 1})
     assert record["gt"] == gt_records(listed)
@@ -963,7 +964,7 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
     label = tmp_path / "a.json"
     json_io.write_annotations(label, [Annotation(subject="bur", geometry=BBox(10.3, 20.7, 40.1, 60.9))],
                               100, 100)
-    listed, _ = json_det_targets(str(label), ClassScope(subject="bur", id_map={"bur": 0}))
+    listed = json_det_targets(str(label), registry_scope(tmp_path, "bur"))
     output = {"boxes": torch.tensor([[10.1, 10.1, 40.3, 30.3]]),
               "labels": torch.tensor([1]), "scores": torch.tensor([0.9])}
     record = records_from_detector(target_tensors(listed), output, width=100, height=100)

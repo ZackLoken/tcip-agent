@@ -195,7 +195,7 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
     detection_images``)."""
     from tests._verified_checkpoint_fixtures import detection_images
 
-    scope = {"subject": DATA_DIR_SUBJECT, "id_map": {DATA_DIR_SUBJECT: 0}}
+    scope = {"subject": DATA_DIR_SUBJECT}
     return {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {}, "task": "detection"},
@@ -251,5 +251,5 @@ def data_dir(tmp_path: Path) -> Path:
         {"image": str(images_dir / f"{name}.jpg"), "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.9, 0.7],
          "labels": [1, 1]} for name in ("img_001", "img_002", "img_003")],
-        scope={"subject": subject, "attribute": None, "id_map": {subject: 0}})
+        scope={"subject": subject})
     return tmp_path

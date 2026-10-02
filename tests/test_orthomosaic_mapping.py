@@ -347,7 +347,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
                     "builder_kwargs": builder_kwargs, "task": "detection"}
     config = {"model_source": model_source,
               "data": {"num_channels": in_chans,
-                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+                       "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "model_best.pt"
     torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
@@ -396,7 +396,7 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
                     "task": "instance_seg"}
     config = {"model_source": model_source,
               "data": {"num_channels": in_chans,
-                       "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+                       "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg_best.pt"
     torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
@@ -459,7 +459,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     pytest.importorskip("torchvision")
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     path = tmp_path / "mosaic.tif"
@@ -476,8 +476,7 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
     # point is where export places it, not the from-scratch-weights mask content.
     result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
 
-    data, _dropped = encode_predictions(result,
-                                        scope=ClassScope(subject="leaf", id_map={"leaf": 0}))
+    data, _dropped = encode_predictions(result, scope=registry_scope(tmp_path, "leaf"))
     anns = json_io.annotations_from_bytes(data, source=str(path))
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
@@ -527,6 +526,7 @@ def test_predict_sliced_windowed_source_reaches_real_slicing_for_instance_seg_wi
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "instance_seg"
     p.in_chans = 3
+    p.attribute_sizes = []
     p.model_source = None
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")

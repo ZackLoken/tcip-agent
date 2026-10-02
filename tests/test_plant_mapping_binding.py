@@ -27,9 +27,7 @@ from tcip_mcp.traits import registered_crops
 
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import register_plant_registry_for
-from tests.test_second_trait_acceptance import _ID_MAP, _seed_currant_bloom_trait
-
-_SCOPE = {"subject": "flower", "attribute": "bloom_state", "id_map": _ID_MAP}
+from tests.test_second_trait_acceptance import BLOOM_STATE, FLOWERS, _seed_currant_bloom_trait
 
 PLANTS = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
@@ -50,26 +48,29 @@ def _init(tmp_path: Path) -> None:
 
 def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     """A dataset root registered in ``tmp_path`` whose own subject registry declares the second
-    trait's positive class, the registry a phenology delivery binds against."""
-    from tests._trait_fixtures import seed_positive_class
+    trait's positive state, the registry a phenology delivery binds against."""
+    from tests._producer_fixtures import registry_over
 
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
     result = register_dataset(tmp_path, str(root), crop=sorted(registered_crops())[0])
     assert "error" not in result, result
-    seed_positive_class(root, "flower", "open")
+    registry_over(root, FLOWERS)
     return root
 
 
 def _publish(project: Path, bucket: Path, images: list[Path]) -> str:
-    """One classified bucket at ``bucket`` holding an open flower on each of ``images``, published
-    under ``project`` (``_chain_fixtures.published``), unassessed: these rails are about the
-    mapping's own binding, not the assessment gate."""
+    """One bucket at ``bucket`` holding an open flower on each of ``images``, published under
+    ``project`` (``_chain_fixtures.published``) from a checkpoint whose scope declares the bloom
+    state, unassessed: these rails are about the mapping's own binding, not the assessment
+    gate."""
     from tests._chain_fixtures import published
 
     results = [{"image": str(p), "width": 8, "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]],
-                "scores": [0.9], "labels": [_ID_MAP["open"] + 1]} for p in images]
-    return str(published(project, bucket, results, scope=_SCOPE).path)
+                "scores": [0.9], "labels": [1], "attributes": [[BLOOM_STATE.values.index("open")]]}
+               for p in images]
+    return str(published(project, bucket, results, scope={"subject": "flower"},
+                         registry=FLOWERS).path)
 
 
 def _deliver(project: Path, *, trait: str, mapping_name: str, plants: list[str],
@@ -107,7 +108,7 @@ def _write_scene(
     unpredicted: frozenset[str] = frozenset(),
 ) -> tuple[Path, Path, dict[str, str]]:
     """Real geolocated images for ``plants`` (``PLANTS`` by default) across ``dates``, plus one
-    published classified bucket per date holding a document for every image but the stems
+    published bucket per date holding a document for every image but the stems
     ``unpredicted`` names, under the project the dataset sits in. Returns (images_root,
     plant_csv, preds_by_date).
     """
@@ -1078,11 +1079,11 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
         res = initialize_project(str(proj), proj.name, site=f"orchard {proj.name}")
         assert "error" not in res, res
 
-    from tests._trait_fixtures import seed_positive_class
+    from tests._producer_fixtures import registry_over
 
     dataset_root = tmp_path / "shared_ds"
     dataset_root.mkdir()
-    seed_positive_class(dataset_root, "flower", "open")
+    registry_over(dataset_root, FLOWERS)
     for proj in (proj_a, proj_b):
         reg = register_dataset(proj, str(dataset_root), crop=sorted(registered_crops())[0])
         assert "error" not in reg, reg

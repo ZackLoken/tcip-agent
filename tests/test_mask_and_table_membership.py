@@ -488,11 +488,11 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_pa
 
     with pytest.raises(ValueError, match="carries its own classes"):
         auto_train_val(tmp_path, "semantic_seg", data_cfg(
-            {"subject": "leaf", "attribute": "condition", "id_map": {"leaf": 0}}), None)
+            {"subject": "leaf"}), None)
 
     admitted = data_cfg({})
     auto_train_val(tmp_path, "semantic_seg", admitted, None)
-    assert admitted["scope"] == {"subject": None, "attribute": None, "id_map": None}
+    assert admitted["scope"] == {"subject": None, "attributes": None}
 
 
 # -- two producers of one record, compared against each other ------------------

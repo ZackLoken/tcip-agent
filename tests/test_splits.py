@@ -319,22 +319,24 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp
 # -- scope normalization ---------------------------------------------------------
 
 
-def test_count_label_lines_reads_an_empty_attribute_as_unset(tmp_path):
-    """A scope stated with ``attribute=""`` means "no attribute", so every record of the subject
-    counts; reading it as a key no annotation carries would score every stem zero and starve the
-    minimum-foreground pass."""
+def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(tmp_path):
+    """Every record of the scope's subject is foreground, whether or not it carries a value for
+    each attribute the registry declares; another subject's record is not."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
+    from tests._producer_fixtures import registry_over
 
     labels_dir = tmp_path / "annotations"
     labels_dir.mkdir()
-    json_io.write_annotations(
-        labels_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5))], 32, 32)
+    registry_over(tmp_path, cr.SubjectRegistry(subjects=(cr.Subject(name="leaf", attributes=(
+        cr.Attribute("condition", "categorical", ("healthy", "damaged")),)),)))
+    json_io.write_annotations(labels_dir / "a.json", [
+        Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5)),
+        Annotation(subject="leaf", geometry=BBox(6, 6, 9, 9), attributes={"condition": "healthy"}),
+        Annotation(subject="bush", geometry=BBox(10, 10, 20, 20))], 32, 32)
 
-    document = labels_dir / "a.json"
-    assert count_label_lines(document, ClassScope(subject="leaf", attribute="")) == 1
-    assert count_label_lines(document, ClassScope(subject="", attribute="")) == 1
-    assert count_label_lines(document, ClassScope(subject="leaf", attribute="condition")) == 0
+    assert count_label_lines(labels_dir / "a.json", registry_scope(labels_dir, "leaf")) == 2
 

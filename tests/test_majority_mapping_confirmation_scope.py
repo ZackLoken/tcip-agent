@@ -7,12 +7,14 @@ from tcip_mcp.pipelines.postprocessing.phenology import milestone_date_columns, 
 from tests._trait_fixtures import entry
 
 BUD = entry(
-    "bud", ["leaf_out_05per_date", "leaf_out_50per_date"], positive_value="open",
+    "bud", ["leaf_out_05per_date", "leaf_out_50per_date"],
+    positive_state={"attribute": "opening", "value": "open"},
     milestone_fractions=[0.05, 0.5, 0.95], milestone_on="positive_fraction",
     majority_milestone="95per", phenology_prefix="bud", majority_label="opening")
 
 PISTILLATE = entry(
-    "pistillate", ["pistillate_50per_date", "pistillate_flowering_date"], positive_value="open",
+    "pistillate", ["pistillate_50per_date", "pistillate_flowering_date"],
+    positive_state={"attribute": "state", "value": "open"},
     milestone_fractions=[0.5], milestone_on="positive_fraction", majority_milestone="50per",
     phenology_prefix="pistillate", majority_label="flowering")
 

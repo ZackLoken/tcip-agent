@@ -186,9 +186,8 @@ Grid cell system:
 3. `annotation_tools.score_predictions` (library call, or `tcip score-predictions`) pairs
    predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
-   its class id, box/polygon, IoU, and confidence). On a classified bucket (predictions carrying
-   the object class in `subject`) this scores the object's localization, never the classifier's
-   own call
+   its class id, box/polygon, IoU, and confidence). A prediction carries its object class in
+   `subject`, so this scores the object's localization, never an attribute head's call
 4. Review on the Annotate canvas, which shows a bucket's predictions as proposals beside the
    image's annotations: accept a proposal, correct a value or a geometry, add a missed object,
    reject a proposal, and mark the image (or, on an orthomosaic, the region in view) complete. A

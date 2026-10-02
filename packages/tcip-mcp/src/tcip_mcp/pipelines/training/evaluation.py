@@ -465,6 +465,28 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
             **{k: round(m[k], 6) for k in ("precision", "recall", "f1")}, "criterion": criterion}
 
 
+def attribute_pairs(per_image: list[dict], criterion: dict, *, conf: float,
+                    column: int) -> list[tuple[Any, int, int]]:
+    """``(image_id, reference id, predicted id)`` under attribute ``column`` for each reference
+    object matched, on geometry alone, to one detection scoring at least ``conf``, under
+    ``criterion`` scaled to ``per_image`` (:func:`~tcip_annotation.matching.match_pairs`, distance
+    first). A reference object unassessed for that attribute contributes no pair."""
+    from tcip_annotation.json_io import UNASSESSED
+    from tcip_annotation.matching import match_pairs
+
+    scaled = scaled_to(criterion, per_image)
+    pairs = []
+    for rec in per_image:
+        gt = gt_objects(rec)
+        dt = [d for d in rec["dt"] if d["score"] >= conf]
+        for gi, di in match_pairs([g["bbox"] for g in gt], [d["bbox"] for d in dt], scaled,
+                                  policy="distance_first"):
+            truth = gt[gi]["attributes"][column]
+            if truth != UNASSESSED:
+                pairs.append((rec["image_id"], truth, dt[di]["attributes"][column]))
+    return pairs
+
+
 def _count_stats_at_conf(per_image: list[dict], *, criterion: dict, conf: float,
                          class_id: int | None) -> dict:
     """Counting statistics under ``criterion`` over ``per_image`` at one conf, optionally for one
@@ -655,34 +677,47 @@ def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
     return dt_record(xywh(*box), label, score)
 
 
+def _rows(values: Any) -> list:
+    """A tensor's, array's or list's rows as a list."""
+    return values.tolist() if hasattr(values, "tolist") else list(values)
+
+
+def _with_attributes(records: list[dict], values: Any) -> list[dict]:
+    """``records``, each carrying its row of ``values`` (one id per attribute) under
+    ``attributes``; unchanged when ``values`` is ``None``."""
+    if values is not None:
+        for record, row in zip(records, _rows(values), strict=True):
+            record["attributes"] = [int(v) for v in row]
+    return records
+
+
 def prediction_record(result: Mapping[str, Any], gt: list[dict], *, image_id: str) -> dict:
     """One per-image evaluation record from a detection result (its ``width``, ``height``,
-    corner ``boxes``, ``scores``, ``labels`` and ``cap_hit``) and the image's ground-truth records
-    ``gt``, named ``image_id``. Boxes, scores and labels differing in length refuse
-    (``ValueError``)."""
-    dt = [detection_record(box, label, score) for box, score, label
-          in zip(result["boxes"], result["scores"], result["labels"], strict=True)]
+    corner ``boxes``, ``scores``, ``labels``, ``attributes`` where it carries them, and
+    ``cap_hit``) and the image's ground-truth records ``gt``, named ``image_id``. Boxes, scores
+    and labels differing in length refuse (``ValueError``)."""
+    dt = _with_attributes([detection_record(box, label, score) for box, score, label
+                           in zip(result["boxes"], result["scores"], result["labels"],
+                                  strict=True)], result.get("attributes"))
     return {**build_coco_image_record(int(result["width"]), int(result["height"]), gt, dt,
                                       image_id=image_id),
             "cap_hit": result["cap_hit"]}
 
 
 def gt_records(target: Mapping[str, Any]) -> list[dict]:
-    """A target's rows, corner ``boxes`` beside ``labels`` and the crowd flag, as evaluation
-    ground-truth records on the stored grid (:func:`~tcip_annotation.json_io.xywh`), from a tensor,
-    array or list target alike, its crowd flags read through
-    :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
+    """A target's rows, corner ``boxes`` beside ``labels``, the crowd flag and the ``attributes``
+    row where the target carries them, as evaluation ground-truth records on the stored grid
+    (:func:`~tcip_annotation.json_io.xywh`), from a tensor, array or list target alike, its crowd
+    flags read through :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
     """
     from tcip_mcp.pipelines.data.datasets import crowd_of
 
-    def rows(values: Any) -> list:
-        return values.tolist() if hasattr(values, "tolist") else list(values)
-
     if not len(target["boxes"]):
         return []
-    return [gt_record(xywh(*box), lab, crowd)
-            for box, lab, crowd in zip(rows(target["boxes"]), rows(target["labels"]),
-                                       rows(crowd_of(target)))]
+    return _with_attributes(
+        [gt_record(xywh(*box), lab, crowd)
+         for box, lab, crowd in zip(_rows(target["boxes"]), _rows(target["labels"]),
+                                    _rows(crowd_of(target)))], target.get("attributes"))
 
 
 def records_from_detector(target: dict, output: dict, *, width: int, height: int,
@@ -711,6 +746,7 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
             if pmasks is not None and i < len(pmasks):
                 res["segmentation"] = _mask_to_rle(pmasks[i])
             dt.append(res)
+        _with_attributes(dt, output.get("attributes"))
     rec = build_coco_image_record(width, height, gt, dt, image_id=target.get("image_id"))
     if detections_cap is not None:
         rec["cap_hit"] = len(dt) >= detections_cap
@@ -986,7 +1022,7 @@ def effective_iou_type(task: str, iou_type: str | None) -> str:
 
 @torch.no_grad()
 def evaluate(
-    model, loader, device, task: str, *, dims: Mapping[str, int],
+    model, loader, device, task: str, *, dims: Mapping[str, Any],
     conf_threshold: float = 0.25, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     trait: TraitEntry | None = None,
@@ -994,7 +1030,10 @@ def evaluate(
     """Compute per-task validation/test metrics. Returns bare metric keys.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
-    a class or rank count is read from it, never off the half being scored.
+    a class or rank count is read from it, never off the half being scored. A detector whose dims
+    carry ``attributes`` also reports ``attribute_agreement``: per attribute name, the matched
+    pairs' count and :func:`classification_metrics` over them (:func:`attribute_pairs`, under the
+    governing criterion at ``conf_threshold``).
 
     ``trait``: the trait's confirmed entry; when set, a count trait's derived localization
         criterion (traits.py, e.g. a
@@ -1105,8 +1144,8 @@ def evaluate(
         })
         # A count trait's derived criterion governs the reported count + the selection f1;
         # map50 stays a labeled comparability metric. Without a trait the IoU convention governs.
+        criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
         if trait is not None:
-            criterion = resolve_match_criterion(trait, per_image)
             gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold)
             result.update({
                 "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
@@ -1119,6 +1158,15 @@ def evaluate(
             "objective",
             _rounded(compute_composite_objective(loss, governing_f1, m["map50"], score_weights)),
         ))
+        if dims.get("attributes"):
+            agreement = {}
+            for column, attribute in enumerate(dims["attributes"]):
+                pairs = attribute_pairs(per_image, criterion, conf=conf_threshold, column=column)
+                agreement[attribute.name] = {"pairs": len(pairs), **_reported_metrics(
+                    classification_metrics(torch.tensor([p for _i, _t, p in pairs]),
+                                           torch.tensor([t for _i, t, _p in pairs]),
+                                           len(attribute.values)))}
+            result["attribute_agreement"] = agreement
     elif task == "classification" and cls_p:
         result.update(_reported_metrics(classification_metrics(
             torch.cat(cls_p), torch.cat(cls_g), dims["num_classes"])))

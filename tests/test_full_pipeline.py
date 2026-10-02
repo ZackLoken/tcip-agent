@@ -217,8 +217,8 @@ class TestDetectionPipelineRealData:
         images_dir = SAMPLE_PROJECT / "images" / date
         labels_dir = SAMPLE_PROJECT / "annotations" / date
         dataset, data = run_over("detection", str(images_dir), str(labels_dir), subject="bud")
-        # num_classes is derived from the dataset's subjects.json via assign_class_ids (single-class
-        # bud here), and num_samples from the bud-annotated images on this date.
+        # num_classes is the one subject the scope isolates (bud here), and num_samples comes
+        # from the bud-annotated images on this date.
         assert dataset.num_classes == 1
         assert dataset.num_samples > 0
 

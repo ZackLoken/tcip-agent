@@ -250,9 +250,9 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     name never built refuses as absent."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tests._chain_fixtures import classified_series
+    from tests._chain_fixtures import attributed_series
 
-    series = classified_series(tmp_path, fractions=(0.0, 1.0))
+    series = attributed_series(tmp_path, fractions=(0.0, 1.0))
     body = series.body()
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 

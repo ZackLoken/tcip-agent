@@ -40,6 +40,16 @@ def _checkpoint(path: Path, content: str) -> Path:
     return checkpoint_file(path, content)
 
 
+def _config(root: Path) -> dict:
+    """A registered config naming ``bud`` under the scope the admission reads over ``root``
+    (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`)."""
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
+    return {"data": {"scope": asdict(registry_scope(root, "bud"))}}
+
+
 def _doctor():
     """The data-state doctor loaded as a module, for its own read of the registry index."""
     from tcip_mcp.cli import doctor
@@ -58,7 +68,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
     for i, (name, content) in enumerate(_RUNS.items()):
         ckpt = _checkpoint(leak_dir / f"{name}.pt", content)
         reg.register_model(
-            name, str(ckpt), {"data": {"scope": {"subject": "bud"}}},
+            name, str(ckpt), _config(root),
             metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
         )
     return root, reg
@@ -193,7 +203,7 @@ def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
     root.mkdir()
     ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
     ModelRegistry(str(root)).register_model(
-        "currant_bud_detector_v1", str(ckpt), {"data": {"scope": {"subject": "bud"}}},
+        "currant_bud_detector_v1", str(ckpt), _config(root),
         metrics={"val_map50": 0.5}, tags=["detector"],
     )
     # The browser reads entries through the registry's own listing, the one reader every

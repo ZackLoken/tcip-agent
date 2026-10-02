@@ -5,7 +5,8 @@ Three tools over the canonical ``pipelines.postprocessing`` modules:
     register_plant_registry        plant-locations CSVs → a named, registered registry
     build_plant_mapping            geolocated images + a plant registry → a named mapping under
                                    the project
-    deliver_phenology_milestones   that mapping + classified prediction buckets →
+    deliver_phenology_milestones   that mapping + prediction buckets whose scope declares the
+                                   positive state's attribute →
                                    <phenology_prefix>_phenology.csv
 
 See the ``phenology`` skill for the whole pattern (isolate → detect → classify state → per-plant
@@ -144,7 +145,8 @@ def deliver_phenology_milestones(
     require_all_dates_complete: bool = phenology.REQUIRE_ALL_DATES_COMPLETE,
     acknowledgment_id: str | None = None,
 ) -> dict:
-    """Per-plant phenology milestones from classified prediction buckets and a plant mapping.
+    """Per-plant phenology milestones from prediction buckets whose scope declares the positive
+    state's attribute, and a plant mapping.
 
     A phenology milestone is a crossing of the fraction of a plant's detected objects a classifier
     calls the trait's positive class. The CSV carries each milestone date the trait's latest
@@ -164,8 +166,8 @@ def deliver_phenology_milestones(
         plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) it
             is for; an empty list refuses.
         require_all_dates_complete: Compute a plant's milestones only when every one of its dates
-            is fully classified and observed; ``False`` computes them from its complete dates
-            alone. Defaults to ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
+            carries the positive state's attribute on every detection and is fully observed;
+            ``False`` computes them from its complete dates alone. Defaults to ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
             event.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
     """

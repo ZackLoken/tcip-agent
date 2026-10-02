@@ -429,7 +429,7 @@ class TestInferenceToolOutputSchema:
         bucket = published(tmp_path, out, [
             {"image": f"{stem}.jpg", "width": 800, "height": 600, "boxes": _boxes(n),
              "scores": [0.9] * n, "labels": [1] * n}
-            for stem, n in counts.items()], scope={"subject": "bud", "id_map": {"bud": 0}})
+            for stem, n in counts.items()], scope={"subject": "bud"})
 
         assert sorted(bucket.documents) == sorted(counts)
         written = {p.stem: len(json.loads(p.read_text())["annotations"])

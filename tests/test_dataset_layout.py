@@ -166,10 +166,9 @@ def test_bucket_dirs_finds_every_published_bucket_at_any_depth_and_nothing_else(
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path
-    scope = {"subject": "bud", "attribute": None, "id_map": {"bud": 0}}
     dated, undated = prediction_root(root) / "modelA" / "2026-03-02", prediction_root(root) / "modelB"
     for bucket in (dated, undated):
-        published(root, bucket, [predicted("IMG_1", ["bud"], scope["id_map"])], scope=scope)
+        published(root, bucket, [predicted("IMG_1", ["bud"])], scope={"subject": "bud"})
     (prediction_root(root) / "modelC" / "2026-03-02").mkdir(parents=True)
 
     assert bucket_dirs(root) == [dated, undated]

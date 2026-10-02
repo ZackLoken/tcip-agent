@@ -166,7 +166,7 @@ def test_get_experiment_lineage(tmp_path):
 
     lineage = exp.get_experiment_lineage("exp-l", project=tmp_path)["lineage"]
     assert lineage["data"]["images_dir"] == config["data"]["images_dir"]
-    assert lineage["data"]["scope"]["id_map"] == config["data"]["scope"]["id_map"]
+    assert lineage["data"]["scope"]["subject"] == config["data"]["scope"]["subject"]
     assert lineage["parent_experiment"] == "exp-k"
     assert lineage["checkpoint"] is None
 

@@ -177,16 +177,19 @@ def _point_note(n: int) -> str:
 
 
 def _legend_name(a: Annotation, *, scope) -> str:
-    """The name a render's legend shows for ``a``: the classified value under a classified scope
-    (the object class alone would be one name for every prediction), else ``a.subject``.
+    """The name a render's legend shows for ``a``: its subject followed by each value it carries
+    under ``scope``'s attributes, in declared order (:func:`~tcip_annotation.json_io.
+    attribute_ids` and its inverse), its subject alone under no scope, a scope naming no subject
+    or declaring no attribute, or for a record of another subject.
     """
-    if scope is not None and scope.classified:
-        from tcip_annotation.json_io import assessed_key
+    from tcip_annotation.json_io import attribute_ids, attribute_values
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
-        value = assessed_key(a, scope.subject, scope.attribute)
-        if value is not None:
-            return value
-    return a.subject
+    if scope is None or scope.subject is None:
+        return a.subject
+    attributes = scope.admitted_for(DOCUMENT, "the rendered bucket's scope").attributes
+    ids = attribute_ids(a, scope.subject, attributes)
+    return " ".join([a.subject, *(attribute_values(ids, attributes).values() if ids else ())])
 
 
 def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
@@ -351,8 +354,8 @@ def _viz_predictions(
 ) -> dict:
     """Render a bucket's predictions on a single image. See ``visualize``.
 
-    Under a classified bucket (the scope its record states), the legend keys each detection by
-    its decoded value, not the object class every one of them shares.
+    The legend keys each detection by its subject and the values it carries under the attributes
+    the bucket's recorded scope declares (:func:`_legend_name`).
     """
     img = Path(image_path)
     if not img.is_file():

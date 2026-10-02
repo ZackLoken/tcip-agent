@@ -12,8 +12,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}
-"""A three-band detection run's data section, scoped to one subject."""
+SCOPED_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
+"""A three-band detection run's data section, stating the one subject it is scoped to; the
+admission reads the attributes the registry declares for it."""
 
 BUILT_DETECTOR = {
     "builder": "tests.bespoke_models:build_bespoke_detection",
@@ -23,21 +24,25 @@ BUILT_DETECTOR = {
 """A tiny detection builder's ``model_source``."""
 
 
-def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = False) -> dict:
-    """A tiny detection dataset under ``where``: ``n`` three-band frames, each label document
-    holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying the first
-    value its ``id_map`` names under its ``attribute`` when it names one. Returns the
-    ``images_dir`` and ``labels_dir`` a data section names it by."""
+def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = False,
+                     values: dict[str, str] | None = None, registry: Any = None) -> dict:
+    """A tiny detection dataset rooted at ``where``: ``n`` three-band frames, each label document
+    holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying
+    ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
+    one is given. Returns the ``images_dir`` and ``labels_dir`` a data section names it by."""
     from PIL import Image
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox, Polygon
 
-    images_dir, labels_dir = where / "images", where / "labels"
+    from tests._producer_fixtures import registry_over
+
+    images_dir, labels_dir = where / "images", where / "annotations"
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
-    attribute = scope.get("attribute")
-    attributes = {attribute: next(iter(scope["id_map"]))} if attribute else {}
+    if registry is not None:
+        registry_over(where, registry)
+    attributes = dict(values or {})
     geometry = (Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]]) if polygons
                 else BBox(8, 8, 24, 24))
     for i in range(n):
@@ -115,10 +120,10 @@ def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
     """Append one epoch row to ``run_dir``'s metrics log through the envelope's own sink."""
     from tcip_mcp.experiments import RUN_FILE, project_of_run, read_record
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.run_registry import TrainRun, trained_config
 
     record = read_record(run_dir / RUN_FILE)
-    run = TrainRun(id=run_dir.name, config=record["config"],
+    run = TrainRun(id=run_dir.name, config=trained_config(record),
                    objective=record["resolved"]["objective"], project=project_of_run(run_dir),
                    output_dir=str(run_dir))
     TrainContext(run=run, train_loader=None)._epoch_sink(epoch, metrics)
@@ -136,6 +141,7 @@ def finished_run(
     wall_clock_passed: bool = False,
     cancel_requested: bool = False,
     seed: int | None = None,
+    registry: Any = None,
 ) -> Path:
     """A run under ``root`` opened by :func:`opened_run` over two frames of its own (unless
     ``data`` names its own ``images_dir``): :func:`detection_images` of its scope for a detection
@@ -148,7 +154,9 @@ def finished_run(
     (drawn when unset); ``wall_clock_passed`` launches it with a wall clock it has passed by the
     time it ends, and ``cancel_requested`` requests its cancellation before it starts.
     ``model_source`` defaults to :data:`BUILT_DETECTOR` and ``data`` to :data:`SCOPED_DATA` for a
-    detection or instance_seg model, three bands otherwise. Returns the run directory."""
+    detection or instance_seg model, three bands otherwise; ``registry`` is the subject registry
+    its own frames' dataset declares, so its admission records that registry's attributes.
+    Returns the run directory."""
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
@@ -159,7 +167,8 @@ def finished_run(
     stated = data or (dict(SCOPED_DATA) if geometric else {"num_channels": 3})
     if "images_dir" not in stated:
         where = fixture_data_dir(root, run_id)
-        frames = (detection_images(where, stated["scope"], polygons=task == "instance_seg")
+        frames = (detection_images(where, stated["scope"], polygons=task == "instance_seg",
+                                   registry=registry)
                   if geometric else table_images(where))
         stated = {**frames, **stated}
     config: dict[str, Any] = {

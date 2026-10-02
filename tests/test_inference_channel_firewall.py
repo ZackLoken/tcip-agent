@@ -37,7 +37,7 @@ def _predicted(tmp_path, images_dir: Path, *, in_chans, builder_kwargs=None, **s
         "builder": "tests.bespoke_models:build_bespoke_detection",
         "builder_kwargs": {"min_size": 64, "max_size": 128, **(builder_kwargs or {})},
         "task": "detection",
-    }, data={"num_channels": in_chans, "scope": {"subject": "bud", "id_map": {"bud": 0}}})
+    }, data={"num_channels": in_chans, "scope": {"subject": "bud"}})
     return predicted_over(tmp_path, str(ckpt), str(images_dir), device="cpu", **stated)
 
 

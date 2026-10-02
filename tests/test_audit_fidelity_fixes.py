@@ -51,14 +51,14 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(tmp_p
     assert not det.exists()
 
 
-def test_encode_predictions_stamps_model_provenance():
-    from tcip_mcp.pipelines.data.selection import ClassScope
+def test_encode_predictions_stamps_model_provenance(tmp_path):
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     data, _dropped = encode_predictions(
         {"image": "pred.jpg", "width": 100, "height": 80,
          "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
-        created_by="model:best_bud", scope=ClassScope(subject="bud", id_map={"bud": 0}))
+        created_by="model:best_bud", scope=registry_scope(tmp_path, "bud"))
     obj = json.loads(data)["annotations"][0]
     assert obj["created_by"] == "model:best_bud"
     assert obj["created_at"]

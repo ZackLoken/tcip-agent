@@ -32,7 +32,7 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
     model_source = {"builder": "tests.bespoke_models:build_fixed_mask_instance_seg",
                     "task": "instance_seg"}
     config = {"model_source": model_source,
-              "data": {"num_channels": 3, "scope": {"subject": "bud", "id_map": {"bud": 0}}}}
+              "data": {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}}
     model = build_model(config, recorded_model_dims(config))
     ckpt = tmp_path / "instance_seg.pt"
     torch.save({"config": config, "model_state_dict": model.state_dict()}, str(ckpt))
